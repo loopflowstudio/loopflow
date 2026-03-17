@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS chord_members;
+DROP TABLE IF EXISTS chords;

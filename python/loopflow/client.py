@@ -14,7 +14,6 @@ from .errors import LoopflowError, WaveAlreadyRunning
 from .models import (
     AuthFlow,
     AuthProviderStatus,
-    Chord,
     ProviderInfo,
     Repo,
     Session,
@@ -210,17 +209,6 @@ class Client:
     def delete_wave(self, name_or_id: str) -> None:
         self._request_json("DELETE", f"/v0/waves/{name_or_id}")
 
-    def create_chord(self, name: str) -> Chord:
-        payload = self._request_json("POST", "/v0/chords", json={"name": name})
-        return Chord.model_validate(payload)
-
-    def list_chords(self) -> list[Chord]:
-        payload = self._request_json("GET", "/v0/chords")
-        return self._parse_model_list(payload, Chord)
-
-    def get_chord(self, chord_id: str) -> Optional[Chord]:
-        return self._request_optional_model(f"/v0/chords/{chord_id}", Chord)
-
     def list_repos(self) -> list[Repo]:
         payload = self._request_json("GET", "/v0/repos")
         return self._parse_model_list(payload, Repo)
@@ -251,30 +239,6 @@ class Client:
     def list_parents(self, owner: str, repo: str) -> list[Repo]:
         payload = self._request_json("GET", f"/v0/repos/{owner}/{repo}/parents")
         return self._parse_model_list(payload, Repo)
-
-    def delete_chord(self, chord_id: str) -> None:
-        self._request_json("DELETE", f"/v0/chords/{chord_id}")
-
-    def add_chord_member(self, chord_id: str, wave_id: str) -> None:
-        self._request_json(
-            "POST",
-            f"/v0/chords/{chord_id}/members",
-            json={"wave_id": wave_id},
-        )
-
-    def remove_chord_member(self, chord_id: str, wave_id: str) -> None:
-        self._request_json(
-            "DELETE",
-            f"/v0/chords/{chord_id}/members/{wave_id}",
-        )
-
-    def list_chord_members(self, chord_id: str) -> list[Wave]:
-        payload = self._request_json("GET", f"/v0/chords/{chord_id}/members")
-        return self._parse_model_list(payload, Wave)
-
-    def list_wave_chords(self, wave_id: str) -> list[Chord]:
-        payload = self._request_json("GET", f"/v0/waves/{wave_id}/chords")
-        return self._parse_model_list(payload, Chord)
 
     def run_wave(
         self,

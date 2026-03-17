@@ -136,13 +136,6 @@ class ProviderInfo(BaseModel):
     models: list[ModelInfo] = Field(default_factory=list)
 
 
-class Chord(BaseModel):
-    id: str
-    name: str
-    is_default: bool = False
-    created_at: Optional[datetime] = None
-
-
 class Repo(BaseModel):
     path: str
     name: str

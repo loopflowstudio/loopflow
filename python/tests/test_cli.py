@@ -28,6 +28,7 @@ from loopflow.cli import (
     _split_repo_slug,
     _status_details,
     _usage_table,
+    _wave_detail_table,
     _wave_table,
 )
 from loopflow.models import (
@@ -73,6 +74,25 @@ def test_wave_table_falls_back_to_wave_branch() -> None:
 
     assert "wave/fallback" in rendered
     assert "/tmp/fallback-wt" in rendered
+
+
+def test_wave_detail_table_includes_flow_and_area() -> None:
+    wave = Wave.model_validate(
+        {
+            **WAVE_MINIMAL,
+            "area": ["wave/chord-model/", "wave/signals/"],
+            "direction": ["care", "clarity"],
+            "primary_flow": "tend",
+        }
+    )
+    console = Console(record=True, width=220)
+    console.print(_wave_detail_table(wave))
+    rendered = console.export_text()
+
+    assert "flow" in rendered
+    assert "tend" in rendered
+    assert "area" in rendered
+    assert "wave/chord-model/, wave/signals/" in rendered
 
 
 def test_auth_status_table_shows_active_and_none_states() -> None:

@@ -1,23 +1,23 @@
 # 01: Bootstrap Wave Configs
 
-**Finish line:** The four redesign waves exist as real wave configs in lfd. The redesign chord exists with all four as members. The chord can be queried — `lfq show redesign-chord` returns member wave state.
+**Finish line:** The four redesign waves exist as real wave configs in lfd. The redesign chord-wave exists as a regular wave with `area` pointing at those four members. `lfq show redesign` returns its flow and area.
 
 ## Context
 
-Chord CRUD and membership APIs are built and tested. Wave configs exist as YAML in `wave/`. This item wires the two together: create the chord in lfd, register the four waves, verify the relationship is queryable.
+Wave configs exist as YAML in `wave/`. This item wires them into lfd: register the four member waves, register the redesign chord-wave, verify the relationship is queryable through the wave API.
 
 ## What to build
 
 1. **Register the four redesign waves** in lfd if not already present. Verify each wave config loads correctly.
 
-2. **Create the redesign chord** via API. Add all four waves as members.
+2. **Create the redesign chord-wave** via the normal wave API. Membership lives in `wave/redesign/redesign.yaml` as area paths.
 
-3. **Verify queryability.** `lfq list` shows the waves. The chord API returns members with their current state. This is the foundation everything else builds on.
+3. **Verify queryability.** `lfq list` shows the waves. `lfq show redesign` returns the area list pointing at the four member waves. This is the foundation everything else builds on.
 
-4. **Document the bootstrap** in scratch/ — what commands were run, what the initial state looks like. This becomes the first memory for the chord's Letta agent later.
+4. **Document the bootstrap** in scratch/ — what commands were run, what the initial state looks like. This becomes the first memory for the chord-wave's Letta agent later.
 
 ## Done when
 
 - `lfq show` for each wave returns its config and status
-- Chord API returns all four member waves
-- The relationship is persisted (survives lfd restart)
+- `lfq show redesign` includes the four area paths
+- The relationship is persisted in YAML and survives lfd restart

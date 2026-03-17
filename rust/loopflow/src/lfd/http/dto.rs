@@ -9,7 +9,7 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Trigger, WaveRun,
+    ActivationLog, ChatMemoryBlock, ChatMessage, LivePullRequestState, Trigger, WaveRun,
     WaveRunStatus,
 };
 
@@ -116,15 +116,6 @@ pub struct WaveDto {
     pub triggers: Vec<TriggerDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChordDto {
-    pub id: String,
-    pub object: String,
-    pub name: String,
-    pub is_default: bool,
-    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -346,16 +337,6 @@ pub struct UsageTimeseriesDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub buckets: Vec<UsageTimeseriesBucketAggregate>,
-}
-
-pub fn chord_dto(chord: Chord) -> ChordDto {
-    ChordDto {
-        id: chord.id.to_string(),
-        object: "chord".to_string(),
-        name: chord.name,
-        is_default: chord.is_default,
-        created_at: format_datetime(chord.created_at),
-    }
 }
 
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {

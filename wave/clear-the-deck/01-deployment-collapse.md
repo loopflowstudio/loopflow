@@ -5,8 +5,9 @@
 ## Carried context
 
 - `LFD_MODE=native|container` already owns `service_manager`, `runtime_backend`, `storage`, and `executor.type`; those keys are rejected if callers try to configure them directly.
+- `AuthMode` is now a proper enum (`Local`, `Ci`, `Studio`) with `#[serde(deny_unknown_fields)]` on `AuthConfig`. The old `auth.provider` key is rejected; `auth.mode: static` is accepted but canonicalized to `ci` with a deprecation warning.
 - `Mode::Container` currently implies compose + postgres and upgrades `auth.mode=local` to `studio` when no token is configured.
-- Remote deploy docs and production compose now use `ci` terminology, but operators still assemble deployments env var by env var instead of selecting a profile.
+- Remote deploy docs and production compose use `ci` terminology (`LFD_AUTH_PROVIDER=ci`), but operators still assemble deployments env var by env var instead of selecting a profile.
 
 ## What to build
 

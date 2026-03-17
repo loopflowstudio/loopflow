@@ -33,10 +33,11 @@ pub mod types;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
 
 use self::auth::AuthProvider;
-use self::config::LfdConfig;
+use self::config::{AuthConfig, AuthMode, LfdConfig};
 use self::registration::RegistrationClient;
 use self::store::{SharedStore, StorageConfig};
 use self::token_ledger::TokenLedger;
@@ -44,7 +45,7 @@ use self::token_ledger::TokenLedger;
 /// Set up auth provider based on config.
 ///
 /// Returns the auth provider, an optional registration client (for Studio
-/// provider status/deregistration), and optional credentials for deregistration.
+/// auth status/deregistration), and optional credentials for deregistration.
 pub async fn setup_auth(
     config: &LfdConfig,
     store: SharedStore,
@@ -56,49 +57,18 @@ pub async fn setup_auth(
     Option<RegistrationClient>,
     Option<(String, String)>,
 ) {
-    match config.auth.provider.as_str() {
-        "local" => (setup_local_auth(), None, None),
-        "static" => {
-            let token = config
-                .auth
-                .token
-                .as_ref()
-                .unwrap_or_else(|| {
-                    tracing::error!(
-                        "auth.provider=static requires auth.token in config or LFD_AUTH_TOKEN env"
-                    );
-                    std::process::exit(1);
-                })
-                .clone();
-            tracing::info!("static token auth configured");
-            (AuthProvider::Static { token }, None, None)
-        }
-        "studio" => {
+    match config.auth.mode {
+        AuthMode::Local => (
+            AuthProvider::Local {
+                session_token: load_or_create_session_token(&config.auth),
+            },
+            None,
+            None,
+        ),
+        AuthMode::Studio => {
             setup_studio_registration(config, store, storage_config, http_addr, cancel).await
         }
-        other => {
-            tracing::error!(provider = other, "unknown auth provider");
-            std::process::exit(1);
-        }
     }
-}
-
-pub fn setup_local_auth() -> AuthProvider {
-    let session_token = match self::session_token::generate_and_write() {
-        Ok(token) => {
-            tracing::info!(
-                path = %self::session_token::token_path().display(),
-                "session token written"
-            );
-            secrecy::SecretString::from(token)
-        }
-        Err(err) => {
-            tracing::error!(error = %err, "failed to write session token");
-            std::process::exit(1);
-        }
-    };
-
-    AuthProvider::Local { session_token }
 }
 
 async fn setup_studio_registration(
@@ -112,18 +82,10 @@ async fn setup_studio_registration(
     Option<RegistrationClient>,
     Option<(String, String)>,
 ) {
-    let local_token = config
-        .auth
-        .token
-        .as_ref()
-        .unwrap_or_else(|| {
-            tracing::error!("auth.provider=studio requires auth.token in config or LFD_AUTH_TOKEN");
-            std::process::exit(1);
-        })
-        .clone();
+    let local_token = load_or_create_session_token(&config.auth);
 
     let Some(jwt) = self::credentials::load_jwt() else {
-        tracing::error!("auth.provider=studio requires a JWT in ~/.lf/credentials.json");
+        tracing::error!("auth.mode=studio requires a JWT in ~/.lf/credentials.json");
         std::process::exit(1);
     };
 
@@ -178,6 +140,34 @@ async fn setup_studio_registration(
         }
         Err(error) => {
             tracing::error!(error = %error, "studio registration failed");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn load_or_create_session_token(auth: &AuthConfig) -> secrecy::SecretString {
+    if let Some(token) = auth.token.as_ref() {
+        if let Err(err) = self::session_token::write(token.expose_secret()) {
+            tracing::error!(error = %err, "failed to write session token");
+            std::process::exit(1);
+        }
+        tracing::info!(
+            path = %self::session_token::token_path().display(),
+            "session token written from override"
+        );
+        return token.clone();
+    }
+
+    match self::session_token::generate_and_write() {
+        Ok(token) => {
+            tracing::info!(
+                path = %self::session_token::token_path().display(),
+                "session token written"
+            );
+            secrecy::SecretString::from(token)
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "failed to write session token");
             std::process::exit(1);
         }
     }

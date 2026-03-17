@@ -1,10 +1,13 @@
 flow: ship-wave
 mode: manual
 area:
-  - rust/loopflow/src/lfd/auth.rs
-  - rust/loopflow/src/lfd/provider_auth.rs
-  - rust/loopflow/src/lfd/executor/sandbox.rs
-  - rust/loopflow/src/lfd/http/
-  - python/loopflow/
+  - deploy/
+  - docker/
+  - docs/
+  - rust/loopflow/src/bin/lfd.rs
+  - rust/loopflow/src/lfd/config.rs
+  - rust/loopflow/src/lfd/executor/
+  - rust/loopflow/src/lfd/service/
+  - scripts/
 direction:
   - simplicity

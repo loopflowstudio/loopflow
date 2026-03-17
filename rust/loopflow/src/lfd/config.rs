@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ipnet::IpNet;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,19 +25,60 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
-/// `provider` selects the auth strategy:
+/// `mode` selects the auth strategy:
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
-/// - `"static"`: validate against a pre-shared token
-/// - `"studio"`: registered with studio for discovery. Static token on
+/// - `"studio"`: registered with studio for discovery. Local token on
 ///   loopback, connection tokens validated locally for remote clients.
 ///   Connection tokens are session credentials: valid from mint until expiry
 ///   (1 hour) or revocation. lfd mints tokens and sends them to studio,
 ///   which distributes them to mobile clients. Validation is local (no
 ///   round-trip to studio on connect).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuthMode {
+    #[default]
+    Local,
+    Studio,
+}
+
+impl AuthMode {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "local" => Ok(Self::Local),
+            "studio" => Ok(Self::Studio),
+            other => bail!("invalid auth.mode value '{other}'; expected 'local' or 'studio'"),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Studio => "studio",
+        }
+    }
+}
+
+impl std::fmt::Display for AuthMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AuthMode {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
-    #[serde(default = "default_provider")]
-    pub provider: String,
+    #[serde(default)]
+    pub mode: AuthMode,
+    /// Optional session-token override for embedded launches.
     pub token: Option<SecretString>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
@@ -46,15 +87,11 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            provider: default_provider(),
+            mode: AuthMode::default(),
             token: None,
             base_url: default_base_url(),
         }
     }
-}
-
-fn default_provider() -> String {
-    "local".to_string()
 }
 
 fn default_base_url() -> String {
@@ -150,10 +187,10 @@ impl RawLfdConfig {
             }
         }
 
-        if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
+        if let Ok(value) = std::env::var("LFD_AUTH_MODE") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                self.auth.provider = trimmed.to_string();
+                self.auth.mode = AuthMode::parse(trimmed)?;
             }
         }
 
@@ -347,8 +384,8 @@ impl RawLfdConfig {
         self.executor.limits.validate()?;
 
         let mut auth = self.auth;
-        if self.mode == Mode::Container && auth.provider == "local" && auth.token.is_none() {
-            auth.provider = "studio".to_string();
+        if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
+            auth.mode = AuthMode::Studio;
         }
 
         Ok(LfdConfig {
@@ -921,7 +958,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.provider, "studio");
+        assert_eq!(resolved.auth.mode, AuthMode::Studio);
     }
 
     #[test]
@@ -953,12 +990,12 @@ executor:
         let raw = r#"
 mode: container
 auth:
-  provider: local
+  mode: local
   token: explicit-token
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.auth.provider, "local");
+        assert_eq!(resolved.auth.mode, AuthMode::Local);
     }
 
     #[test]
@@ -1008,7 +1045,7 @@ executor:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",
@@ -1030,7 +1067,7 @@ executor:
             "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
         std::env::set_var("LFD_MODE", "container");
-        std::env::set_var("LFD_AUTH_PROVIDER", "static");
+        std::env::set_var("LFD_AUTH_MODE", "studio");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_CREDENTIAL_SOCKET", "/tmp/concerto-auth.sock");
         std::env::set_var(
@@ -1065,7 +1102,7 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.provider, "static");
+        assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(
             resolved
                 .auth
@@ -1129,6 +1166,26 @@ executor:
     }
 
     #[test]
+    fn auth_mode_yaml_rejects_removed_ci_alias() {
+        let raw = r#"
+auth:
+  mode: ci
+"#;
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("ci mode rejected");
+        assert!(err.to_string().contains("expected 'local' or 'studio'"));
+    }
+
+    #[test]
+    fn legacy_auth_provider_key_is_rejected() {
+        let raw = r#"
+auth:
+  provider: studio
+"#;
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("provider key rejected");
+        assert!(err.to_string().contains("unknown field `provider`"));
+    }
+
+    #[test]
     fn invalid_executor_limits_env_override_is_rejected() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&["LFD_EXECUTOR_LIMITS_MEMORY"]);
@@ -1181,7 +1238,7 @@ http_security:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",

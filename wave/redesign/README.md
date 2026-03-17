@@ -30,7 +30,7 @@ wave: redesign (chord-wave)
 │  flow: tend
 │
 ├── wave: chord-model           6 items — tend flow, Letta, mutations
-├── wave: clear-the-deck        4 items — cuts, deletions, collapses
+├── wave: clear-the-deck        2 items — deploy collapse and sandbox pruning
 ├── wave: agent-embedding       6 items — Concerto as conductor
 └── wave: signals               5 items — block taxonomy, cascade, memory
 ```
@@ -51,7 +51,7 @@ First tend cycle runs. The chord-wave observes its own bootstrap commits. Letta 
 
 Waves produce real PRs. The chord-wave tends them. Build and tend alternate — waves create, chord-wave observes, chord-wave proposes, waves adjust.
 
-**clear-the-deck** runs fast — four independent cuts, each a PR.
+**clear-the-deck** runs fast — two remaining cuts, each a PR-sized decision.
 
 **agent-embedding** starts with block queue view (01) — the chord-wave needs somewhere to surface blocks. Terminal embedding (02) and portfolio (03) follow.
 
@@ -103,7 +103,7 @@ The five existing waves (foundation, trust, context, concerto, scale) keep runni
 Some existing work items are already covered by the new waves:
 - scale/04 (chord UI) -> agent-embedding/01 + 03
 - scale/05 (cross-repo UI) -> agent-embedding/03
-- trust/04-05 (sandbox) -> clear-the-deck/03
+- trust/04-05 (sandbox) -> clear-the-deck/02
 - foundation/01 (code cleanup) -> clear-the-deck energy
 
 These overlaps resolve naturally when the default chord-wave runs its first tend cycle and proposes consolidation.

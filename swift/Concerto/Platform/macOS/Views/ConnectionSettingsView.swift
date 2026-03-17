@@ -199,7 +199,7 @@ struct ConnectionSettingsView: View {
                 Text("Token")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
-                SecureField("Bearer token", text: $token)
+                SecureField("Connection token", text: $token)
                     .textFieldStyle(.plain)
                     .font(Typography.code(13))
                     .padding(Spacing.md)

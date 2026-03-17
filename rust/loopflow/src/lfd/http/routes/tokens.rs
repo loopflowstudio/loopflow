@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_endpoint_requires_loopback_static_token() {
+    async fn revoke_endpoint_requires_loopback_session_token() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store: SharedStore = Arc::new(

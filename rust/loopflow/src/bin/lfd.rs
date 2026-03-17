@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::auth::AuthProvider;
-use loopflow::lfd::config::{LfdConfig, StorageType};
+use loopflow::lfd::config::{AuthMode, LfdConfig, StorageType};
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -47,16 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "start" => return loopflow::lfd::service::start(force),
             "stop" => return loopflow::lfd::service::stop(),
             "status" => return loopflow::lfd::service::status(),
-            "token" => {
-                if matches!(args.get(2).map(String::as_str), Some("rotate")) {
-                    let token = loopflow::lfd::session_token::generate();
-                    println!("{}", format_token_rotation_output(token.as_str()));
-                    return Ok(());
-                }
-                return Err("unknown token subcommand; expected `lfd token rotate`"
-                    .to_string()
-                    .into());
-            }
             _ => {} // fall through to serve
         }
     }
@@ -76,15 +66,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cancel = CancellationToken::new();
 
-    if requires_secure_bind(&lfd_config.auth.provider)
+    if requires_secure_bind(lfd_config.auth.mode)
         && !allow_insecure_bind
         && !http_addr.ip().is_loopback()
         && !is_tailscale_ip(http_addr.ip())
     {
         return Err(format!(
-            "refusing insecure non-loopback bind for auth.provider={}: {}. \
+            "refusing insecure non-loopback bind for auth.mode={}: {}. \
              use --allow-insecure-bind to override",
-            lfd_config.auth.provider, http_addr
+            lfd_config.auth.mode, http_addr
         )
         .into());
     }
@@ -97,28 +87,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: SharedStore = Arc::new(open_store(&storage_config).await?);
 
     let is_loopback = http_addr.ip().is_loopback();
-    let (auth_provider, registration_client, registration_creds) =
-        if is_loopback && lfd_config.auth.provider == "local" {
-            // Loopback + local auth stays on startup session token behavior.
-            (loopflow::lfd::setup_local_auth(), None, None)
-        } else {
-            let (provider, client, creds) = loopflow::lfd::setup_auth(
-                &lfd_config,
-                store.clone(),
-                &storage_config,
-                http_addr,
-                cancel.clone(),
-            )
-            .await;
-            if !is_loopback && matches!(provider, AuthProvider::Local { .. }) {
-                tracing::warn!(
-                    addr = %http_addr,
-                    "binding to non-loopback address with auth.provider=local; \
-                     remote requests require the session token"
-                );
-            }
-            (provider, client, creds)
-        };
+    let (auth_provider, registration_client, registration_creds) = loopflow::lfd::setup_auth(
+        &lfd_config,
+        store.clone(),
+        &storage_config,
+        http_addr,
+        cancel.clone(),
+    )
+    .await;
+    if !is_loopback && matches!(auth_provider, AuthProvider::Local { .. }) {
+        tracing::warn!(
+            addr = %http_addr,
+            "binding to non-loopback address with auth.mode=local; \
+             remote requests require the session token"
+        );
+    }
 
     if lfd_config.github.webhook_secret.trim().is_empty() {
         tracing::warn!(
@@ -375,14 +358,8 @@ fn storage_config_from_config(
     }
 }
 
-fn format_token_rotation_output(token: &str) -> String {
-    format!(
-        "new static auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
-    )
-}
-
-fn requires_secure_bind(provider: &str) -> bool {
-    provider == "studio"
+fn requires_secure_bind(mode: AuthMode) -> bool {
+    matches!(mode, AuthMode::Studio)
 }
 
 fn is_tailscale_ip(ip: std::net::IpAddr) -> bool {
@@ -397,8 +374,8 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_token_rotation_output, has_flag, is_tailscale_ip, requires_secure_bind,
-        storage_config_from_config, LfdConfig, StorageConfig, StorageType,
+        has_flag, is_tailscale_ip, requires_secure_bind, storage_config_from_config, AuthMode,
+        LfdConfig, StorageConfig, StorageType,
     };
     use std::ffi::OsString;
     use std::net::IpAddr;
@@ -468,9 +445,8 @@ mod tests {
 
     #[test]
     fn secure_bind_required_for_studio() {
-        assert!(requires_secure_bind("studio"));
-        assert!(!requires_secure_bind("local"));
-        assert!(!requires_secure_bind("static"));
+        assert!(requires_secure_bind(AuthMode::Studio));
+        assert!(!requires_secure_bind(AuthMode::Local));
     }
 
     #[test]
@@ -543,15 +519,6 @@ mod tests {
             err.to_string(),
             "LFD_DATABASE_URL required for postgres storage"
         );
-    }
-
-    #[test]
-    fn format_token_rotation_output_prints_token_once_with_runbook_steps() {
-        let output = format_token_rotation_output("abc123");
-        assert_eq!(output.matches("abc123").count(), 1);
-        assert!(output.contains("update LFD_AUTH_TOKEN"));
-        assert!(output.contains("restart lfd"));
-        assert!(output.contains("verify old token is rejected and new token is accepted"));
     }
 
     #[test]

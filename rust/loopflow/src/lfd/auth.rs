@@ -23,16 +23,13 @@ const MAX_BEARER_TOKEN_BYTES: usize = 4096;
 
 /// Auth provider for lfd connections.
 ///
-/// Selected from config (`auth.provider`). Determines how requests are
-/// authenticated.
+/// Selected from config (`auth.mode`). Determines how requests are authenticated.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum AuthProvider {
-    /// Local mode: loopback only, session token required.
+    /// Local mode: session token auth.
     Local { session_token: SecretString },
-    /// Validate against a pre-shared static token.
-    Static { token: SecretString },
-    /// Registered with studio. Static token on loopback, connection tokens
+    /// Registered with studio. Local token on loopback, connection tokens
     /// validated locally via ledger for remote clients.
     Studio {
         local_token: SecretString,
@@ -57,7 +54,6 @@ impl AuthProvider {
             AuthProvider::Local { session_token } => {
                 authorize_expected_token(session_token, provided_token)
             }
-            AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
             AuthProvider::Studio {
                 local_token,
                 ledger,
@@ -100,9 +96,8 @@ impl AuthProvider {
         };
 
         match self {
-            AuthProvider::Static { token: local_token } => token_matches(local_token, token),
             AuthProvider::Studio { local_token, .. } => token_matches(local_token, token),
-            _ => false,
+            AuthProvider::Local { .. } => false,
         }
     }
 
@@ -245,9 +240,7 @@ fn token_matches(expected: &SecretString, provided: &str) -> bool {
 
 fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'static str) {
     match auth {
-        AuthProvider::Local { .. } | AuthProvider::Static { .. } => {
-            (StatusCode::UNAUTHORIZED, "malformed token")
-        }
+        AuthProvider::Local { .. } => (StatusCode::UNAUTHORIZED, "malformed token"),
         AuthProvider::Studio { .. } => {
             if source.is_loopback() {
                 (StatusCode::UNAUTHORIZED, "malformed token")
@@ -554,18 +547,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn studio_accepts_local_static_token_on_loopback() {
+    async fn studio_accepts_local_session_token_on_loopback() {
         let tmp = tempdir().expect("tempdir");
         let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
             .await
             .expect("ledger");
         let auth = AuthProvider::Studio {
-            local_token: token("local-static"),
+            local_token: token("local-session"),
             ledger,
         };
 
         let result = auth
-            .validate(Some("local-static"), IpAddr::from([127, 0, 0, 1]))
+            .validate(Some("local-session"), IpAddr::from([127, 0, 0, 1]))
             .await;
         assert_eq!(result, Ok(()));
     }
@@ -579,7 +572,7 @@ mod tests {
         let mut minted = ledger.mint(1).await.expect("mint");
         let connection_token = minted.pop().expect("token");
         let auth = AuthProvider::Studio {
-            local_token: token("local-static"),
+            local_token: token("local-session"),
             ledger,
         };
 
@@ -590,18 +583,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn studio_rejects_static_token_for_remote_source() {
+    async fn studio_rejects_local_session_token_for_remote_source() {
         let tmp = tempdir().expect("tempdir");
         let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
             .await
             .expect("ledger");
         let auth = AuthProvider::Studio {
-            local_token: token("local-static"),
+            local_token: token("local-session"),
             ledger,
         };
 
         let result = auth
-            .validate(Some("local-static"), IpAddr::from([203, 0, 113, 7]))
+            .validate(Some("local-session"), IpAddr::from([203, 0, 113, 7]))
             .await;
         assert_eq!(
             result,

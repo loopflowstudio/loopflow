@@ -84,7 +84,7 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
 - `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
 - `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
-- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
 - `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
@@ -200,7 +200,7 @@ Two patterns, intentionally different:
 
 2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
    - Connects to active server (`ws://.../ws` or `wss://.../ws`)
-   - Uses configured auth mode (none or static token)
+   - Uses the current connection credential (local session token or remote connection token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 

@@ -79,7 +79,7 @@ struct MobileRootView: View {
             }
             .tag(1)
 
-            ConnectionSetupView()
+            DiscoveryView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -122,7 +122,7 @@ struct MobileRootView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            ConnectionSetupView()
+            DiscoveryView()
         }
         .onChange(of: selectedWaveId) { _, newValue in
             if newValue != nil {

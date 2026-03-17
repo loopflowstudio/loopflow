@@ -8,7 +8,7 @@
 - `ReplyDraftTray` renders the queue but has no reorder/edit/delete controls.
 - Emoji reactions bypass the composer and queue immediately — this flow stays unchanged.
 - iOS selection persists after composer dismiss (macOS has `selectionResetToken`). Address as polish here or in a follow-up.
-- Discovery auth shipped (02): `auth.provider=studio` — mobile connects via connection tokens, WS re-validation runs on a 60s interval. Queue management is client-side only — no auth/protocol changes needed.
+- Discovery auth shipped (02): `auth.mode=studio` — mobile connects via connection tokens, WS re-validation runs on a 60s interval. Queue management is client-side only — no auth/protocol changes needed.
 
 ## What to build
 

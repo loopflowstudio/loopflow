@@ -20,8 +20,10 @@ use crate::engine::flow::{
     ConcreteStep, FlowAction, Step,
 };
 use crate::engine::worktree::remove_worktree;
+use crate::lfd::attention::{create_code_review_attention, create_step_failure_attention};
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::helpers::resolve_current_step_name;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
@@ -801,11 +803,18 @@ impl WaveExecutor {
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
                     if should_manage_pr && run.snapshot.pr.is_some() {
-                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
+                        match create_code_review_attention(&self.store, &wave, &run).await {
+                            Ok(item) => self.event_hub.send(Event::attention_created(item)),
+                            Err(err) => {
+                                warn!(wave_id = %wave.id(), error = %err, "failed to create code review attention")
+                            }
+                        }
+                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,
                             wave.id(),
                             crate::lfd::queue::QueueTrigger::RunCompleted,
+                            Some(&self.event_hub),
                         )
                         .await
                         {
@@ -935,10 +944,17 @@ impl WaveExecutor {
     }
 
     async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
+        let step_name = resolve_current_step_name(run, run.step_index);
         run.status = WaveRunStatus::Failed;
         run.ended_at = Some(OffsetDateTime::now_utc());
-        run.error = Some(error);
+        run.error = Some(error.clone());
         self.store.update_wave_run(run).await?;
+        match create_step_failure_attention(&self.store, wave, run, &step_name, &error).await {
+            Ok(item) => self.event_hub.send(Event::attention_created(item)),
+            Err(err) => {
+                warn!(wave_id = %wave.id(), error = %err, "failed to create step failure attention")
+            }
+        }
         self.output.close_writer(&run.id.to_string());
 
         // Clean up run-scoped worktrees.

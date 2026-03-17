@@ -1,3 +1,4 @@
+pub mod attention;
 pub mod auth;
 pub mod flows;
 pub mod hooks;

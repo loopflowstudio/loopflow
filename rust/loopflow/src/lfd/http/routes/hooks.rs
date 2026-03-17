@@ -399,12 +399,13 @@ pub async fn github_webhook_handler(
             })?;
             let mut processed = 0_u32;
             for wave_id in wave_ids {
-                let handled = crate::lfd::queue::handle_pr_merged(
+                let handled = crate::lfd::queue::handle_pr_merged_with_events(
                     &state.store,
                     &state.github,
                     &wave_id,
                     event.pull_request.number,
                     merged_at,
+                    Some(&state.event_hub),
                 )
                 .await
                 .map_err(|err| {

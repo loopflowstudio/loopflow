@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
+use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
     PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -21,9 +22,10 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState,
-    PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId,
-    Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
+    ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -795,6 +797,10 @@ impl SqliteStore {
 
     pub fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM attention_items WHERE wave_id = ?1",
+            params![wave_id],
+        )?;
         conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;
         Ok(())
     }
@@ -985,86 +991,208 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        struct RawQueueBlock {
+    pub fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>> {
+        struct RawAttentionItem {
+            id: LfdId,
             wave_id: LfdId,
-            run_id: LfdId,
-            reason: String,
-            attempted_at: i64,
-            conflict_files: Vec<String>,
-            error: Option<String>,
+            run_id: Option<LfdId>,
+            kind: String,
+            status: String,
+            title: String,
+            summary: String,
+            context: String,
+            surfaced_at: i64,
+            viewed_at: Option<i64>,
+            resolved_at: Option<i64>,
         }
 
+        let mut sql = String::from(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items",
+        );
+        let mut params: Vec<String> = Vec::new();
+        let mut clauses: Vec<String> = Vec::new();
+        if let Some(status) = status {
+            clauses.push("status = ?".to_string());
+            params.push(status.as_str().to_string());
+        }
+        if let Some(kind) = kind {
+            clauses.push("kind = ?".to_string());
+            params.push(kind.as_str().to_string());
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" ORDER BY surfaced_at DESC");
+
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT wave_id, run_id, reason, attempted_at, conflict_files, error
-             FROM wave_queue_blocks
-             WHERE wave_id = ?1
-             ORDER BY attempted_at DESC",
-        )?;
-        let rows = stmt.query_map(params![wave_id], |row| {
-            let conflict_files = row
-                .get::<_, String>(4)
-                .ok()
-                .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
-                .unwrap_or_default();
-            Ok(RawQueueBlock {
-                wave_id: LfdId::from_raw(row.get::<_, String>(0)?),
-                run_id: LfdId::from_raw(row.get::<_, String>(1)?),
-                reason: row.get(2)?,
-                attempted_at: row.get::<_, i64>(3)?,
-                conflict_files,
-                error: row.get(5)?,
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(RawAttentionItem {
+                id: LfdId::from_raw(row.get::<_, String>(0)?),
+                wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
+                run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+                kind: row.get(3)?,
+                status: row.get(4)?,
+                title: row.get(5)?,
+                summary: row.get(6)?,
+                context: row.get(7)?,
+                surfaced_at: row.get(8)?,
+                viewed_at: row.get(9)?,
+                resolved_at: row.get(10)?,
             })
         })?;
-        let mut blocks = Vec::new();
+
+        let mut items = Vec::new();
         for raw in rows {
             let raw = raw?;
-            let reason = raw
-                .reason
-                .parse::<QueueBlockReason>()
+            let kind = raw
+                .kind
+                .parse::<AttentionKind>()
                 .map_err(StoreError::InvalidData)?;
-            blocks.push(QueueBlock {
+            let status = raw
+                .status
+                .parse::<AttentionStatus>()
+                .map_err(StoreError::InvalidData)?;
+            let context = serde_json::from_str(&raw.context)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            items.push(AttentionItem {
+                id: raw.id,
                 wave_id: raw.wave_id,
                 run_id: raw.run_id,
-                reason,
-                attempted_at: crate::lfd::store::rows::unix_to_datetime(raw.attempted_at),
-                conflict_files: raw.conflict_files,
-                error: raw.error,
+                kind,
+                status,
+                title: raw.title,
+                summary: raw.summary,
+                context,
+                surfaced_at: crate::lfd::store::rows::unix_to_datetime(raw.surfaced_at),
+                viewed_at: raw.viewed_at.map(crate::lfd::store::rows::unix_to_datetime),
+                resolved_at: raw
+                    .resolved_at
+                    .map(crate::lfd::store::rows::unix_to_datetime),
             });
         }
-        Ok(blocks)
+        Ok(items)
     }
 
-    pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+    pub fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items WHERE id = ?1",
+        )?;
+        stmt.query_row(rusqlite::params![attention_id], |row| {
+            let kind_raw: String = row.get(3)?;
+            let status_raw: String = row.get(4)?;
+            let context_raw: String = row.get(7)?;
+            let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(StoreError::InvalidData(err)),
+                )
+            })?;
+            let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(StoreError::InvalidData(err)),
+                )
+            })?;
+            Ok(AttentionItem {
+                id: LfdId::from_raw(row.get::<_, String>(0)?),
+                wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
+                run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+                kind,
+                status,
+                title: row.get(5)?,
+                summary: row.get(6)?,
+                context: serde_json::from_str(&context_raw)
+                    .unwrap_or(serde_json::Value::Object(Default::default())),
+                surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.get(8)?),
+                viewed_at: row
+                    .get::<_, Option<i64>>(9)?
+                    .map(crate::lfd::store::rows::unix_to_datetime),
+                resolved_at: row
+                    .get::<_, Option<i64>>(10)?
+                    .map(crate::lfd::store::rows::unix_to_datetime),
+            })
+        })
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO wave_queue_blocks (wave_id, run_id, reason, attempted_at, conflict_files, error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(wave_id, run_id) DO UPDATE SET
-                reason = excluded.reason,
-                attempted_at = excluded.attempted_at,
-                conflict_files = excluded.conflict_files,
-                error = excluded.error",
-            params![
-                block.wave_id,
-                block.run_id,
-                block.reason.as_str(),
-                block.attempted_at.unix_timestamp(),
-                serde_json::to_string(&block.conflict_files)?,
-                block.error,
+            "INSERT INTO attention_items (id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                wave_id = excluded.wave_id,
+                run_id = excluded.run_id,
+                kind = excluded.kind,
+                status = excluded.status,
+                title = excluded.title,
+                summary = excluded.summary,
+                context = excluded.context,
+                surfaced_at = excluded.surfaced_at,
+                viewed_at = excluded.viewed_at,
+                resolved_at = excluded.resolved_at",
+            rusqlite::params![
+                &item.id,
+                &item.wave_id,
+                &item.run_id,
+                &item.kind.as_str(),
+                &item.status.as_str(),
+                &item.title,
+                &item.summary,
+                &serde_json::to_string(&item.context)?,
+                &item.surfaced_at.unix_timestamp(),
+                &item.viewed_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
+                &item.resolved_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
             ],
         )?;
         Ok(())
     }
 
-    pub fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+    pub fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
-            "DELETE FROM wave_queue_blocks WHERE wave_id = ?1 AND run_id = ?2",
-            params![wave_id, run_id],
+            "DELETE FROM attention_items WHERE id = ?1",
+            rusqlite::params![attention_id],
         )?;
         Ok(deleted as u32)
+    }
+
+    pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        self.list_attention_items(
+            Some(AttentionStatus::Surfaced),
+            Some(AttentionKind::Algedonic),
+        )?
+        .into_iter()
+        .filter(|item| &item.wave_id == wave_id)
+        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
+        .filter_map(|result| result.transpose())
+        .collect()
+    }
+
+    pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        self.upsert_attention_item(&queue_block_attention_item(block))
+    }
+
+    pub fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let id =
+            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+        let Some(mut item) = self.get_attention_item(&id)? else {
+            return Ok(0);
+        };
+        item.status = AttentionStatus::Resolved;
+        item.resolved_at = Some(time::OffsetDateTime::now_utc());
+        self.upsert_attention_item(&item)?;
+        Ok(1)
     }
 
     pub fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {

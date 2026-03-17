@@ -5,6 +5,7 @@ use deadpool_postgres::{Manager, Pool};
 use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 
+use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
     PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -22,9 +23,10 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState,
-    PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId,
-    Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
+    ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -884,7 +886,14 @@ impl PostgresStore {
     }
 
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let wave_id = wave_id.clone();
         self.with_client(|client| async move {
+            client
+                .execute(
+                    "DELETE FROM attention_items WHERE wave_id = $1",
+                    &[&wave_id],
+                )
+                .await?;
             client
                 .execute(Self::sql(Query::DeleteWaveById), &[&wave_id])
                 .await?;
@@ -1094,83 +1103,156 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        let wave_id = wave_id.clone();
+    pub async fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>> {
+        let status = status.map(|value| value.as_str().to_string());
+        let kind = kind.map(|value| value.as_str().to_string());
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT wave_id, run_id, reason, attempted_at, conflict_files, error
-                     FROM wave_queue_blocks
-                     WHERE wave_id = $1
-                     ORDER BY attempted_at DESC",
-                    &[&wave_id],
+                    "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
+                     FROM attention_items
+                     WHERE ($1::TEXT IS NULL OR status = $1)
+                       AND ($2::TEXT IS NULL OR kind = $2)
+                     ORDER BY surfaced_at DESC",
+                    &[&status, &kind],
                 )
                 .await?;
             rows.into_iter()
                 .map(|row| {
-                    let conflict_files = row
-                        .try_get::<_, String>(4)
-                        .ok()
-                        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
-                        .unwrap_or_default();
-                    let reason_raw: String = row.try_get(2)?;
-                    let reason = reason_raw
-                        .parse::<QueueBlockReason>()
-                        .map_err(StoreError::InvalidData)?;
-                    Ok(QueueBlock {
-                        wave_id: LfdId::from_raw(row.try_get::<_, String>(0)?),
-                        run_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
-                        reason,
-                        attempted_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(3)?),
-                        conflict_files,
-                        error: row.try_get(5)?,
+                    let kind_raw: String = row.try_get(3)?;
+                    let status_raw: String = row.try_get(4)?;
+                    Ok(AttentionItem {
+                        id: LfdId::from_raw(row.try_get::<_, String>(0)?),
+                        wave_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
+                        run_id: row.try_get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+                        kind: kind_raw.parse::<AttentionKind>().map_err(StoreError::InvalidData)?,
+                        status: status_raw.parse::<AttentionStatus>().map_err(StoreError::InvalidData)?,
+                        title: row.try_get(5)?,
+                        summary: row.try_get(6)?,
+                        context: serde_json::from_str(&row.try_get::<_, String>(7)?).unwrap_or(serde_json::Value::Object(Default::default())),
+                        surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(8)?),
+                        viewed_at: row.try_get::<_, Option<i64>>(9)?.map(crate::lfd::store::rows::unix_to_datetime),
+                        resolved_at: row.try_get::<_, Option<i64>>(10)?.map(crate::lfd::store::rows::unix_to_datetime),
                     })
                 })
                 .collect()
-        })
-        .await
+        }).await
     }
 
-    pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        let block = block.clone();
+    pub async fn get_attention_item(
+        &self,
+        attention_id: &LfdId,
+    ) -> StoreResult<Option<AttentionItem>> {
+        let attention_id = attention_id.clone();
         self.with_client(|client| async move {
-            client
-                .execute(
-                    "INSERT INTO wave_queue_blocks (wave_id, run_id, reason, attempted_at, conflict_files, error)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT(wave_id, run_id) DO UPDATE SET
-                        reason = excluded.reason,
-                        attempted_at = excluded.attempted_at,
-                        conflict_files = excluded.conflict_files,
-                        error = excluded.error",
-                    &[
-                        &block.wave_id,
-                        &block.run_id,
-                        &block.reason.as_str(),
-                        &block.attempted_at.unix_timestamp(),
-                        &serde_json::to_string(&block.conflict_files)?,
-                        &block.error,
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
+            let row = client.query_opt(
+                "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
+                 FROM attention_items WHERE id = $1",
+                &[&attention_id],
+            ).await?;
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let kind_raw: String = row.try_get(3)?;
+            let status_raw: String = row.try_get(4)?;
+            Ok(Some(AttentionItem {
+                id: LfdId::from_raw(row.try_get::<_, String>(0)?),
+                wave_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
+                run_id: row.try_get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+                kind: kind_raw.parse::<AttentionKind>().map_err(StoreError::InvalidData)?,
+                status: status_raw.parse::<AttentionStatus>().map_err(StoreError::InvalidData)?,
+                title: row.try_get(5)?,
+                summary: row.try_get(6)?,
+                context: serde_json::from_str(&row.try_get::<_, String>(7)?).unwrap_or(serde_json::Value::Object(Default::default())),
+                surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(8)?),
+                viewed_at: row.try_get::<_, Option<i64>>(9)?.map(crate::lfd::store::rows::unix_to_datetime),
+                resolved_at: row.try_get::<_, Option<i64>>(10)?.map(crate::lfd::store::rows::unix_to_datetime),
+            }))
+        }).await
     }
 
-    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let wave_id = wave_id.clone();
-        let run_id = run_id.clone();
+    pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
+        let item = item.clone();
+        self.with_client(|client| async move {
+            client.execute(
+                "INSERT INTO attention_items (id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 ON CONFLICT(id) DO UPDATE SET
+                    wave_id = excluded.wave_id,
+                    run_id = excluded.run_id,
+                    kind = excluded.kind,
+                    status = excluded.status,
+                    title = excluded.title,
+                    summary = excluded.summary,
+                    context = excluded.context,
+                    surfaced_at = excluded.surfaced_at,
+                    viewed_at = excluded.viewed_at,
+                    resolved_at = excluded.resolved_at",
+                &[
+                    &item.id,
+                    &item.wave_id,
+                    &item.run_id,
+                    &item.kind.as_str(),
+                    &item.status.as_str(),
+                    &item.title,
+                    &item.summary,
+                    &serde_json::to_string(&item.context)?,
+                    &item.surfaced_at.unix_timestamp(),
+                    &item.viewed_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
+                    &item.resolved_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
+                ],
+            ).await?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
+        let attention_id = attention_id.clone();
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
-                    "DELETE FROM wave_queue_blocks WHERE wave_id = $1 AND run_id = $2",
-                    &[&wave_id, &run_id],
+                    "DELETE FROM attention_items WHERE id = $1",
+                    &[&attention_id],
                 )
                 .await?;
             Ok(deleted as u32)
         })
         .await
+    }
+
+    pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        let wave_id = wave_id.clone();
+        self.list_attention_items(
+            Some(AttentionStatus::Surfaced),
+            Some(AttentionKind::Algedonic),
+        )
+        .await?
+        .into_iter()
+        .filter(|item| item.wave_id == wave_id)
+        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
+        .filter_map(|result| result.transpose())
+        .collect()
+    }
+
+    pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        self.upsert_attention_item(&queue_block_attention_item(block))
+            .await
+    }
+
+    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let attention_id =
+            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+        let Some(mut item) = self.get_attention_item(&attention_id).await? else {
+            return Ok(0);
+        };
+        item.status = AttentionStatus::Resolved;
+        item.resolved_at = Some(time::OffsetDateTime::now_utc());
+        self.upsert_attention_item(&item).await?;
+        Ok(1)
     }
 
     pub async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {

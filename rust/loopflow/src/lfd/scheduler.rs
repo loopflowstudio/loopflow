@@ -147,7 +147,12 @@ impl Scheduler {
                 event_hub.clone(),
                 cancel.clone(),
             ),
-            triggers::spawn_queue_reconciler(store.clone(), github, cancel.clone()),
+            triggers::spawn_queue_reconciler(
+                store.clone(),
+                github,
+                event_hub.clone(),
+                cancel.clone(),
+            ),
             triggers::spawn_recovery_loop(store.clone(), executor.clone(), cancel.clone()),
             triggers::spawn_summary_refresh(
                 store.clone(),

@@ -88,6 +88,7 @@ public final class RepoState {
 
     // Wave state — delegated to WaveStore
     public let waveStore = WaveStore()
+    public let attentionStore = AttentionStore()
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
     public let authProviderStore = AuthProviderStore()
@@ -239,6 +240,7 @@ public final class RepoState {
         flows = []
         supportedHarnesses = []
         waveStore.removeAll()
+        attentionStore.removeAll()
         worktreeStore.removeAll()
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
@@ -414,6 +416,7 @@ public final class RepoState {
         lfdConnected = true
         connectionState = .connected
         waveStore.removeAll()
+        attentionStore.removeAll()
     }
 
     public func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
@@ -422,6 +425,7 @@ public final class RepoState {
 
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
+        attentionStore.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         hasCompletedInitialLoad = false
         currentRepo = canonicalURL
@@ -450,6 +454,7 @@ public final class RepoState {
         }
         eventService = nil
         waitingSessionIds.removeAll()
+        attentionStore.removeAll()
         optimisticInteractiveWaveIds.removeAll()
     }
 
@@ -475,11 +480,14 @@ public final class RepoState {
                         case .connected(let connected):
                             self.updateConnectionState(.connected)
                             self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
+                            await self.refreshAttention()
                             await self.refreshWorktrees()
                             self.hasCompletedInitialLoad = true
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
+                        case .attention(let attentionEvent):
+                            await self.handleAttentionEvent(attentionEvent)
                         case .output(let outputEvent):
                             outputBuffer.appendOutput(
                                 waveId: outputEvent.waveId,
@@ -569,6 +577,23 @@ public final class RepoState {
         }
     }
 
+    private func handleAttentionEvent(_ event: AttentionEvent) async {
+        switch event.type {
+        case .created, .updated:
+            if let item = event.item {
+                attentionStore.set(item)
+            } else {
+                await refreshAttention()
+            }
+        case .resolved:
+            if let item = event.item {
+                attentionStore.remove(item.id)
+            } else {
+                await refreshAttention()
+            }
+        }
+    }
+
     private func didRunComplete(oldStatus: WaveStatus?, newStatus: WaveStatus?) -> Bool {
         guard let oldStatus, let newStatus else { return false }
         let wasActive = oldStatus == .running || oldStatus == .waiting
@@ -603,12 +628,27 @@ public final class RepoState {
             let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
             waveStore.setAll(newWaves.map(makeWaveViewModel))
+            await refreshAttention()
             if let selectedWaveId {
                 loadWaveContent(for: selectedWaveId)
             }
         } catch {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waveStore.removeAll()
+            attentionStore.removeAll()
+        }
+    }
+
+    public func refreshAttention() async {
+        guard let repo = repoTarget else {
+            attentionStore.removeAll()
+            return
+        }
+        do {
+            let items = try await waveService.listAttention(repo: repo)
+            attentionStore.setAll(items)
+        } catch {
+            LoggingService.model("refreshAttention: error=\(error.localizedDescription)")
         }
     }
 
@@ -622,6 +662,12 @@ public final class RepoState {
     public func refreshWorktrees() async {
         guard let repo = repoTarget else { return }
         worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
+    }
+
+    public func markAttentionViewed(_ id: String) async throws -> AttentionItem {
+        let item = try await waveService.markAttentionViewed(id)
+        attentionStore.set(item)
+        return item
     }
 
     public func combinePRs(_ waveId: String) async throws -> CombinePRsResult {
@@ -927,6 +973,7 @@ public final class RepoState {
 
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
+        attentionStore.removeAll()
         optimisticInteractiveWaveIds.removeAll()
 
         let probeService = Self.makeEventService(
@@ -956,6 +1003,7 @@ public final class RepoState {
     public func selectRemoteRepo(path: String) {
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
+        attentionStore.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)

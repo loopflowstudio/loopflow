@@ -4,6 +4,7 @@
 //! without gRPC/proto dependencies.
 
 mod agent;
+mod attention;
 mod chat_memory;
 mod chat_message;
 mod event;
@@ -13,6 +14,7 @@ mod trigger;
 mod wave;
 
 pub use agent::{AgentRun, AgentStatus};
+pub use attention::{AttentionItem, AttentionKind, AttentionStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use event::Event;

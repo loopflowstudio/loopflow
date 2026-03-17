@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    auth as auth_routes, flows, hooks, providers, repos, sessions, system, tokens, usage,
-    wave_runs, waves, worktrees, ws,
+    attention, auth as auth_routes, flows, hooks, providers, repos, sessions, system, tokens,
+    usage, wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -88,6 +88,15 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/sessions/{id}/usage",
             get(usage::get_session_usage_handler),
+        )
+        .route("/attention", get(attention::list_attention_handler))
+        .route(
+            "/attention/history",
+            get(attention::list_attention_history_handler),
+        )
+        .route(
+            "/attention/{attention_id}",
+            get(attention::get_attention_handler).patch(attention::patch_attention_handler),
         )
         .route(
             "/waves",

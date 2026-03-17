@@ -52,6 +52,18 @@ public struct AgentEndedEvent: Sendable {
     public let timestamp: Date
 }
 
+public struct AttentionEvent: Sendable {
+    public enum EventType: String, Sendable {
+        case created
+        case updated
+        case resolved
+    }
+
+    public let type: EventType
+    public let item: AttentionItem?
+    public let timestamp: Date
+}
+
 public struct OutputEvent: Sendable {
     public let waveId: String
     public let agentId: String
@@ -83,6 +95,7 @@ public enum LFDEvent: Sendable {
     case agentStarted(AgentStartedEvent)
     case agentEnded(AgentEndedEvent)
     case output(OutputEvent)
+    case attention(AttentionEvent)
     case auth(AuthEvent)
 }
 
@@ -506,6 +519,15 @@ public actor EventService {
                 text: text,
                 timestamp: parseTimestamp(json["timestamp"])
             ))
+        case "attention_created", "attention_updated", "attention_resolved":
+            let typeMap: [String: AttentionEvent.EventType] = [
+                "attention_created": .created,
+                "attention_updated": .updated,
+                "attention_resolved": .resolved,
+            ]
+            guard let eventType = typeMap[type] else { return nil }
+            let item = (json["item"] as? [String: Any]).flatMap(WaveService.parseAttentionFromJSON)
+            return .attention(AttentionEvent(type: eventType, item: item, timestamp: parseTimestamp(json["timestamp"])))
         case "auth.flow_started", "auth.connected", "auth.failed", "auth.disconnected":
             guard let authEvent = parseAuthEvent(type: type, json: json) else {
                 return nil

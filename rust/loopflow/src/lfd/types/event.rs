@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::provider_auth::Provider;
-use crate::lfd::types::agent::AgentStatus;
+use crate::lfd::types::{agent::AgentStatus, AttentionItem};
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +171,23 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
+    // Attention
+    AttentionCreated {
+        item: AttentionItem,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    AttentionUpdated {
+        item: AttentionItem,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    AttentionResolved {
+        item: AttentionItem,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+
     // Output
     OutputLine {
         wave_id: LfdId,
@@ -184,6 +201,27 @@ pub enum Event {
 impl Event {
     pub fn now() -> OffsetDateTime {
         OffsetDateTime::now_utc()
+    }
+
+    pub fn attention_created(item: AttentionItem) -> Self {
+        Self::AttentionCreated {
+            item,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn attention_updated(item: AttentionItem) -> Self {
+        Self::AttentionUpdated {
+            item,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn attention_resolved(item: AttentionItem) -> Self {
+        Self::AttentionResolved {
+            item,
+            timestamp: Self::now(),
+        }
     }
 
     pub fn wave_created(wave_id: LfdId, name: String) -> Self {

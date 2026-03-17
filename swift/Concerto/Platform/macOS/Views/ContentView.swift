@@ -367,7 +367,7 @@ struct ContentView: View {
             WaveDetailPanel(wave: wave)
                 .id(wave.id)
         } else {
-            CatchWaveView()
+            AttentionQueueView()
         }
     }
 }

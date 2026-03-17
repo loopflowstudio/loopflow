@@ -15,7 +15,7 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
 | Capability | tmux | Concerto target |
 |-----------|------|-----------------|
 | Split panes | Terminal only | Terminal + native views |
-| Pane types | All terminals | Terminal, chat, diff, file editor, wave config, block queue |
+| Pane types | All terminals | Terminal, chat, diff, file editor, wave config, attention queue |
 | Layouts | Manual splits, saved configs | Named layouts per workflow (build, review, tend, debug) |
 | Session persistence | Across disconnects | Across app launches, bound to wave state |
 | Context switching | `prefix + window number` | Wave-aware — switch wave, layout follows |
@@ -31,13 +31,13 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
    - **Diff viewer** — Side-by-side or unified, syntax highlighted, reviewable (approve/comment inline)
    - **File editor** — Native text editor with syntax highlighting (or embedded editor component)
    - **Wave config** — Visual editor for wave YAML (direction picker, area file browser, flow step list)
-   - **Block queue** — The tend flow's human interface (from agent-embedding/01)
+   - **Attention queue** — The tend flow's human interface (from agent-embedding/01)
    - **Portfolio** — Multi-wave overview (from agent-embedding/03)
 
 2. **Layout system.** Panes compose into layouts:
    - Horizontal/vertical splits, resizable, nestable (like tmux)
    - Named layouts saved per wave or per workflow
-   - Default layouts: `build` (terminal + chat + file tree), `review` (diff + terminal + chat), `tend` (portfolio + block queue + calibration), `debug` (terminal + terminal + log viewer)
+   - Default layouts: `build` (terminal + chat + file tree), `review` (diff + terminal + chat), `tend` (portfolio + attention queue + calibration), `debug` (terminal + terminal + log viewer)
    - Layout follows wave — switch wave context, panes update to show that wave's state
 
 3. **Wave-aware context switching.** The tmux session concept, but bound to waves:
@@ -54,7 +54,7 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
 5. **Keyboard-driven.** tmux users live on the keyboard. Concerto should be equally fast:
    - Leader key (like tmux prefix) for pane management
    - Pane navigation (hjkl or arrow keys)
-   - Quick switcher (fuzzy find waves, files, blocks)
+   - Quick switcher (fuzzy find waves, files, attention items)
    - All pane operations available without mouse
 
 6. **Session persistence.** Survive app restart:
@@ -72,7 +72,7 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
 
 ## Done when
 
-- At least 3 pane types working (terminal, diff viewer, block queue)
+- At least 3 pane types working (terminal, diff viewer, attention queue)
 - Layouts are saveable and switchable
 - Wave context switching updates all panes
 - Keyboard navigation works for all pane operations

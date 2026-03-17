@@ -138,6 +138,15 @@ Concerto launches into a portfolio window instead of a single welcome panel:
 - Use the `+` card to scan `~/src` and add another main git worktree
 - Added repos persist between launches
 
+## Attention Queue
+
+Repo windows now open into a queue view when no wave is selected:
+
+- Review-ready, failed, and queue-blocked waves are listed in urgency order
+- Click an item to open its detail without drilling into the wave first
+- Code review items offer `Ship`; step failures offer `Retry`
+- Empty queues show `Nothing needs you. Waves are running.`
+
 ## Wave Detail: Current + Runs
 
 Wave detail now has two tabs:

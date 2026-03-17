@@ -9,13 +9,15 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
 use crate::engine::worktrees::main_repo_root;
+use crate::lfd::attention::{attention_id, queue_block_attention_item_from_existing};
 use crate::lfd::config::GitHubConfig;
+use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason, QueueMergeEvent, WaveRun,
-    WaveRunStackStatus,
+    AttentionKind, AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock,
+    QueueBlockReason, QueueMergeEvent, WaveRun, WaveRunStackStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,8 +179,26 @@ pub async fn reconcile_wave_queue(
     wave_id: &LfdId,
     trigger: QueueTrigger,
 ) -> Result<(), String> {
+    reconcile_wave_queue_with_events(store, github_config, wave_id, trigger, None).await
+}
+
+pub async fn reconcile_wave_queue_with_events(
+    store: &SharedStore,
+    github_config: &GitHubConfig,
+    wave_id: &LfdId,
+    trigger: QueueTrigger,
+    event_hub: Option<&EventHub>,
+) -> Result<(), String> {
     let _guard = acquire_reconcile_lock(wave_id).await;
-    reconcile_wave_queue_with_ops(store, github_config, wave_id, trigger, &RealQueueOps).await
+    reconcile_wave_queue_with_ops(
+        store,
+        github_config,
+        wave_id,
+        trigger,
+        &RealQueueOps,
+        event_hub,
+    )
+    .await
 }
 
 pub async fn remove_reconcile_lock(wave_id: &LfdId) {
@@ -204,6 +224,7 @@ async fn reconcile_wave_queue_with_ops(
     wave_id: &LfdId,
     trigger: QueueTrigger,
     ops: &dyn QueueOps,
+    event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
     let wave_id_for_log = wave_id.clone();
     let mut runs = store
@@ -278,11 +299,27 @@ async fn reconcile_wave_queue_with_ops(
 
     let head = runs[head_index].clone();
     let Some(head_pr_number) = pr_number(&head) else {
-        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
+        set_queue_block(
+            store,
+            &head,
+            QueueBlockReason::MissingPr,
+            Vec::new(),
+            None,
+            event_hub,
+        )
+        .await?;
         return Ok(());
     };
     let Some(head_live_state) = live_snapshot.state_for_run(&head) else {
-        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
+        set_queue_block(
+            store,
+            &head,
+            QueueBlockReason::MissingPr,
+            Vec::new(),
+            None,
+            event_hub,
+        )
+        .await?;
         return Ok(());
     };
     if head_live_state.state != LivePrState::Open {
@@ -301,6 +338,7 @@ async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::WaveRunning,
                 Vec::new(),
                 None,
+                event_hub,
             )
             .await?;
             return Ok(());
@@ -315,6 +353,7 @@ async fn reconcile_wave_queue_with_ops(
             QueueBlockReason::ScratchDirty,
             Vec::new(),
             None,
+            event_hub,
         )
         .await?;
         return Ok(());
@@ -335,6 +374,7 @@ async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::RebaseConflict,
                 conflict.files.clone(),
                 Some("lazy rebase failed".to_string()),
+                event_hub,
             )
             .await?;
             return Ok(());
@@ -350,6 +390,7 @@ async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::PromotionFailed,
                 Vec::new(),
                 Some(err),
+                event_hub,
             )
             .await?;
             return Ok(());
@@ -361,7 +402,7 @@ async fn reconcile_wave_queue_with_ops(
         let _ = store.upsert_live_pr_state(&promoted_state).await;
     }
 
-    let _ = store.delete_queue_block(wave_id, &head.id).await;
+    clear_queue_block(store, wave_id, &head.id, event_hub).await?;
     Ok(())
 }
 
@@ -371,6 +412,25 @@ pub async fn handle_pr_merged(
     wave_id: &LfdId,
     merged_pr_number: u32,
     merged_at: OffsetDateTime,
+) -> Result<bool, String> {
+    handle_pr_merged_with_events(
+        store,
+        github_config,
+        wave_id,
+        merged_pr_number,
+        merged_at,
+        None,
+    )
+    .await
+}
+
+pub async fn handle_pr_merged_with_events(
+    store: &SharedStore,
+    github_config: &GitHubConfig,
+    wave_id: &LfdId,
+    merged_pr_number: u32,
+    merged_at: OffsetDateTime,
+    event_hub: Option<&EventHub>,
 ) -> Result<bool, String> {
     let event = QueueMergeEvent {
         wave_id: wave_id.clone(),
@@ -397,8 +457,14 @@ pub async fn handle_pr_merged(
         let _ = store.update_wave_run(&run).await;
     }
 
-    if let Err(err) =
-        reconcile_wave_queue(store, github_config, wave_id, QueueTrigger::WebhookMerged).await
+    if let Err(err) = reconcile_wave_queue_with_events(
+        store,
+        github_config,
+        wave_id,
+        QueueTrigger::WebhookMerged,
+        event_hub,
+    )
+    .await
     {
         tracing::warn!(wave_id = %wave_id, error = %err, "queue reconcile after merge failed");
     }
@@ -507,6 +573,7 @@ async fn set_queue_block(
     reason: QueueBlockReason,
     conflict_files: Vec<String>,
     error: Option<String>,
+    event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
     let block = QueueBlock {
         wave_id: run.wave_id.clone(),
@@ -516,10 +583,69 @@ async fn set_queue_block(
         conflict_files,
         error,
     };
-    store
-        .upsert_queue_block(&block)
+    let attention_id = attention_id(
+        AttentionKind::Algedonic,
+        &block.wave_id,
+        Some(&block.run_id),
+    );
+    let existing = store
+        .get_attention_item(&attention_id)
         .await
-        .map_err(|err| format!("upsert_queue_block failed: {err}"))
+        .map_err(|err| format!("get queue attention item failed: {err}"))?;
+    let item = queue_block_attention_item_from_existing(&block, existing.as_ref());
+    store
+        .upsert_attention_item(&item)
+        .await
+        .map_err(|err| format!("upsert_queue_block failed: {err}"))?;
+
+    if let Some(event_hub) = event_hub {
+        match existing {
+            None => event_hub.send(Event::attention_created(item)),
+            Some(existing) if existing.status == AttentionStatus::Resolved => {
+                event_hub.send(Event::attention_created(item));
+            }
+            Some(existing)
+                if existing.status != item.status
+                    || existing.title != item.title
+                    || existing.summary != item.summary
+                    || existing.context != item.context =>
+            {
+                event_hub.send(Event::attention_updated(item));
+            }
+            Some(_) => {}
+        }
+    }
+
+    Ok(())
+}
+
+async fn clear_queue_block(
+    store: &SharedStore,
+    wave_id: &LfdId,
+    run_id: &LfdId,
+    event_hub: Option<&EventHub>,
+) -> Result<(), String> {
+    let attention_id = attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+    let Some(mut item) = store
+        .get_attention_item(&attention_id)
+        .await
+        .map_err(|err| format!("get queue attention item failed: {err}"))?
+    else {
+        return Ok(());
+    };
+    if item.status == AttentionStatus::Resolved {
+        return Ok(());
+    }
+    item.status = AttentionStatus::Resolved;
+    item.resolved_at = Some(OffsetDateTime::now_utc());
+    store
+        .upsert_attention_item(&item)
+        .await
+        .map_err(|err| format!("resolve queue attention item failed: {err}"))?;
+    if let Some(event_hub) = event_hub {
+        event_hub.send(Event::attention_resolved(item));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -527,6 +653,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         PullRequest, QueueBlockReason, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus,
@@ -685,6 +812,7 @@ mod tests {
             wave.id(),
             QueueTrigger::RunCompleted,
             &ops,
+            None,
         )
         .await
         .expect("reconcile");
@@ -762,6 +890,7 @@ mod tests {
             wave.id(),
             QueueTrigger::RunCompleted,
             &ops,
+            None,
         )
         .await
         .expect("reconcile");
@@ -788,6 +917,111 @@ mod tests {
             projection.get(&run.id).map(|view| view.next_action),
             Some(QueueNextAction::ResolveConflict)
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_queue_block_preserves_age_and_emits_only_once() {
+        let store = sqlite_store().await;
+        let wave = make_wave(".");
+        store.create_wave(&wave).await.expect("wave");
+        let run = make_run(&wave, 0, 41);
+        store.create_wave_run(&run).await.expect("run");
+        set_live_open(&store, &run, true).await;
+        let event_hub = EventHub::new(8);
+        let mut rx = event_hub.subscribe();
+
+        let ops = MockOps {
+            scratch_clean: false,
+            ..Default::default()
+        };
+        reconcile_wave_queue_with_ops(
+            &store,
+            &GitHubConfig::default(),
+            wave.id(),
+            QueueTrigger::Poll,
+            &ops,
+            Some(&event_hub),
+        )
+        .await
+        .expect("first reconcile");
+
+        let created = rx.try_recv().expect("created event");
+        let first_item = match created {
+            Event::AttentionCreated { item, .. } => item,
+            other => panic!("expected attention created, got {other:?}"),
+        };
+
+        reconcile_wave_queue_with_ops(
+            &store,
+            &GitHubConfig::default(),
+            wave.id(),
+            QueueTrigger::Poll,
+            &ops,
+            Some(&event_hub),
+        )
+        .await
+        .expect("second reconcile");
+
+        let queue_item = store
+            .get_attention_item(&first_item.id)
+            .await
+            .expect("get attention item")
+            .expect("attention item exists");
+        assert_eq!(
+            queue_item.surfaced_at.unix_timestamp(),
+            first_item.surfaced_at.unix_timestamp()
+        );
+        assert!(rx.try_recv().is_err(), "no duplicate attention event");
+    }
+
+    #[tokio::test]
+    async fn clearing_queue_block_emits_attention_resolved() {
+        let store = sqlite_store().await;
+        let wave = make_wave(".");
+        store.create_wave(&wave).await.expect("wave");
+        let run = make_run(&wave, 0, 51);
+        store.create_wave_run(&run).await.expect("run");
+        set_live_open(&store, &run, true).await;
+        let event_hub = EventHub::new(8);
+        let mut rx = event_hub.subscribe();
+
+        let blocked_ops = MockOps {
+            scratch_clean: false,
+            ..Default::default()
+        };
+        reconcile_wave_queue_with_ops(
+            &store,
+            &GitHubConfig::default(),
+            wave.id(),
+            QueueTrigger::Poll,
+            &blocked_ops,
+            Some(&event_hub),
+        )
+        .await
+        .expect("block reconcile");
+        let _ = rx.try_recv().expect("created event");
+
+        let cleared_ops = MockOps {
+            scratch_clean: true,
+            ..Default::default()
+        };
+        reconcile_wave_queue_with_ops(
+            &store,
+            &GitHubConfig::default(),
+            wave.id(),
+            QueueTrigger::Poll,
+            &cleared_ops,
+            Some(&event_hub),
+        )
+        .await
+        .expect("clear reconcile");
+
+        let resolved = rx.try_recv().expect("resolved event");
+        let resolved_item = match resolved {
+            Event::AttentionResolved { item, .. } => item,
+            other => panic!("expected attention resolved, got {other:?}"),
+        };
+        assert_eq!(resolved_item.status, AttentionStatus::Resolved);
     }
 
     #[tokio::test]

@@ -1,9 +1,11 @@
 - ingest
-- branch:
+- or:
     paths:
       build:
         flow: ship-roadmap-build
         description: "Compelling item found — design and build it"
       reorg:
         flow: reorg
-        description: "Nothing compelling — reorganize items and go silent"
+        description: "No compelling item, but wave items need coherence pass"
+      silence:
+        description: "Wave is healthy and coherent — no action needed this iteration"

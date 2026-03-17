@@ -157,10 +157,10 @@ Flows can include mechanical ops items directly:
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → branch(build: ship-roadmap-build, reorg: reorg) |
+| `ship-roadmap` | ingest → or(build, reorg) |
 | `ship-roadmap-build` | kickoff → review-design → build → review → land |
 | `reorg` | update-wave (coherence pass) |
-| `qa-deploy` | qa → triage → branch(fix: qa-fix, deploy: deploy) |
+| `qa-deploy` | qa → triage → or(fix, deploy) |
 | `qa-fix` | implement → compress → lint → gate |
 | `deploy` | gate → update-wave |
 
@@ -168,15 +168,15 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | fork(reduce×3) → update-wave |
-| `wave-polish` | fork(polish×3) → update-wave |
-| `wave-expand` | fork(expand×3) → update-wave |
+| `wave-reduce` | and(reduce×3) → update-wave |
+| `wave-polish` | and(polish×3) → update-wave |
+| `wave-expand` | and(expand×3) → update-wave |
 
 ### Tend flows (`tend/`)
 
 | Flow | Steps |
 |------|-------|
-| `tend` | scan-waves → assess → branch(chord: tend-chord, reorg: reorg) |
+| `tend` | scan-waves → assess → or(chord, reorg) |
 | `tend-chord` | draft-chord → review-chord → apply-chord |
 
 ### Scan flows (`scan/`)
@@ -187,33 +187,37 @@ Flows can include mechanical ops items directly:
 
 ### Forks (and)
 
-Forks run a step in parallel with different directions, then synthesize the results.
+`and` runs a step in parallel with different directions, then synthesizes the results.
 
 ```bash
 lf wave-reduce    # runs reduce 3x with different perspectives
 ```
 
-`wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.
+`wave-reduce` runs `reduce` across infra, ux, and ceo directions via `and`, then reconciles results with `update-wave`.
 
 ### Branches (or)
 
 Branches route a flow based on an agent's assessment of the current state. One path runs.
 
 ```yaml
-# flow: qa-deploy
-- qa
-- triage
-- branch:
+# flow: tend
+- tend/scan-waves
+- or:
+    router: tend/assess
     paths:
-      fix:
-        flow: qa-fix
-        description: "Blocking issues found, fix before deploy"
-      deploy:
-        flow: deploy
-        description: "Clean enough to ship"
+      chord:
+        flow: tend-chord
+        description: "Pressure points found — compose and review mutations"
+      reorg:
+        flow: reorg
+        description: "No cross-wave pressure, but waves need coherence passes"
+      silence:
+        description: "Everything is healthy — no action needed this cycle"
 ```
 
-The branch construct runs a routing agent that reads scratch/ and chooses a path. The selected sub-flow runs inline. Combined with cron scheduling and loop iteration, this enables cycles like daily QA → fix → deploy.
+The `or` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.
+
+If no `router:` is specified, a generic routing agent picks a path based on scratch/ contents.
 
 ## Playing in the Waves
 

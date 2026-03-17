@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::{ConcreteForkBranch, ConcreteStep};
+use crate::engine::flow::{ConcreteAndBranch, ConcreteStep};
 
 pub const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 pub const FORK_SYNTHESIZE_STEP: &str = "synthesize";
@@ -63,7 +63,7 @@ pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
 }
 
 pub fn plan_fork_execution(
-    branches: &[ConcreteForkBranch],
+    branches: &[ConcreteAndBranch],
     base_directions: &[String],
 ) -> Result<Vec<ForkBranchExecutionPlan>, String> {
     if branches.is_empty() {
@@ -93,7 +93,7 @@ pub fn plan_fork_execution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{ConcreteForkBranch, ConcreteStep, Step};
+    use crate::engine::flow::{ConcreteAndBranch, ConcreteStep, Step};
 
     #[test]
     fn fork_worktree_path_uses_dash_suffix() {
@@ -121,8 +121,8 @@ mod tests {
         assert_eq!(merged, base);
     }
 
-    fn single_step_branch(name: &str) -> ConcreteForkBranch {
-        ConcreteForkBranch {
+    fn single_step_branch(name: &str) -> ConcreteAndBranch {
+        ConcreteAndBranch {
             steps: vec![ConcreteStep {
                 step: Step::named(name),
                 flow_parents: Vec::new(),
@@ -133,8 +133,8 @@ mod tests {
         }
     }
 
-    fn multi_step_branch(names: &[&str], directions: Vec<String>) -> ConcreteForkBranch {
-        ConcreteForkBranch {
+    fn multi_step_branch(names: &[&str], directions: Vec<String>) -> ConcreteAndBranch {
+        ConcreteAndBranch {
             steps: names
                 .iter()
                 .map(|name| ConcreteStep {
@@ -178,7 +178,7 @@ mod tests {
     fn plan_fork_execution_rejects_interactive_branch() {
         let mut step = Step::named("a");
         step.interactive = Some(true);
-        let branches = vec![ConcreteForkBranch {
+        let branches = vec![ConcreteAndBranch {
             steps: vec![ConcreteStep {
                 step,
                 flow_parents: Vec::new(),

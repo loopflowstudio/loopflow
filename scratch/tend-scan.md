@@ -12,7 +12,7 @@
 - Chord CRUD removed — chords are waves, no separate tables/DTOs/routes
 - Tend flow YAML defined (tend.yaml, tend-chord.yaml)
 - All five tend step prompts written (scan-waves, assess, draft-chord, review-chord, apply-chord)
-- ship-roadmap flow with branch construct and ops items
+- ship-roadmap flow with or construct and ops items
 - reorg flow (single update-wave step)
 - Wave YAML configs for all four member waves + redesign chord-wave
 - Bootstrap script for wave registration

@@ -1,11 +1,14 @@
 use crate::engine::flow::expand_direction_names;
+use crate::engine::flow::{load_flow, load_step, OrPath};
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
-use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
+use crate::engine::{
+    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteOr, ConcreteStep, Flow, FlowAction,
+};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::lfd::executor::{
@@ -31,8 +34,8 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
         .map(|item| match item {
             ConcreteItem::Step(s) => s.step.name.as_str(),
             ConcreteItem::Op(_) => "[op]",
-            ConcreteItem::Fork(_) => "[fork]",
-            ConcreteItem::Branch(_) => "[branch]",
+            ConcreteItem::And(_) => "[and]",
+            ConcreteItem::Or(_) => "[or]",
         })
         .collect();
 
@@ -86,21 +89,13 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 );
                 crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
             }
-            FlowAction::Fork { fork } => {
-                run_fork(&fork, message, cli, repo)?;
-                commit_step_work(repo, "fork")?;
+            FlowAction::And { fork } => {
+                run_and(&fork, message, cli, repo)?;
+                commit_step_work(repo, "and")?;
             }
-            FlowAction::Branch { .. } => {
-                // Branch routing requires the daemon executor; skip in CLI flow runner.
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}[branch]{reset} (requires lfd)",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                );
+            FlowAction::Or { branch } => {
+                run_or(&branch, message, cli, repo)?;
+                commit_step_work(repo, "or")?;
             }
             FlowAction::Complete => break,
         }
@@ -120,6 +115,163 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Run or-routing: execute a routing step, read the verdict, then run the
+/// selected sub-flow inline.
+fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+    let colors = Colors::new();
+    let verdict_path = repo.join("scratch/route-or.md");
+
+    let router_name = or_def.router.as_deref().unwrap_or("or-route");
+
+    eprintln!(
+        "{dim}[or]{reset} {bold}{step}{reset} choosing between {n} paths",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+        step = router_name,
+        n = or_def.paths.len(),
+    );
+
+    // Build routing instructions that get appended to the step's prompt.
+    let routing_suffix = build_or_routing_suffix(or_def);
+
+    // Write the routing step — either a wrapper around the router step's
+    // content + routing instructions, or a standalone generic routing prompt.
+    let tmp_step_dir = repo.join(".lf/steps");
+    std::fs::create_dir_all(&tmp_step_dir)?;
+    let tmp_step_path = tmp_step_dir.join("or-route.md");
+    let wrote_tmp = !tmp_step_path.exists();
+
+    let prompt = if let Some(ref router_name) = or_def.router {
+        let router = load_step(router_name, repo)?;
+        let base = router.content.as_deref().unwrap_or("");
+        format!("{base}\n\n{routing_suffix}")
+    } else {
+        format!(
+            "---\nagent: claude:sonnet\n---\n\
+             Previous steps have analyzed the current state and written their findings to scratch/.\n\
+             Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
+             {routing_suffix}"
+        )
+    };
+
+    if wrote_tmp {
+        std::fs::write(&tmp_step_path, &prompt)?;
+    }
+
+    let result = crate::lf::commands::run::run(Some("or-route"), message, cli);
+
+    if wrote_tmp {
+        let _ = std::fs::remove_file(&tmp_step_path);
+    }
+
+    result?;
+    commit_step_work(repo, router_name)?;
+
+    let selected = read_or_verdict(&verdict_path, or_def)?;
+
+    eprintln!(
+        "{dim}[or]{reset} {bold}{selected}{reset} selected",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+    );
+
+    // Load and execute the selected sub-flow.
+    let or_path = or_def
+        .paths
+        .get(&selected)
+        .expect("selected path validated by read_or_verdict");
+
+    let sub_items = load_or_path_items(or_path, repo)?;
+
+    for sub_item in &sub_items {
+        let sub_step = match sub_item {
+            ConcreteItem::Step(step) => step,
+            ConcreteItem::Op(ops) => {
+                crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
+                continue;
+            }
+            _ => continue,
+        };
+
+        let step_name = sub_step.step.name.clone();
+        eprintln!(
+            "{dim}[or/{selected}]{reset} {bold}{step_name}{reset}",
+            dim = colors.dim,
+            reset = colors.reset,
+            bold = colors.bold,
+        );
+        crate::lf::commands::run::run(Some(&step_name), message, cli)?;
+        commit_step_work(repo, &step_name)?;
+    }
+
+    Ok(())
+}
+
+fn build_or_routing_suffix(or_def: &ConcreteOr) -> String {
+    let mut suffix = String::from(
+        "## Routing\n\nAfter completing your analysis, choose one of these paths:\n\n",
+    );
+    let mut keys: Vec<&String> = or_def.paths.keys().collect();
+    keys.sort();
+    for key in &keys {
+        let path = &or_def.paths[*key];
+        suffix.push_str(&format!("- **{key}**: {}\n", path.description));
+    }
+    suffix.push_str(
+        "\nWrite your choice to `scratch/route-or.md`.\n\
+         First line must be exactly: `path: <key>`\n\
+         Then explain your reasoning briefly.\n",
+    );
+    suffix
+}
+
+fn read_or_verdict(verdict_path: &Path, or_def: &ConcreteOr) -> Result<String> {
+    let content = std::fs::read_to_string(verdict_path)
+        .with_context(|| format!("or verdict not found at {}", verdict_path.display()))?;
+
+    let first_line = content
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("or verdict file is empty"))?;
+
+    let selected = first_line
+        .strip_prefix("path:")
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| {
+            anyhow!("or verdict first line must start with 'path:', got: {first_line}")
+        })?;
+
+    if !or_def.paths.contains_key(&selected) {
+        let valid_keys: Vec<&String> = or_def.paths.keys().collect();
+        return Err(anyhow!(
+            "unknown or path: {selected}, expected one of: {valid_keys:?}"
+        ));
+    }
+
+    Ok(selected)
+}
+
+fn load_or_path_items(or_path: &OrPath, repo: &Path) -> Result<Vec<ConcreteItem>> {
+    if let Some(ref flow_name) = or_path.flow {
+        let flow = load_flow(flow_name, repo)?;
+        let items = expand_flow(&flow, repo)?;
+        return Ok(items);
+    }
+
+    if let Some(ref step_name) = or_path.step {
+        let step = load_step(step_name, repo)?;
+        return Ok(vec![ConcreteItem::Step(ConcreteStep {
+            step,
+            flow_parents: Vec::new(),
+        })]);
+    }
+
+    // Silence path — no flow or step, just a clean exit.
+    Ok(vec![])
+}
+
 #[derive(Debug, Clone)]
 struct ForkBranchTask {
     index: usize,
@@ -129,7 +281,7 @@ struct ForkBranchTask {
     branch_name: String,
 }
 
-fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let expanded_cli_directions = expand_direction_names(&cli.direction, repo);
     let planned = plan_fork_execution(&fork.branches, &expanded_cli_directions)
         .map_err(|err| anyhow!(err))?;

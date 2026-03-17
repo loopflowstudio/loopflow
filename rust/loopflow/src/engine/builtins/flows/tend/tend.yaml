@@ -1,10 +1,12 @@
 - tend/scan-waves
-- tend/assess
-- branch:
+- or:
+    router: tend/assess
     paths:
       chord:
         flow: tend-chord
         description: "Pressure points found — compose and review mutations"
       reorg:
         flow: reorg
-        description: "Nothing to tend — waves reorganize internally"
+        description: "No cross-wave pressure, but individual waves need coherence passes"
+      silence:
+        description: "Everything is healthy — no action needed this cycle"

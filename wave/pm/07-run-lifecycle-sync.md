@@ -4,6 +4,8 @@
 
 ## What to build
 
+The provider seam already has the required verbs (`comment`, `complete_item`), and Asana implements them today. This item is about wiring those calls into executor lifecycle transitions once both providers are available.
+
 ### Sync points
 
 Add sync points to the wave run lifecycle in the executor:

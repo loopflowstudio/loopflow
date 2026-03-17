@@ -1324,7 +1324,14 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
-    let token = json.get("access_token").and_then(|v| v.as_str())?;
+    let token = json
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            json.get("tokens")
+                .and_then(|value| value.get("access_token"))
+                .and_then(|v| v.as_str())
+        })?;
     let expires_at = read_json_expires_at(
         &json,
         &[
@@ -2118,6 +2125,22 @@ mod tests {
         let token = extract_codex_token(tmp.path()).expect("oauth token should load");
         assert_eq!(token.provider, "codex");
         assert_eq!(token.access_token, "oauth-access-token");
+    }
+
+    #[test]
+    fn extract_codex_token_reads_nested_chatgpt_access_token() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"nested-oauth-token"}}"#,
+        )
+        .expect("write auth json");
+
+        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
+        assert_eq!(token.provider, "codex");
+        assert_eq!(token.access_token, "nested-oauth-token");
     }
 
     #[test]

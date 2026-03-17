@@ -20,6 +20,7 @@ Start with small, low-risk items that teach the Swift codebase (queue management
 
 - Mobile reply workflows are fluid — reorder, edit, delete queued replies
 - API key entry works without CLI
+- Provider auth is honest — provider-specific methods, not one generic "Connect"
 - Release config and "Release Now" accessible from the app
 - Voice conversation loop works hands-free
 

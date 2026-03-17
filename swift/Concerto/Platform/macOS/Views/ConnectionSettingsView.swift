@@ -27,42 +27,48 @@ struct ConnectionSettingsView: View {
             header
             modePicker
 
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                if mode == .bundled {
-                    bundledContent
-                } else {
-                    remoteContent
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    if mode == .bundled {
+                        bundledContent
+                    } else {
+                        remoteContent
+                    }
+
+                    statusContent
+                    providerConnectionsContent
+                    supportedHarnessesContent
+
+                    if let cliMessage, mode == .bundled {
+                        Text(cliMessage)
+                            .font(Typography.caption(11))
+                            .foregroundStyle(palette.textSecondary)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(Typography.caption())
+                            .foregroundStyle(Color.statusError)
+                    }
+
+                    actionsContent
                 }
-
-                statusContent
-                providerConnectionsContent
-                supportedHarnessesContent
-
-                if let cliMessage, mode == .bundled {
-                    Text(cliMessage)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(Typography.caption())
-                        .foregroundStyle(Color.statusError)
-                }
-
-                actionsContent
+                .padding(.horizontal, Spacing.xl)
+                .padding(.bottom, Spacing.xl)
             }
-            .padding(.horizontal, Spacing.xl)
-            .padding(.bottom, Spacing.xl)
-
-            Spacer(minLength: 0)
         }
         .background(palette.background)
-        .frame(width: 420, height: mode == .bundled ? 760 : 720)
+        .frame(width: 420)
+        .frame(minHeight: 500, idealHeight: 760)
         .onAppear {
             loadFromCurrentConnection()
-            guard repoState.isConnected else { return }
-            Task { await repoState.authProviderStore.refresh() }
+            refreshProviderStatuses()
+        }
+        .onChange(of: repoState.connectionState) { _, _ in
+            refreshProviderStatuses()
+        }
+        .onChange(of: mode) { _, _ in
+            refreshProviderStatuses()
         }
         .onChange(of: repoState.authProviderStore.browserLaunchRequest) { _, _ in
             handleBrowserLaunchRequest()
@@ -258,7 +264,7 @@ struct ConnectionSettingsView: View {
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
 
-            if !repoState.isConnected {
+            if !isProviderAuthAvailable {
                 Text("Connect to server first.")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
@@ -268,7 +274,7 @@ struct ConnectionSettingsView: View {
                 AuthProviderCard(
                     status: status,
                     pendingFlow: repoState.authProviderStore.pendingFlows[status.provider],
-                    isEnabled: repoState.isConnected,
+                    isEnabled: isProviderAuthAvailable,
                     error: repoState.authProviderStore.errorProvider == status.provider
                         ? repoState.authProviderStore.error
                         : nil,
@@ -365,6 +371,15 @@ struct ConnectionSettingsView: View {
 
     private var isCLIInstalled: Bool {
         cliInstallManager.isInstalled(in: selectedInstallDirectoryURL)
+    }
+
+    private var isProviderAuthAvailable: Bool {
+        repoState.isConnected || bundledProviderConnection != nil
+    }
+
+    private var bundledProviderConnection: ServerConnection? {
+        guard mode == .bundled else { return nil }
+        return SharedDaemon.currentConnection
     }
 
     private func loadFromCurrentConnection() {
@@ -507,5 +522,30 @@ struct ConnectionSettingsView: View {
 
         guard mode == .bundled else { return }
         connect()
+    }
+
+    private func refreshProviderStatuses() {
+        Task {
+            if repoState.isConnected {
+                await repoState.authProviderStore.refresh()
+                return
+            }
+
+            guard mode == .bundled else { return }
+
+            for _ in 0..<8 {
+                if let connection = bundledProviderConnection {
+                    let service = WaveService(
+                        connection: connection,
+                        tokenProvider: { connection.staticToken }
+                    )
+                    repoState.authProviderStore.bindService(service)
+                    await repoState.authProviderStore.refresh()
+                    return
+                }
+
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+        }
     }
 }

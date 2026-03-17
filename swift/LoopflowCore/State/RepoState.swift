@@ -193,6 +193,7 @@ public final class RepoState {
     public let connectionStore = ConnectionStore()
     public var connectionState: ConnectionState = .disconnected(nil)
     public var lfdConnected: Bool = false
+    public var hasCompletedInitialLoad: Bool = false
     public var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
@@ -260,6 +261,7 @@ public final class RepoState {
 
     public func configureMockWaves() {
         lfdConnected = true
+        hasCompletedInitialLoad = true
         connectionState = .connected
         let repo = currentRepo?.path ?? "/tmp/demo"
         waveStore.setAll([
@@ -421,6 +423,7 @@ public final class RepoState {
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
+        hasCompletedInitialLoad = false
         currentRepo = canonicalURL
         repoTarget = .local(canonicalURL)
         errorMessage = nil
@@ -473,6 +476,7 @@ public final class RepoState {
                             self.updateConnectionState(.connected)
                             self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
                             await self.refreshWorktrees()
+                            self.hasCompletedInitialLoad = true
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
@@ -849,6 +853,7 @@ public final class RepoState {
     }
 
     public func connectLfd(outputBuffer: OutputBuffer) async throws {
+        updateConnectionState(.connecting(.startingDaemon))
         let connection = try await resolveConnection()
         try await performConnectionHandshake(connection: connection, outputBuffer: outputBuffer)
     }
@@ -891,28 +896,35 @@ public final class RepoState {
         self.outputBuffer = outputBuffer
         rebuildServices(for: connection)
 
-        for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {
-            try await runConnectionPhase(phase, connection: connection) {
+        if connectionStore.mode == .bundled {
+            // Bundled daemon is localhost — skip TLS trust check and repo discovery.
+            try await runConnectionPhase(.authCheck, connection: connection) {
                 try await waveService.checkConnection()
             }
-        }
 
-        let repos = try await runConnectionPhase(.repoDiscovery, connection: connection) {
-            try await waveService.listRepos()
-        }
-
-        if connectionStore.mode == .bundled {
             availableRemoteRepos = []
             if let currentRepo {
                 repoTarget = .local(currentRepo)
             }
-        } else if let remote = repos.first {
-            availableRemoteRepos = repos
-            selectRemoteRepo(path: remote.path)
         } else {
+            for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {
+                try await runConnectionPhase(phase, connection: connection) {
+                    try await waveService.checkConnection()
+                }
+            }
+
+            let repos = try await runConnectionPhase(.repoDiscovery, connection: connection) {
+                try await waveService.listRepos()
+            }
+
             availableRemoteRepos = repos
-            repoTarget = nil
+            if let remote = repos.first {
+                selectRemoteRepo(path: remote.path)
+            } else {
+                repoTarget = nil
+            }
         }
+
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
@@ -979,12 +991,20 @@ public final class RepoState {
         connectionState.isConnected
     }
 
+    public var isActivelyConnecting: Bool {
+        if case .connecting = connectionState { return true }
+        if case .reconnecting = connectionState { return true }
+        if lfdConnected && !hasCompletedInitialLoad { return true }
+        return false
+    }
+
     public var connectionSummary: String {
         switch connectionState {
         case .connected:
             return "Connected"
         case .connecting(let phase):
             switch phase {
+            case .startingDaemon: return "Starting daemon…"
             case .tlsTrustCheck: return "Checking TLS trust…"
             case .authCheck: return "Authenticating…"
             case .repoDiscovery: return "Loading repos…"

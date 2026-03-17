@@ -1,0 +1,1 @@
+concerto: detect local provider auth, eager daemon startup

@@ -181,6 +181,7 @@ public enum ConnectionState: Equatable, Sendable {
 }
 
 public enum ConnectionPhase: String, Sendable {
+    case startingDaemon
     case tlsTrustCheck
     case authCheck
     case repoDiscovery

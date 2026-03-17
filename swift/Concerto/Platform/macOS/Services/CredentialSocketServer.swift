@@ -7,6 +7,7 @@ import Security
 // thread; the background listener thread only touches per-connection locals.
 final class CredentialSocketServer: @unchecked Sendable {
     let socketPath: URL
+    let homeDirectory: URL
 
     private var listenerThread: Thread?
     private var listenerFD: Int32 = -1
@@ -14,8 +15,12 @@ final class CredentialSocketServer: @unchecked Sendable {
     static let defaultPath = FileManager.default.temporaryDirectory
         .appendingPathComponent("concerto-auth-\(ProcessInfo.processInfo.processIdentifier).sock")
 
-    init(socketPath: URL = CredentialSocketServer.defaultPath) {
+    init(
+        socketPath: URL = CredentialSocketServer.defaultPath,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
         self.socketPath = socketPath
+        self.homeDirectory = homeDirectory
     }
 
     func start() throws {
@@ -86,9 +91,7 @@ final class CredentialSocketServer: @unchecked Sendable {
             var clientAddress = sockaddr()
             var clientLength = socklen_t(MemoryLayout<sockaddr>.size)
             let clientFD = withUnsafeMutablePointer(to: &clientAddress) { pointer in
-                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    accept(listenerFD, sockaddrPtr, &clientLength)
-                }
+                accept(listenerFD, pointer, &clientLength)
             }
 
             if clientFD < 0 {
@@ -116,7 +119,7 @@ final class CredentialSocketServer: @unchecked Sendable {
         }
 
         if request.method == "GET", let provider = routeProvider(route, prefix: "/credentials/") {
-            if let credential = readKeychain(provider: provider) {
+            if let credential = readCredential(provider: provider) {
                 writeJSON(clientFD, statusCode: 200, payload: credential)
             } else {
                 writeResponse(clientFD, statusCode: 404, jsonBody: ["error": "credential not found"])
@@ -239,6 +242,11 @@ final class CredentialSocketServer: @unchecked Sendable {
         )
     }
 
+    private func readCredential(provider: CredentialProvider) -> CredentialResponse? {
+        FileCredentialReader(homeDirectory: homeDirectory).read(provider: provider)
+            ?? readKeychain(provider: provider)
+    }
+
     private func readKeychain(provider: CredentialProvider) -> CredentialResponse? {
         let service = provider.keychainService
         let account = provider.keychainAccount
@@ -280,12 +288,98 @@ final class CredentialSocketServer: @unchecked Sendable {
     }
 }
 
+struct FileCredentialReader {
+    let homeDirectory: URL
+
+    func read(provider: CredentialProvider) -> CredentialResponse? {
+        switch provider {
+        case .github:
+            return nil
+        case .claude:
+            return readClaudeCredential()
+        case .codex:
+            return readCodexCredential()
+        }
+    }
+
+    private func readClaudeCredential() -> CredentialResponse? {
+        let path = homeDirectory
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent(".credentials.json")
+        guard
+            let json = readJSONObject(at: path),
+            let token = json["accessToken"] as? String,
+            !token.isEmpty
+        else {
+            return nil
+        }
+
+        let login = json["email"] as? String
+        let expiresAt = firstString(
+            from: json,
+            keys: ["expiresAt", "expires_at", "accessTokenExpiresAt", "access_token_expires_at"]
+        )
+        return CredentialResponse(token: token, login: login, expires_at: expiresAt)
+    }
+
+    private func readCodexCredential() -> CredentialResponse? {
+        let path = homeDirectory
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("auth.json")
+        guard
+            let json = readJSONObject(at: path),
+            let token = codexAccessToken(from: json),
+            !token.isEmpty
+        else {
+            return nil
+        }
+
+        let expiresAt = firstString(
+            from: json,
+            keys: ["expires_at", "expiresAt", "accessTokenExpiresAt", "access_token_expires_at"]
+        )
+        return CredentialResponse(token: token, login: nil, expires_at: expiresAt)
+    }
+
+    private func codexAccessToken(from json: [String: Any]) -> String? {
+        if let token = json["access_token"] as? String {
+            return token
+        }
+
+        let nested = json["tokens"] as? [String: Any]
+        return nested?["access_token"] as? String
+    }
+
+    private func readJSONObject(at url: URL) -> [String: Any]? {
+        guard
+            let data = try? Data(contentsOf: url),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return object
+    }
+
+    private func firstString(from json: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            guard let value = json[key] else { continue }
+            if let string = value as? String, !string.isEmpty {
+                return string
+            }
+            if let number = value as? NSNumber {
+                return number.stringValue
+            }
+        }
+        return nil
+    }
+}
+
 private struct HTTPRequest {
     let method: String
     let path: String
 }
 
-private enum CredentialProvider: String {
+enum CredentialProvider: String {
     case github
     case claude
     case codex
@@ -331,7 +425,7 @@ private struct CredentialAuthStartResponse: Codable {
     let expires_in: Int?
 }
 
-private struct CredentialResponse: Codable {
+struct CredentialResponse: Codable {
     let token: String
     let login: String?
     let expires_at: String?

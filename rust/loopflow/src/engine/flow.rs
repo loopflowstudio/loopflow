@@ -846,20 +846,14 @@ fn expand_with_chain(
                 // A plain string in flow YAML is parsed as Step, but it might
                 // actually be a sub-flow name. If the step has no inline content,
                 // check if a flow with this name exists and expand it.
-                if step.content.is_none() && !chain.contains(&step.name) {
-                    if let Ok(nested) = load_flow(&step.name, repo) {
-                        if is_multi_step_flow(&nested, &step.name) {
-                            let mut nested_chain = chain.clone();
-                            nested_chain.push(step.name.clone());
-                            items.extend(expand_with_chain(
-                                &nested,
-                                repo,
-                                nested_chain,
-                                depth + 1,
-                            )?);
-                            continue;
-                        }
-                    }
+                if let Some(nested) = try_load_multi_step_flow(step, repo, &chain) {
+                    items.extend(expand_with_chain(
+                        &nested,
+                        repo,
+                        chain_with(&chain, &step.name),
+                        depth + 1,
+                    )?);
+                    continue;
                 }
                 items.push(ConcreteItem::Step(ConcreteStep {
                     step: resolve_step_reference(step, repo),
@@ -874,9 +868,12 @@ fn expand_with_chain(
                     )));
                 }
                 let nested = load_flow(name, repo)?;
-                let mut nested_chain = chain.clone();
-                nested_chain.push(name.clone());
-                items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
+                items.extend(expand_with_chain(
+                    &nested,
+                    repo,
+                    chain_with(&chain, name),
+                    depth + 1,
+                )?);
             }
             FlowItem::Op(item) => {
                 items.push(ConcreteItem::Op(ConcreteOp {
@@ -928,14 +925,11 @@ fn expand_and_branch(
         FlowItem::Step(step) => {
             // A step name in a fork branch might actually reference a flow.
             // Try loading it as a flow first (same resolution as expand_with_chain).
-            if step.content.is_none() {
-                if let Some(branch) = try_expand_step_as_flow(step, repo, chain, depth)? {
-                    return Ok(branch);
-                }
+            if let Some(branch) = try_expand_step_as_flow(step, repo, chain, depth)? {
+                return Ok(branch);
             }
             let resolved = resolve_step_reference(step, repo);
-            let mut flow_parents = chain.to_vec();
-            flow_parents.push(format!("and/{}", step.name));
+            let flow_parents = and_branch_parents(chain, &step.name);
             Ok(ConcreteAndBranch {
                 steps: vec![ConcreteStep {
                     step: resolved,
@@ -946,7 +940,10 @@ fn expand_and_branch(
                 directions: step.directions.clone(),
             })
         }
-        FlowItem::FlowRef(name) => expand_flow_ref_branch(name, &[], repo, chain, depth),
+        FlowItem::FlowRef(name) => {
+            let nested = load_flow(name, repo)?;
+            expand_flow_ref_branch(name, &[], &nested, repo, chain, depth)
+        }
         FlowItem::Op(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain ops items".to_string(),
         )),
@@ -970,6 +967,25 @@ fn is_multi_step_flow(flow: &Flow, step_name: &str) -> bool {
             .unwrap_or(false)
 }
 
+fn try_load_multi_step_flow(step: &Step, repo: &Path, chain: &[String]) -> Option<Flow> {
+    if step.content.is_some() || chain.contains(&step.name) {
+        return None;
+    }
+
+    let flow = load_flow(&step.name, repo).ok()?;
+    is_multi_step_flow(&flow, &step.name).then_some(flow)
+}
+
+fn chain_with(chain: &[String], name: &str) -> Vec<String> {
+    let mut nested_chain = chain.to_vec();
+    nested_chain.push(name.to_string());
+    nested_chain
+}
+
+fn and_branch_parents(chain: &[String], name: &str) -> Vec<String> {
+    chain_with(chain, &format!("and/{name}"))
+}
+
 /// Try to expand a step name as a flow reference. Returns `Some(branch)` if
 /// the name resolves to a multi-step flow, `None` if it's just a step.
 fn try_expand_step_as_flow(
@@ -978,13 +994,10 @@ fn try_expand_step_as_flow(
     chain: &[String],
     depth: usize,
 ) -> Result<Option<ConcreteAndBranch>, LoadError> {
-    let Ok(nested) = load_flow(&step.name, repo) else {
+    let Some(nested) = try_load_multi_step_flow(step, repo, chain) else {
         return Ok(None);
     };
-    if !is_multi_step_flow(&nested, &step.name) {
-        return Ok(None);
-    }
-    let branch = expand_flow_ref_branch(&step.name, &step.directions, repo, chain, depth)?;
+    let branch = expand_flow_ref_branch(&step.name, &step.directions, &nested, repo, chain, depth)?;
     Ok(Some(branch))
 }
 
@@ -992,15 +1005,14 @@ fn try_expand_step_as_flow(
 fn expand_flow_ref_branch(
     name: &str,
     directions: &[String],
+    nested: &Flow,
     repo: &Path,
     chain: &[String],
     depth: usize,
 ) -> Result<ConcreteAndBranch, LoadError> {
-    let nested = load_flow(name, repo)?;
-    let nested_items = expand_with_chain(&nested, repo, chain.to_vec(), depth + 1)?;
+    let nested_items = expand_with_chain(nested, repo, chain.to_vec(), depth + 1)?;
     let steps = extract_and_branch_steps(name, &nested_items)?;
-    let mut flow_parents = chain.to_vec();
-    flow_parents.push(format!("and/{name}"));
+    let flow_parents = and_branch_parents(chain, name);
     Ok(ConcreteAndBranch {
         steps,
         flow_parents,

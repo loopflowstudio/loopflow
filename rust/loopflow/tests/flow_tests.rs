@@ -17,6 +17,18 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
     fs::write(flows_dir.join(format!("{name}.yaml")), content).unwrap();
 }
 
+fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteItem> {
+    let flow = load_flow(name, repo).unwrap();
+    expand_flow(&flow, repo).unwrap()
+}
+
+fn assert_step_name(item: &ConcreteItem, expected: &str) {
+    match item {
+        ConcreteItem::Step(step) => assert_eq!(step.step.name, expected),
+        other => panic!("expected step {expected}, got {other:?}"),
+    }
+}
+
 #[test]
 fn flow_parsing_parity() {
     let temp = TempDir::new().unwrap();
@@ -220,14 +232,10 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     write_flow(repo, "publish", "- step-a\n- step-b");
     write_flow(repo, "parent", "- review\n- publish");
 
-    let flow = load_flow("parent", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "parent");
 
     assert_eq!(items.len(), 3, "publish should expand into its sub-steps");
-    match &items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
-        _ => panic!("expected step"),
-    }
+    assert_step_name(&items[0], "review");
     match &items[1] {
         ConcreteItem::Step(s) => {
             assert_eq!(s.step.name, "step-a");
@@ -254,8 +262,7 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     write_step(repo, "review", "Review the code.");
     write_flow(repo, "parent", "- review");
 
-    let flow = load_flow("parent", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "parent");
 
     assert_eq!(items.len(), 1);
     match &items[0] {
@@ -274,8 +281,7 @@ fn builtin_wave_reduce_expands_to_update_wave() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let flow = load_flow("wave-reduce", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "wave-reduce");
 
     // and + update-wave = 2
     assert_eq!(
@@ -305,10 +311,7 @@ fn builtin_wave_reduce_expands_to_update_wave() {
         );
     }
     // Step 1: update-wave
-    match &items[1] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "update-wave"),
-        _ => panic!("expected update-wave step"),
-    }
+    assert_step_name(&items[1], "update-wave");
 }
 
 #[test]
@@ -316,8 +319,7 @@ fn builtin_ship_uses_ops_land_item() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let flow = load_flow("ship", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "ship");
     assert!(!items.is_empty());
     assert!(matches!(items.last(), Some(ConcreteItem::Op(_))));
 }
@@ -327,15 +329,11 @@ fn builtin_tend_flow_structure() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let flow = load_flow("tend", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "tend");
 
     // tend: scan-waves, or(router: assess)
     assert_eq!(items.len(), 2);
-    match &items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/scan-waves"),
-        other => panic!("expected scan-waves step, got {other:?}"),
-    }
+    assert_step_name(&items[0], "tend/scan-waves");
     match &items[1] {
         ConcreteItem::Or(or_def) => {
             assert_eq!(
@@ -355,29 +353,15 @@ fn builtin_tend_flow_structure() {
         other => panic!("expected Or, got {other:?}"),
     }
 
-    let chord_flow = load_flow("tend-chord", repo).unwrap();
-    let chord_items = expand_flow(&chord_flow, repo).unwrap();
+    let chord_items = expand_named_flow(repo, "tend-chord");
     assert_eq!(chord_items.len(), 3);
-    match &chord_items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/draft-chord"),
-        other => panic!("expected draft-chord step, got {other:?}"),
-    }
-    match &chord_items[1] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/review-chord"),
-        other => panic!("expected review-chord step, got {other:?}"),
-    }
-    match &chord_items[2] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/apply-chord"),
-        other => panic!("expected apply-chord step, got {other:?}"),
-    }
+    assert_step_name(&chord_items[0], "tend/draft-chord");
+    assert_step_name(&chord_items[1], "tend/review-chord");
+    assert_step_name(&chord_items[2], "tend/apply-chord");
 
-    let reorg_flow = load_flow("reorg", repo).unwrap();
-    let reorg_items = expand_flow(&reorg_flow, repo).unwrap();
+    let reorg_items = expand_named_flow(repo, "reorg");
     assert_eq!(reorg_items.len(), 1);
-    match &reorg_items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "update-wave"),
-        other => panic!("expected update-wave step, got {other:?}"),
-    }
+    assert_step_name(&reorg_items[0], "update-wave");
 }
 
 #[test]
@@ -385,8 +369,7 @@ fn builtin_ship_roadmap_has_ops_in_or_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let flow = load_flow("ship-roadmap", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = expand_named_flow(repo, "ship-roadmap");
     let build_flow_name = match &items[1] {
         ConcreteItem::Or(or_def) => or_def.paths["build"]
             .flow
@@ -394,8 +377,7 @@ fn builtin_ship_roadmap_has_ops_in_or_subflow() {
             .expect("build path should point at a sub-flow"),
         other => panic!("expected or in ship-roadmap, got {other:?}"),
     };
-    let build_flow = load_flow(build_flow_name, repo).unwrap();
-    let items = expand_flow(&build_flow, repo).unwrap();
+    let items = expand_named_flow(repo, build_flow_name);
     assert!(
         items.iter().any(|item| matches!(item, ConcreteItem::Op(_))),
         "ship-roadmap-build should contain an ops item"

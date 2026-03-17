@@ -168,7 +168,7 @@ fn ops_item_parses_and_expands() {
     let flow = load_flow("ship-ish", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
-        FlowItem::Ops(item) => {
+        FlowItem::Op(item) => {
             assert_eq!(item.command, "land");
             assert_eq!(item.args, vec!["--create-pr"]);
         }

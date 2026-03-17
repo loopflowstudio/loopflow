@@ -12,7 +12,7 @@ Loopflow syncs with the PM tools teams already use. Plan in Asana or Linear, exe
 
 ## Strategy
 
-The shared PM seam lives in `rust/loopflow/src/lfd/pm.rs`: `PmProviderKind`, `PmConfig`, `PmItem`/`PmItemCreate`/`PmItemUpdate`, `PmProvider` trait (6 async methods), `RoadmapItemDocument` with frontmatter parse/render. Provider clients, ops commands, ingest hooks, and run-lifecycle sync extend this seam instead of inventing provider-specific side paths.
+The shared PM seam lives in `rust/loopflow/src/lfd/pm/mod.rs`: `PmProviderKind`, `PmConfig`, `PmItem`/`PmItemCreate`/`PmItemUpdate`, `PmProvider` trait (6 async methods), `RoadmapItemDocument` with frontmatter parse/render. Provider clients, ops commands, ingest hooks, and run-lifecycle sync extend this seam instead of inventing provider-specific side paths.
 
 ### Model
 

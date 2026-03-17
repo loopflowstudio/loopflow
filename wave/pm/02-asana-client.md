@@ -2,7 +2,7 @@
 
 **Finish line:** `AsanaClient` implements `PmProvider` over the Asana REST API. All trait methods work against a real Asana workspace.
 
-The shared PM types already exist in `rust/loopflow/src/lfd/pm.rs`, and Asana credentials already flow through `Provider::Asana` in provider auth. This item is the REST mapping layer plus the config-driven project bootstrap details that sit on top.
+The shared PM types already exist in `rust/loopflow/src/lfd/pm/mod.rs`, and Asana credentials already flow through `Provider::Asana` in provider auth. This item is the REST mapping layer plus the config-driven project bootstrap details that sit on top.
 
 ## What to build
 

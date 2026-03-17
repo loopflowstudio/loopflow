@@ -5,9 +5,9 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
-    PendingActivation, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave,
-    WaveRun, WaveRunStackStatus,
+    ActivationLog, AgentRun, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock,
+    ChatMessage, LivePrState, LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent,
+    Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -222,6 +222,29 @@ impl Store {
 
     pub async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
         WaveStateStore::upsert_live_pr_state(self, state).await
+    }
+
+    pub async fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>> {
+        WaveStateStore::list_attention_items(self, status, kind).await
+    }
+
+    pub async fn get_attention_item(
+        &self,
+        attention_id: &LfdId,
+    ) -> StoreResult<Option<AttentionItem>> {
+        WaveStateStore::get_attention_item(self, attention_id).await
+    }
+
+    pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
+        WaveStateStore::upsert_attention_item(self, item).await
+    }
+
+    pub async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::delete_attention_item(self, attention_id).await
     }
 
     pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
@@ -596,6 +619,14 @@ pub trait WaveStateStore: Send + Sync {
         pr_number: u32,
     ) -> StoreResult<Option<LivePullRequestState>>;
     async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()>;
+    async fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>>;
+    async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>>;
+    async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()>;
+    async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32>;
     async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>>;
     async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()>;
     async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
@@ -1019,6 +1050,52 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.upsert_live_pr_state(&state)).await
             }
             StoreBackend::Postgres(store) => store.upsert_live_pr_state(state).await,
+        }
+    }
+
+    async fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.list_attention_items(status, kind)).await
+            }
+            StoreBackend::Postgres(store) => store.list_attention_items(status, kind).await,
+        }
+    }
+
+    async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let attention_id = attention_id.clone();
+                run_sqlite(store, move |store| store.get_attention_item(&attention_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_attention_item(attention_id).await,
+        }
+    }
+
+    async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let item = item.clone();
+                run_sqlite(store, move |store| store.upsert_attention_item(&item)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_attention_item(item).await,
+        }
+    }
+
+    async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let attention_id = attention_id.clone();
+                run_sqlite(store, move |store| {
+                    store.delete_attention_item(&attention_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.delete_attention_item(attention_id).await,
         }
     }
 

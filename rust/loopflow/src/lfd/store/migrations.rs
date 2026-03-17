@@ -134,6 +134,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "028_drop_chords_tables",
         sql: include_str!("migrations/028_drop_chords_tables.sql"),
     },
+    Migration {
+        version: "029_attention_items",
+        sql: include_str!("migrations/029_attention_items.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

@@ -277,6 +277,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    private func attentionURL(_ attentionId: String? = nil, components: String...) -> URL {
+        var url = apiBaseURL.appendingPathComponent("attention")
+        if let attentionId {
+            url = url.appendingPathComponent(attentionId)
+        }
+        return components.reduce(url) { current, component in
+            current.appendingPathComponent(component)
+        }
+    }
+
     private func authURL(_ provider: AuthProvider? = nil) -> URL {
         var url = apiBaseURL.appendingPathComponent("auth")
         if let provider {
@@ -489,6 +499,47 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func listAttention(repo: RepoTarget) async throws -> [AttentionItem] {
+        var components = URLComponents(url: attentionURL(), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+        guard let url = components.url else {
+            throw WaveServiceError.commandFailed("Invalid attention URL")
+        }
+        let (data, response) = try await performGet(url)
+        try requireOKStatus(response, data: data)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return items.compactMap(Self.parseAttentionFromJSON)
+    }
+
+    public func getAttention(_ id: String) async throws -> AttentionItem {
+        let (data, response) = try await performGet(attentionURL(id))
+        try requireOKStatus(response, data: data)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let item = Self.parseAttentionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return item
+    }
+
+    public func markAttentionViewed(_ id: String) async throws -> AttentionItem {
+        let request = try makeRequest(
+            attentionURL(id),
+            method: "PATCH",
+            body: [:],
+            contentType: "application/json"
+        )
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let item = Self.parseAttentionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return item
+    }
+
     // MARK: - Actions
 
     public func listRepos() async throws -> [RemoteRepo] {
@@ -688,6 +739,33 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             LoggingService.lfd("createWave: exception=\(error.localizedDescription)")
             throw WaveServiceError.commandFailed(error.localizedDescription)
         }
+    }
+
+    static func parseAttentionFromJSON(_ json: [String: Any]) -> AttentionItem? {
+        guard let id = json["id"] as? String,
+              let waveId = json["wave_id"] as? String,
+              let kindRaw = json["kind"] as? String,
+              let kind = AttentionKind(rawValue: kindRaw),
+              let statusRaw = json["status"] as? String,
+              let status = AttentionStatus(rawValue: statusRaw),
+              let title = json["title"] as? String,
+              let summary = json["summary"] as? String else {
+            return nil
+        }
+
+        return AttentionItem(
+            id: id,
+            waveId: waveId,
+            runId: json["run_id"] as? String,
+            kind: kind,
+            status: status,
+            title: title,
+            summary: summary,
+            context: AttentionItem.context(kind: kind, json: json["context"] as? [String: Any] ?? [:]),
+            surfacedAt: parseDate(json["surfaced_at"]) ?? Date(),
+            viewedAt: parseDate(json["viewed_at"]),
+            resolvedAt: parseDate(json["resolved_at"])
+        )
     }
 
     static func parseWaveFromJSON(_ json: [String: Any]) -> Wave {

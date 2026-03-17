@@ -159,7 +159,7 @@ struct PortfolioWindow: View {
             }
             repoStates[wave.repo.normalizedFilePath]?.applyWaveEvent(waveEvent)
 
-        case .worktree, .agentStarted, .agentEnded, .output, .auth:
+        case .worktree, .agentStarted, .agentEnded, .output, .attention, .auth:
             break
         }
     }

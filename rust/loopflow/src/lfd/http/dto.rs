@@ -9,8 +9,8 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    ActivationLog, ChatMemoryBlock, ChatMessage, LivePullRequestState, Trigger, WaveRun,
-    WaveRunStatus,
+    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Trigger,
+    WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -194,6 +194,42 @@ pub struct TriggerDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered_at: Option<i64>,
     pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AttentionItemDto {
+    pub id: String,
+    pub object: String,
+    pub wave_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub title: String,
+    pub summary: String,
+    pub context: serde_json::Value,
+    pub surfaced_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<String>,
+}
+
+pub fn attention_item_dto(item: AttentionItem) -> AttentionItemDto {
+    AttentionItemDto {
+        id: item.id.to_string(),
+        object: "attention_item".to_string(),
+        wave_id: item.wave_id.to_string(),
+        run_id: item.run_id.map(|value| value.to_string()),
+        kind: item.kind.as_str().to_string(),
+        status: item.status.as_str().to_string(),
+        title: item.title,
+        summary: item.summary,
+        context: item.context,
+        surfaced_at: format_datetime(Some(item.surfaced_at)).unwrap_or_default(),
+        viewed_at: format_datetime(item.viewed_at),
+        resolved_at: format_datetime(item.resolved_at),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

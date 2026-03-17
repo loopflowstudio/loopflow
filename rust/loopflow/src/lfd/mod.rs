@@ -1,4 +1,5 @@
 pub mod address;
+pub mod attention;
 pub mod auth;
 pub mod config;
 pub mod credential_socket;

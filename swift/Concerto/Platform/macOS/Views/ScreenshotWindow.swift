@@ -151,7 +151,7 @@ private struct ScreenshotLayout: View {
             WaveDetailPanel(wave: wave)
                 .id(wave.id)
         } else {
-            CatchWaveView()
+            AttentionQueueView()
         }
     }
 }

@@ -38,6 +38,9 @@ public protocol WaveServiceProtocol: Sendable {
     func stopSession(_ id: String) async throws -> AgentSession
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
+    func listAttention(repo: RepoTarget) async throws -> [AttentionItem]
+    func getAttention(_ id: String) async throws -> AttentionItem
+    func markAttentionViewed(_ id: String) async throws -> AttentionItem
     func landWave(_ id: String) async throws
     func nextWave(_ id: String) async throws -> String
     func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult

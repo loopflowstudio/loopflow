@@ -23,6 +23,7 @@ use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::engine::worktree::remove_worktree;
+use crate::lfd::attention::create_code_review_attention;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
@@ -37,7 +38,7 @@ use crate::lfd::triggers::{
 };
 use crate::lfd::types::{
     Event, LivePrState, LivePullRequestState, Signal, TerminalSession, TerminalSessionStatus, Wave,
-    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus, CI_FIX_FLOW,
+    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -370,42 +371,10 @@ impl WaveExecutor {
             wave.name().clone(),
             run.worktree.clone(),
         );
-        let run_is_pr_oriented = run.target_branch == "main" || run.target_branch.is_empty();
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
         debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
-
-        if run_is_pr_oriented
-            && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
-        {
-            let worktree = run.worktree.clone();
-            let wave_name = wave.name().clone();
-            match tokio::task::spawn_blocking(move || {
-                crate::ops::pm::pm_sync(
-                    Path::new(&worktree),
-                    &crate::ops::pm::PmSyncOptions { wave: wave_name },
-                    &crate::ops::NullProgress,
-                )
-            })
-            .await
-            {
-                Ok(Ok(result)) => {
-                    info!(
-                        run_id = %run.id,
-                        pushed = result.pushed.len(),
-                        pulled = result.pulled.len(),
-                        "synced roadmap with PM provider at run start"
-                    );
-                }
-                Ok(Err(err)) => {
-                    warn!(run_id = %run.id, error = %err, "PM sync failed at run start; continuing");
-                }
-                Err(err) => {
-                    warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
-                }
-            }
-        }
 
         loop {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
@@ -547,7 +516,6 @@ impl WaveExecutor {
                         run.id.clone(),
                         terminal_session_id.clone(),
                     );
-
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run).await?;
@@ -780,41 +748,14 @@ impl WaveExecutor {
                     run.ended_at = Some(OffsetDateTime::now_utc());
 
                     let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
-                    if run_is_pr_oriented
-                        && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
-                    {
-                        let worktree = run.worktree.clone();
-                        let branch = run.branch.clone();
-                        let wave_name = wave.name().clone();
-                        match tokio::task::spawn_blocking(move || -> Result<()> {
-                            crate::ops::pm::pm_sync(
-                                Path::new(&worktree),
-                                &crate::ops::pm::PmSyncOptions { wave: wave_name },
-                                &crate::ops::NullProgress,
-                            )
-                            .map_err(|err| anyhow!(err.to_string()))?;
-                            post_step_sync(Path::new(&worktree), &branch, "ops pm sync")?;
-                            Ok(())
-                        })
-                        .await
-                        {
-                            Ok(Ok(())) => {
-                                info!(run_id = %run.id, "synced roadmap with PM provider at run end");
-                            }
-                            Ok(Err(err)) => {
-                                warn!(run_id = %run.id, error = %err, "PM sync failed at run end; continuing");
-                            }
-                            Err(err) => {
-                                warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
-                            }
-                        }
-                    }
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     // Activations targeting "main" produce new branches and PRs.
                     // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
                     // push directly to that branch — no new PR needed.
-                    if run_is_pr_oriented {
+                    let should_manage_pr =
+                        run.target_branch == "main" || run.target_branch.is_empty();
+                    if should_manage_pr {
                         let worktree = run.worktree.clone();
                         let wave_name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -862,7 +803,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if run_is_pr_oriented && run.pr.is_some() && is_recurring {
+                    if should_manage_pr && run.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -898,7 +839,13 @@ impl WaveExecutor {
                     self.output.close_writer(&run.id.to_string());
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
-                    if run_is_pr_oriented && run.pr.is_some() {
+                    if should_manage_pr && run.pr.is_some() {
+                        match create_code_review_attention(&self.store, &wave, &run).await {
+                            Ok(item) => self.event_hub.send(Event::attention_created(item)),
+                            Err(err) => {
+                                warn!(wave_id = %wave.id(), error = %err, "failed to create code review attention")
+                            }
+                        }
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,

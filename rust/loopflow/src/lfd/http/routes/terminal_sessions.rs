@@ -3,6 +3,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
+use time::OffsetDateTime;
 
 use crate::lfd::auth::AuthProvider;
 use crate::lfd::http::dto::{
@@ -11,7 +12,6 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
-use crate::lfd::id::LfdId;
 use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
@@ -108,7 +108,12 @@ pub async fn get_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session = load_terminal_session(&state, &session_id).await?;
+    let session = state
+        .store
+        .get_terminal_session(&session_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -118,8 +123,25 @@ pub async fn attach_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalLaunchSpecDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session =
-        update_terminal_session(&state, &session_id, |session| Ok(session.attach())).await?;
+    let mut session = state
+        .store
+        .get_terminal_session(&session_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))?;
+
+    if session.status == TerminalSessionStatus::Pending {
+        session.status = TerminalSessionStatus::Attached;
+        session.attached_at = Some(OffsetDateTime::now_utc());
+        state
+            .store
+            .update_terminal_session(&session)
+            .await
+            .map_err(map_store_error)?;
+        state
+            .event_hub
+            .send(Event::terminal_session_updated(session.clone()));
+    }
 
     let completion_token = session.completion_token.clone().ok_or_else(|| {
         api_error(
@@ -128,7 +150,12 @@ pub async fn attach_terminal_session_handler(
         )
     })?;
     let complete_url = completion_url(&headers, &session_id);
-    let auth_header = local_auth_header(&state.auth);
+    let auth_header = local_auth_header(&state.auth).ok_or_else(|| {
+        api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "terminal embedding unavailable",
+        )
+    })?;
     let launch_argv = vec![
         "/bin/zsh".to_string(),
         "-lc".to_string(),
@@ -136,9 +163,14 @@ pub async fn attach_terminal_session_handler(
     ];
 
     Ok(Json(TerminalLaunchSpecDto {
+        session_id: session.id.to_string(),
+        wave_id: session.wave_id.to_string(),
+        step: session.step,
+        agent: session.agent,
         cwd: session.cwd,
         argv: launch_argv,
         env: session.env,
+        completion_token,
     }))
 }
 
@@ -147,8 +179,27 @@ pub async fn start_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session =
-        update_terminal_session(&state, &session_id, |session| Ok(session.start())).await?;
+    let mut session = state
+        .store
+        .get_terminal_session(&session_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))?;
+    if !session.status.is_terminal() {
+        if session.attached_at.is_none() {
+            session.attached_at = Some(OffsetDateTime::now_utc());
+        }
+        session.status = TerminalSessionStatus::Running;
+        session.started_at = Some(OffsetDateTime::now_utc());
+        state
+            .store
+            .update_terminal_session(&session)
+            .await
+            .map_err(map_store_error)?;
+        state
+            .event_hub
+            .send(Event::terminal_session_updated(session.clone()));
+    }
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -159,11 +210,31 @@ pub async fn complete_terminal_session_handler(
     Json(payload): Json<CompleteTerminalSessionRequest>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session = update_terminal_session(&state, &session_id, |session| {
-        verify_completion_token(&headers, session)?;
-        Ok(session.complete(payload.exit_code))
-    })
-    .await?;
+    let mut session = state
+        .store
+        .get_terminal_session(&session_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))?;
+
+    verify_completion_token(&headers, &session)?;
+
+    if !session.status.is_terminal() {
+        session.status = if payload.exit_code == 0 {
+            TerminalSessionStatus::Succeeded
+        } else {
+            TerminalSessionStatus::Failed
+        };
+        session.completed_at = Some(OffsetDateTime::now_utc());
+        state
+            .store
+            .update_terminal_session(&session)
+            .await
+            .map_err(map_store_error)?;
+        state
+            .event_hub
+            .send(Event::terminal_session_updated(session.clone()));
+    }
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -172,61 +243,25 @@ pub async fn cancel_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session =
-        update_terminal_session(&state, &session_id, |session| Ok(session.cancel())).await?;
-    Ok(Json(terminal_session_dto(session)))
-}
-
-async fn load_terminal_session(
-    state: &HttpState,
-    session_id: &LfdId,
-) -> Result<TerminalSession, ApiError> {
-    state
+    let mut session = state
         .store
-        .get_terminal_session(session_id)
+        .get_terminal_session(&session_id)
         .await
         .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))
-}
-
-async fn store_terminal_session_update(
-    state: &HttpState,
-    session: &TerminalSession,
-) -> Result<(), ApiError> {
-    state
-        .store
-        .update_terminal_session(session)
-        .await
-        .map_err(map_store_error)?;
-    state
-        .event_hub
-        .send(Event::terminal_session_updated(session.clone()));
-    Ok(())
-}
-
-async fn store_terminal_session_update_if_changed(
-    state: &HttpState,
-    session: &TerminalSession,
-    changed: bool,
-) -> Result<(), ApiError> {
-    if changed {
-        store_terminal_session_update(state, session).await?;
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "terminal session not found"))?;
+    if !session.status.is_terminal() {
+        session.status = TerminalSessionStatus::Canceled;
+        session.completed_at = Some(OffsetDateTime::now_utc());
+        state
+            .store
+            .update_terminal_session(&session)
+            .await
+            .map_err(map_store_error)?;
+        state
+            .event_hub
+            .send(Event::terminal_session_updated(session.clone()));
     }
-    Ok(())
-}
-
-async fn update_terminal_session<F>(
-    state: &HttpState,
-    session_id: &LfdId,
-    update: F,
-) -> Result<TerminalSession, ApiError>
-where
-    F: FnOnce(&mut TerminalSession) -> Result<bool, ApiError>,
-{
-    let mut session = load_terminal_session(state, session_id).await?;
-    let changed = update(&mut session)?;
-    store_terminal_session_update_if_changed(state, &session, changed).await?;
-    Ok(session)
+    Ok(Json(terminal_session_dto(session)))
 }
 
 fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Result<(), ApiError> {
@@ -257,12 +292,20 @@ fn completion_url(headers: &HeaderMap, session_id: &crate::lfd::id::LfdId) -> St
     format!("http://{host}/v0/terminal-sessions/{session_id}/complete")
 }
 
-fn local_auth_header(auth: &AuthProvider) -> String {
-    let token = match auth {
-        AuthProvider::Local { session_token } => session_token,
-        AuthProvider::Studio { local_token, .. } => local_token,
-    };
-    format!("Authorization: Bearer {}", token.expose_secret())
+fn local_auth_header(auth: &AuthProvider) -> Option<String> {
+    match auth {
+        AuthProvider::Local { session_token } => Some(format!(
+            "Authorization: Bearer {}",
+            session_token.expose_secret()
+        )),
+        AuthProvider::Static { token } => {
+            Some(format!("Authorization: Bearer {}", token.expose_secret()))
+        }
+        AuthProvider::Studio { local_token, .. } => Some(format!(
+            "Authorization: Bearer {}",
+            local_token.expose_secret()
+        )),
+    }
 }
 
 fn build_wrapped_command(
@@ -282,7 +325,7 @@ fn build_wrapped_command(
         .map(|value| shell_escape(value))
         .collect::<Vec<_>>()
         .join(" ");
-    let exit_payload = "{\\\"exit_code\\\":%s}";
+    let exit_payload = format!("{{\\\"exit_code\\\":%s}}");
     format!(
         "{env_prefix}{agent_command}; EXIT_CODE=$?; /usr/bin/curl -fsS -X POST -H {} -H 'Content-Type: application/json' -H {} --data \"$(printf '{}' \\\"$EXIT_CODE\\\")\" {} >/dev/null 2>&1 || true; exit \"$EXIT_CODE\"",
         shell_escape(auth_header),

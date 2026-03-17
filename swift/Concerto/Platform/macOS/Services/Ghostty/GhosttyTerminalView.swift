@@ -83,8 +83,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
 
 // MARK: - GhosttyMetalView
 
-@MainActor
-final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrency NSTextInputClient {
+final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var workingDirectory: String = ""
     var command: String?
     var sessionId: String?
@@ -125,7 +124,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         if let surface {
             // Register surface as active session for lifecycle callbacks
             if let sessionId {
-                manager.registerSurface(surface, sessionId: sessionId, owner: self)
+                manager.registerSurface(surface, sessionId: sessionId)
             }
 
             updateContentScale()
@@ -139,30 +138,6 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         let link = displayLink(target: self, selector: #selector(displayLinkFired))
         link.add(to: .main, forMode: .common)
         displayLink = link
-    }
-
-    private func teardownSurface(freeSurface: Bool) {
-        displayLink?.invalidate()
-        displayLink = nil
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-            self.trackingArea = nil
-        }
-
-        guard let surface else { return }
-        self.surface = nil
-        if freeSurface {
-            ghostty_surface_free(surface)
-        }
-    }
-
-    func destroyManagedSurface(_ managedSurface: ghostty_surface_t) {
-        guard surface == managedSurface else {
-            ghostty_surface_free(managedSurface)
-            return
-        }
-        teardownSurface(freeSurface: true)
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
@@ -528,9 +503,8 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     @objc private func clearAction() {
         guard let surface else { return }
         // Send clear screen sequence
-        let clearCmd = "clear\n"
-        clearCmd.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(clearCmd.utf8.count))
+        "clear\n".withCString { ptr in
+            ghostty_surface_text(surface, ptr, 6)
         }
     }
 
@@ -597,11 +571,9 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 
     deinit {
-        MainActor.assumeIsolated {
-            if let sessionId, let surface {
-                GhosttyManager.shared.unregisterSurface(sessionId, surface: surface)
-            }
-            teardownSurface(freeSurface: true)
+        displayLink?.invalidate()
+        if let surface {
+            ghostty_surface_free(surface)
         }
     }
 }

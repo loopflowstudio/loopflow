@@ -101,9 +101,6 @@ public final class RepoState {
     private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
-    private var autoPresentTerminalWaveIds: Set<String> = []
-    private var roadmapBootstrapRepos: Set<String> = []
-    private var bootstrappingRoadmapRepoPath: String?
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
@@ -169,9 +166,13 @@ public final class RepoState {
     }
 
     public func shouldShowInteractiveSession(for wave: WaveViewModel) -> Bool {
-        isOptimisticallyStartingInteractiveSession(for: wave.id)
-            || interactiveSessionId(for: wave.id) != nil
-            || wave.status == .waiting
+        if isOptimisticallyStartingInteractiveSession(for: wave.id) {
+            return true
+        }
+        if interactiveSessionId(for: wave.id) != nil {
+            return true
+        }
+        return wave.status == .waiting
     }
 
     func setOptimisticInteractiveSessionStart(for waveId: String, isStarting: Bool) {
@@ -184,25 +185,6 @@ public final class RepoState {
         sessionStates[waveId]?.setAwaitingSession(false)
     }
 
-    public func markAutoPresentTerminal(for waveId: String) {
-        autoPresentTerminalWaveIds.insert(waveId)
-    }
-
-    public func consumeAutoPresentTerminal(for waveId: String) -> Bool {
-        autoPresentTerminalWaveIds.remove(waveId) != nil
-    }
-
-    private func resetTransientWaveState(includeSessionStates: Bool = true) {
-        if includeSessionStates {
-            sessionStates.removeAll()
-        }
-        waitingSessionIds.removeAll()
-        attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
-        autoPresentTerminalWaveIds.removeAll()
-    }
-
     // In-flight actions (land) — buttons disable while pending
     private(set) var inFlightActions: Set<String> = []
 
@@ -212,7 +194,6 @@ public final class RepoState {
 
     // Loading
     public var isLoading: Bool = false
-    public var isBootstrappingRoadmapWaves: Bool = false
     public var errorMessage: String?
 
     // Connection
@@ -266,9 +247,11 @@ public final class RepoState {
         flows = []
         supportedHarnesses = []
         waveStore.removeAll()
+        attentionStore.removeAll()
         worktreeStore.removeAll()
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
+        terminalWorkspaceStore.setAll([])
         optimisticInteractiveWaveIds.removeAll()
         selectedWaveId = nil
         isLoading = false
@@ -447,11 +430,12 @@ public final class RepoState {
     public func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
-        if currentRepo?.path() != canonicalURL.path() {
-            cancelTrackedTerminalSessions()
-        }
 
-        resetTransientWaveState()
+        sessionStates.removeAll()
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        terminalWorkspaceStore.setAll([])
+        optimisticInteractiveWaveIds.removeAll()
         hasCompletedInitialLoad = false
         currentRepo = canonicalURL
         repoTarget = .local(canonicalURL)
@@ -474,12 +458,14 @@ public final class RepoState {
     }
 
     public func closeRepo() {
-        cancelTrackedTerminalSessions()
         Task {
             await eventService?.disconnect()
         }
         eventService = nil
-        resetTransientWaveState()
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        terminalWorkspaceStore.setAll([])
+        optimisticInteractiveWaveIds.removeAll()
     }
 
     // MARK: - Event Subscription
@@ -539,11 +525,6 @@ public final class RepoState {
     }
 
     private func handleWaveEvent(_ event: WaveEvent) async {
-        if let bootstrappingRoadmapRepoPath,
-           currentRepo?.path == bootstrappingRoadmapRepoPath {
-            return
-        }
-
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
             let previousStatus = waveStore.wave(for: event.waveId)?.status
@@ -570,9 +551,6 @@ public final class RepoState {
                     state.seedInitialUserMessage(initialUserMessage)
                 }
                 if let terminalSessionId = event.terminalSessionId {
-                    if selectedWaveId == nil || selectedWaveId == event.waveId {
-                        markAutoPresentTerminal(for: event.waveId)
-                    }
                     await loadTerminalSession(id: terminalSessionId, select: true)
                     if selectedWaveId == nil {
                         selectedWaveId = event.waveId
@@ -681,15 +659,8 @@ public final class RepoState {
         }
         LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
         do {
-            var newWaves = try await waveService.listWaves(repo: repo)
+            let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            let bootstrapped = await bootstrapRoadmapWavesIfNeeded(repo: repo, existingWaves: newWaves)
-            if bootstrapped {
-                newWaves = try await waveService.listWaves(repo: repo)
-                LoggingService.model("refreshWaves: after bootstrap got \(newWaves.count) waves")
-                await refreshWorktrees()
-                await refreshFlowsAsync()
-            }
             waveStore.setAll(newWaves.map(makeWaveViewModel))
             await refreshAttention()
             if let selectedWaveId {
@@ -700,83 +671,6 @@ public final class RepoState {
             waveStore.removeAll()
             attentionStore.removeAll()
         }
-    }
-
-    private func bootstrapRoadmapWavesIfNeeded(
-        repo: RepoTarget,
-        existingWaves: [Wave]
-    ) async -> Bool {
-        guard case .local(let repoURL) = repo else { return false }
-
-        let repoPath = repoURL.path
-        let roadmapWaves = roadmapWaveNames(in: repoURL)
-        guard !roadmapWaves.isEmpty else { return false }
-
-        let existingNames = Set(existingWaves.map(\.name))
-        let missingWaves = roadmapWaves.filter { !existingNames.contains($0) }
-        guard !missingWaves.isEmpty else {
-            roadmapBootstrapRepos.insert(repoPath)
-            return false
-        }
-
-        if roadmapBootstrapRepos.contains(repoPath) {
-            return false
-        }
-
-        LoggingService.model(
-            "bootstrapRoadmapWaves: repo=\(repoPath) creating \(missingWaves.count) waves"
-        )
-
-        bootstrappingRoadmapRepoPath = repoPath
-        isBootstrappingRoadmapWaves = true
-        defer {
-            bootstrappingRoadmapRepoPath = nil
-            isBootstrappingRoadmapWaves = false
-        }
-
-        var created = 0
-        for waveName in missingWaves {
-            do {
-                _ = try await waveService.createWave(
-                    name: waveName,
-                    repo: repo,
-                    flow: "ship-roadmap",
-                    run: false,
-                    status: .paused
-                )
-                created += 1
-            } catch {
-                LoggingService.model(
-                    "bootstrapRoadmapWaves: wave=\(waveName) error=\(error.localizedDescription)"
-                )
-            }
-        }
-
-        if created == missingWaves.count {
-            roadmapBootstrapRepos.insert(repoPath)
-        }
-        return created > 0
-    }
-
-    private func roadmapWaveNames(in repoURL: URL) -> [String] {
-        let waveRoot = repoURL.appendingPathComponent("wave", isDirectory: true)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: waveRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return entries.compactMap { entry in
-            guard let values = try? entry.resourceValues(forKeys: [.isDirectoryKey]),
-                  values.isDirectory == true
-            else {
-                return nil
-            }
-            return entry.lastPathComponent
-        }
-        .sorted()
     }
 
     public func refreshAttention() async {
@@ -833,27 +727,12 @@ public final class RepoState {
     }
 
     public func selectTerminalSession(_ id: String?) {
-        focusTerminalSession(id)
-    }
-
-    /// Navigate to a terminal session from the attention queue.
-    /// Selects the wave, switches to the terminal tab, and selects the session.
-    public func openTerminalSession(_ sessionId: String) {
-        focusTerminalSession(sessionId, autoPresent: true)
-    }
-
-    private func focusTerminalSession(_ sessionId: String?, autoPresent: Bool = false) {
-        terminalWorkspaceStore.select(sessionId)
-        guard let sessionId,
-              let session = terminalWorkspaceStore.sessionsById[sessionId] else {
-            return
+        terminalWorkspaceStore.select(id)
+        if let id, let session = terminalWorkspaceStore.sessionsById[id] {
+            selectedWaveId = session.waveId
+            loadWaveContent(for: session.waveId)
+            loadRuns(for: session.waveId)
         }
-        selectedWaveId = session.waveId
-        if autoPresent {
-            markAutoPresentTerminal(for: session.waveId)
-        }
-        loadWaveContent(for: session.waveId)
-        loadRuns(for: session.waveId)
     }
 
     public func loadRuns(for waveId: String) {
@@ -1175,7 +1054,11 @@ public final class RepoState {
             }
         }
 
-        resetTransientWaveState()
+        sessionStates.removeAll()
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        terminalWorkspaceStore.setAll([])
+        optimisticInteractiveWaveIds.removeAll()
 
         let probeService = Self.makeEventService(
             connection: connection,
@@ -1202,8 +1085,11 @@ public final class RepoState {
     }
 
     public func selectRemoteRepo(path: String) {
-        cancelTrackedTerminalSessions()
-        resetTransientWaveState()
+        sessionStates.removeAll()
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        terminalWorkspaceStore.setAll([])
+        optimisticInteractiveWaveIds.removeAll()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
         repoTarget = .remote(path: path, host: host)
@@ -1388,20 +1274,6 @@ public final class RepoState {
             tokenProvider: { token },
             shellCommandRunner: shellCommandRunner
         )
-    }
-
-    private func cancelTrackedTerminalSessions() {
-        let sessionIds = terminalWorkspaceStore.orderedSessions
-            .filter { !$0.status.isTerminal }
-            .map(\.id)
-        guard !sessionIds.isEmpty else { return }
-
-        let service = waveService
-        Task {
-            for sessionId in sessionIds {
-                _ = try? await service.cancelTerminalSession(sessionId)
-            }
-        }
     }
 
     private static func makeEventService(connection: ServerConnection, token: String?) -> EventService {

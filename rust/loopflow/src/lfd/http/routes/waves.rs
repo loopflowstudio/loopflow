@@ -1655,6 +1655,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_wave_uses_mode_from_wave_config() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+        let wave_dir = repo_tmp.path().join("wave").join("designer");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(
+            wave_dir.join("designer.yaml"),
+            "flow: build\nmode: manual\ndirection: [clarity]\narea: [src/]\n",
+        )
+        .expect("write wave config");
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("designer".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        assert_eq!(created.mode, "manual");
+        assert_eq!(created.primary_flow, "build");
+        assert_eq!(created.direction, vec!["clarity".to_string()]);
+        assert_eq!(created.area, vec!["src/".to_string()]);
+    }
+
+    #[tokio::test]
     async fn list_with_repo_filter() {
         let state = test_http_state().await;
         let repo_a_tmp = tempdir().expect("tempdir");

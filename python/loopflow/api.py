@@ -288,6 +288,7 @@ __all__ = [
     "disconnect_auth",
     "configure_api_key",
     "providers",
+    "revoke_connection_tokens",
     "usage_summary",
     "waves",
     "wave",

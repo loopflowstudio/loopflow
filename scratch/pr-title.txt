@@ -1,0 +1,1 @@
+Bootstrap redesign as waves and remove legacy chord APIs

@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+import subprocess
+from pathlib import Path
 
 import loopflow.api as loopflow
+from loopflow.models import Wave
 
-REPO = "."
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
 WAVE_NAMES = [
     "chord-model",
     "clear-the-deck",
@@ -17,10 +19,33 @@ WAVE_NAMES = [
 ]
 
 
-def _ensure_wave(name: str) -> Any:
+def _resolve_repo_root() -> Path:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=SCRIPT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return SCRIPT_ROOT
+
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = (SCRIPT_ROOT / common_dir).resolve()
+    if common_dir.name == ".git":
+        return common_dir.parent
+    return SCRIPT_ROOT
+
+
+REPO_ROOT = _resolve_repo_root()
+
+
+def _ensure_wave(name: str) -> Wave:
     wave = loopflow.wave(name)
     if wave is None:
-        wave = loopflow.create_wave(name, REPO)
+        wave = loopflow.create_wave(name, str(REPO_ROOT))
         print(f"{name}: created ({wave.id})")
         return wave
 
@@ -28,7 +53,7 @@ def _ensure_wave(name: str) -> Any:
     return wave
 
 
-def _print_summary(redesign: Any) -> None:
+def _print_summary(redesign: Wave) -> None:
     print("\nredesign")
     print(f"  id: {redesign.id}")
     print(f"  flow: {redesign.primary_flow}")

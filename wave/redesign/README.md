@@ -20,6 +20,8 @@ This wave is the first chord-wave. Its first job is building itself. Its second 
 
 All four member waves use existing `build` / `ship-wave` flows until the chord-model wave produces `tend`. Then this wave starts using what it built.
 
+During bootstrap, these waves register in `manual` mode. Wiring the structure together should not immediately start build/tend loops.
+
 ```
 wave: redesign (chord-wave)
 │

@@ -1,0 +1,7 @@
+flow: ship-wave
+area:
+  - swift/Concerto/
+  - swift/LoopflowCore/
+direction:
+  - care
+  - clarity

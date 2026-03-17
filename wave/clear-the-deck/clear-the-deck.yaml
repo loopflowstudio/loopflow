@@ -1,0 +1,9 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/lfd/auth.rs
+  - rust/loopflow/src/lfd/provider_auth.rs
+  - rust/loopflow/src/lfd/executor/sandbox.rs
+  - rust/loopflow/src/lfd/http/
+  - python/loopflow/
+direction:
+  - simplicity

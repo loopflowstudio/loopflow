@@ -1,0 +1,10 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/lfd/
+  - rust/loopflow/src/engine/
+  - python/loopflow/
+  - steps/
+  - flows/
+direction:
+  - clarity
+  - care

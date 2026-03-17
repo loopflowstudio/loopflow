@@ -80,6 +80,28 @@ impl Provider {
         ]
     }
 
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+            Self::OpenCodeZen => "OpenCode Zen",
+            Self::Asana => "Asana",
+            Self::Linear => "Linear",
+        }
+    }
+
+    pub fn api_key_env_name(self) -> Option<&'static str> {
+        match self {
+            Self::Claude => Some("ANTHROPIC_API_KEY"),
+            Self::Codex => Some("OPENAI_API_KEY"),
+            Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
+            Self::Asana => Some("ASANA_ACCESS_TOKEN"),
+            Self::Linear => Some("LINEAR_API_KEY"),
+            Self::GitHub => None,
+        }
+    }
+
     /// Whether this provider supports CLI-based token refresh.
     /// Providers that only re-read files (Claude, OpenCodeZen) can't self-heal
     /// and require user re-authentication when tokens expire.
@@ -414,34 +436,11 @@ impl ProviderAuthService {
             let trimmed = socket_path.trim();
             if !trimmed.is_empty() {
                 let client = Arc::new(CredentialSocketClient::new(PathBuf::from(trimmed)));
-                return Self::with_brokers_and_store(
-                    vec![
-                        Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(SocketAuthBroker::new(Provider::Codex, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
-                        Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
-                        Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
-                    ],
-                    Some(store),
-                );
+                return Self::with_brokers_and_store(default_brokers(Some(client)), Some(store));
             }
         }
 
-        Self::with_brokers_and_store(
-            vec![
-                Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
-                Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
-            ],
-            Some(store),
-        )
+        Self::with_brokers_and_store(default_brokers(None), Some(store))
     }
 
     #[cfg(test)]
@@ -666,6 +665,33 @@ impl ProviderAuthService {
             .cloned()
             .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))
     }
+}
+
+fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn AuthBroker>> {
+    let mut brokers = match client {
+        Some(client) => vec![
+            Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
+                as Arc<dyn AuthBroker>,
+            Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
+                as Arc<dyn AuthBroker>,
+            Arc::new(SocketAuthBroker::new(Provider::Codex, client)) as Arc<dyn AuthBroker>,
+        ],
+        None => vec![
+            Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
+            Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
+            Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
+        ],
+    };
+    brokers.push(Arc::new(OpenCodeZenBroker::default()));
+    brokers.extend(api_key_brokers());
+    brokers
+}
+
+fn api_key_brokers() -> [Arc<dyn AuthBroker>; 2] {
+    [
+        Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+        Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
+    ]
 }
 
 fn socket_auth_flow_handle(

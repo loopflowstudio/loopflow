@@ -67,17 +67,6 @@ pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     Ok(())
 }
 
-fn api_key_env_name(provider: Provider) -> Option<&'static str> {
-    match provider {
-        Provider::Claude => Some("ANTHROPIC_API_KEY"),
-        Provider::Codex => Some("OPENAI_API_KEY"),
-        Provider::OpenCodeZen => Some("OPENCODE_API_KEY"),
-        Provider::Asana => Some("ASANA_ACCESS_TOKEN"),
-        Provider::Linear => Some("LINEAR_API_KEY"),
-        Provider::GitHub => None,
-    }
-}
-
 fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bool> {
     let status = client.provider_status(provider)?;
     if status.is_active() {
@@ -86,7 +75,7 @@ fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bo
     }
 
     // Detect API key in environment and warn about billing
-    if let Some(env_name) = api_key_env_name(provider) {
+    if let Some(env_name) = provider.api_key_env_name() {
         if std::env::var(env_name)
             .map(|v| !v.trim().is_empty())
             .unwrap_or(false)
@@ -102,29 +91,25 @@ fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bo
     }
 
     // OAuth failed/skipped — offer API key fallback if available
-    if let Some(env_name) = api_key_env_name(provider) {
+    if let Some(env_name) = provider.api_key_env_name() {
         if let Ok(api_key) = std::env::var(env_name) {
             if !api_key.trim().is_empty() && prompt_api_key_fallback(provider, env_name)? {
                 client.configure_api_key(provider, &api_key)?;
                 println!(
                     "  ✓ {} connected via API key (pay-per-token billing)",
-                    provider_display_name(provider)
+                    provider.display_name()
                 );
                 return Ok(true);
             }
         }
     }
 
-    println!("  ! {} not connected.", provider_display_name(provider));
+    println!("  ! {} not connected.", provider.display_name());
     Ok(false)
 }
 
 fn prompt_api_key_fallback(provider: Provider, env_name: &str) -> Result<bool> {
-    print!(
-        "  Use {} for {}? [y/N] ",
-        env_name,
-        provider_display_name(provider)
-    );
+    print!("  Use {} for {}? [y/N] ", env_name, provider.display_name());
     io::stdout().flush().context("failed to flush stdout")?;
 
     let mut input = String::new();
@@ -148,7 +133,7 @@ fn ensure_required_provider_connected(client: &OnboardingClient, provider: Provi
 
     bail!(
         "failed to connect required provider {}",
-        provider_display_name(provider)
+        provider.display_name()
     )
 }
 
@@ -165,7 +150,7 @@ fn offer_optional_provider(client: &OnboardingClient, provider: Provider) -> Res
     }
 
     if !connect_provider(client, provider)? {
-        println!("  ! {} not connected.", provider_display_name(provider));
+        println!("  ! {} not connected.", provider.display_name());
     }
 
     Ok(())
@@ -182,7 +167,7 @@ fn connect_provider(client: &OnboardingClient, provider: Provider) -> Result<boo
             let code = flow.user_code.unwrap_or_else(|| "(no code)".to_string());
             println!(
                 "  {} — go to {} and enter code: {}",
-                provider_display_name(provider),
+                provider.display_name(),
                 location,
                 code,
             );
@@ -191,7 +176,7 @@ fn connect_provider(client: &OnboardingClient, provider: Provider) -> Result<boo
         StartAuthResult::AlreadyPending => {
             println!(
                 "  {} — auth already pending, waiting for completion...",
-                provider_display_name(provider)
+                provider.display_name()
             );
             None
         }
@@ -219,10 +204,7 @@ fn poll_until_connected(
         }
 
         if status.status == "expired" {
-            println!(
-                "  ! {} authentication expired.",
-                provider_display_name(provider)
-            );
+            println!("  ! {} authentication expired.", provider.display_name());
             return Ok(false);
         }
 
@@ -231,13 +213,13 @@ fn poll_until_connected(
 
     println!(
         "  ! Timed out waiting for {} authentication.",
-        provider_display_name(provider)
+        provider.display_name()
     );
     Ok(false)
 }
 
 fn print_connected(provider: Provider, status: &AuthProviderStatus) {
-    let name = provider_display_name(provider);
+    let name = provider.display_name();
     let login = status
         .login
         .as_deref()
@@ -249,7 +231,7 @@ fn print_connected(provider: Provider, status: &AuthProviderStatus) {
 fn prompt_optional(provider: Provider) -> Result<bool> {
     print!(
         "  {} (optional) — press Enter to skip, or 'y' to connect: ",
-        provider_display_name(provider)
+        provider.display_name()
     );
     io::stdout().flush().context("failed to flush stdout")?;
 
@@ -277,17 +259,6 @@ fn provider_is_active(statuses: &[AuthProviderStatus], provider: Provider) -> bo
 
 fn is_affirmative_input(input: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
-
-fn provider_display_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::GitHub => "GitHub",
-        Provider::Claude => "Claude",
-        Provider::Codex => "Codex",
-        Provider::OpenCodeZen => "OpenCode Zen",
-        Provider::Asana => "Asana",
-        Provider::Linear => "Linear",
-    }
 }
 
 fn format_login(provider: Provider, login: &str) -> String {
@@ -386,12 +357,10 @@ impl OnboardingClient {
         let request = self
             .client
             .post(format!("{}/v0/auth/{}", self.base_url, provider.as_str()));
-        let response = self.authorize(request).send().with_context(|| {
-            format!(
-                "failed to start {} auth flow",
-                provider_display_name(provider)
-            )
-        })?;
+        let response = self
+            .authorize(request)
+            .send()
+            .with_context(|| format!("failed to start {} auth flow", provider.display_name()))?;
 
         if response.status() == reqwest::StatusCode::CONFLICT {
             return Ok(StartAuthResult::AlreadyPending);
@@ -434,12 +403,7 @@ impl OnboardingClient {
             .authorize(request)
             .json(&body)
             .send()
-            .with_context(|| {
-                format!(
-                    "failed to configure {} API key",
-                    provider_display_name(provider)
-                )
-            })?;
+            .with_context(|| format!("failed to configure {} API key", provider.display_name()))?;
 
         if !response.status().is_success() {
             return Err(response_error(response, "configure API key"));

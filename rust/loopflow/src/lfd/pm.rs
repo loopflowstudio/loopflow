@@ -2,23 +2,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::lfd::provider_auth::Provider;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum PmProviderKind {
     Asana,
     Linear,
-}
-
-impl PmProviderKind {
-    pub fn as_auth_provider(self) -> Provider {
-        match self {
-            Self::Asana => Provider::Asana,
-            Self::Linear => Provider::Linear,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +66,12 @@ pub struct RoadmapItemFrontmatter {
     pub pm_id: Option<String>,
 }
 
+impl RoadmapItemFrontmatter {
+    fn is_empty(&self) -> bool {
+        self.pm_id.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoadmapItemDocument {
     pub frontmatter: RoadmapItemFrontmatter,
@@ -99,7 +94,7 @@ impl RoadmapItemDocument {
     }
 
     pub fn render(&self) -> PmResult<String> {
-        if self.frontmatter == RoadmapItemFrontmatter::default() {
+        if self.frontmatter.is_empty() {
             return Ok(self.body.clone());
         }
 

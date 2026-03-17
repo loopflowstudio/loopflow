@@ -33,6 +33,23 @@ app.add_typer(repos_app, name="repos")
 app.add_typer(token_app, name="token")
 console = Console()
 
+_PROVIDER_LABELS = {
+    "github": "GitHub",
+    "claude": "Claude",
+    "codex": "Codex",
+    "opencodezen": "OpenCode Zen",
+    "asana": "Asana",
+    "linear": "Linear",
+}
+
+_PROVIDER_API_KEY_CONFIG = {
+    "claude": ("ANTHROPIC_API_KEY", "Claude API key"),
+    "codex": ("OPENAI_API_KEY", "Codex API key"),
+    "opencodezen": ("OPENCODE_API_KEY", "OpenCode API key"),
+    "asana": ("ASANA_ACCESS_TOKEN", "Asana personal access token"),
+    "linear": ("LINEAR_API_KEY", "Linear API key"),
+}
+
 
 def _wave_table(waves: list[Wave]) -> Table:
     table = Table(show_header=True, header_style="bold")
@@ -85,15 +102,18 @@ def _wave_detail_table(wave: Wave) -> Table:
 
 
 def _provider_label(provider: str) -> str:
-    labels = {
-        "github": "GitHub",
-        "claude": "Claude",
-        "codex": "Codex",
-        "opencodezen": "OpenCode Zen",
-        "asana": "Asana",
-        "linear": "Linear",
-    }
-    return labels.get(provider.lower(), provider)
+    return _PROVIDER_LABELS.get(provider.lower(), provider)
+
+
+def _provider_api_key_config(provider: str) -> Optional[tuple[str, str]]:
+    return _PROVIDER_API_KEY_CONFIG.get(provider.lower())
+
+
+def _require_provider_api_key_config(provider: str) -> tuple[str, str]:
+    config = _provider_api_key_config(provider)
+    if config is None:
+        raise ValueError(f"provider does not support API key auth: {provider}")
+    return config
 
 
 def _repo_table(repos: list[Repo]) -> Table:
@@ -623,12 +643,14 @@ def auth_zen() -> None:
 
 @auth_app.command("asana", help="Store an Asana personal access token.")
 def auth_asana() -> None:
-    _configure_provider_token("asana", "ASANA_ACCESS_TOKEN", "Asana personal access token")
+    env_name, prompt_label = _require_provider_api_key_config("asana")
+    _configure_provider_token("asana", env_name, prompt_label)
 
 
 @auth_app.command("linear", help="Store a Linear API key.")
 def auth_linear() -> None:
-    _configure_provider_token("linear", "LINEAR_API_KEY", "Linear API key")
+    env_name, prompt_label = _require_provider_api_key_config("linear")
+    _configure_provider_token("linear", env_name, prompt_label)
 
 
 @auth_app.command("disconnect", help="Disconnect a provider.")
@@ -647,17 +669,12 @@ def auth_disconnect(provider: str) -> None:
 def auth_configure(
     provider: str,
 ) -> None:
-    env_names = {
-        "claude": "ANTHROPIC_API_KEY",
-        "codex": "OPENAI_API_KEY",
-        "opencodezen": "OPENCODE_API_KEY",
-        "asana": "ASANA_ACCESS_TOKEN",
-        "linear": "LINEAR_API_KEY",
-    }
-    env_name = env_names.get(provider.lower())
-    if not env_name:
+    config = _provider_api_key_config(provider)
+    if config is None:
         typer.echo(f"Error: {provider} does not support API key auth", err=True)
         raise typer.Exit(1)
+
+    env_name, _ = config
     _configure_provider_token(provider, env_name, f"{_provider_label(provider)} API key")
 
 

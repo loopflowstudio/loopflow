@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,39 +23,13 @@ finally:
     sys.path.pop(0)
 
 
-def test_resolve_repo_root_prefers_git_common_dir(monkeypatch, tmp_path) -> None:
-    repo_root = tmp_path / "loopflow"
-    common_dir = repo_root / ".git"
-    common_dir.mkdir(parents=True)
-    monkeypatch.setattr(bootstrap_redesign, "SCRIPT_ROOT", tmp_path / "loopflow.redesign")
-    monkeypatch.setattr(
-        bootstrap_redesign.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(stdout=str(common_dir)),
-    )
-
-    assert bootstrap_redesign._resolve_repo_root() == repo_root
-
-
-def test_resolve_repo_root_falls_back_to_script_root_on_git_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(bootstrap_redesign, "SCRIPT_ROOT", tmp_path / "loopflow.redesign")
-
-    def raise_called_process_error(*args, **kwargs):
-        raise subprocess.CalledProcessError(1, args[0])
-
-    monkeypatch.setattr(bootstrap_redesign.subprocess, "run", raise_called_process_error)
-
-    assert bootstrap_redesign._resolve_repo_root() == bootstrap_redesign.SCRIPT_ROOT
-
-
 def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> None:
     created: list[str] = []
-    expected_repo = str(bootstrap_redesign.REPO_ROOT)
     waves: dict[str, SimpleNamespace] = {
         "signals": SimpleNamespace(
             id="wave-signals",
             primary_flow="build",
-            area=[expected_repo],
+            area=["python/"],
             status="idle",
         )
     }
@@ -65,7 +38,6 @@ def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> 
         return waves.get(name)
 
     def fake_create_wave(name: str, repo: str):
-        assert repo == expected_repo
         wave = SimpleNamespace(
             id=f"wave-{name}",
             primary_flow="tend" if name == "redesign" else "build",

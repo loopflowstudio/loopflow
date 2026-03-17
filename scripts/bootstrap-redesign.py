@@ -3,13 +3,9 @@
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-
 import loopflow.api as loopflow
-from loopflow.models import Wave
 
-SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+REPO = "."
 WAVE_NAMES = [
     "chord-model",
     "clear-the-deck",
@@ -19,41 +15,21 @@ WAVE_NAMES = [
 ]
 
 
-def _resolve_repo_root() -> Path:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=SCRIPT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return SCRIPT_ROOT
+def ensure_wave(name: str) -> None:
+    existing = loopflow.wave(name)
+    if existing is not None:
+        print(f"{name}: exists ({existing.id})")
+        return
 
-    common_dir = Path(result.stdout.strip())
-    if not common_dir.is_absolute():
-        common_dir = (SCRIPT_ROOT / common_dir).resolve()
-    if common_dir.name == ".git":
-        return common_dir.parent
-    return SCRIPT_ROOT
+    created = loopflow.create_wave(name, REPO)
+    print(f"{name}: created ({created.id})")
 
 
-REPO_ROOT = _resolve_repo_root()
+def print_summary() -> None:
+    redesign = loopflow.wave("redesign")
+    if redesign is None:
+        raise RuntimeError("bootstrap created no redesign wave")
 
-
-def _ensure_wave(name: str) -> Wave:
-    wave = loopflow.wave(name)
-    if wave is None:
-        wave = loopflow.create_wave(name, str(REPO_ROOT))
-        print(f"{name}: created ({wave.id})")
-        return wave
-
-    print(f"{name}: exists ({wave.id})")
-    return wave
-
-
-def _print_summary(redesign: Wave) -> None:
     print("\nredesign")
     print(f"  id: {redesign.id}")
     print(f"  flow: {redesign.primary_flow}")
@@ -62,16 +38,9 @@ def _print_summary(redesign: Wave) -> None:
 
 
 def main() -> int:
-    redesign = None
     for name in WAVE_NAMES:
-        wave = _ensure_wave(name)
-        if name == "redesign":
-            redesign = wave
-
-    if redesign is None:
-        raise RuntimeError("bootstrap created no redesign wave")
-
-    _print_summary(redesign)
+        ensure_wave(name)
+    print_summary()
     return 0
 
 

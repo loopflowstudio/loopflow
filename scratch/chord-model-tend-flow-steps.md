@@ -13,7 +13,4 @@
 - `tend` parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
 - `ship-roadmap` still allows ops inside an `or` sub-flow
 - Python and docs no longer expose standalone chord CRUD
-
-## Still open
-
-- Live tend-cycle validation against a running lfd instance moved back into `wave/chord-model/02-tend-flow-steps.md`
+- `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section

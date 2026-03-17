@@ -4,16 +4,35 @@
 
 ## Context
 
-The structural wiring is already in place:
-- `tend` is now `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
+The structural wiring is now in place on this branch:
+- `tend` expands as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
 - `tend-chord` expands to `draft-chord -> review-chord -> apply-chord`
 - `scan-waves` reads live lfd state through `lfq show <wave> --json`
 - `WaveDto` now exposes the runtime fields `scan-waves` needs today: `flow_steps`, `triggers`, `open_pr_count`, `stack_count`, and optional `active_run` PR / queue state
+- `ship-roadmap` still allows ops inside an `or` sub-flow, so tend can branch without giving up mechanical follow-through
 - `scripts/bootstrap-redesign.py` registers `redesign` plus its member waves through the ordinary waves API
 - Python, docs, and lfd HTTP routes no longer expose standalone chord CRUD
 - Rust flow tests cover tend structure and ops inside `or` sub-flows
 
-What's still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted.
+What is still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted.
+
+## Validation baseline
+
+Use the current branch to re-check the structural slice before attempting the live run:
+
+- `cargo test -p loopflow --test flow_tests`
+- `cargo test -p loopflow lf::commands::flow::tests`
+- `cargo test --all`
+- `uv run pytest python/tests/`
+- Inspect `lf flow tend`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+
+Expected results:
+- `tend` parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
+- `ship-roadmap` keeps working with ops inside an `or` sub-flow
+- Python and docs no longer expose standalone chord CRUD
+- `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section
+
+That baseline is the setup for the real remaining proof: boot lfd, register the redesign waves, and run `lf tend` against live state.
 
 ## What to build
 

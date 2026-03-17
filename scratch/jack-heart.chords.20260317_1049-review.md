@@ -15,7 +15,3 @@
 - Tend expands as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence`
 - `ship-roadmap` still supports ops inside an `or` sub-flow
 - Chord CRUD is gone from Python, docs, and lfd HTTP routes
-
-## Still open
-
-- First live `lf tend` run against a registered redesign wave remains tracked in `wave/chord-model/02-tend-flow-steps.md`

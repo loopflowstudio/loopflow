@@ -10,3 +10,4 @@ What you should see:
 - tend parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
 - `ship-roadmap` keeps working with ops inside an `or` sub-flow
 - Python and docs no longer expose standalone chord CRUD
+- `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section

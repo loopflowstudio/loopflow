@@ -4,10 +4,13 @@
 
 ## Context
 
-The structural wiring shipped on this branch:
+The structural wiring is already in place:
 - `tend` is now `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
 - `tend-chord` expands to `draft-chord -> review-chord -> apply-chord`
 - `scan-waves` reads live lfd state through `lfq show <wave> --json`
+- `WaveDto` now exposes the runtime fields `scan-waves` needs today: `flow_steps`, `triggers`, `open_pr_count`, `stack_count`, and optional `active_run` PR / queue state
+- `scripts/bootstrap-redesign.py` registers `redesign` plus its member waves through the ordinary waves API
+- Python, docs, and lfd HTTP routes no longer expose standalone chord CRUD
 - Rust flow tests cover tend structure and ops inside `or` sub-flows
 
 What's still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted.

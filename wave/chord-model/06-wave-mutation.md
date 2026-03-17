@@ -6,7 +6,7 @@
 
 `draft-chord` suggests changes. `apply-chord` executes them. After bootstrap, the constraint is sharper: mutations have to operate on the waves-only model that replaced chord CRUD. Changes should update ordinary wave config and runtime state, not smuggle chord-specific state back into the system.
 
-The manual execution path exists now: `apply-chord` edits wave YAML and files, then syncs lfd with `lf ops update-wave`. What's missing is a typed mutation layer with logging, reversibility, and a durable record of who changed what and why.
+The manual execution path exists now, but it is split across two surfaces: `apply-chord` edits wave YAML and item files directly, and the ordinary waves API / `update_wave` path can already sync runtime fields like `flow`, `direction`, `area`, `status`, `agent`, and `step_agents` back into lfd. What's missing is one typed mutation layer that spans those levers, logs each change, and preserves enough prior state to revert it cleanly.
 
 The levers stay the same:
 - **Direction** — shift what a wave optimizes for

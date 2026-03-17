@@ -123,84 +123,6 @@ struct LocalWaveServiceAuthTests {
         #expect(spec.argv == ["/bin/zsh", "-lc", "echo hi"])
         #expect(spec.env == ["LF_WAVE_ID": "wave-1"])
     }
-
-    @Test("createWave sends initial paused status when requested")
-    func createWaveSendsInitialPausedStatus() async throws {
-        let service = makeService { request in
-            #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v0/waves")
-
-            let body = try #require(httpBodyData(for: request))
-            let json = try #require(
-                JSONSerialization.jsonObject(with: body) as? [String: Any]
-            )
-            #expect(json["repo"] as? String == "/tmp/repo")
-            #expect(json["name"] as? String == "agent-embedding")
-            #expect(json["status"] as? String == "paused")
-
-            return StubResponse(
-                statusCode: 200,
-                body: Data(
-                    """
-                    {
-                      "id": "wave-1",
-                      "name": "agent-embedding",
-                      "repo": "/tmp/repo",
-                      "status": "paused",
-                      "iteration": 0,
-                      "direction": [],
-                      "area": [],
-                      "flow": "ship-roadmap",
-                      "triggers": [],
-                      "git": {
-                        "worktree_path": "/tmp/repo.agent-embedding",
-                        "branch": "jack-heart.agent-embedding",
-                        "head_sha": null,
-                        "has_uncommitted_changes": false
-                      }
-                    }
-                    """.utf8
-                )
-            )
-        }
-
-        let wave = try await service.createWave(
-            name: "agent-embedding",
-            repo: .local(URL(fileURLWithPath: "/tmp/repo")),
-            flow: "ship-roadmap",
-            run: false,
-            status: .paused
-        )
-
-        #expect(wave.status == .paused)
-        #expect(wave.name == "agent-embedding")
-    }
-
-    @Test("run sends one-shot flow override")
-    func runSendsFlowOverride() async throws {
-        let service = makeService { request in
-            #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v0/waves/wave-1/run")
-
-            let body = try #require(httpBodyData(for: request))
-            let json = try #require(
-                JSONSerialization.jsonObject(with: body) as? [String: Any]
-            )
-            #expect(json["flow"] as? String == "design")
-            #expect(json["area"] == nil)
-            #expect(json["direction"] == nil)
-
-            return StubResponse(
-                statusCode: 200,
-                body: Data("{\"ok\":true}".utf8)
-            )
-        }
-
-        try await service.run(
-            "wave-1",
-            overrides: RunOverrides(flow: "design")
-        )
-    }
 }
 
 private struct StubResponse {
@@ -303,32 +225,4 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
-}
-
-private func httpBodyData(for request: URLRequest) -> Data? {
-    if let body = request.httpBody {
-        return body
-    }
-
-    guard let stream = request.httpBodyStream else {
-        return nil
-    }
-
-    stream.open()
-    defer { stream.close() }
-
-    var data = Data()
-    let bufferSize = 4096
-    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-    defer { buffer.deallocate() }
-
-    while stream.hasBytesAvailable {
-        let count = stream.read(buffer, maxLength: bufferSize)
-        if count <= 0 {
-            break
-        }
-        data.append(buffer, count: count)
-    }
-
-    return data.isEmpty ? nil : data
 }

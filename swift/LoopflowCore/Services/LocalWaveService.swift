@@ -621,9 +621,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func getTerminalSession(_ id: String) async throws -> TerminalSession {
-        let (data, response) = try await performGet(
-            apiBaseURL.appendingPathComponent("terminal-sessions").appendingPathComponent(id)
-        )
+        let (data, response) = try await performGet(terminalSessionURL(id))
         try requireOKStatus(response, data: data)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let session = Self.parseTerminalSessionFromJSON(json) else {
@@ -633,40 +631,44 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec {
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("terminal-sessions").appendingPathComponent(id).appendingPathComponent("attach"),
-            method: "POST",
-            body: [:],
-            contentType: "application/json"
+        try await performTerminalSessionAction(
+            id,
+            action: "attach",
+            parse: Self.parseTerminalLaunchSpecFromJSON
         )
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let spec = Self.parseTerminalLaunchSpecFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return spec
     }
 
     public func startTerminalSession(_ id: String) async throws -> TerminalSession {
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("terminal-sessions").appendingPathComponent(id).appendingPathComponent("start"),
-            method: "POST",
-            body: [:],
-            contentType: "application/json"
+        try await performTerminalSessionAction(
+            id,
+            action: "start",
+            parse: Self.parseTerminalSessionFromJSON
         )
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseTerminalSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
     }
 
     public func cancelTerminalSession(_ id: String) async throws -> TerminalSession {
+        try await performTerminalSessionAction(
+            id,
+            action: "cancel",
+            parse: Self.parseTerminalSessionFromJSON
+        )
+    }
+
+    private func terminalSessionURL(_ id: String, action: String? = nil) -> URL {
+        let baseURL = apiBaseURL
+            .appendingPathComponent("terminal-sessions")
+            .appendingPathComponent(id)
+        guard let action else { return baseURL }
+        return baseURL.appendingPathComponent(action)
+    }
+
+    private func performTerminalSessionAction<T>(
+        _ id: String,
+        action: String,
+        parse: ([String: Any]) -> T?
+    ) async throws -> T {
         let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("terminal-sessions").appendingPathComponent(id).appendingPathComponent("cancel"),
+            terminalSessionURL(id, action: action),
             method: "POST",
             body: [:],
             contentType: "application/json"
@@ -674,10 +676,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseTerminalSessionFromJSON(json) else {
+              let value = parse(json) else {
             throw WaveServiceError.commandFailed("Invalid response")
         }
-        return session
+        return value
     }
 
     // MARK: - Actions
@@ -1543,24 +1545,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     static func parseTerminalLaunchSpecFromJSON(_ json: [String: Any]) -> TerminalLaunchSpec? {
-        guard let sessionId = json["session_id"] as? String,
-              let waveId = json["wave_id"] as? String,
-              let step = json["step"] as? String,
-              let agent = json["agent"] as? String,
-              let cwd = json["cwd"] as? String,
-              let completionToken = json["completion_token"] as? String else {
+        guard let cwd = json["cwd"] as? String else {
             return nil
         }
 
         return TerminalLaunchSpec(
-            sessionId: sessionId,
-            waveId: waveId,
-            step: step,
-            agent: agent,
             cwd: cwd,
             argv: json["argv"] as? [String] ?? [],
-            env: json["env"] as? [String: String] ?? [:],
-            completionToken: completionToken
+            env: json["env"] as? [String: String] ?? [:]
         )
     }
 

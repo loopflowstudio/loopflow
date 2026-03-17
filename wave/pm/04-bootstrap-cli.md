@@ -1,3 +1,6 @@
+---
+pm_id: '1213718537307877'
+---
 # 04: Bootstrap CLI
 
 **Finish line:** `lf ops asana init` and `lf ops linear init` create and link projects in both directions. `lf ops asana/linear status` shows sync state.

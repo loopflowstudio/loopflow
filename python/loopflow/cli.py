@@ -6,6 +6,7 @@ import time
 import webbrowser
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 import typer
 from rich.console import Console
@@ -238,6 +239,9 @@ def _connect_provider(provider: str) -> None:
     if not opened:
         typer.echo(verification_url)
 
+    if provider == "asana":
+        _complete_oauth_code_flow(provider)
+
     deadline = time.time() + 180
     while time.time() < deadline:
         status = api.auth_status(provider)
@@ -253,6 +257,31 @@ def _connect_provider(provider: str) -> None:
         time.sleep(1)
 
     typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
+
+
+def _complete_oauth_code_flow(provider: str) -> None:
+    provider_label = _provider_label(provider)
+    typer.echo(
+        f"{provider_label} will redirect to an out-of-band page. Paste the full redirect URL or just the authorization code."
+    )
+    value = typer.prompt("Authorization code").strip()
+    code = _extract_authorization_code(value)
+    if not code:
+        typer.echo("Error: could not find an authorization code in the pasted value", err=True)
+        raise typer.Exit(1)
+    api.complete_auth(provider, code)
+
+
+def _extract_authorization_code(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme and (parsed.query or parsed.fragment):
+        query = parse_qs(parsed.query)
+        if "code" in query and query["code"]:
+            return query["code"][0]
+        fragment = parse_qs(parsed.fragment)
+        if "code" in fragment and fragment["code"]:
+            return fragment["code"][0]
+    return value.strip()
 
 
 def _configure_provider_token(provider: str, env_name: str, prompt_label: str) -> None:
@@ -652,10 +681,9 @@ def auth_zen() -> None:
     _connect_provider("opencodezen")
 
 
-@auth_app.command("asana", help="Store an Asana personal access token.")
+@auth_app.command("asana", help="Start Asana OAuth authentication.")
 def auth_asana() -> None:
-    env_name, prompt_label = _require_provider_api_key_config("asana")
-    _configure_provider_token("asana", env_name, prompt_label)
+    _connect_provider("asana")
 
 
 @auth_app.command("linear", help="Store a Linear API key.")

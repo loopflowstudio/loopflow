@@ -16,6 +16,8 @@ pub enum PmProviderKind {
 pub struct PmConfig {
     pub provider: PmProviderKind,
     pub project: String,
+    #[serde(default)]
+    pub team: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

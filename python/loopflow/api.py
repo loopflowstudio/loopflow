@@ -50,6 +50,10 @@ def start_auth(provider: str) -> AuthFlow:
     return _client().start_auth(provider)
 
 
+def complete_auth(provider: str, code: str) -> None:
+    _client().complete_auth(provider, code)
+
+
 def disconnect_auth(provider: str) -> AuthProviderStatus:
     return _client().disconnect_auth(provider)
 
@@ -285,6 +289,7 @@ __all__ = [
     "status",
     "auth_status",
     "start_auth",
+    "complete_auth",
     "disconnect_auth",
     "configure_api_key",
     "providers",

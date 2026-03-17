@@ -180,6 +180,17 @@ class TestClientResponses:
         assert flow.user_code == "ABCD-1234"
         client.close()
 
+    def test_complete_auth_posts_authorization_code(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/asana/complete"
+            assert request.method == "POST"
+            assert json.loads(request.content) == {"code": "auth-code-123"}
+            return httpx.Response(200, json={"provider": "asana", "status": "accepted"})
+
+        client = _mock_client(handler)
+        client.complete_auth("asana", "auth-code-123")
+        client.close()
+
     def test_disconnect_auth_returns_status(self):
         def handler(request):
             assert request.url.path == "/v0/auth/github"

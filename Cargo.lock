@@ -1516,6 +1516,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "serde_yaml_ng",
  "sha2",
  "subtle",

@@ -183,11 +183,23 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             Ok(())
         }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
+        OpsCommand::Export { wave, dry_run } => {
+            crate::ops::export(
+                repo,
+                &crate::ops::ExportOptions {
+                    wave: wave.clone(),
+                    dry_run: *dry_run,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
         | OpsCommand::Wt { .. }
-        | OpsCommand::Shell { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/wt/shell commands".to_string(),
+        | OpsCommand::Shell { .. }
+        | OpsCommand::Auth { .. } => Err(OpsError::Message(
+            "ops item does not support cp/doctor/wt/shell/auth commands".to_string(),
         )),
     }
 }

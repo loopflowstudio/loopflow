@@ -24,7 +24,7 @@ Keep the layers narrow:
 
 - Wave ↔ project
 - Roadmap item ↔ Asana task / Linear issue
-- `wave/<name>/<name>.yaml` carries the provider + project in `pm:` block (parsed as `PmConfig`)
+- `wave/<name>/<name>.yaml` carries the provider + project in `pm:` block (parsed as `PmConfig`), plus optional per-wave `team` override when project bootstrap needs a specific team
 - Roadmap item frontmatter carries provider-agnostic `pm_id` (parsed via `RoadmapItemDocument`)
 - External IDs stay strings end to end (Asana GID strings, Linear UUID/project IDs)
 

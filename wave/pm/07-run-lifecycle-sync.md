@@ -1,3 +1,6 @@
+---
+pm_id: '1213718325464924'
+---
 # 07: Run lifecycle → PM sync
 
 **Finish line:** PR creation and merge automatically update the corresponding PM item. Best-effort, non-blocking.

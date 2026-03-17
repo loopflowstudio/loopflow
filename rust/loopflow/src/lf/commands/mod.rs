@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod flow;
 pub mod list;
 pub mod ops;

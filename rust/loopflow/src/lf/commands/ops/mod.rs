@@ -12,10 +12,10 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
+    abandon_branch, commit_workflow, create_or_update_pr, export, ingest, land, next_branch,
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
-    Progress, RebaseOptions, RotationResult,
+    release_tag, AbandonOptions, CommitOptions, ExportOptions, IngestOptions, LandOptions,
+    NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -87,6 +87,8 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
         },
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
+        OpsCommand::Export { wave, dry_run } => export_cmd(wave, *dry_run, &progress),
+        OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
     }
 }
 
@@ -269,6 +271,31 @@ fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
         progress,
     )?;
     println!("{}", result.dest.display());
+    Ok(())
+}
+
+fn export_cmd(wave: &str, dry_run: bool, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let result = export(
+        &repo_root,
+        &ExportOptions {
+            wave: wave.to_string(),
+            dry_run,
+        },
+        progress,
+    )?;
+
+    let total = result.created.len() + result.updated.len();
+    if total == 0 {
+        println!("nothing to export");
+    } else {
+        println!(
+            "exported {} items ({} created, {} updated)",
+            total,
+            result.created.len(),
+            result.updated.len()
+        );
+    }
     Ok(())
 }
 

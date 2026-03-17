@@ -197,9 +197,12 @@ Concerto mobile connects to remote `lfd` — monitor and manage waves from your 
 Auth connects your providers:
 
 ```bash
+lf ops auth asana    # connect Asana for local `lf` commands like `lf ops export`
+lf ops auth status   # check local lf credentials
+
 lfq auth github      # connect GitHub
 lfq auth claude      # connect Claude
-lfq auth asana       # store Asana PAT
+lfq auth asana       # connect Asana with OAuth
 lfq auth linear      # store Linear API key
 lfq auth status      # check connections
 ```

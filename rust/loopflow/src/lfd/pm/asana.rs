@@ -15,6 +15,7 @@ const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const ASANA_RATE_LIMIT_RETRIES: u8 = 3;
 const ASANA_RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
 const TASK_FIELDS: &str = "name,notes,completed";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
 
 #[derive(Debug, Clone)]
 pub struct AsanaClient {
@@ -93,31 +94,104 @@ impl AsanaClient {
         ))
     }
 
-    fn workspace(&self) -> PmResult<&str> {
-        self.config.workspace.as_deref().ok_or_else(|| {
-            PmError::Message("asana.workspace must be configured to create projects".to_string())
-        })
+    /// List all workspaces visible to the authenticated user.
+    pub async fn list_workspaces(&self) -> PmResult<Vec<AsanaWorkspace>> {
+        let response: AsanaResponse<Vec<AsanaWorkspace>> = self
+            .send_json(|| self.request(Method::GET, "/workspaces", &[]))
+            .await?;
+        Ok(response.data)
+    }
+
+    /// Resolve the workspace GID: use config if set, otherwise auto-detect.
+    /// Fails if the user has zero or multiple workspaces and none is configured.
+    pub async fn resolve_workspace(&self) -> PmResult<String> {
+        if let Some(workspace) = &self.config.workspace {
+            return Ok(workspace.clone());
+        }
+
+        let workspaces = self.list_workspaces().await?;
+        match workspaces.len() {
+            0 => Err(PmError::Message(
+                "no asana workspaces found for this token".to_string(),
+            )),
+            1 => Ok(workspaces.into_iter().next().expect("len is 1").gid),
+            n => {
+                let list: Vec<String> = workspaces
+                    .iter()
+                    .map(|ws| format!("  {} ({})", ws.name, ws.gid))
+                    .collect();
+                Err(PmError::Message(format!(
+                    "found {n} asana workspaces — set asana.workspace in .lf/config.yaml:\n{}",
+                    list.join("\n")
+                )))
+            }
+        }
+    }
+
+    async fn list_teams(&self, workspace_id: &str) -> PmResult<Vec<AsanaTeam>> {
+        let path = format!("/workspaces/{workspace_id}/teams");
+        let response: AsanaResponse<Vec<AsanaTeam>> = self
+            .send_json(|| self.request(Method::GET, &path, &[]))
+            .await?;
+        Ok(response.data)
+    }
+
+    async fn create_team(&self, workspace_id: &str, name: &str) -> PmResult<String> {
+        let body = AsanaRequest {
+            data: CreateTeamRequest {
+                name,
+                organization: workspace_id,
+            },
+        };
+        let response: AsanaResponse<AsanaGid> = self
+            .send_json(|| self.request(Method::POST, "/teams", &[]).json(&body))
+            .await?;
+        Ok(response.data.gid)
+    }
+
+    async fn resolve_team_for_project_bootstrap(&self, workspace_id: &str) -> PmResult<String> {
+        if let Some(team) = self.config.default_team.as_deref() {
+            return Ok(team.to_string());
+        }
+
+        let teams = self.list_teams(workspace_id).await?;
+        if let Some(existing) = teams
+            .iter()
+            .find(|team| team.name.eq_ignore_ascii_case(DEFAULT_LOOPFLOW_TEAM_NAME))
+        {
+            return Ok(existing.gid.clone());
+        }
+
+        self.create_team(workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
+            .await
+    }
+
+    async fn create_project_for_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String> {
+        let body = AsanaRequest {
+            data: CreateProjectForTeamRequest {
+                name,
+                notes: description,
+            },
+        };
+        let path = format!("/teams/{team_id}/projects");
+        let response: AsanaResponse<AsanaGid> = self
+            .send_json(|| self.request(Method::POST, &path, &[]).json(&body))
+            .await?;
+        Ok(response.data.gid)
     }
 }
 
 #[async_trait]
 impl PmProvider for AsanaClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
-        let workspace = self.workspace()?;
-        let team = self.config.default_team.as_deref();
-        let body = AsanaRequest {
-            data: CreateProjectRequest {
-                name,
-                notes: description,
-                workspace,
-                team,
-            },
-        };
-
-        let response: AsanaResponse<AsanaGid> = self
-            .send_json(|| self.request(Method::POST, "/projects", &[]).json(&body))
-            .await?;
-        Ok(response.data.gid)
+        let workspace = self.resolve_workspace().await?;
+        let team = self.resolve_team_for_project_bootstrap(&workspace).await?;
+        self.create_project_for_team(&team, name, description).await
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -206,12 +280,15 @@ struct AsanaRequest<T> {
 }
 
 #[derive(Serialize)]
-struct CreateProjectRequest<'a> {
+struct CreateProjectForTeamRequest<'a> {
     name: &'a str,
     notes: &'a str,
-    workspace: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    team: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct CreateTeamRequest<'a> {
+    name: &'a str,
+    organization: &'a str,
 }
 
 #[derive(Serialize)]
@@ -298,6 +375,18 @@ impl AsanaTask {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AsanaWorkspace {
+    pub gid: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AsanaTeam {
+    gid: String,
+    name: String,
+}
+
 #[derive(Deserialize)]
 struct AsanaPageInfo {
     offset: Option<String>,
@@ -331,6 +420,11 @@ async fn parse_response<T: DeserializeOwned>(response: reqwest::Response) -> PmR
 fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
     if let Ok(error_body) = serde_json::from_slice::<AsanaErrorBody>(body) {
         if let Some(error) = error_body.errors.first() {
+            if error.message.contains("Missing required `team` field") {
+                return format!(
+                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/<name>.yaml or `asana.default_team` in .lf/config.yaml."
+                );
+            }
             return format!(
                 "asana request failed with status {status}: {}",
                 error.message
@@ -402,7 +496,7 @@ mod tests {
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, "POST");
-        assert_eq!(requests[0].path, "/projects");
+        assert_eq!(requests[0].path, "/teams/team-9/projects");
         assert_eq!(
             requests[0].authorization.as_deref(),
             Some("Bearer secret-token")
@@ -413,27 +507,133 @@ mod tests {
             json!({
                 "data": {
                     "name": "Wave PM",
-                    "notes": "Ship the Asana client",
-                    "workspace": "workspace-1",
-                    "team": "team-9"
+                    "notes": "Ship the Asana client"
                 }
             })
         );
     }
 
     #[tokio::test]
-    async fn create_project_requires_workspace() {
-        let client = AsanaClient::new("secret-token".to_string(), AsanaConfig::default());
+    async fn create_project_reuses_existing_loopflow_team_when_default_missing() {
+        let (base_url, requests) = spawn_test_server(vec![
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": [
+                        { "gid": "team-1", "name": "Loopflow" },
+                        { "gid": "team-2", "name": "Other" }
+                    ]
+                }),
+            ),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "project-123" } }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            base_url,
+        );
+
+        let project_id = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect("create project should succeed");
+
+        assert_eq!(project_id, "project-123");
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].path, "/workspaces/workspace-1/teams");
+        assert_eq!(requests[1].method, "POST");
+        assert_eq!(requests[1].path, "/teams/team-1/projects");
+    }
+
+    #[tokio::test]
+    async fn create_project_creates_loopflow_team_when_missing() {
+        let (base_url, requests) = spawn_test_server(vec![
+            json_response(StatusCode::OK, json!({ "data": [] })),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "team-loopflow" } }),
+            ),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "project-123" } }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            base_url,
+        );
+
+        let project_id = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect("create project should succeed");
+
+        assert_eq!(project_id, "project-123");
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].path, "/workspaces/workspace-1/teams");
+        assert_eq!(requests[1].method, "POST");
+        assert_eq!(requests[1].path, "/teams");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
+            json!({
+                "data": {
+                    "name": "Loopflow",
+                    "organization": "workspace-1"
+                }
+            })
+        );
+        assert_eq!(requests[2].method, "POST");
+        assert_eq!(requests[2].path, "/teams/team-loopflow/projects");
+    }
+
+    #[tokio::test]
+    async fn create_project_fails_with_no_workspaces() {
+        let (base_url, _requests) =
+            spawn_test_server(vec![json_response(StatusCode::OK, json!({ "data": [] }))]).await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
 
         let error = client
             .create_project("Wave PM", "Ship the Asana client")
             .await
-            .expect_err("workspace should be required");
+            .expect_err("should fail with no workspaces");
 
         assert_eq!(
             error,
-            PmError::Message("asana.workspace must be configured to create projects".to_string())
+            PmError::Message("no asana workspaces found for this token".to_string())
         );
+    }
+
+    #[test]
+    fn parse_error_message_for_missing_team_is_actionable() {
+        let body = serde_json::to_vec(&json!({
+            "errors": [{ "message": "Missing required `team` field" }]
+        }))
+        .expect("json body");
+
+        let message = parse_error_message(StatusCode::BAD_REQUEST, &body);
+
+        assert!(message.contains("pm.team"));
+        assert!(message.contains("asana.default_team"));
     }
 
     #[tokio::test]

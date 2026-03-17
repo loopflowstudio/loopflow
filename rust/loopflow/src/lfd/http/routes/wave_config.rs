@@ -136,6 +136,25 @@ mod tests {
         let pm = config.pm.expect("pm config should exist");
         assert_eq!(pm.provider, crate::lfd::pm::PmProviderKind::Asana);
         assert_eq!(pm.project, "1234567890");
+        assert_eq!(pm.team, None);
+    }
+
+    #[test]
+    fn read_wave_config_parses_pm_team_override() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("scan.yaml"),
+            "flow: build\npm:\n  provider: asana\n  project: \"1234567890\"\n  team: \"eng-platform\"\n",
+        )
+        .expect("write");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        let pm = config.pm.expect("pm config should exist");
+        assert_eq!(pm.provider, crate::lfd::pm::PmProviderKind::Asana);
+        assert_eq!(pm.project, "1234567890");
+        assert_eq!(pm.team.as_deref(), Some("eng-platform"));
     }
 
     #[test]

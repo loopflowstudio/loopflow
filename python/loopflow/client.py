@@ -105,6 +105,10 @@ class Client:
         payload = self._request_json("POST", f"/v0/auth/{provider}")
         return AuthFlow.model_validate(payload)
 
+    def complete_auth(self, provider: str, code: str) -> None:
+        body = {"code": code}
+        self._request_json("POST", f"/v0/auth/{provider}/complete", json=body)
+
     def disconnect_auth(self, provider: str) -> AuthProviderStatus:
         payload = self._request_json("DELETE", f"/v0/auth/{provider}")
         return AuthProviderStatus.model_validate(payload)

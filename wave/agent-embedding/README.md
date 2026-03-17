@@ -1,46 +1,41 @@
 # Agent Embedding
 
-Concerto becomes the conductor, not the chat client. The agent runs in a real terminal. Concerto provides everything outside the coding session: what's stuck, what needs you, where things stand.
+## Vision
 
-Claude Code, Cursor, Windsurf, OpenCode — all ahead on chat polish, all iterating faster. Concerto embeds their terminals and builds the UX *around* coding sessions. The conductor view, not the chat view.
+Concerto becomes the conductor, not the chat client. The repo window opens on an attention queue that shows what needs human judgment across waves, while coding sessions themselves stay in a real terminal. Concerto's value is everything around the terminal: attention, portfolio awareness, calibration, worktree and PR lifecycle, and native compositions of those surfaces.
 
-## Concerto's job
-
-- Block queue — what's stuck, what needs you
-- Terminal embedding for coding sessions (Ghostty)
-- Portfolio view (multi-repo, multi-wave status at a glance)
-- Worktree/PR lifecycle management
-- Wave configuration and monitoring
-- Calibration view for tend flow trajectory review
-- Window composition — native Swift alternative to tmux, mixing terminals with native diff viewers, chat views, wave editors
-- Beat synthesizer — sequencer grid for programming chord rhythms
-- Chord-wave graph view — hierarchical visualization of waves-over-waves relationships, derived from area paths
-
-When OpenCode ships a desktop app or native components, evaluate adopting them for the chat view. Until then, Ghostty terminal embedding.
+Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Concerto makes parallel agent work legible and steerable.
 
 ## Strategy
 
-Block queue view first — it's the new primary screen and the UX that proves the conductor concept. Terminal embedding second — makes Concerto the place you actually work. Portfolio and lifecycle views build on the foundation once the core interaction model is proven.
+Use one durable human-attention model across the product. `AttentionItem` is the shared contract for code review, design review, calibration, and failure states; the queue stays the home screen, and later portfolio/lifecycle/compositor surfaces should reuse that model instead of inventing parallel status systems.
 
-The calibration view (trajectory review across waves) comes last because it requires tend flow output to be meaningful.
+Complete the attention queue before broadening the shell around it. The remaining work in this wave is to finish the missing design-review and calibration paths, then embed the terminal, then widen into portfolio, lifecycle, and composition views. Each later surface should reduce clicks from “I see a problem” to “I’m acting on it,” not add another place to check.
+
+Keep the agent in a real terminal. Concerto should wrap Ghostty or another full terminal with wave-aware context, not compete with purpose-built chat clients on chat chrome.
+
+Derive cross-wave and cross-chord views from existing wave data, run history, and attention streams. No separate dashboard-only model that can drift from lfd.
 
 ## Goals
 
-- Primary Concerto screen is a block queue, not a chat view
+- Primary Concerto screen is an attention queue, not a chat view
+- Every human checkpoint in build and tend flows surfaces as an `AttentionItem`
 - Coding sessions happen in embedded Ghostty terminals
-- Multi-repo, multi-wave status visible at a glance
-- Wave lifecycle (create, configure, start, stop) managed from Concerto
+- Multi-repo, multi-wave status is visible at a glance
+- Wave lifecycle (create, configure, start, stop) is managed from Concerto
 - Human calibration moments have a dedicated UX
-- Chord-wave graph derived from area relationships, not a separate data model
+- Chord-wave graph and portfolio views derive from existing wave/chord relationships
 
 ## Risks
 
-- Ghostty terminal embedding is unproven in SwiftUI — may need fallback plan
-- Block queue is only useful once signals/blocks are being generated — chicken-and-egg with signals wave
-- Portfolio view scope could expand unboundedly
+- Partial attention coverage creates blind spots until design review and calibration moments surface through `AttentionItem`
+- Ghostty terminal embedding is still unproven in SwiftUI and may require a fallback
+- Portfolio scope can expand unboundedly; repo-scoped attention queries will need store-level aggregation before cross-repo scale
+- Lifecycle UI could duplicate CLI flows instead of simplifying them if it diverges from existing wave/worktree semantics
 
 ## Metrics
 
-- Clicks from "I see a problem" to "I'm acting on it" (target: <=2)
+- Clicks from “I see a problem” to “I’m acting on it” (target: <=2)
+- Share of unresolved human checkpoints represented as attention items (target: 100%)
 - Time to assess all-waves status (target: <10 seconds glance)
-- Percentage of coding sessions that happen inside Concerto vs external terminal
+- Percentage of coding sessions that happen inside Concerto vs external terminal (target: >70%)

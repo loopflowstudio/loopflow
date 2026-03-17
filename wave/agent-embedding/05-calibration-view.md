@@ -13,7 +13,7 @@ Design and code review have existing UX patterns (PR review, design doc review).
 
 ## What to build
 
-1. **Calibration prompt.** When the tend flow's assess step completes, the calibration surfaces in the block queue with a special view. Not a generic block — a structured trajectory review.
+1. **Calibration prompt.** When `tend/draft-chord` completes, the calibration surfaces in the attention queue with a dedicated view. Not a generic failure row — a structured trajectory review built on `AttentionItem.calibration`.
 
 2. **Assessment display.** The chord's observations, per wave and overall:
    - Progress: what shipped since last calibration, velocity trend
@@ -30,7 +30,7 @@ Design and code review have existing UX patterns (PR review, design doc review).
 
 ## Done when
 
-- Calibration appears as a structured view in the block queue
+- Calibration appears as a structured view in the attention queue
 - Assessment covers progress, health, coherence, drift, and blind spots
 - Human can approve/reject mutations and write trajectory notes
 - Notes flow into Letta as core memories

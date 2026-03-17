@@ -200,7 +200,7 @@ Two patterns, intentionally different:
 
 2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
    - Connects to active server (`ws://.../ws` or `wss://.../ws`)
-   - Uses configured auth mode (none, session token, or configured bearer token)
+   - Uses the current connection credential (local session token or remote connection token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 

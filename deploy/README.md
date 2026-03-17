@@ -1,6 +1,6 @@
 # Remote deploy (EC2 + Docker + Caddy)
 
-Run lfd remotely behind Caddy TLS and verify it from your laptop.
+Run `lfd` remotely behind Caddy TLS.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ Run lfd remotely behind Caddy TLS and verify it from your laptop.
 - Docker + Docker Compose plugin
 - Domain (or host name) pointing to the instance
 - Security group allows inbound `443/tcp` and `80/tcp` (ACME challenge)
-- CI auth token for remote auth (`LFD_AUTH_TOKEN`)
+- Host already signed into studio (`~/.lf/credentials.json` present)
 
 ## Quick start
 
@@ -16,8 +16,7 @@ Run lfd remotely behind Caddy TLS and verify it from your laptop.
 git clone https://github.com/loopflowstudio/loopflow.git
 cd loopflow
 
-export LFD_AUTH_PROVIDER=ci
-export LFD_AUTH_TOKEN='<strong-random-token>'
+export LFD_AUTH_MODE=studio
 export LF_DOMAIN='lfd.example.com'
 
 # Dev/internal CA mode (self-signed by Caddy local CA)
@@ -35,43 +34,19 @@ docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up
 ## Configuration
 
 ```bash
-# Required for remote auth
-export LFD_AUTH_PROVIDER=ci
-export LFD_AUTH_TOKEN='<token>'
-
-# Caddy domain and TLS mode
+export LFD_AUTH_MODE=studio
 export LF_DOMAIN='lfd.example.com'
 export LF_TLS_MODE=internal   # internal (dev) or empty (public ACME)
-
-# Optional executor image override
 export LFD_EXECUTOR_IMAGE='loopflow/agent:latest'
 ```
 
 ## Verify deployment
 
 ```bash
-uv run python scripts/test_remote_smoke.py \
-  --url https://lfd.example.com \
-  --token "$LFD_AUTH_TOKEN" \
-  --repo /absolute/path/to/loopflow/on/remote
+curl -f https://lfd.example.com/health
 ```
 
-On fresh hosts with no existing waves, `--repo` is required. Once waves exist, the script can default to the first `/v0/repos` entry.
-
-For internal-CA deployments, pass custom trust or run insecure:
-
-```bash
-uv run python scripts/test_remote_smoke.py \
-  --url https://lfd.example.com \
-  --token "$LFD_AUTH_TOKEN" \
-  --ca-cert /path/to/caddy-local-root.crt
-
-# or
-uv run python scripts/test_remote_smoke.py \
-  --url https://lfd.example.com \
-  --token "$LFD_AUTH_TOKEN" \
-  --insecure
-```
+Then sign in through Concerto or `lfq` and connect to the remote daemon through the normal studio discovery flow.
 
 ## Credential mounts for agent execution
 
@@ -106,13 +81,5 @@ docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml lo
 Common failures:
 
 - ACME cert not issued: domain DNS or port 80 blocked
-- `401 missing token`: wrong/missing `Authorization: Bearer <token>`
-- SSE appears delayed: ensure `flush_interval -1` is in `deploy/Caddyfile`
-- WS fails: ensure `/ws` is reachable through the same TLS host and token auth
-
-## Manual operator checks (not in smoke script)
-
-- Connect Concerto in Remote mode to `https://<domain>` with token
-- Open remote editor for a wave worktree
-- Open remote terminal for a wave worktree
-- Restart lfd container and verify reconnect behavior in Concerto
+- WS fails: ensure `/ws` is reachable through the same TLS host
+- Remote clients cannot connect: verify `~/.lf/credentials.json` and successful studio registration logs on the host

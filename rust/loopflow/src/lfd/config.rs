@@ -27,7 +27,6 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 ///
 /// `mode` selects the auth strategy:
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
-/// - `"ci"`: validate against a pre-shared token
 /// - `"studio"`: registered with studio for discovery. Local token on
 ///   loopback, connection tokens validated locally for remote clients.
 ///   Connection tokens are session credentials: valid from mint until expiry
@@ -38,7 +37,6 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 pub enum AuthMode {
     #[default]
     Local,
-    Ci,
     Studio,
 }
 
@@ -47,21 +45,13 @@ impl AuthMode {
         match value.trim() {
             "local" => Ok(Self::Local),
             "studio" => Ok(Self::Studio),
-            "ci" => Ok(Self::Ci),
-            "static" => {
-                warn!("auth mode `static` is deprecated; use `ci`");
-                Ok(Self::Ci)
-            }
-            other => {
-                bail!("invalid auth.mode value '{other}'; expected 'local', 'studio', or 'ci'")
-            }
+            other => bail!("invalid auth.mode value '{other}'; expected 'local' or 'studio'"),
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Local => "local",
-            Self::Ci => "ci",
             Self::Studio => "studio",
         }
     }
@@ -88,6 +78,7 @@ impl<'de> Deserialize<'de> for AuthMode {
 pub struct AuthConfig {
     #[serde(default)]
     pub mode: AuthMode,
+    /// Optional session-token override for embedded launches.
     pub token: Option<SecretString>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
@@ -196,7 +187,7 @@ impl RawLfdConfig {
             }
         }
 
-        if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
+        if let Ok(value) = std::env::var("LFD_AUTH_MODE") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.mode = AuthMode::parse(trimmed)?;
@@ -1054,7 +1045,7 @@ executor:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",
@@ -1076,7 +1067,7 @@ executor:
             "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
         std::env::set_var("LFD_MODE", "container");
-        std::env::set_var("LFD_AUTH_PROVIDER", "static");
+        std::env::set_var("LFD_AUTH_MODE", "studio");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_CREDENTIAL_SOCKET", "/tmp/concerto-auth.sock");
         std::env::set_var(
@@ -1111,7 +1102,7 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.mode, AuthMode::Ci);
+        assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(
             resolved
                 .auth
@@ -1175,14 +1166,13 @@ executor:
     }
 
     #[test]
-    fn auth_mode_yaml_accepts_static_alias_and_canonicalizes_to_ci() {
+    fn auth_mode_yaml_rejects_removed_ci_alias() {
         let raw = r#"
 auth:
-  mode: static
+  mode: ci
 "#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let resolved = config.resolve().expect("static alias resolves");
-        assert_eq!(resolved.auth.mode, AuthMode::Ci);
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("ci mode rejected");
+        assert!(err.to_string().contains("expected 'local' or 'studio'"));
     }
 
     #[test]
@@ -1248,7 +1238,7 @@ http_security:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",

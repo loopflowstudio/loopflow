@@ -10,8 +10,7 @@ services:
       LFD_MODE: container
       LFD_DATABASE_URL: "postgres://lfd:lfd@postgres:5432/lfd"
       LFD_EXECUTOR_IMAGE: "${LFD_EXECUTOR_IMAGE:-loopflow/agent:latest}"
-      LFD_AUTH_PROVIDER: "${LFD_AUTH_PROVIDER:-local}"
-      LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:-}"
+      LFD_AUTH_MODE: "${LFD_AUTH_MODE:-local}"
     env_file:
       - path: .env
         required: false

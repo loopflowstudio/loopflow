@@ -1,7 +1,7 @@
 # Production override for remote deployment.
 # Usage: docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 #
-# Adds Caddy for TLS termination and sets auth to CI token.
+# Adds Caddy for TLS termination and runs lfd in studio auth mode.
 
 services:
   caddy:
@@ -22,7 +22,7 @@ services:
 
   lfd:
     environment:
-      LFD_AUTH_PROVIDER: ci
+      LFD_AUTH_MODE: studio
 
 volumes:
   caddy-data:

@@ -4,9 +4,9 @@
 
 ## Carried context
 
-- `auth.mode` is now the canonical config surface; `auth.provider` is rejected, and `static` survives only as a deprecated alias for `ci`.
+- `auth.mode` is now the canonical config surface; `auth.provider` is rejected, and the pre-shared bearer-token mode is gone.
 - iOS no longer has a manual host/token connection screen. Remote access should continue to flow through discovery and `AuthService`, not a second manual setup path.
-- `studio` mode still uses `base_url` plus connection-token distribution; `local` and `ci` behavior should stay unchanged.
+- `studio` mode still uses `base_url` plus connection-token distribution; `local` behavior should stay unchanged.
 - Provider-auth, registration, and token-ledger plumbing already live in `lfd` and should be reused where possible.
 
 ## What to build

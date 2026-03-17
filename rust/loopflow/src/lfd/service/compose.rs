@@ -219,7 +219,7 @@ fn render_compose_file(config: &LfdConfig) -> Result<String> {
     };
 
     Ok(format!(
-        "services:\n  lfd:\n    image: {image}\n    ports:\n      - \"${{LFD_PORT:-2486}}:2486\"\n    environment:\n      LFD_HTTP_ADDR: \"0.0.0.0:2486\"\n      LFD_MODE: \"{mode}\"\n      LFD_DATABASE_URL: \"{database_url}\"\n      LFD_EXECUTOR_IMAGE: \"{image}\"\n      LFD_AUTH_PROVIDER: \"${{LFD_AUTH_PROVIDER:-studio}}\"\n      LFD_AUTH_TOKEN: \"${{LFD_AUTH_TOKEN:-}}\"{extra_env}\n    env_file:\n      - path: .env\n        required: false\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - lfd-data:/root/.lf{extra_mounts}\n    depends_on:\n      postgres:\n        condition: service_healthy\n    healthcheck:\n      test: [\"CMD\", \"curl\", \"-sf\", \"http://localhost:2486/health\"]\n      interval: 10s\n      timeout: 5s\n      retries: 3\n      start_period: 30s\n    restart: unless-stopped\n\n  postgres:\n    image: {postgres_image}\n    environment:\n      POSTGRES_USER: lfd\n      POSTGRES_PASSWORD: lfd\n      POSTGRES_DB: lfd\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U lfd\"]\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n\nvolumes:\n  pgdata:\n  lfd-data:\n",
+        "services:\n  lfd:\n    image: {image}\n    ports:\n      - \"${{LFD_PORT:-2486}}:2486\"\n    environment:\n      LFD_HTTP_ADDR: \"0.0.0.0:2486\"\n      LFD_MODE: \"{mode}\"\n      LFD_DATABASE_URL: \"{database_url}\"\n      LFD_EXECUTOR_IMAGE: \"{image}\"\n      LFD_AUTH_MODE: \"${{LFD_AUTH_MODE:-studio}}\"{extra_env}\n    env_file:\n      - path: .env\n        required: false\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - lfd-data:/root/.lf{extra_mounts}\n    depends_on:\n      postgres:\n        condition: service_healthy\n    healthcheck:\n      test: [\"CMD\", \"curl\", \"-sf\", \"http://localhost:2486/health\"]\n      interval: 10s\n      timeout: 5s\n      retries: 3\n      start_period: 30s\n    restart: unless-stopped\n\n  postgres:\n    image: {postgres_image}\n    environment:\n      POSTGRES_USER: lfd\n      POSTGRES_PASSWORD: lfd\n      POSTGRES_DB: lfd\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U lfd\"]\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n\nvolumes:\n  pgdata:\n  lfd-data:\n",
         image = config.executor.image,
         mode = config.mode.as_str(),
         database_url = POSTGRES_DATABASE_URL,
@@ -278,41 +278,6 @@ impl From<ComposePsRow> for ComposeServiceStatus {
 mod tests {
     use super::render_compose_file;
     use crate::lfd::config::{CredentialMount, ExecutorType, LfdConfig, Mode, StorageType};
-    use secrecy::SecretString;
-    use std::ffi::OsString;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    struct EnvGuard {
-        vars: Vec<(&'static str, Option<OsString>)>,
-    }
-
-    impl EnvGuard {
-        fn snapshot(vars: &[&'static str]) -> Self {
-            Self {
-                vars: vars
-                    .iter()
-                    .map(|name| (*name, std::env::var_os(name)))
-                    .collect(),
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            for (name, value) in &self.vars {
-                if let Some(value) = value {
-                    std::env::set_var(name, value);
-                } else {
-                    std::env::remove_var(name);
-                }
-            }
-        }
-    }
 
     fn container_config() -> LfdConfig {
         let mut config = LfdConfig {
@@ -325,18 +290,11 @@ mod tests {
     }
 
     #[test]
-    fn compose_keeps_auth_token_placeholder_and_never_inlines_secret_values() {
-        let _lock = env_lock().lock().expect("env lock");
-        let _guard = EnvGuard::snapshot(&["LFD_AUTH_TOKEN"]);
-        std::env::set_var("LFD_AUTH_TOKEN", "runtime-secret-value");
-
-        let mut config = container_config();
-        config.auth.token = Some(SecretString::new("config-secret-value".to_string()));
+    fn compose_defaults_to_studio_auth_mode() {
+        let config = container_config();
         let content = render_compose_file(&config).expect("render compose file");
 
-        assert!(content.contains("LFD_AUTH_TOKEN: \"${LFD_AUTH_TOKEN:-}\""));
-        assert!(!content.contains("runtime-secret-value"));
-        assert!(!content.contains("config-secret-value"));
+        assert!(content.contains("LFD_AUTH_MODE: \"${LFD_AUTH_MODE:-studio}\""));
     }
 
     #[test]

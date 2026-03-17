@@ -1170,7 +1170,7 @@ impl SqliteStore {
     pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
         self.list_attention_items(
             Some(AttentionStatus::Surfaced),
-            Some(AttentionKind::QueueFailure),
+            Some(AttentionKind::Algedonic),
         )?
         .into_iter()
         .filter(|item| &item.wave_id == wave_id)
@@ -1185,7 +1185,7 @@ impl SqliteStore {
 
     pub fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
         let id =
-            crate::lfd::attention::attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
+            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
         let Some(mut item) = self.get_attention_item(&id)? else {
             return Ok(0);
         };

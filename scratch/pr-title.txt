@@ -1,0 +1,1 @@
+lfd auth: rename provider config to mode and remove iOS manual connect

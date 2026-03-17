@@ -1,23 +1,5 @@
-agent: claude:opus
-direction:
-  - craft
-yolo: true
-chrome: false
-
-skill_sources:
-  - name: superpowers
-    prefix: sp
-    path: ~/.superpowers
 exclude:
   - uv.lock
-summary_tokens: 25000
-
-summaries:
-  - path: .
-    agent: claude:sonnet
 
 branch_names:
   schema: "{user}.{name}.{ts}"
-
-internal:
-  use_rust: true

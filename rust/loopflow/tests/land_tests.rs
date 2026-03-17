@@ -196,7 +196,7 @@ fn land_cleans_up_remote_branch() {
 
 #[test]
 fn land_missing_pr_error_includes_branch_name() {
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_no_pr_script()),
         ("claude", claude_script()),
         ("open", noop_open_script()),
@@ -216,8 +216,8 @@ fn land_missing_pr_error_includes_branch_name() {
             create_pr: false,
             worktree: None,
             commit_message: None,
-            pr_title: None,
-            pr_body: None,
+            pr_title: Some("cached title".to_string()),
+            pr_body: Some("cached body".to_string()),
         },
         &NullProgress,
     );
@@ -270,7 +270,7 @@ fn land_uses_cached_pr_copy_when_available() {
 
 #[test]
 fn land_generates_copy_when_cached_pr_copy_is_stale() {
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_no_pr_script()),
         ("claude", claude_script()),
         ("open", noop_open_script()),
@@ -291,11 +291,23 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         "0000000000000000000000000000000000000000",
     )
     .expect("write stale ref");
+    let status = Command::new("git")
+        .args(["add", "scratch"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git add scratch");
+    assert!(status.success(), "git add scratch should succeed");
+    let status = Command::new("git")
+        .args(["commit", "-m", "add stale gate copy"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git commit scratch");
+    assert!(status.success(), "git commit scratch should succeed");
 
     let result = land(
         repo.path(),
         &LandOptions {
-            strict: false,
+            strict: true,
             local: false,
             create_pr: true,
             worktree: None,

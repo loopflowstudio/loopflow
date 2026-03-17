@@ -1,0 +1,1 @@
+lfd: collapse auth and deployment shapes

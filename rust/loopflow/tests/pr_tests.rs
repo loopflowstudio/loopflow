@@ -37,7 +37,7 @@ fn push_branch(repo: &TestRepo, name: &str) {
 #[test]
 fn pr_create_calls_gh() {
     let gh_script = write_gh_script("[]", None);
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_script.as_str()),
         ("open", noop_script()),
         ("claude", claude_script()),
@@ -66,7 +66,7 @@ fn pr_update_refreshes_body() {
         r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,
         Some("diff"),
     );
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_script.as_str()),
         ("open", noop_script()),
         ("claude", claude_script()),
@@ -92,7 +92,7 @@ fn pr_update_refreshes_body() {
 #[test]
 fn pr_create_uses_default_base_when_upstream_matches_head() {
     let gh_script = write_gh_script_reject_base("feature");
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_script.as_str()),
         ("open", noop_script()),
         ("claude", claude_script()),
@@ -133,7 +133,7 @@ fn current_pr_surfaces_gh_list_errors() {
 #[test]
 fn pr_auto_generates_title_when_missing() {
     let gh_script = write_gh_script("[]", None);
-    let _env = EnvGuard::new(&[
+    let _env = EnvGuard::new_with_clean_home(&[
         ("gh", gh_script.as_str()),
         ("open", noop_script()),
         ("claude", claude_script()),

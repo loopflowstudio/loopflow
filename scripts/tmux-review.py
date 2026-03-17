@@ -119,7 +119,11 @@ def check_status_script() -> bool:
     """Run the status script directly and verify output."""
     script = os.path.join(PLUGIN_DIR, "scripts", "loopflow-status.sh")
     result = subprocess.run(
-        [script], capture_output=True, text=True, check=False, timeout=5,
+        [script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
         env={**os.environ, "LOOPFLOW_DIR": PLUGIN_DIR},
     )
     output = result.stdout.strip()
@@ -141,10 +145,17 @@ def check_custom_status_format() -> bool:
     if os.path.exists(cache_file):
         os.remove(cache_file)
     tmux_socket = run_tmux(
-        "display-message", "-p", "#{socket_path}", check=False,
+        "display-message",
+        "-p",
+        "#{socket_path}",
+        check=False,
     ).stdout.strip()
     result = subprocess.run(
-        [script], capture_output=True, text=True, check=False, timeout=5,
+        [script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
         env={**os.environ, "TMUX": tmux_socket, "LOOPFLOW_DIR": PLUGIN_DIR},
     )
     output = result.stdout.strip()
@@ -216,7 +227,9 @@ def check_layouts_create_windows() -> bool:
         script = os.path.join(PLUGIN_DIR, "scripts", "layouts", name)
         # Run inside the tmux server
         run_tmux(
-            "send-keys", f"LOOPFLOW_DIR='{PLUGIN_DIR}' bash '{script}' '{PLUGIN_DIR}'", "Enter",
+            "send-keys",
+            f"LOOPFLOW_DIR='{PLUGIN_DIR}' bash '{script}' '{PLUGIN_DIR}'",
+            "Enter",
             check=False,
         )
         time.sleep(1)
@@ -239,7 +252,7 @@ def print_checklist():
     print()
     print("Run these in a normal tmux session after sourcing the plugin:")
     print()
-    print("  tmux run-shell \"$PWD/loopflow.tmux\"")
+    print('  tmux run-shell "$PWD/loopflow.tmux"')
     print()
     print("1. [ ] Status bar shows [lf: <branch>] or [lf: --]")
     print("2. [ ] Press prefix+l+? — help overlay appears")

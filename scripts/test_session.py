@@ -129,7 +129,10 @@ def make_client() -> Client:
 
 
 def wait_for_session_status(
-    client: Client, session_id: str, expected: str, timeout_s: float = 20,
+    client: Client,
+    session_id: str,
+    expected: str,
+    timeout_s: float = 20,
 ) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:

@@ -118,8 +118,10 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
         "open",
         "-n",
         "-W",
-        "--stdout", str(log_path),
-        "--stderr", str(log_path),
+        "--stdout",
+        str(log_path),
+        "--stderr",
+        str(log_path),
         str(app_path),
     ]
     with log_path.open("a", encoding="utf-8") as log_file:
@@ -204,14 +206,7 @@ def _resolve_lfd_sqlite_path(db_path: str) -> Path:
 
 
 def _bundled_lfd_sqlite_path() -> Path:
-    return (
-        Path.home()
-        / "Library"
-        / "Application Support"
-        / "Concerto"
-        / "lfd"
-        / "concerto.db"
-    )
+    return Path.home() / "Library" / "Application Support" / "Concerto" / "lfd" / "concerto.db"
 
 
 def _remove_sqlite_database(db_path: Path) -> None:
@@ -343,8 +338,7 @@ def _seed_waves_from_wave_dir() -> None:
         return
 
     wave_names = sorted(
-        d.name for d in wave_dir.iterdir()
-        if d.is_dir() and not d.name.startswith(".")
+        d.name for d in wave_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
     )
     if not wave_names:
         return
@@ -492,11 +486,16 @@ def cmd_run_ios(device: str | None = None) -> int:
     print(f"Building Concerto for {device}...")
     result = run(
         [
-            "xcodebuild", "build",
-            "-scheme", "Concerto",
-            "-project", str(project),
-            "-destination", destination,
-            "-configuration", "Debug",
+            "xcodebuild",
+            "build",
+            "-scheme",
+            "Concerto",
+            "-project",
+            str(project),
+            "-destination",
+            destination,
+            "-configuration",
+            "Debug",
         ],
         cwd=SWIFT_DIR,
         check=False,
@@ -507,11 +506,16 @@ def cmd_run_ios(device: str | None = None) -> int:
     # Find the built .app
     settings = run_capture(
         [
-            "xcodebuild", "-showBuildSettings",
-            "-scheme", "Concerto",
-            "-project", str(project),
-            "-destination", destination,
-            "-configuration", "Debug",
+            "xcodebuild",
+            "-showBuildSettings",
+            "-scheme",
+            "Concerto",
+            "-project",
+            str(project),
+            "-destination",
+            destination,
+            "-configuration",
+            "Debug",
         ],
         cwd=SWIFT_DIR,
     )
@@ -655,18 +659,31 @@ def _lfd_docker() -> int:
         print("Starting postgres...")
         # Remove stopped container if it exists
         run(["docker", "rm", "-f", pg_container], check=False)
-        result = run([
-            "docker", "run", "-d",
-            "--name", pg_container,
-            "-p", "5432:5432",
-            "-e", "POSTGRES_USER=lfd",
-            "-e", "POSTGRES_PASSWORD=lfd",
-            "-e", "POSTGRES_DB=lfd",
-            "--health-cmd", "pg_isready -U lfd",
-            "--health-interval", "2s",
-            "--health-retries", "10",
-            "postgres:16-alpine",
-        ], check=False)
+        result = run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                pg_container,
+                "-p",
+                "5432:5432",
+                "-e",
+                "POSTGRES_USER=lfd",
+                "-e",
+                "POSTGRES_PASSWORD=lfd",
+                "-e",
+                "POSTGRES_DB=lfd",
+                "--health-cmd",
+                "pg_isready -U lfd",
+                "--health-interval",
+                "2s",
+                "--health-retries",
+                "10",
+                "postgres:16-alpine",
+            ],
+            check=False,
+        )
         if result.returncode != 0:
             return result.returncode
 
@@ -674,10 +691,15 @@ def _lfd_docker() -> int:
         print("Waiting for postgres...")
         for _ in range(30):
             time.sleep(1)
-            check = run_capture([
-                "docker", "inspect", pg_container,
-                "--format", "{{.State.Health.Status}}",
-            ])
+            check = run_capture(
+                [
+                    "docker",
+                    "inspect",
+                    pg_container,
+                    "--format",
+                    "{{.State.Health.Status}}",
+                ]
+            )
             if check.stdout.strip() == "healthy":
                 break
         else:
@@ -1038,8 +1060,12 @@ def cmd_ghostty_build() -> int:
         GHOSTTY_DIR.parent.mkdir(parents=True, exist_ok=True)
         result = run(
             [
-                "git", "clone", "--depth", "1",
-                "https://github.com/ghostty-org/ghostty.git", str(GHOSTTY_DIR)
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/ghostty-org/ghostty.git",
+                str(GHOSTTY_DIR),
             ],
             check=False,
         )
@@ -1070,7 +1096,16 @@ def _load_r2_credentials() -> tuple[str, str, str] | None:
     # Prefer Doppler — env vars may be stale from old shell sessions
     try:
         result = run_capture(
-            ["doppler", "secrets", "download", "--no-file", "--project", "loopflow", "--config", "prd"]
+            [
+                "doppler",
+                "secrets",
+                "download",
+                "--no-file",
+                "--project",
+                "loopflow",
+                "--config",
+                "prd",
+            ]
         )
         if result.returncode == 0:
             secrets = json.loads(result.stdout)
@@ -1089,7 +1124,10 @@ def _load_r2_credentials() -> tuple[str, str, str] | None:
     if all([account_id, access_key, secret_key]):
         return account_id, access_key, secret_key
 
-    print("R2 credentials not found in Doppler or env (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)")
+    print(
+        "R2 credentials not found in Doppler or env "
+        "(R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)"
+    )
     return None
 
 
@@ -1144,7 +1182,9 @@ def cmd_ghostty_update() -> int:
         region_name="auto",
     )
     client.upload_file(
-        str(zip_path), "bin", zip_name,
+        str(zip_path),
+        "bin",
+        zip_name,
         ExtraArgs={
             "ContentType": "application/zip",
             "CacheControl": "public, max-age=31536000, immutable",
@@ -1185,12 +1225,12 @@ def _update_package_swift(url: str, checksum: str) -> None:
 
     content = re.sub(
         r'(\.binaryTarget\([^)]*url:\s*")[^"]*(")',
-        rf'\g<1>{url}\2',
+        rf"\g<1>{url}\2",
         content,
     )
     content = re.sub(
         r'(\.binaryTarget\([^)]*checksum:\s*")[^"]*(")',
-        rf'\g<1>{checksum}\2',
+        rf"\g<1>{checksum}\2",
         content,
     )
     package_swift.write_text(content)

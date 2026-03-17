@@ -10,7 +10,6 @@ Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 import os
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -64,16 +63,12 @@ def _install_wheel() -> tuple[bool, str]:
     wheel = str(wheels[-1])
 
     typer.echo("Installing wheel into local venv...")
-    result = _stream_process(
-        ["uv", "pip", "install", "--force-reinstall", wheel], "pip"
-    )
+    result = _stream_process(["uv", "pip", "install", "--force-reinstall", wheel], "pip")
     if result.returncode != 0:
         return False, "uv pip install failed (see output above)"
 
     typer.echo("Installing wheel as global tool...")
-    result = _stream_process(
-        ["uv", "tool", "install", "--force", "--reinstall", wheel], "tool"
-    )
+    result = _stream_process(["uv", "tool", "install", "--force", "--reinstall", wheel], "tool")
     if result.returncode != 0:
         return False, "uv tool install failed (see output above)"
     return True, "Wheel installed."
@@ -82,9 +77,7 @@ def _install_wheel() -> tuple[bool, str]:
 def _build_binaries() -> tuple[bool, str]:
     """Cargo release build only (no install)."""
     typer.echo("Building lf/lfd (cargo release)...")
-    result = _stream_process(
-        ["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT
-    )
+    result = _stream_process(["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT)
     if result.returncode != 0:
         return False, "cargo build failed (see output above)"
     return True, "Cargo build succeeded."
@@ -169,9 +162,7 @@ def _build_concerto() -> tuple[bool, str]:
         return False, f"swift directory not found: {swift_dir}"
 
     typer.echo("Building Concerto (swift release)...")
-    result = _stream_process(
-        ["swift", "build", "-c", "release"], "swift", cwd=swift_dir
-    )
+    result = _stream_process(["swift", "build", "-c", "release"], "swift", cwd=swift_dir)
     if result.returncode != 0:
         return False, "swift build -c release failed (see output above)"
     return True, "Swift build succeeded."
@@ -253,15 +244,11 @@ def _restart_lfd() -> None:
     lfd_bin = shutil.which("lfd")
     if lfd_bin:
         typer.echo("Reinstalling lfd service (updates PATH)...")
-        result = subprocess.run(
-            [lfd_bin, "install"], capture_output=True, text=True, timeout=15
-        )
+        result = subprocess.run([lfd_bin, "install"], capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             typer.echo("lfd service restarted.")
             return
-        typer.echo(
-            f"lfd install failed, falling back to launchctl: {result.stderr.strip()}"
-        )
+        typer.echo(f"lfd install failed, falling back to launchctl: {result.stderr.strip()}")
 
     if not plist.exists():
         typer.echo("lfd launchd plist not found, skipping restart.")

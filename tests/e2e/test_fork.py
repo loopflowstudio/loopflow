@@ -23,6 +23,7 @@ def _docker_available() -> bool:
     result = subprocess.run(["docker", "version"], capture_output=True)
     return result.returncode == 0
 
+
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.docker,

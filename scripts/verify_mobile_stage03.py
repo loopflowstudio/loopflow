@@ -20,11 +20,13 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 def _find_default_iphone_simulator() -> str:
     result = run(
         ["xcrun", "simctl", "list", "devices", "available", "-j"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return "iPhone 16"
     import json
+
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -55,15 +57,23 @@ def build_ios(device: str) -> int:
     destination = f"platform=iOS Simulator,name={device}"
 
     print(f"Building Concerto for {device}...")
-    result = run([
-        "xcodebuild", "build",
-        "-scheme", "Concerto",
-        "-project", str(project),
-        "-destination", destination,
-        "-configuration", "Debug",
-        "CODE_SIGNING_ALLOWED=NO",
-        "CODE_SIGNING_REQUIRED=NO",
-    ], cwd=SWIFT_DIR)
+    result = run(
+        [
+            "xcodebuild",
+            "build",
+            "-scheme",
+            "Concerto",
+            "-project",
+            str(project),
+            "-destination",
+            destination,
+            "-configuration",
+            "Debug",
+            "CODE_SIGNING_ALLOWED=NO",
+            "CODE_SIGNING_REQUIRED=NO",
+        ],
+        cwd=SWIFT_DIR,
+    )
     return result.returncode
 
 

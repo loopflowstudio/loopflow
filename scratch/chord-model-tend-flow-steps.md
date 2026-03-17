@@ -6,7 +6,7 @@
 - `cargo test -p loopflow lf::commands::flow::tests`
 - `cargo test --all`
 - `uv run pytest python/tests/`
-- Inspect the tend surface with `lfq show <wave> --json`, `lf flow tend`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-chord.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
 
 ## What to expect
 

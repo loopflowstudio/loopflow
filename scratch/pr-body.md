@@ -4,7 +4,7 @@
 - `cargo test -p loopflow lf::commands::flow::tests`
 - `cargo test --all`
 - `uv run pytest python/tests/`
-- Inspect the new tend flow surface with `lfq show <wave> --json`, `lf flow tend`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-chord.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
 
 What you should see:
 - tend parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths

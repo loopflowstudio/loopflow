@@ -4,7 +4,7 @@
 
 ## Context
 
-The structural wiring is now in place on this branch:
+The structural wiring is in place now:
 - `tend` expands as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
 - `tend-chord` expands to `draft-chord -> review-chord -> apply-chord`
 - `scan-waves` reads live lfd state through `lfq show <wave> --json`
@@ -18,13 +18,13 @@ What is still missing is the live proof. The redesign/member wave directories ex
 
 ## Validation baseline
 
-Use the current branch to re-check the structural slice before attempting the live run:
+Use the current codebase to re-check the structural slice before attempting the live run:
 
 - `cargo test -p loopflow --test flow_tests`
 - `cargo test -p loopflow lf::commands::flow::tests`
 - `cargo test --all`
 - `uv run pytest python/tests/`
-- Inspect `lf flow tend`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-chord.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
 
 Expected results:
 - `tend` parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths

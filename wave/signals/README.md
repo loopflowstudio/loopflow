@@ -1,17 +1,42 @@
 # Signals
 
-The nervous system. Default state is running. When something blocks progress, the system tries to unblock itself first. What it can't resolve propagates up — wave to chord to human.
+The nervous system. Default state is running. When something blocks progress, the system tries to unblock itself first. What it can't resolve propagates up — wave to chord-wave to human.
 
 ## Strategy
 
 Start with the block types that actually occur during this redesign. Don't design a taxonomy speculatively — let real blocks define the categories. CI failure and merge conflict exist already. Stall detection and shallow work detection are the high-value additions.
 
-The self-healing cascade (wave tries → chord tries → human decides) is the core architecture. Build it for one block type, then extend.
+The self-healing cascade (wave tries -> chord-wave tries -> human decides) is the core architecture. Build it for one block type, then extend.
+
+## The cascade
+
+```
+Block occurs (CI failure, merge conflict, quality gate, stall)
+  -> Can the wave unblock itself? (ci-fix, rebase, retry)
+    -> yes: keep running, log it
+    -> no: block propagates to chord-wave
+      -> Can the chord-wave unblock it? (resequence, pause conflicting wave)
+        -> yes: keep running, log it
+        -> no: block surfaces to human in Concerto
+```
+
+The Concerto UX is fundamentally a queue of blocks — "here's what's stuck and what you need to decide." Not a notification feed. A machine waiting for you.
+
+## Qualitative signals
+
+Beyond mechanical blocks (CI, merge conflicts), chord-waves detect qualitative signals:
+
+- **Shallow work** — PRs landing but quality is thin relative to intent
+- **Stall** — wave running but not producing meaningful progress
+- **Capability gap** — wave shipping code without validating user experience (no integration tests, no screenshots, no end-to-end)
+- **Human-system drift** — approvals getting mechanical, no course corrections, the human losing the thread of what's being produced
+
+These surface at calibration, not as interrupts.
 
 ## Goals
 
 - Block types defined by what actually blocks work, not speculation
-- Self-healing cascade: wave → chord → human, with each level trying before escalating
+- Self-healing cascade: wave -> chord-wave -> human, with each level trying before escalating
 - Stall detection: wave running but not producing
 - Shallow work detection: PRs landing but quality is thin
 - Human-system drift detection: human approvals getting mechanical

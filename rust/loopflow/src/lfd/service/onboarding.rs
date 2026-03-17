@@ -74,33 +74,26 @@ fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bo
         return Ok(true);
     }
 
-    // Detect API key in environment and warn about billing
-    if let Some(env_name) = provider.api_key_env_name() {
-        if std::env::var(env_name)
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-        {
-            println!(
-                "  Found {env_name}. API key auth bills per token — OAuth uses your existing subscription. We recommend OAuth."
-            );
-        }
+    let api_key = provider_api_key(provider);
+
+    if let Some((env_name, _)) = api_key.as_ref() {
+        println!(
+            "  Found {env_name}. API key auth bills per token — OAuth uses your existing subscription. We recommend OAuth."
+        );
     }
 
     if connect_provider(client, provider)? {
         return Ok(true);
     }
 
-    // OAuth failed/skipped — offer API key fallback if available
-    if let Some(env_name) = provider.api_key_env_name() {
-        if let Ok(api_key) = std::env::var(env_name) {
-            if !api_key.trim().is_empty() && prompt_api_key_fallback(provider, env_name)? {
-                client.configure_api_key(provider, &api_key)?;
-                println!(
-                    "  ✓ {} connected via API key (pay-per-token billing)",
-                    provider.display_name()
-                );
-                return Ok(true);
-            }
+    if let Some((env_name, api_key)) = api_key {
+        if prompt_api_key_fallback(provider, env_name)? {
+            client.configure_api_key(provider, &api_key)?;
+            println!(
+                "  ✓ {} connected via API key (pay-per-token billing)",
+                provider.display_name()
+            );
+            return Ok(true);
         }
     }
 
@@ -245,9 +238,9 @@ fn prompt_optional(provider: Provider) -> Result<bool> {
 
 fn required_providers_connected(statuses: &[AuthProviderStatus]) -> bool {
     let github_connected = provider_is_active(statuses, Provider::GitHub);
-    let has_agent = provider_is_active(statuses, Provider::Claude)
-        || provider_is_active(statuses, Provider::Codex)
-        || provider_is_active(statuses, Provider::OpenCodeZen);
+    let has_agent = [Provider::Claude, Provider::Codex, Provider::OpenCodeZen]
+        .into_iter()
+        .any(|provider| provider_is_active(statuses, provider));
     github_connected && has_agent
 }
 
@@ -270,15 +263,23 @@ fn format_login(provider: Provider, login: &str) -> String {
 }
 
 fn resolve_base_url() -> String {
-    if let Ok(raw) = std::env::var("LFD_URL") {
-        return normalize_base_url(&raw);
-    }
-
-    if let Ok(raw) = std::env::var("LFD_HTTP_ADDR") {
-        return normalize_base_url(&raw);
+    for key in ["LFD_URL", "LFD_HTTP_ADDR"] {
+        if let Ok(raw) = std::env::var(key) {
+            return normalize_base_url(&raw);
+        }
     }
 
     "http://127.0.0.1:2486".to_string()
+}
+
+fn provider_api_key(provider: Provider) -> Option<(&'static str, String)> {
+    let env_name = provider.api_key_env_name()?;
+    let api_key = std::env::var(env_name).ok()?;
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return None;
+    }
+    Some((env_name, api_key.to_string()))
 }
 
 fn normalize_base_url(raw: &str) -> String {

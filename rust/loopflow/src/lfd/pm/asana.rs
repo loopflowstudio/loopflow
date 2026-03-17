@@ -44,11 +44,7 @@ impl AsanaClient {
         }
     }
 
-    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
-        self.request_with_query(method, path, &[])
-    }
-
-    fn request_with_query(
+    fn request(
         &self,
         method: Method,
         path: &str,
@@ -56,7 +52,7 @@ impl AsanaClient {
     ) -> reqwest::RequestBuilder {
         let mut url = Url::parse(&format!("{}{}", self.base_url, path))
             .expect("asana base URL should be valid");
-        {
+        if !query.is_empty() {
             let mut pairs = url.query_pairs_mut();
             for (key, value) in query {
                 pairs.append_pair(key, value);
@@ -118,8 +114,8 @@ impl PmProvider for AsanaClient {
             },
         };
 
-        let response: AsanaResponse<AsanaProject> = self
-            .send_json(|| self.request(Method::POST, "/projects").json(&body))
+        let response: AsanaResponse<AsanaGid> = self
+            .send_json(|| self.request(Method::POST, "/projects", &[]).json(&body))
             .await?;
         Ok(response.data.gid)
     }
@@ -137,19 +133,12 @@ impl PmProvider for AsanaClient {
                     if let Some(offset) = page_offset.as_deref() {
                         query.push(("offset", offset));
                     }
-                    self.request_with_query(Method::GET, &path, &query)
+                    self.request(Method::GET, &path, &query)
                 })
                 .await?;
 
             for task in response.data {
-                let rank = items.len() as u32;
-                items.push(PmItem {
-                    id: task.gid,
-                    name: task.name,
-                    description: task.notes,
-                    rank,
-                    completed: task.completed,
-                });
+                items.push(task.into_pm_item(items.len() as u32));
             }
 
             offset = response.next_page.and_then(|page| page.offset);
@@ -164,47 +153,37 @@ impl PmProvider for AsanaClient {
             data: CreateTaskRequest {
                 name: &item.name,
                 notes: &item.description,
-                projects: vec![project_id],
+                projects: [project_id],
             },
         };
 
-        let response: AsanaResponse<AsanaTaskRef> = self
-            .send_json(|| self.request(Method::POST, "/tasks").json(&body))
+        let response: AsanaResponse<AsanaGid> = self
+            .send_json(|| self.request(Method::POST, "/tasks", &[]).json(&body))
             .await?;
         Ok(response.data.gid)
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let body = AsanaRequest {
-            data: UpdateTaskRequest {
-                name: update.name.as_deref(),
-                notes: update.description.as_deref(),
-                completed: None,
-            },
-        };
-
-        if body.data.name.is_none() && body.data.notes.is_none() {
+        let request = UpdateTaskRequest::from(update);
+        if request.is_empty() {
             return Ok(());
         }
 
-        let path = format!("/tasks/{item_id}");
+        let body = AsanaRequest { data: request };
+        let path = task_path(item_id);
         let _: AsanaResponse<Value> = self
-            .send_json(|| self.request(Method::PUT, &path).json(&body))
+            .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
             .await?;
         Ok(())
     }
 
     async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         let body = AsanaRequest {
-            data: UpdateTaskRequest {
-                name: None,
-                notes: None,
-                completed: Some(true),
-            },
+            data: UpdateTaskRequest::completed(),
         };
-        let path = format!("/tasks/{item_id}");
+        let path = task_path(item_id);
         let _: AsanaResponse<Value> = self
-            .send_json(|| self.request(Method::PUT, &path).json(&body))
+            .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
             .await?;
         Ok(())
     }
@@ -214,10 +193,9 @@ impl PmProvider for AsanaClient {
             data: CreateStoryRequest { text: body },
         };
         let path = format!("/tasks/{item_id}/stories");
-        let response: AsanaResponse<AsanaStory> = self
-            .send_json(|| self.request(Method::POST, &path).json(&request))
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::POST, &path, &[]).json(&request))
             .await?;
-        let _story_gid = response.data.gid;
         Ok(())
     }
 }
@@ -240,7 +218,7 @@ struct CreateProjectRequest<'a> {
 struct CreateTaskRequest<'a> {
     name: &'a str,
     notes: &'a str,
-    projects: Vec<&'a str>,
+    projects: [&'a str; 1],
 }
 
 #[derive(Serialize)]
@@ -251,6 +229,30 @@ struct UpdateTaskRequest<'a> {
     notes: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     completed: Option<bool>,
+}
+
+impl<'a> UpdateTaskRequest<'a> {
+    fn completed() -> Self {
+        Self {
+            name: None,
+            notes: None,
+            completed: Some(true),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.name.is_none() && self.notes.is_none() && self.completed.is_none()
+    }
+}
+
+impl<'a> From<&'a PmItemUpdate> for UpdateTaskRequest<'a> {
+    fn from(update: &'a PmItemUpdate) -> Self {
+        Self {
+            name: update.name.as_deref(),
+            notes: update.description.as_deref(),
+            completed: None,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -280,18 +282,20 @@ struct AsanaTask {
 }
 
 #[derive(Deserialize)]
-struct AsanaTaskRef {
+struct AsanaGid {
     gid: String,
 }
 
-#[derive(Deserialize)]
-struct AsanaProject {
-    gid: String,
-}
-
-#[derive(Deserialize)]
-struct AsanaStory {
-    gid: String,
+impl AsanaTask {
+    fn into_pm_item(self, rank: u32) -> PmItem {
+        PmItem {
+            id: self.gid,
+            name: self.name,
+            description: self.notes,
+            rank,
+            completed: self.completed,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -349,6 +353,10 @@ fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(ASANA_RETRY_AFTER_FALLBACK)
+}
+
+fn task_path(item_id: &str) -> String {
+    format!("/tasks/{item_id}")
 }
 
 #[cfg(test)]

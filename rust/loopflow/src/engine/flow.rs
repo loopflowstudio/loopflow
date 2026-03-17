@@ -520,7 +520,7 @@ fn parse_flow_mapping(map: &serde_yaml_ng::Mapping) -> Result<FlowItem, LoadErro
         return parse_or_value(or_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, ops, flow, and, or or".to_string(),
+        "flow item mapping must include step, ops, flow, and, or".to_string(),
     ))
 }
 

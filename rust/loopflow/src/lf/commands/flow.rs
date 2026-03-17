@@ -20,6 +20,8 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+const TEMP_OR_ROUTE_STEP_NAME: &str = "or-route";
+
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
@@ -121,7 +123,7 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
     let colors = Colors::new();
     let verdict_path = repo.join("scratch/route-or.md");
 
-    let router_name = or_def.router.as_deref().unwrap_or("or-route");
+    let router_name = or_def.router.as_deref().unwrap_or(TEMP_OR_ROUTE_STEP_NAME);
 
     eprintln!(
         "{dim}[or]{reset} {bold}{step}{reset} choosing between {n} paths",
@@ -137,11 +139,6 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
 
     // Write the routing step — either a wrapper around the router step's
     // content + routing instructions, or a standalone generic routing prompt.
-    let tmp_step_dir = repo.join(".lf/steps");
-    std::fs::create_dir_all(&tmp_step_dir)?;
-    let tmp_step_path = tmp_step_dir.join("or-route.md");
-    let wrote_tmp = !tmp_step_path.exists();
-
     let prompt = if let Some(ref router_name) = or_def.router {
         let router = load_step(router_name, repo)?;
         let base = router.content.as_deref().unwrap_or("");
@@ -155,15 +152,9 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
         )
     };
 
-    if wrote_tmp {
-        std::fs::write(&tmp_step_path, &prompt)?;
-    }
-
-    let result = crate::lf::commands::run::run(Some("or-route"), message, cli);
-
-    if wrote_tmp {
-        let _ = std::fs::remove_file(&tmp_step_path);
-    }
+    let temp_step = write_or_route_step(repo, &prompt)?;
+    let result = crate::lf::commands::run::run(Some(TEMP_OR_ROUTE_STEP_NAME), message, cli);
+    drop(temp_step);
 
     result?;
     commit_step_work(repo, router_name)?;
@@ -207,6 +198,44 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
     }
 
     Ok(())
+}
+
+fn write_or_route_step(repo: &Path, prompt: &str) -> Result<OrRouteStepGuard> {
+    let tmp_step_dir = repo.join(".lf/steps");
+    std::fs::create_dir_all(&tmp_step_dir)?;
+    let path = tmp_step_dir.join(format!("{TEMP_OR_ROUTE_STEP_NAME}.md"));
+    let original_content = std::fs::read_to_string(&path).ok();
+    std::fs::write(&path, prompt)?;
+    Ok(OrRouteStepGuard {
+        path,
+        original_content,
+    })
+}
+
+struct OrRouteStepGuard {
+    path: PathBuf,
+    original_content: Option<String>,
+}
+
+impl Drop for OrRouteStepGuard {
+    fn drop(&mut self) {
+        let result = match &self.original_content {
+            Some(content) => std::fs::write(&self.path, content),
+            None => match std::fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err),
+            },
+        };
+
+        if let Err(err) = result {
+            eprintln!(
+                "failed to restore temporary or-route step {}: {}",
+                self.path.display(),
+                err
+            );
+        }
+    }
 }
 
 fn build_or_routing_suffix(or_def: &ConcreteOr) -> String {
@@ -507,5 +536,53 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
         } else {
             println!("[{branch_label}] {line}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_or_route_step;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn write_or_route_step_removes_temp_file_when_none_existed() {
+        let temp = TempDir::new().unwrap();
+        let step_path = temp.path().join(".lf/steps/or-route.md");
+
+        {
+            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            assert_eq!(
+                fs::read_to_string(&step_path).unwrap(),
+                "temporary route prompt"
+            );
+        }
+
+        assert!(
+            !step_path.exists(),
+            "temporary or-route step should be removed after use"
+        );
+    }
+
+    #[test]
+    fn write_or_route_step_restores_existing_file() {
+        let temp = TempDir::new().unwrap();
+        let steps_dir = temp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        let step_path = steps_dir.join("or-route.md");
+        fs::write(&step_path, "existing route prompt").unwrap();
+
+        {
+            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            assert_eq!(
+                fs::read_to_string(&step_path).unwrap(),
+                "temporary route prompt"
+            );
+        }
+
+        assert_eq!(
+            fs::read_to_string(&step_path).unwrap(),
+            "existing route prompt"
+        );
     }
 }

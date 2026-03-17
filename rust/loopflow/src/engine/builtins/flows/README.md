@@ -22,9 +22,9 @@ Flows that produce wave items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `wave-reduce` | fork(reduce×3) → update-wave | Find simplification opportunities |
-| `wave-polish` | fork(polish×3) → update-wave | Find polish priorities |
-| `wave-expand` | fork(expand×3) → update-wave | Find expansion opportunities |
+| `wave-reduce` | and(reduce×3) → update-wave | Find simplification opportunities |
+| `wave-polish` | and(polish×3) → update-wave | Find polish priorities |
+| `wave-expand` | and(expand×3) → update-wave | Find expansion opportunities |
 
 ## And pattern
 

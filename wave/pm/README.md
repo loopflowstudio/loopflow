@@ -12,19 +12,21 @@ Loopflow syncs with the PM tools teams already use. Plan in Asana or Linear, exe
 
 ## Strategy
 
-Build everything on the shared PM seam that already exists in `rust/loopflow/src/lfd/pm.rs`: provider kind, wave config, roadmap frontmatter, and provider-agnostic item types. Provider clients, ops commands, ingest hooks, and run-lifecycle sync should extend that seam instead of inventing provider-specific side paths.
+The shared PM seam lives in `rust/loopflow/src/lfd/pm.rs`: `PmProviderKind`, `PmConfig`, `PmItem`/`PmItemCreate`/`PmItemUpdate`, `PmProvider` trait (6 async methods), `RoadmapItemDocument` with frontmatter parse/render. Provider clients, ops commands, ingest hooks, and run-lifecycle sync extend this seam instead of inventing provider-specific side paths.
 
 ### Model
 
 - Wave ↔ project
 - Roadmap item ↔ Asana task / Linear issue
-- `wave/<name>/<name>.yaml` carries the provider + project in `pm`
-- Roadmap item frontmatter carries provider-agnostic `pm_id`
+- `wave/<name>/<name>.yaml` carries the provider + project in `pm:` block (parsed as `PmConfig`)
+- Roadmap item frontmatter carries provider-agnostic `pm_id` (parsed via `RoadmapItemDocument`)
 - External IDs stay strings end to end (Asana GID strings, Linear UUID/project IDs)
 
 ### Ownership
 
-Provider credentials live in the existing encrypted provider-token store. Reuse that storage and lookup path for PM work, but keep PM UX separate from metered model-provider UX — Asana and Linear are API-key providers, not pay-per-token model providers.
+Provider credentials live in the existing encrypted provider-token store (`Provider::Asana`, `Provider::Linear`). PM API-key UX is separate from metered model-provider UX — Asana and Linear don't show pay-per-token billing copy in CLI status/output.
+
+Global config (`engine::config`) carries `AsanaConfig` (workspace, default_team) and `LinearConfig` (team) for project creation paths.
 
 Import is a pull: the PM tool wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state. Avoid bidirectional merge logic.
 

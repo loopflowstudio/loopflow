@@ -1,1 +1,1 @@
-lfd: make container mode Docker-only
+lf pm: add trait, config, and Asana/Linear auth scaffolding

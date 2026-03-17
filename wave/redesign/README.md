@@ -14,7 +14,7 @@ Everything below the orchestration layer is someone else's problem. Everything a
 
 Build and tend. Two voices in counterpoint.
 
-A wave builds — code, tests, PRs. A chord-wave tends — scan, assess, propose, apply. Same flow engine, same data model. The difference is area: files vs `wave/`.
+A wave builds — code, tests, PRs. A chord-wave tends — `scan-waves`, `assess`, then routes to `tend-chord`, `reorg`, or silence. Same flow engine, same data model. The difference is area: files vs `wave/`.
 
 This wave is the first chord-wave. Its first job is building itself. Its second job is tending the waves that build everything else. The recursive case — a chord-wave that tends its own construction — is the real test.
 
@@ -41,9 +41,9 @@ wave: redesign (chord-wave)
 
 Build enough to run the first tend cycle. Uses existing flows.
 
-- **chord-model/02** — tend flow steps (scan-waves, assess, propose, apply)
-- **signals/01** — block taxonomy (types, data model, API)
-- **chord-model/03** — Letta integration (stand up, wire into tend)
+- **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
+- **signals/01** — block taxonomy (types, data model, API) in parallel with item 02
+- **chord-model/03** — Letta integration once live tend output exists to remember
 
 First tend cycle runs. The chord-wave observes its own bootstrap commits. Letta records its first memories. The recursive loop is live.
 

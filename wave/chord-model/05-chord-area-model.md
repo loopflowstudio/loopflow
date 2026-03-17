@@ -6,6 +6,8 @@
 
 Bootstrap already established the core rule: membership lives exclusively in `area` entries that point at `wave/<name>/` directories. The filesystem defines each member wave. lfd stores runtime state. This item makes that contract explicit so `scan-waves` and future UI work can depend on one consistent snapshot.
 
+The first slice of that model already shipped: `scan-waves` derives member names from `wave/<name>/`, shells out to `lfq show <wave> --json`, and reads live `WaveDto` state from lfd. What's left is turning that prompt-level convention into a richer shared loader/API with cross-wave state and human history.
+
 ## What to build
 
 1. **Wave state snapshot.** For each member wave, expose:

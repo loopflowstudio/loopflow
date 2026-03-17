@@ -6,6 +6,8 @@
 
 Letta (formerly MemGPT) provides layered memory: core, recall, archival. The architectural boundary stays the same after bootstrap: Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The redesign chord-wave is the only place where durable qualitative memory belongs.
 
+Item 02 now covers the first live tend cycle. Finish that first so Letta has a real stream of scan observations, routed decisions, and human calibration events to remember instead of a purely structural test run.
+
 ## What to build
 
 ### Stand up Letta

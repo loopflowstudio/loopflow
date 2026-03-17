@@ -4,7 +4,9 @@
 
 ## Context
 
-`propose` suggests changes. `apply` executes them. After bootstrap, the constraint is sharper: mutations have to operate on the waves-only model that replaced chord CRUD. Changes should update ordinary wave config and runtime state, not smuggle chord-specific state back into the system.
+`draft-chord` suggests changes. `apply-chord` executes them. After bootstrap, the constraint is sharper: mutations have to operate on the waves-only model that replaced chord CRUD. Changes should update ordinary wave config and runtime state, not smuggle chord-specific state back into the system.
+
+The manual execution path exists now: `apply-chord` edits wave YAML and files, then syncs lfd with `lf ops update-wave`. What's missing is a typed mutation layer with logging, reversibility, and a durable record of who changed what and why.
 
 The levers stay the same:
 - **Direction** — shift what a wave optimizes for
@@ -23,12 +25,12 @@ The levers stay the same:
 
 3. **Reversibility.** Store enough prior state to revert an individual mutation cleanly.
 
-4. **Apply-step integration.** `apply` uses the mutation API for both auto-applied changes and human-gated proposals. Human-review items keep the proposed mutation attached so approval can execute the same payload.
+4. **Apply-step integration.** `apply-chord` uses the mutation API for both auto-applied changes and human-gated proposals. Human-review items keep the proposed mutation attached so approval can execute the same payload.
 
 ## Done when
 
 - The mutation API accepts and executes all planned lever types
 - Every mutation is logged with actor, rationale, and previous value
 - Mutations are individually revertible
-- `apply` uses the API for both auto and human-gated changes
+- `apply-chord` uses the API for both auto and human-gated changes
 - At least one real mutation has been applied by the redesign chord-wave's tend flow

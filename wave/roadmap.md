@@ -2,9 +2,9 @@
 
 Build and tend. Two voices in counterpoint.
 
-A wave builds — code, tests, PRs. A chord tends — scan, assess,
-propose, apply. Same flow engine, same infrastructure. The difference
-is area: files vs waves.
+A wave builds — code, tests, PRs. A chord tends — `scan-waves`,
+`assess`, then routes to `tend-chord`, `reorg`, or silence. Same flow
+engine, same infrastructure. The difference is area: files vs waves.
 
 The redesign is the first chord. Its first job is building itself.
 Its second job is tending the waves that build everything else. The
@@ -16,7 +16,7 @@ coordinate anything.
 chord: redesign
 │
 │  build: creates chord machinery, signals, Letta integration
-│  tend:  observes its own waves, surfaces blocks, remembers
+│  tend:  observes its own waves, routes to chord/reorg/silence, remembers
 │
 ├── wave: clear-the-deck        6 items — cuts, deletions, collapses, cleanup
 ├── wave: agent-embedding       8 items — Concerto as conductor
@@ -38,9 +38,9 @@ it built.
 
 Build enough to run the first tend cycle. Uses existing flows.
 
-- **chord-model/02** — tend flow steps (scan-waves, assess, draft-chord, review-chord, apply-chord)
-- **signals/01** — block taxonomy (types, data model, API)
-- **chord-model/03** — Letta integration (stand up, wire into tend)
+- **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
+- **signals/01** — block taxonomy (types, data model, API) in parallel with item 02
+- **chord-model/03** — Letta integration once live tend output exists to remember
 
 First tend cycle runs. The chord observes its own bootstrap commits.
 Letta records its first memories. The recursive loop is live.
@@ -87,6 +87,7 @@ tend (1 global update)
   scan-waves → assess → branch:
     chord: draft-chord → review-chord → apply-chord
     reorg: update-wave (coherence pass, no human review)
+    silence: exit cleanly
 
 build × N (parallel, one per active wave)
   ingest → branch:

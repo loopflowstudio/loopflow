@@ -72,11 +72,11 @@ fn golden_flows() {
         repo,
         "forked",
         r#"
-- fork:
+- and:
     branches:
       - step: { name: implement }
       - step: { name: polish }
-- fork:
+- and:
     branches:
       - step: { name: quick }
       - step: { name: deep }
@@ -87,16 +87,16 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::Fork { branches } => {
+        FlowItem::And { branches } => {
             assert_eq!(branches.len(), 2);
         }
-        _ => panic!("expected fork"),
+        _ => panic!("expected and"),
     }
     match &flow.items[1] {
-        FlowItem::Fork { branches } => {
+        FlowItem::And { branches } => {
             assert_eq!(branches.len(), 2);
         }
-        _ => panic!("expected fork"),
+        _ => panic!("expected and"),
     }
     match &flow.items[2] {
         FlowItem::FlowRef(name) => {
@@ -107,23 +107,23 @@ fn golden_flows() {
 }
 
 #[test]
-fn fork_select_is_rejected() {
+fn and_select_is_rejected() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
         repo,
         "forked",
         r#"
-- fork:
+- and:
     branches:
       - step: { name: implement }
     select: all
 "#,
     );
 
-    let err = load_flow("forked", repo).expect_err("fork select should fail");
+    let err = load_flow("forked", repo).expect_err("and select should fail");
     let message = err.to_string();
-    assert!(message.contains("fork select modes are not supported"));
+    assert!(message.contains("and select modes are not supported"));
 }
 
 #[test]
@@ -211,22 +211,18 @@ fn expand_flow_tracks_parents() {
 }
 
 /// Plain string items in flow YAML that match a sub-flow name should be
-/// expanded as sub-flows, not treated as step names. This was the root
-/// cause of `step not found: publish` in wave-reduce.
+/// expanded as sub-flows, not treated as step names.
 #[test]
 fn expand_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    // "publish" is a flow containing two steps
     write_flow(repo, "publish", "- step-a\n- step-b");
-    // "parent" references "publish" as a plain string (not `flow: publish`)
     write_flow(repo, "parent", "- review\n- publish");
 
     let flow = load_flow("parent", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // Should expand to 3 steps: review, step-a, step-b
     assert_eq!(items.len(), 3, "publish should expand into its sub-steps");
     match &items[0] {
         ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
@@ -255,14 +251,12 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    // "review" exists as both a step and as a flow (auto-wrapped)
     write_step(repo, "review", "Review the code.");
     write_flow(repo, "parent", "- review");
 
     let flow = load_flow("parent", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // Should keep as a single step (not expand into a sub-flow)
     assert_eq!(items.len(), 1);
     match &items[0] {
         ConcreteItem::Step(s) => {
@@ -274,7 +268,7 @@ fn expand_flow_prefers_step_over_single_step_flow() {
 }
 
 /// The builtin wave-reduce flow should expand to 2 items:
-/// fork(reduce×3), update-wave.
+/// and(reduce×3), update-wave.
 #[test]
 fn builtin_wave_reduce_expands_to_update_wave() {
     let temp = TempDir::new().unwrap();
@@ -283,20 +277,20 @@ fn builtin_wave_reduce_expands_to_update_wave() {
     let flow = load_flow("wave-reduce", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // fork + update-wave = 2
+    // and + update-wave = 2
     assert_eq!(
         items.len(),
         2,
-        "wave-reduce should expand into fork + update-wave"
+        "wave-reduce should expand into and + update-wave"
     );
 
-    // Step 0: fork (reduce × 3 directions)
+    // Step 0: and (reduce × 3 directions)
     assert!(
-        matches!(&items[0], ConcreteItem::Fork(_)),
-        "expected fork at index 0"
+        matches!(&items[0], ConcreteItem::And(_)),
+        "expected and at index 0"
     );
-    if let ConcreteItem::Fork(fork) = &items[0] {
-        let branch_directions: Vec<Vec<String>> = fork
+    if let ConcreteItem::And(and) = &items[0] {
+        let branch_directions: Vec<Vec<String>> = and
             .branches
             .iter()
             .map(|branch| branch.directions.clone())
@@ -326,4 +320,84 @@ fn builtin_ship_uses_ops_land_item() {
     let items = expand_flow(&flow, repo).unwrap();
     assert!(!items.is_empty());
     assert!(matches!(items.last(), Some(ConcreteItem::Op(_))));
+}
+
+#[test]
+fn builtin_tend_flow_structure() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let flow = load_flow("tend", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+
+    // tend: scan-waves, or(router: assess)
+    assert_eq!(items.len(), 2);
+    match &items[0] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/scan-waves"),
+        other => panic!("expected scan-waves step, got {other:?}"),
+    }
+    match &items[1] {
+        ConcreteItem::Or(or_def) => {
+            assert_eq!(
+                or_def.router.as_deref(),
+                Some("tend/assess"),
+                "or should have tend/assess as router"
+            );
+            assert_eq!(or_def.paths.len(), 3);
+            assert!(or_def.paths.contains_key("chord"));
+            assert!(or_def.paths.contains_key("reorg"));
+            assert!(or_def.paths.contains_key("silence"));
+            assert_eq!(or_def.paths["chord"].flow.as_deref(), Some("tend-chord"));
+            assert_eq!(or_def.paths["reorg"].flow.as_deref(), Some("reorg"));
+            assert_eq!(or_def.paths["silence"].flow, None);
+            assert_eq!(or_def.paths["silence"].step, None);
+        }
+        other => panic!("expected Or, got {other:?}"),
+    }
+
+    let chord_flow = load_flow("tend-chord", repo).unwrap();
+    let chord_items = expand_flow(&chord_flow, repo).unwrap();
+    assert_eq!(chord_items.len(), 3);
+    match &chord_items[0] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/draft-chord"),
+        other => panic!("expected draft-chord step, got {other:?}"),
+    }
+    match &chord_items[1] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/review-chord"),
+        other => panic!("expected review-chord step, got {other:?}"),
+    }
+    match &chord_items[2] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "tend/apply-chord"),
+        other => panic!("expected apply-chord step, got {other:?}"),
+    }
+
+    let reorg_flow = load_flow("reorg", repo).unwrap();
+    let reorg_items = expand_flow(&reorg_flow, repo).unwrap();
+    assert_eq!(reorg_items.len(), 1);
+    match &reorg_items[0] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "update-wave"),
+        other => panic!("expected update-wave step, got {other:?}"),
+    }
+}
+
+#[test]
+fn builtin_ship_roadmap_has_ops_in_or_subflow() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let flow = load_flow("ship-roadmap", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+    let build_flow_name = match &items[1] {
+        ConcreteItem::Or(or_def) => or_def.paths["build"]
+            .flow
+            .as_deref()
+            .expect("build path should point at a sub-flow"),
+        other => panic!("expected or in ship-roadmap, got {other:?}"),
+    };
+    let build_flow = load_flow(build_flow_name, repo).unwrap();
+    let items = expand_flow(&build_flow, repo).unwrap();
+    assert!(
+        items.iter().any(|item| matches!(item, ConcreteItem::Op(_))),
+        "ship-roadmap-build should contain an ops item"
+    );
 }

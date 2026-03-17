@@ -12,9 +12,11 @@ Wave configs exist as YAML in `wave/`. This item wires them into lfd: register t
 
 2. **Create the redesign chord-wave** via the normal wave API. Membership lives in `wave/redesign/redesign.yaml` as area paths.
 
-3. **Verify queryability.** `lfq list` shows the waves. `lfq show redesign` returns the area list pointing at the four member waves. This is the foundation everything else builds on.
+3. **Register them dormant first.** The redesign wave configs use `mode: manual` so bootstrap creates the structure without immediately starting build/tend loops.
 
-4. **Document the bootstrap** in scratch/ — what commands were run, what the initial state looks like. This becomes the first memory for the chord-wave's Letta agent later.
+4. **Verify queryability.** `lfq list` shows the waves. `lfq show redesign` returns the area list pointing at the four member waves. This is the foundation everything else builds on.
+
+5. **Document the bootstrap** in scratch/ — what commands were run, what the initial state looks like. This becomes the first memory for the chord-wave's Letta agent later.
 
 ## Done when
 

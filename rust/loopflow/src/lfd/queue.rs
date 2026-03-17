@@ -585,7 +585,11 @@ async fn set_queue_block(
         conflict_files,
         error,
     };
-    let attention_id = attention_id_for_queue_block(&block.run_id);
+    let attention_id = attention_id(
+        AttentionKind::QueueFailure,
+        &block.wave_id,
+        Some(&block.run_id),
+    );
     let existing = store
         .get_attention_item(&attention_id)
         .await
@@ -619,11 +623,11 @@ async fn set_queue_block(
 
 async fn clear_queue_block(
     store: &SharedStore,
-    _wave_id: &LfdId,
+    wave_id: &LfdId,
     run_id: &LfdId,
     event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
-    let attention_id = attention_id_for_queue_block(run_id);
+    let attention_id = attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
     let Some(mut item) = store
         .get_attention_item(&attention_id)
         .await

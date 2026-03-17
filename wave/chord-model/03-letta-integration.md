@@ -1,32 +1,30 @@
 # 03: Letta Integration
 
-**Finish line:** The redesign chord has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord remembers across runs.
+**Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord-wave remembers across runs.
 
 ## Context
 
-Letta (formerly MemGPT) provides layered memory: core, recall, archival. Self-hosted via Docker, REST API, Python SDK. Apache-2.0.
-
-Key design decision: Letta is a memory service, not an agent runtime. Thin integration. Waves stay ephemeral with file-based state. The chord is the only thing with persistent qualitative memory. This is the architectural boundary that makes chords more than fancy cron jobs.
+Letta (formerly MemGPT) provides layered memory: core, recall, archival. The architectural boundary stays the same after bootstrap: Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The redesign chord-wave is the only place where durable qualitative memory belongs.
 
 ## What to build
 
 ### Stand up Letta
 
-Self-hosted Letta instance via Docker Compose. Runs alongside lfd. No external dependencies.
+Run a self-hosted Letta instance alongside lfd. Keep the setup reproducible and local to the repo.
 
 ### Define memory schema
 
 **Core memories** (always in context, small, high-signal):
-- Design principles from the redesign doc
-- Key decisions made and their rationale
+- Design principles from the redesign docs
+- Key chord-wave decisions and their rationale
 - Current priorities and focus areas
-- Known anti-patterns and past mistakes
+- Known anti-patterns and recurring mistakes
 
 **Recall memories** (searchable, medium-term):
 - Recent wave activity summaries
 - Conflict resolutions and their outcomes
 - Human calibration decisions and reasoning
-- Tend cycle observations
+- Tend-cycle observations and proposals
 
 **Archival memories** (long-term, searchable):
 - Full redesign context and history
@@ -34,30 +32,30 @@ Self-hosted Letta instance via Docker Compose. Runs alongside lfd. No external d
 - Research findings (VSM, Daytona, OpenCode)
 - Patterns observed across multiple tend cycles
 
-### Wire into tend flow
+### Wire memory into tend
 
 ```
 tend cycle starts
-  → load core memories (always)
-  → search recall for recent relevant context
-  → search archival if assess surfaces something historical
-  → run tend flow with memories in prompt context
-  → write new memories:
-      - scan observations → recall
-      - assessment conclusions → recall
-      - decisions made → core (if significant) or recall
-      - patterns noticed → archival (if cross-cutting)
+  -> load core memories
+  -> search recall for recent relevant context
+  -> search archival when assessment surfaces something historical
+  -> run tend flow with memories in prompt context
+  -> write new memories:
+      - scan observations -> recall
+      - assessment conclusions -> recall
+      - durable decisions -> core or recall
+      - cross-cutting patterns -> archival
 tend cycle ends
 ```
 
 ### Memory hygiene
 
-Core memories have a size budget. When core fills, older items get demoted to recall. The chord's assess step can explicitly promote/demote memories: "this decision is now foundational" (→ core) or "this concern resolved itself" (→ archival or delete).
+Core memories need a size budget. When core fills, demote lower-value entries to recall. The chord-wave should be able to promote, demote, or retire memories as part of ordinary tending instead of letting the store bloat.
 
 ## Done when
 
-- Letta running alongside lfd via Docker Compose
-- Chord agent created with initial core memories (design doc principles)
-- Tend flow loads and writes memories on each cycle
+- Letta runs alongside lfd via repo-local tooling
+- The redesign chord-wave has initial core memories seeded from the redesign docs
+- Tend loads and writes memories on each cycle
 - After 3+ tend cycles, recall contains useful history
 - Memory search returns relevant context for new tend cycles

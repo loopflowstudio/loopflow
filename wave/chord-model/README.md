@@ -1,129 +1,61 @@
 # Chord Model
 
-Make chord-waves work. A chord-wave is a wave whose area is `wave/` — same data model, same infrastructure. No separate chord CRUD, no separate tables. The distinction is behavioral: chord-waves default to the `tend` flow, and the tend steps carry S2-S5 coordination concerns as built-in behavior.
+## Vision
 
-This wave is recursive: it builds the tools that the redesign chord-wave will use to coordinate all four waves, including this one. Early items ship via existing `build` flow. Later items create `tend`. Then the chord-wave starts using what it built.
+Make chord-waves first-class without introducing a second runtime model. A chord-wave is an ordinary wave whose `area` points at `wave/<name>/` directories, so coordination, mutation, and memory all grow out of the existing wave/flow system instead of parallel chord CRUD.
+
+This wave builds the machinery the redesign chord-wave will use to tend its own member waves. Build remains the code-producing voice. Tend becomes the coordinating voice. The system only works if those two voices can share one data model.
 
 ## Strategy
 
-Bootstrap first. Get the redesign chord-wave running tend cycles against its own waves as fast as possible. Every item after that is informed by what tend reveals.
+### Start from the waves-only baseline
 
-## The tend flow
+Bootstrap is already the ground truth: the redesign chord-wave registers through the normal wave API, membership lives in `wave/redesign/redesign.yaml`, and the redesign waves start in `manual` mode so the structure exists before automatic runs do. Everything left in this wave builds on that baseline. No separate chord tables, DTOs, or client helpers come back.
 
-Build creates. Tend maintains. Counterpoint — two voices moving independently but in harmony.
+### Turn tend into a real flow
+
+The next milestone is the tend flow itself:
 
 ```yaml
-# "tend" flow
-- scan-waves    # read member wave state, run history, PR outcomes
-- assess        # compare against directions, find drift
-- propose       # suggest changes (new waves, config, pruning)
-- apply         # make the changes (or flag for human review)
+- scan-waves
+- assess
+- propose
+- apply
 ```
 
-The tend steps map naturally to VSM concerns:
+Those steps need a concrete contract for what a chord-wave can see about its member waves, how it detects drift, and how it turns judgment into durable mutations. The flow should tolerate imperfect state, fix what it finds, and stay legible enough that humans can calibrate it.
 
-| Tend step | VSM concern | What it asks |
-|-----------|-------------|-------------|
-| scan-waves | S2 (Coordination) | What's happening across waves? Information flow, trigger state, shared files |
-| assess | S3 (Optimization) | Are resources well-allocated? Are waves in conflict? Is work balanced? |
-| assess | S4 (Intelligence) | Is the environment changing? Are we building the right things? What's emerging? |
-| (directions) | S5 (Identity) | What are we building and why? Does current work serve the mission? |
-| (block queue) | Algedonic | Urgent signals that bypass normal flow and go straight to the human |
+### Keep the architecture waves all the way down
 
-This isn't configuration — it's what chord-waves *are*. Any wave with a tend flow is asking these questions about its area. Not in a strict hierarchy, but as facets of the same gardening attention.
+Membership is `area`. Runtime state lives in lfd. Filesystem identity lives in `wave/<name>/`. Letta, triggers, mutation APIs, and eventual DAG support all need to extend that model rather than route around it. If a future feature needs a special chord-only persistence layer, the model has failed.
 
-Convention over configuration. Tolerant readers — wave state files should be readable even when they drift from ideal format. Agents fix what they find, not fail on it.
+### Build for human calibration, not hidden autonomy
 
-## Human intervention points
+Tend should surface trajectory, conflicts, and shallow work clearly enough that a human can intervene at the right moments. Mechanical fixes can auto-apply. Judgment-heavy changes need explicit calibration hooks, clear rationale, and reversible mutations.
 
-Three kinds, spaced between agent work, each a different attention:
+### Use VSM as pressure, not ceremony
 
-**Build: design review** (forward-looking, single wave). Is this the right thing to build? The prompt shows the design, alternatives, risks. Verdict: go / rethink / scope down.
-
-**Build: code review** (backward-looking, single wave). Is what we built good enough? The diff in context of design intent, not just "does this compile." Verdict: ship / iterate / reject.
-
-**Tend: calibration** (meta, cross-cutting, panoramic). The highest-leverage human moment. The chord-wave presents:
-- Are we making real, measurable progress?
-- Are we lost in details that don't matter, or skipping details that do?
-- Do agents have the tools to evaluate they're creating polished, reliable user experiences?
-- Is the human still connected to what's being produced, or drifting?
-- Proposed wave mutations with rationale.
-
-The human approves mutations, writes trajectory notes (which become Letta core memories), or overrides.
-
-## Wave mutation levers
-
-When the chord-wave (or human at calibration) needs to change how a wave operates:
-
-- **Direction** — shift what a wave optimizes for (add `care` if shipping sloppy, `simplicity` if over-engineering)
-- **Area** — tighten scope if producing shallow work, widen if missing the point
-- **Flow** — change the process (inject research step if building without understanding, remove gates if they're ceremony)
-- **Work items** — re-prioritize, rewrite stale items, delete non-issues
-- **Agent** — shift model (opus for research, haiku for cleanup)
-- **Step agents** — different models for different steps in the flow
-- **Triggers** — change frequency, add/remove trigger sources
-- **Lifecycle** — pause, resume, split, combine, or prune a wave
-
-## Letta memory
-
-Thin integration. Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The chord-wave is the only thing with persistent qualitative memory — the architectural boundary that makes chord-waves more than fancy cron jobs.
-
-```
-chord-wave tend cycle starts
-  -> load from Letta:
-      core:     design principles, key decisions, current priorities
-      recall:   recent wave activity, conflict resolutions, human decisions
-      archival: full redesign context, abandoned approaches, research
-  -> run tend flow with memories in prompt context
-  -> write to Letta:
-      what was observed, what was decided, what was proposed
-chord-wave tend cycle ends
-```
-
-Block resolutions feed into Letta. The chord-wave accumulates judgment — "last time we saw this pattern (stall after three PRs on the same item), narrowing scope and adding a research step worked." Patterns emerge from repeated resolutions and get applied to future similar situations.
-
-## Depth over speed
-
-The trap: systems that emphasize scale and speed end up with jagged polish. Some parts pixelated summaries, others handcrafted. The inconsistency makes the whole product hard to trust.
-
-**It is better to go deep on fewer things than to leave unknown unknowns accumulating across a wide surface.**
-
-## VSM expressibility
-
-Two levels of VSM influence:
-
-**Absorbed into the DNA.** Every chord-wave, by default, asks VSM-level questions via the tend flow. This isn't configuration — it's what chord-waves are.
-
-**Expressible as wave configuration.** For users who want the full Moskov system — explicit S2 through S5 agents with distinct roles, formal escalation paths — they can build that as nested chord-waves. A chord-wave with five member waves, each focused on a specific S-level concern. Or a five-step flow where each step embodies a level.
-
-The system must be expressive enough to represent VSM directly. If you can't build Moskov's architecture as a chord-wave configuration, the model isn't general enough. This is a design constraint, not a feature request.
-
-## Two chord-waves
-
-**Redesign chord-wave.** The first one. Coordinates four waves of this redesign. Recursive — builds its own tools, then tends its own construction.
-
-**Default chord-wave.** Every project gets one. After the redesign chord-wave proves tend works, the default chord-wave absorbs the existing five waves (foundation, trust, context, concerto, scale) and restructures them through tend cycles. The chord-wave proposes, the human reviews.
-
-Chord-waves can contain chord-waves (DAG, acyclicity enforced). The default chord-wave at the top, project chord-waves inside, waves at the leaves.
+The tend steps should naturally ask coordination, optimization, intelligence, identity, and algedonic questions. That pressure belongs in the flow and prompts, not in a second governance framework bolted onto the side. Explicit VSM chord structures should remain representable as nested chord-waves if users want them.
 
 ## Goals
 
-- Tend flow runs against the redesign chord-wave's own waves
-- Letta provides persistent memory across tend cycles
-- Chord-wave can mutate wave configuration (direction, area, flow, agent, work items)
-- Human calibration moments surface trajectory, not just status
-- Default chord-wave exists as concept, ready to absorb existing waves after proven
-- VSM expressibility: tend flow asks S2-S5 questions by default, AND a user can configure nested chord-waves that directly implement the full Moskov VSM hierarchy
+- The redesign chord-wave can run `tend` against its own member waves through ordinary wave configs and APIs
+- Tend steps produce structured observations, actionable proposals, and durable applied changes
+- Letta gives the redesign chord-wave persistent qualitative memory across tend cycles
+- Wave mutation stays waves-only: direction, area, flow, triggers, work items, and lifecycle all mutate through one model
+- Nested chord-waves remain possible without reintroducing chord-specific runtime concepts
 
 ## Risks
 
-- Letta integration could be heavier than "thin wrapper" — watch for scope creep
-- Tend flow could become ceremony if it doesn't surface genuinely useful observations
-- Recursive bootstrapping means early tend cycles run on incomplete machinery
+- Tend could become a report generator instead of a coordinating loop that changes outcomes
+- Letta integration could sprawl beyond a thin memory boundary
+- Mutation APIs could become too implicit and make human calibration harder instead of easier
+- DAG and trigger work could leak chord-specific special cases back into the runtime
 
 ## Metrics
 
-- Number of tend cycles that surface an actionable observation (target: >50%)
-- Time from block detection to human awareness (target: <1 hour during working hours)
-- Number of wave mutations proposed by chord-wave that human accepts (signal of useful judgment)
-- Human-system drift: days since human engaged substantively with a wave's output
+- First successful tend cycle against `redesign`: 1
+- Tend cycles that surface at least one actionable observation: >50%
+- Time from block detection to human awareness during working hours: <1 hour
+- Mutation proposals accepted by a human reviewer: tracked per cycle, trending upward
+- Human calibration sessions that produce a course correction or explicit affirmation: >0 each week while redesign is active

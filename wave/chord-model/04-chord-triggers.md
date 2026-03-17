@@ -1,25 +1,25 @@
-# 04: Chord Triggers
+# 04: Chord-Wave Triggers
 
-**Finish line:** The redesign chord runs tend automatically — after member wave PRs land, on daily cron, and on block escalation. Not just manually invoked.
+**Finish line:** The redesign chord-wave runs `tend` automatically — after member wave work lands, on daily cadence, and on block escalation. Tending is not a purely manual command.
 
 ## Context
 
-Wave triggers exist: repo (paths changed on main), wave (another wave completed), ci_failure. Chords need their own trigger semantics. A chord's tend flow should fire in response to member wave activity, not file changes.
+Wave triggers already exist for repo changes, wave completion, and CI failure. After bootstrap, the missing piece is chord-wave semantics: the redesign chord-wave needs to react to changes in its member waves, not to file diffs in its own directory. Membership is already derived from `area`, so trigger routing should build on that instead of introducing chord-only bookkeeping.
 
 ## What to build
 
-1. **Wave-completion trigger.** When a member wave lands a PR (merges to main), the chord's tend flow fires. This is the natural rhythm — build completes, tend observes.
+1. **Wave-completion trigger.** When a member wave lands work on main, the redesign chord-wave's `tend` flow fires. Build completes; tend observes.
 
-2. **Cron trigger.** Daily tend cycle regardless of wave activity. Catches stalls and drift that wouldn't trigger wave-completion. Uses the existing wave cron machinery — a chord is a wave.
+2. **Cron trigger.** Run a daily tend cycle even without recent wave completions so stalls and drift still surface. Use existing cron machinery — a chord-wave is still a wave.
 
-3. **Block escalation trigger.** When a wave encounters a block it can't self-heal, the chord's tend flow fires immediately (not waiting for cron or PR). The chord tries to resolve before escalating to human.
+3. **Block-escalation trigger.** When a member wave hits a block it cannot self-heal, fire `tend` immediately so the chord-wave can try to resolve or resequence before escalating to a human.
 
-4. **Debounce.** Multiple wave completions in quick succession shouldn't trigger N tend cycles. Batch within a window (e.g., 5 minutes) and run one tend cycle covering all recent changes.
+4. **Debounce.** Multiple member-wave events in a short window should batch into one tend cycle. The redesign chord-wave should see the whole recent change set, not a burst of redundant runs.
 
 ## Done when
 
-- Chord tend fires automatically after member wave PR merge
-- Daily cron tend cycle runs
-- Block escalation triggers immediate tend
+- The redesign chord-wave tends automatically after member-wave completion
+- Daily cron tend cycles run
+- Block escalation triggers immediate tending
 - Debouncing prevents redundant tend cycles
-- All triggers logged — visible in chord run history
+- Trigger reasons are visible in chord-wave run history

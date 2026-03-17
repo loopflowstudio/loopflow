@@ -584,7 +584,7 @@ async fn set_queue_block(
         error,
     };
     let attention_id = attention_id(
-        AttentionKind::Algedonic,
+        AttentionKind::QueueFailure,
         &block.wave_id,
         Some(&block.run_id),
     );
@@ -625,7 +625,7 @@ async fn clear_queue_block(
     run_id: &LfdId,
     event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
-    let attention_id = attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+    let attention_id = attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
     let Some(mut item) = store
         .get_attention_item(&attention_id)
         .await

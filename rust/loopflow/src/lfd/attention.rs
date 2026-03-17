@@ -276,11 +276,32 @@ pub fn queue_block_attention_item(block: &QueueBlock) -> AttentionItem {
     }
 }
 
+pub fn queue_block_attention_item_from_existing(
+    block: &QueueBlock,
+    existing: Option<&AttentionItem>,
+) -> AttentionItem {
+    let mut item = queue_block_attention_item(block);
+    let Some(existing) = existing else {
+        return item;
+    };
+    if existing.kind != AttentionKind::QueueFailure || existing.status == AttentionStatus::Resolved
+    {
+        return item;
+    }
+    item.status = existing.status;
+    item.surfaced_at = existing.surfaced_at;
+    item.viewed_at = existing.viewed_at;
+    item
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{queue_block_attention_item, queue_block_from_attention};
+    use super::{
+        queue_block_attention_item, queue_block_attention_item_from_existing,
+        queue_block_from_attention,
+    };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{QueueBlock, QueueBlockReason};
+    use crate::lfd::types::{AttentionStatus, QueueBlock, QueueBlockReason};
     use time::OffsetDateTime;
 
     #[test]
@@ -305,6 +326,28 @@ mod tests {
         assert_eq!(restored.attempted_at, block.attempted_at);
         assert_eq!(restored.conflict_files, block.conflict_files);
         assert_eq!(restored.error, block.error);
+    }
+
+    #[test]
+    fn queue_block_attention_preserves_open_lifecycle_fields() {
+        let block = QueueBlock {
+            wave_id: LfdId::new(),
+            run_id: LfdId::new(),
+            reason: QueueBlockReason::ScratchDirty,
+            attempted_at: OffsetDateTime::now_utc(),
+            conflict_files: Vec::new(),
+            error: None,
+        };
+        let mut existing = queue_block_attention_item(&block);
+        existing.status = AttentionStatus::Viewed;
+        existing.viewed_at = Some(existing.surfaced_at + time::Duration::minutes(1));
+        existing.surfaced_at -= time::Duration::hours(1);
+
+        let refreshed = queue_block_attention_item_from_existing(&block, Some(&existing));
+
+        assert_eq!(refreshed.status, AttentionStatus::Viewed);
+        assert_eq!(refreshed.surfaced_at, existing.surfaced_at);
+        assert_eq!(refreshed.viewed_at, existing.viewed_at);
     }
 }
 

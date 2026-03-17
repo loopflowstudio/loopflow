@@ -277,9 +277,14 @@ pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TerminalLaunchSpecDto {
+    pub session_id: String,
+    pub wave_id: String,
+    pub step: String,
+    pub agent: String,
     pub cwd: String,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub completion_token: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

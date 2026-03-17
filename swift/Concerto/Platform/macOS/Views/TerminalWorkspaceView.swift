@@ -117,8 +117,9 @@ private struct SessionTerminalSurface: View {
     let session: TerminalSession
 
     @Environment(RepoState.self) private var repoState
-    @ObservedObject private var ghosttyManager = GhosttyManager.shared
+    @StateObject private var ghosttyManager = GhosttyManager.shared
     @State private var launchSpec: TerminalLaunchSpec?
+    @State private var hasStarted = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -132,15 +133,11 @@ private struct SessionTerminalSurface: View {
                     manager: ghosttyManager
                 )
             } else if session.status == .running {
-                if ghosttyManager.hasSession(session.id) {
-                    ContentUnavailableView(
-                        "Session already attached",
-                        systemImage: "terminal",
-                        description: Text("This terminal is already open in the current app process.")
-                    )
-                } else {
-                    detachedSessionView
-                }
+                ContentUnavailableView(
+                    "Session already running",
+                    systemImage: "terminal",
+                    description: Text("Restart Concerto in the same app process to keep the embedded terminal attached.")
+                )
             } else if let errorMessage {
                 ContentUnavailableView("Terminal unavailable", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
@@ -148,41 +145,20 @@ private struct SessionTerminalSurface: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onChange(of: session.status) { _, newStatus in
-            guard newStatus.isTerminal else { return }
-            launchSpec = nil
-            ghosttyManager.destroySession(session.id)
-        }
         .task(id: session.id) {
             guard launchSpec == nil, !session.status.isTerminal else { return }
             guard session.status == .pending || session.status == .attached else { return }
             do {
                 let spec = try await repoState.attachTerminalSession(session.id)
                 launchSpec = spec
-                _ = try await repoState.startTerminalSession(session.id)
+                if !hasStarted {
+                    _ = try await repoState.startTerminalSession(session.id)
+                    hasStarted = true
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
-    }
-
-    private var detachedSessionView: some View {
-        VStack(spacing: Spacing.lg) {
-            ContentUnavailableView(
-                "Session lost its terminal surface",
-                systemImage: "terminal",
-                description: Text("The shell is still marked running, but this window no longer owns the embedded terminal.")
-            )
-
-            Button("Cancel stale session", role: .destructive) {
-                Task {
-                    _ = try? await repoState.cancelTerminalSession(session.id)
-                    ghosttyManager.destroySession(session.id)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

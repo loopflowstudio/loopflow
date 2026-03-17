@@ -72,25 +72,6 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
-    // Secrets provider
-    #[serde(rename = "secrets.connected")]
-    SecretsConnected {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.synced")]
-    SecretsSynced {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.disconnected")]
-    SecretsDisconnected {
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Wave lifecycle
     WaveCreated {
         wave_id: LfdId,
@@ -257,22 +238,16 @@ impl Event {
         }
     }
 
-    pub fn secrets_connected(provider: String) -> Self {
-        Self::SecretsConnected {
-            provider,
+    pub fn terminal_session_created(session: TerminalSession) -> Self {
+        Self::TerminalSessionCreated {
+            session,
             timestamp: Self::now(),
         }
     }
 
-    pub fn secrets_synced(provider: String) -> Self {
-        Self::SecretsSynced {
-            provider,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn secrets_disconnected() -> Self {
-        Self::SecretsDisconnected {
+    pub fn terminal_session_updated(session: TerminalSession) -> Self {
+        Self::TerminalSessionUpdated {
+            session,
             timestamp: Self::now(),
         }
     }

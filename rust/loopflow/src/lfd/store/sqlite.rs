@@ -835,18 +835,13 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    const TERMINAL_SESSION_COLS: &str =
-        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status, \
-         completion_token, created_at, attached_at, started_at, completed_at";
-
     pub fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            &format!(
-                "INSERT INTO terminal_sessions ({}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                Self::TERMINAL_SESSION_COLS
-            ),
+            "INSERT INTO terminal_sessions (
+                id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
+                completion_token, created_at, attached_at, started_at, completed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 session.id,
                 session.wave_id,
@@ -870,10 +865,12 @@ impl SqliteStore {
 
     pub fn get_terminal_session(&self, session_id: &LfdId) -> StoreResult<Option<TerminalSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM terminal_sessions WHERE id = ?1",
-            Self::TERMINAL_SESSION_COLS
-        ))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
+                    completion_token, created_at, attached_at, started_at, completed_at
+             FROM terminal_sessions
+             WHERE id = ?1",
+        )?;
         let row = stmt
             .query_row(params![session_id], Self::map_terminal_session_row)
             .optional()?;
@@ -886,9 +883,10 @@ impl SqliteStore {
         statuses: Option<&[TerminalSessionStatus]>,
     ) -> StoreResult<Vec<TerminalSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut sql = format!(
-            "SELECT {} FROM terminal_sessions",
-            Self::TERMINAL_SESSION_COLS
+        let mut sql = String::from(
+            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
+                    completion_token, created_at, attached_at, started_at, completed_at
+             FROM terminal_sessions",
         );
         let mut predicates = Vec::new();
         let mut params: Vec<Box<dyn ToSql>> = Vec::new();
@@ -931,12 +929,14 @@ impl SqliteStore {
         wave_run_id: &LfdId,
     ) -> StoreResult<Option<TerminalSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM terminal_sessions \
-             WHERE wave_run_id = ?1 AND status IN (?2, ?3, ?4) \
-             ORDER BY created_at DESC LIMIT 1",
-            Self::TERMINAL_SESSION_COLS
-        ))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
+                    completion_token, created_at, attached_at, started_at, completed_at
+             FROM terminal_sessions
+             WHERE wave_run_id = ?1 AND status IN (?2, ?3, ?4)
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )?;
         let row = stmt
             .query_row(
                 params![

@@ -446,6 +446,8 @@ struct ContentView: View {
     private var detailContent: some View {
         if repoState.showingAnalytics {
             AnalyticsDashboardView()
+        } else if repoState.terminalWorkspaceStore.selectedSession != nil {
+            TerminalWorkspaceView()
         } else if let wave = repoState.selectedWave {
             WaveWorkspaceView(wave: wave)
                 .id(wave.id)

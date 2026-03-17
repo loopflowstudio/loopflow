@@ -2,33 +2,31 @@
 
 ## Vision
 
-Remove product and deployment choices that create maintenance surface without teaching us anything. This wave is for cuts that simplify how `lfd` is configured, deployed, and executed. It does not own auth expansion or iOS distribution work; those live in `wave/trust/` and `wave/concerto/`.
+Keep `lfd`'s deployment surface honest and small. This wave now owns the last executor decision after the deployment/auth collapse: Docker stays the blessed container path unless a measured replacement proves worth carrying. It does not own team auth, install-time CLI sugar, or iOS distribution work.
 
 ## Strategy
 
-Finish the remaining collapse in two passes.
+The deployment and auth collapse is now the baseline: docs, compose defaults, and config resolution teach two shapes (`native` and `container`) and two auth modes (`local` and `studio`). Do not reopen that matrix while finishing this wave.
 
-First, collapse the public deployment story to the shapes that already exist in code: native/local and container/studio. `LFD_MODE=native|container` already centralizes several downstream decisions; build on that instead of inventing profile names the product cannot yet explain.
+The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` and `executor.sandbox` are tuning knobs inside that shape. If sandbox cannot show a concrete win over Docker, or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area, cut it from the blessed story and shrink the code around Docker.
 
-Second, decide whether sandbox stays at all. The current adaptive path only earns its keep if it clearly beats Docker on latency or isolation. If it cannot, demote it to an explicit experiment or delete it.
-
-Hidden overrides are acceptable as escape hatches. Documented defaults are not allowed to sprawl.
+Escape hatches are still allowed, but only as clearly experimental overrides. User-facing docs, compose defaults, and installed-service guidance should keep telling one Docker-backed container story.
 
 ## Goals
 
-- Users choose from a small, honest deployment surface instead of a bag of orthogonal config knobs.
-- The default container execution path is obvious in both code and docs.
-- Deploy and operator docs describe only blessed paths.
+- Docker is the only blessed container executor unless a measured replacement beats it.
+- Sandbox has one explicit status instead of an adaptive half-product.
+- Deploy docs, compose generation, and executor tests all describe the same support story.
 
 ## Risks
 
-- New deployment nouns could drift from the current `native|container` machinery and accidentally fork behavior.
-- Simplifying sandbox too aggressively could remove a useful path before a replacement is ready.
-- Escape hatches can quietly become the real product if the blessed paths stay incomplete.
+- A vague “keep both for now” outcome preserves maintenance cost without enough user value.
+- A Daytona spike could look good on startup latency while still missing worktree, credential, or harness requirements.
+- Cutting sandbox too aggressively could break internal experiments if escape hatches and tests do not move together.
 
 ## Metrics
 
 - Documented deployment shapes: 2
-- Documented deploy-selection knobs outside those shapes: 0
-- User-visible executor backends in blessed docs: 1
-- Remote deploy setup steps before first healthy `lfd`: 10 or fewer
+- Blessed container executors in user-facing docs: 1
+- Experimental container executors carried past this wave: 0
+- Default execution paths the team supports end to end: 2

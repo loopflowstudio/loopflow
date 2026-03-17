@@ -7,22 +7,22 @@
 Modify the `ingest` step to check for `pm` configuration:
 
 1. Read wave YAML
-2. If `pm` block present: run `lf ops pm import` (same as `import-pm` step)
-3. Proceed with existing ingest logic — pick next unshipped item by priority rank
+2. If `pm` block present: run the same import code path as `lf ops pm import`
+3. Proceed with existing ingest logic — pick the next unshipped item by priority rank
 
-This means planning can happen entirely in the PM tool. Reprioritize items, update descriptions, add new items — `ingest` picks up the latest state without manual `import-pm` runs.
+This keeps PM planning authoritative without inventing a second sync path. Reprioritize items, update descriptions, add new items — `ingest` should pick up the latest state without a manual `import-pm` run.
 
 ### Ship-roadmap flow update
 
 `ship-roadmap` currently: ingest → kickoff → review-design → build → review → land
 
-With PM integration, it naturally gains export at the end. The `ingest` step handles import. Consider adding `export-pm` as a post-land hook or appending to the flow when `pm` is configured.
+With PM integration, ingest handles the pull and the flow needs an export at the back when `pm` is configured. Keep that conditional wiring in one place so `ship-roadmap` without PM stays unchanged.
 
 ## Constraints
 
-- The import in ingest should be the same code path as `lf ops pm import` — no duplication
-- If no `pm` block, ingest behaves exactly as before
-- Import errors should warn, not block ingest — the local items are still valid
+- Reuse the exact import implementation from `lf ops pm import` — no duplicated sync logic.
+- If no `pm` block, ingest behaves exactly as before.
+- Import errors should warn, not block ingest — the local roadmap is still usable.
 
 ## Done when
 

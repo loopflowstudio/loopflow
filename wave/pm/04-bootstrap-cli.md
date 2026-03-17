@@ -2,6 +2,8 @@
 
 **Finish line:** `lf ops asana init` and `lf ops linear init` create and link projects in both directions. `lf ops asana/linear status` shows sync state.
 
+The file formats are already settled: wave YAML uses `PmConfig`, and roadmap frontmatter uses `RoadmapItemDocument` + `pm_id`. This item should wire real commands onto those existing shapes rather than creating another representation.
+
 ## What to build
 
 ### Commands
@@ -24,13 +26,15 @@ lf ops asana status
 lf ops linear status
 ```
 
+Implement these as deterministic Rust ops commands so they compose cleanly with `lf ops commit`, existing repo detection, and future automation.
+
 ### `init --wave` (wave exists, no PM project)
 
 1. Read `wave/<name>/README.md` — use wave name as project name, vision section as description
 2. `provider.create_project(name, description)`
 3. For each `NN-*.md`: `provider.create_item(project_id, item)`
-4. Write `pm` block to wave YAML
-5. Write `pm_id` to each roadmap item frontmatter
+4. Write `pm` block to wave YAML through the existing PM config shape
+5. Write `pm_id` to each roadmap item through `RoadmapItemDocument`
 6. Commit changes
 
 ### `init --project` (PM project exists, no wave)
@@ -61,7 +65,8 @@ For each wave with a `pm` block:
 
 - All commands commit their changes (YAML + frontmatter updates)
 - `init` should fail clearly if the wave or project already has a `pm` link (use `link` to reconnect)
-- Provider resolved from command name (`lf ops asana` → Asana, `lf ops linear` → Linear)
+- Provider resolves from command name (`lf ops asana` → Asana, `lf ops linear` → Linear)
+- Reuse existing auth lookup and config parsing — no PM-only credential plumbing
 
 ## Done when
 

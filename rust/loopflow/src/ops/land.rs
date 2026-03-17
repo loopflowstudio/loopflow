@@ -306,20 +306,33 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let scratch = repo.join("scratch");
+    let gitkeep = scratch.join(".gitkeep");
+
+    // Ensure scratch/ always exists.
     if !scratch.exists() {
-        return Ok(());
+        std::fs::create_dir_all(&scratch)?;
     }
 
     let mut removed = false;
     for entry in std::fs::read_dir(&scratch)? {
         let entry = entry?;
         let path = entry.path();
+        // Preserve .gitkeep so the directory survives git operations.
+        if path == gitkeep {
+            continue;
+        }
         if path.is_dir() {
             std::fs::remove_dir_all(&path)?;
         } else {
             std::fs::remove_file(&path)?;
         }
         removed = true;
+    }
+
+    // Ensure .gitkeep exists so scratch/ is tracked even when empty.
+    if !gitkeep.exists() {
+        std::fs::write(&gitkeep, "")?;
+        removed = true; // needs staging
     }
 
     if !removed {

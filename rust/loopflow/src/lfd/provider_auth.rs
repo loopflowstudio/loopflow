@@ -53,6 +53,8 @@ pub enum Provider {
     Claude,
     Codex,
     OpenCodeZen,
+    Asana,
+    Linear,
 }
 
 impl Provider {
@@ -62,11 +64,46 @@ impl Provider {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
+            Self::Asana => "asana",
+            Self::Linear => "linear",
         }
     }
 
-    pub fn all() -> [Self; 4] {
-        [Self::GitHub, Self::Claude, Self::Codex, Self::OpenCodeZen]
+    pub fn all() -> [Self; 6] {
+        [
+            Self::GitHub,
+            Self::Claude,
+            Self::Codex,
+            Self::OpenCodeZen,
+            Self::Asana,
+            Self::Linear,
+        ]
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+            Self::OpenCodeZen => "OpenCode Zen",
+            Self::Asana => "Asana",
+            Self::Linear => "Linear",
+        }
+    }
+
+    pub fn api_key_env_name(self) -> Option<&'static str> {
+        match self {
+            Self::Claude => Some("ANTHROPIC_API_KEY"),
+            Self::Codex => Some("OPENAI_API_KEY"),
+            Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
+            Self::Asana => Some("ASANA_ACCESS_TOKEN"),
+            Self::Linear => Some("LINEAR_API_KEY"),
+            Self::GitHub => None,
+        }
+    }
+
+    pub fn api_key_bills_per_token(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex | Self::OpenCodeZen)
     }
 
     /// Whether this provider supports CLI-based token refresh.
@@ -93,6 +130,8 @@ impl FromStr for Provider {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
+            "asana" => Ok(Self::Asana),
+            "linear" | "lin" => Ok(Self::Linear),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
             }),
@@ -262,6 +301,39 @@ pub struct SocketAuthBroker {
     client: Arc<CredentialSocketClient>,
 }
 
+#[derive(Debug, Clone)]
+struct ApiKeyBroker {
+    provider: Provider,
+}
+
+impl ApiKeyBroker {
+    fn new(provider: Provider) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait]
+impl AuthBroker for ApiKeyBroker {
+    fn provider(&self) -> Provider {
+        self.provider
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        Err(AuthError::CommandUnavailable {
+            provider: self.provider,
+            command: "lfq auth configure".to_string(),
+        })
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        Ok(AuthStatus::None)
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        Ok(())
+    }
+}
+
 impl SocketAuthBroker {
     pub fn new(provider: Provider, client: Arc<CredentialSocketClient>) -> Self {
         Self {
@@ -368,30 +440,11 @@ impl ProviderAuthService {
             let trimmed = socket_path.trim();
             if !trimmed.is_empty() {
                 let client = Arc::new(CredentialSocketClient::new(PathBuf::from(trimmed)));
-                return Self::with_brokers_and_store(
-                    vec![
-                        Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(SocketAuthBroker::new(Provider::Codex, client.clone()))
-                            as Arc<dyn AuthBroker>,
-                        Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
-                    ],
-                    Some(store),
-                );
+                return Self::with_brokers_and_store(default_brokers(Some(client)), Some(store));
             }
         }
 
-        Self::with_brokers_and_store(
-            vec![
-                Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
-            ],
-            Some(store),
-        )
+        Self::with_brokers_and_store(default_brokers(None), Some(store))
     }
 
     #[cfg(test)]
@@ -616,6 +669,33 @@ impl ProviderAuthService {
             .cloned()
             .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))
     }
+}
+
+fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn AuthBroker>> {
+    let mut brokers = match client {
+        Some(client) => vec![
+            Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
+                as Arc<dyn AuthBroker>,
+            Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
+                as Arc<dyn AuthBroker>,
+            Arc::new(SocketAuthBroker::new(Provider::Codex, client)) as Arc<dyn AuthBroker>,
+        ],
+        None => vec![
+            Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
+            Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
+            Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
+        ],
+    };
+    brokers.push(Arc::new(OpenCodeZenBroker::default()));
+    brokers.extend(api_key_brokers());
+    brokers
+}
+
+fn api_key_brokers() -> [Arc<dyn AuthBroker>; 2] {
+    [
+        Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+        Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
+    ]
 }
 
 fn socket_auth_flow_handle(
@@ -1554,6 +1634,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
+        Provider::Asana | Provider::Linear => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 
@@ -1844,7 +1925,20 @@ mod tests {
         assert_eq!("opencodezen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
+        assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
+        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
         assert!("gemini".parse::<Provider>().is_err());
+    }
+
+    #[test]
+    fn provider_api_key_billing_only_marks_metered_agent_providers() {
+        assert!(!Provider::GitHub.api_key_bills_per_token());
+        assert!(Provider::Claude.api_key_bills_per_token());
+        assert!(Provider::Codex.api_key_bills_per_token());
+        assert!(Provider::OpenCodeZen.api_key_bills_per_token());
+        assert!(!Provider::Asana.api_key_bills_per_token());
+        assert!(!Provider::Linear.api_key_bills_per_token());
     }
 
     #[test]

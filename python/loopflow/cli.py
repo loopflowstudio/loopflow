@@ -33,6 +33,25 @@ app.add_typer(repos_app, name="repos")
 app.add_typer(token_app, name="token")
 console = Console()
 
+_PROVIDER_LABELS = {
+    "github": "GitHub",
+    "claude": "Claude",
+    "codex": "Codex",
+    "opencodezen": "OpenCode Zen",
+    "asana": "Asana",
+    "linear": "Linear",
+}
+
+_PROVIDER_API_KEY_CONFIG = {
+    "claude": ("ANTHROPIC_API_KEY", "Claude API key"),
+    "codex": ("OPENAI_API_KEY", "Codex API key"),
+    "opencodezen": ("OPENCODE_API_KEY", "OpenCode API key"),
+    "asana": ("ASANA_ACCESS_TOKEN", "Asana personal access token"),
+    "linear": ("LINEAR_API_KEY", "Linear API key"),
+}
+
+_METERED_API_KEY_PROVIDERS = {"claude", "codex", "opencodezen"}
+
 
 def _wave_table(waves: list[Wave]) -> Table:
     table = Table(show_header=True, header_style="bold")
@@ -85,13 +104,22 @@ def _wave_detail_table(wave: Wave) -> Table:
 
 
 def _provider_label(provider: str) -> str:
-    labels = {
-        "github": "GitHub",
-        "claude": "Claude",
-        "codex": "Codex",
-        "opencodezen": "OpenCode Zen",
-    }
-    return labels.get(provider.lower(), provider)
+    return _PROVIDER_LABELS.get(provider.lower(), provider)
+
+
+def _provider_api_key_config(provider: str) -> Optional[tuple[str, str]]:
+    return _PROVIDER_API_KEY_CONFIG.get(provider.lower())
+
+
+def _require_provider_api_key_config(provider: str) -> tuple[str, str]:
+    config = _provider_api_key_config(provider)
+    if config is None:
+        raise ValueError(f"provider does not support API key auth: {provider}")
+    return config
+
+
+def _provider_api_key_bills_per_token(provider: str) -> bool:
+    return provider.lower() in _METERED_API_KEY_PROVIDERS
 
 
 def _repo_table(repos: list[Repo]) -> Table:
@@ -177,7 +205,8 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
             if ct == "apikey":
                 icon = "⚠"
                 status_label = "apikey"
-                details = f"{details} · pay-per-token"
+                if _provider_api_key_bills_per_token(status.provider):
+                    details = f"{details} · pay-per-token"
             else:
                 icon = "✓"
                 status_label = "oauth"
@@ -224,6 +253,23 @@ def _connect_provider(provider: str) -> None:
         time.sleep(1)
 
     typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
+
+
+def _configure_provider_token(provider: str, env_name: str, prompt_label: str) -> None:
+    api_key = os.environ.get(env_name)
+    if not api_key:
+        api_key = typer.prompt(prompt_label, hide_input=True).strip()
+    if not api_key:
+        typer.echo(f"Error: {env_name} is empty", err=True)
+        raise typer.Exit(1)
+
+    if _provider_api_key_bills_per_token(provider):
+        typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
+    status = api.configure_api_key(provider, api_key)
+    if _provider_api_key_bills_per_token(status.provider):
+        typer.echo(f"{_provider_label(status.provider)} switched to API key")
+    else:
+        typer.echo(f"Stored {_provider_label(status.provider)} API key")
 
 
 def _format_tokens(value: int) -> str:
@@ -606,6 +652,18 @@ def auth_zen() -> None:
     _connect_provider("opencodezen")
 
 
+@auth_app.command("asana", help="Store an Asana personal access token.")
+def auth_asana() -> None:
+    env_name, prompt_label = _require_provider_api_key_config("asana")
+    _configure_provider_token("asana", env_name, prompt_label)
+
+
+@auth_app.command("linear", help="Store a Linear API key.")
+def auth_linear() -> None:
+    env_name, prompt_label = _require_provider_api_key_config("linear")
+    _configure_provider_token("linear", env_name, prompt_label)
+
+
 @auth_app.command("disconnect", help="Disconnect a provider.")
 def auth_disconnect(provider: str) -> None:
     status = api.disconnect_auth(provider)
@@ -622,24 +680,13 @@ def auth_disconnect(provider: str) -> None:
 def auth_configure(
     provider: str,
 ) -> None:
-    env_names = {
-        "claude": "ANTHROPIC_API_KEY",
-        "codex": "OPENAI_API_KEY",
-        "opencodezen": "OPENCODE_API_KEY",
-    }
-    env_name = env_names.get(provider.lower())
-    if not env_name:
+    config = _provider_api_key_config(provider)
+    if config is None:
         typer.echo(f"Error: {provider} does not support API key auth", err=True)
         raise typer.Exit(1)
 
-    api_key = os.environ.get(env_name)
-    if not api_key:
-        typer.echo(f"Error: set {env_name} in your environment first", err=True)
-        raise typer.Exit(1)
-
-    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
-    status = api.configure_api_key(provider, api_key)
-    typer.echo(f"{_provider_label(status.provider)} switched to API key")
+    env_name, _ = config
+    _configure_provider_token(provider, env_name, f"{_provider_label(provider)} API key")
 
 
 @token_app.command("revoke", help="Revoke connection token hash prefixes or revoke all tokens.")

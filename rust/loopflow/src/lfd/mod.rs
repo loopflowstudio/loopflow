@@ -13,6 +13,7 @@ pub mod live_pr;
 pub mod machine_id;
 pub mod obs;
 pub mod output;
+pub mod pm;
 pub mod provider_auth;
 pub mod providers;
 pub mod queue;

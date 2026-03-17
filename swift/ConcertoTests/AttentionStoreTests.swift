@@ -14,7 +14,7 @@ struct AttentionStoreTests {
                 id: "1",
                 waveId: "wave",
                 runId: nil,
-                kind: .stepFailure,
+                kind: .algedonic,
                 status: .viewed,
                 title: "viewed",
                 summary: "",
@@ -25,7 +25,7 @@ struct AttentionStoreTests {
                 id: "2",
                 waveId: "wave",
                 runId: nil,
-                kind: .codeReview,
+                kind: .interactiveStep,
                 status: .surfaced,
                 title: "older review",
                 summary: "",
@@ -36,7 +36,7 @@ struct AttentionStoreTests {
                 id: "3",
                 waveId: "wave",
                 runId: nil,
-                kind: .codeReview,
+                kind: .interactiveStep,
                 status: .surfaced,
                 title: "newer review",
                 summary: "",
@@ -48,13 +48,13 @@ struct AttentionStoreTests {
         #expect(store.ordered.map(\.id) == ["2", "3", "1"])
     }
 
-    @Test("parseAttentionFromJSON decodes typed contexts")
+    @Test("parseAttentionFromJSON decodes typed contexts by payload shape")
     func parsesAttention() throws {
         let json: [String: Any] = [
             "id": "attn-1",
             "wave_id": "wave-1",
             "run_id": "run-1",
-            "kind": "queue_failure",
+            "kind": "algedonic",
             "status": "surfaced",
             "title": "Queue blocked",
             "summary": "Needs help",
@@ -66,7 +66,7 @@ struct AttentionStoreTests {
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .queueFailure)
+        #expect(item?.kind == .algedonic)
         if case .queueFailure(let context) = item?.context {
             #expect(context.conflictFiles == ["src/lib.rs"])
             #expect(context.error == "merge failed")

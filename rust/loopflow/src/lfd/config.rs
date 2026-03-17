@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ipnet::IpNet;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,16 +28,66 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 /// `mode` selects the auth strategy:
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
 /// - `"ci"`: validate against a pre-shared token
-/// - `"studio"`: registered with studio for discovery. Static token on
+/// - `"studio"`: registered with studio for discovery. Local token on
 ///   loopback, connection tokens validated locally for remote clients.
 ///   Connection tokens are session credentials: valid from mint until expiry
 ///   (1 hour) or revocation. lfd mints tokens and sends them to studio,
 ///   which distributes them to mobile clients. Validation is local (no
 ///   round-trip to studio on connect).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuthMode {
+    #[default]
+    Local,
+    Ci,
+    Studio,
+}
+
+impl AuthMode {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "local" => Ok(Self::Local),
+            "studio" => Ok(Self::Studio),
+            "ci" => Ok(Self::Ci),
+            "static" => {
+                warn!("auth mode `static` is deprecated; use `ci`");
+                Ok(Self::Ci)
+            }
+            other => {
+                bail!("invalid auth.mode value '{other}'; expected 'local', 'studio', or 'ci'")
+            }
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Ci => "ci",
+            Self::Studio => "studio",
+        }
+    }
+}
+
+impl std::fmt::Display for AuthMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AuthMode {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
-    #[serde(default = "default_auth_mode", alias = "provider")]
-    pub mode: String,
+    #[serde(default)]
+    pub mode: AuthMode,
     pub token: Option<SecretString>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
@@ -46,15 +96,11 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            mode: default_auth_mode(),
+            mode: AuthMode::default(),
             token: None,
             base_url: default_base_url(),
         }
     }
-}
-
-fn default_auth_mode() -> String {
-    "local".to_string()
 }
 
 fn default_base_url() -> String {
@@ -153,7 +199,7 @@ impl RawLfdConfig {
         if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                self.auth.mode = trimmed.to_string();
+                self.auth.mode = AuthMode::parse(trimmed)?;
             }
         }
 
@@ -347,9 +393,8 @@ impl RawLfdConfig {
         self.executor.limits.validate()?;
 
         let mut auth = self.auth;
-        auth.mode = canonicalize_auth_mode(&auth.mode)?;
-        if self.mode == Mode::Container && auth.mode == "local" && auth.token.is_none() {
-            auth.mode = "studio".to_string();
+        if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
+            auth.mode = AuthMode::Studio;
         }
 
         Ok(LfdConfig {
@@ -370,17 +415,6 @@ impl RawLfdConfig {
             http_security: self.http_security.resolve()?,
             output_log_retention_days: self.output_log_retention_days,
         })
-    }
-}
-
-fn canonicalize_auth_mode(mode: &str) -> Result<String> {
-    match mode.trim() {
-        "local" | "studio" | "ci" => Ok(mode.trim().to_string()),
-        "static" => {
-            warn!("auth mode `static` is deprecated; use `ci`");
-            Ok("ci".to_string())
-        }
-        other => bail!("invalid auth.mode value '{other}'; expected 'local', 'studio', or 'ci'"),
     }
 }
 
@@ -933,7 +967,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.mode, "studio");
+        assert_eq!(resolved.auth.mode, AuthMode::Studio);
     }
 
     #[test]
@@ -970,7 +1004,7 @@ auth:
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.auth.mode, "local");
+        assert_eq!(resolved.auth.mode, AuthMode::Local);
     }
 
     #[test]
@@ -1077,7 +1111,7 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.mode, "ci");
+        assert_eq!(resolved.auth.mode, AuthMode::Ci);
         assert_eq!(
             resolved
                 .auth
@@ -1148,18 +1182,17 @@ auth:
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("static alias resolves");
-        assert_eq!(resolved.auth.mode, "ci");
+        assert_eq!(resolved.auth.mode, AuthMode::Ci);
     }
 
     #[test]
-    fn auth_mode_legacy_provider_key_still_deserializes() {
+    fn legacy_auth_provider_key_is_rejected() {
         let raw = r#"
 auth:
   provider: studio
 "#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let resolved = config.resolve().expect("legacy provider key resolves");
-        assert_eq!(resolved.auth.mode, "studio");
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("provider key rejected");
+        assert!(err.to_string().contains("unknown field `provider`"));
     }
 
     #[test]

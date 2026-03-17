@@ -36,7 +36,7 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
 use self::auth::AuthProvider;
-use self::config::LfdConfig;
+use self::config::{AuthMode, LfdConfig};
 use self::registration::RegistrationClient;
 use self::store::{SharedStore, StorageConfig};
 use self::token_ledger::TokenLedger;
@@ -56,9 +56,9 @@ pub async fn setup_auth(
     Option<RegistrationClient>,
     Option<(String, String)>,
 ) {
-    match config.auth.mode.as_str() {
-        "local" => (setup_local_auth(), None, None),
-        "ci" => {
+    match config.auth.mode {
+        AuthMode::Local => (setup_local_auth(), None, None),
+        AuthMode::Ci => {
             let token = config
                 .auth
                 .token
@@ -73,12 +73,8 @@ pub async fn setup_auth(
             tracing::info!("ci token auth configured");
             (AuthProvider::Ci { token }, None, None)
         }
-        "studio" => {
+        AuthMode::Studio => {
             setup_studio_registration(config, store, storage_config, http_addr, cancel).await
-        }
-        other => {
-            tracing::error!(mode = other, "unknown auth mode");
-            std::process::exit(1);
         }
     }
 }

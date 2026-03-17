@@ -32,7 +32,7 @@ pub enum AuthProvider {
     Local { session_token: SecretString },
     /// CI mode: validate against a pre-shared token.
     Ci { token: SecretString },
-    /// Registered with studio. Static token on loopback, connection tokens
+    /// Registered with studio. Local token on loopback, connection tokens
     /// validated locally via ledger for remote clients.
     Studio {
         local_token: SecretString,

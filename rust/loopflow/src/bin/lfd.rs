@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::auth::AuthProvider;
-use loopflow::lfd::config::{LfdConfig, StorageType};
+use loopflow::lfd::config::{AuthMode, LfdConfig, StorageType};
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cancel = CancellationToken::new();
 
-    if requires_secure_bind(&lfd_config.auth.mode)
+    if requires_secure_bind(lfd_config.auth.mode)
         && !allow_insecure_bind
         && !http_addr.ip().is_loopback()
         && !is_tailscale_ip(http_addr.ip())
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let is_loopback = http_addr.ip().is_loopback();
     let (auth_provider, registration_client, registration_creds) =
-        if is_loopback && lfd_config.auth.mode == "local" {
+        if is_loopback && lfd_config.auth.mode == AuthMode::Local {
             // Loopback + local auth stays on startup session token behavior.
             (loopflow::lfd::setup_local_auth(), None, None)
         } else {
@@ -381,8 +381,8 @@ fn format_token_rotation_output(token: &str) -> String {
     )
 }
 
-fn requires_secure_bind(provider: &str) -> bool {
-    provider == "studio"
+fn requires_secure_bind(mode: AuthMode) -> bool {
+    matches!(mode, AuthMode::Studio)
 }
 
 fn is_tailscale_ip(ip: std::net::IpAddr) -> bool {
@@ -398,7 +398,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 mod tests {
     use super::{
         format_token_rotation_output, has_flag, is_tailscale_ip, requires_secure_bind,
-        storage_config_from_config, LfdConfig, StorageConfig, StorageType,
+        storage_config_from_config, AuthMode, LfdConfig, StorageConfig, StorageType,
     };
     use std::ffi::OsString;
     use std::net::IpAddr;
@@ -468,10 +468,9 @@ mod tests {
 
     #[test]
     fn secure_bind_required_for_studio() {
-        assert!(requires_secure_bind("studio"));
-        assert!(!requires_secure_bind("local"));
-        assert!(!requires_secure_bind("ci"));
-        assert!(!requires_secure_bind("static"));
+        assert!(requires_secure_bind(AuthMode::Studio));
+        assert!(!requires_secure_bind(AuthMode::Local));
+        assert!(!requires_secure_bind(AuthMode::Ci));
     }
 
     #[test]

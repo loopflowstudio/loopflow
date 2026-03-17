@@ -2,7 +2,7 @@
 
 **Finish line:** `LinearClient` implements `PmProvider` over the Linear GraphQL API. All trait methods work against a real Linear workspace.
 
-The shared PM seam, Asana reference client, Linear credential storage, and repo/global PM config parsing already exist. This item adds only the GraphQL transport, Linear-specific project/issue mapping, and the state lookup needed to make `complete_item` mean "done" in a real workspace.
+The shared PM seam (`PmProvider` trait in `pm/mod.rs`), Asana reference client (`pm/asana.rs`), Linear credential storage (`Provider::Linear` in `provider_auth.rs`, `lfq auth linear`), and repo/global PM config parsing (`LinearConfig` in `engine::config`) already exist on main. This item adds only the GraphQL transport, Linear-specific project/issue mapping, and the state lookup needed to make `complete_item` mean "done" in a real workspace.
 
 ## What to build
 
@@ -21,8 +21,8 @@ Rust GraphQL client using `reqwest` (raw POST to `https://api.linear.app/graphql
 
 ### Auth and config
 
-- `Authorization: {api_key}` header. Key comes from the existing encrypted provider-token store.
-- Read the default team from `.lf/config.yaml` `linear.team` through `engine::config` for project and issue creation paths. The config type and auth surfaces already exist; don't add new Linear-only plumbing.
+- `Authorization: {api_key}` header. Key comes from `Provider::Linear` in the encrypted provider-token store (`lfq auth linear` already stores it).
+- Read the default team from `.lf/config.yaml` `linear.team` through `LinearConfig` in `engine::config`. The config type, CLI auth command, and HTTP auth route already exist on main.
 - Keep remote IDs as strings even when Linear returns UUIDs or project keys.
 
 ### Markdown

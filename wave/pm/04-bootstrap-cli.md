@@ -2,7 +2,7 @@
 
 **Finish line:** `lf ops asana init` and `lf ops linear init` create and link projects in both directions. `lf ops asana/linear status` shows sync state.
 
-The file formats and auth/config plumbing are already settled: wave YAML uses `PmConfig`, roadmap frontmatter uses `RoadmapItemDocument` + `pm_id`, and `lfq auth asana|linear` already stores credentials. This item should wire real commands onto those existing shapes rather than creating another representation.
+The file formats, auth, and config plumbing are already on main: wave YAML uses `PmConfig` (`pm/mod.rs`), roadmap frontmatter uses `RoadmapItemDocument` + `pm_id`, `lfq auth asana|linear` stores credentials via `Provider::Asana`/`Provider::Linear`, and `AsanaConfig`/`LinearConfig` in `engine::config` carry workspace/team IDs. This item wires real commands onto those existing shapes rather than creating another representation.
 
 ## What to build
 

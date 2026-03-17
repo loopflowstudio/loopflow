@@ -34,6 +34,7 @@ Each mutation pulls one of these levers on a member wave:
 | **Step agents** | Different steps need different models | `step_agents:` in wave YAML |
 | **Triggers** | Wrong frequency or trigger sources | `triggers:` in wave YAML |
 | **Lifecycle** | Wave should pause, split, or combine | Create/delete/restructure wave dirs |
+| **Rhythm** | Wrong execution pattern for current phase | `rhythm:` and `beats:` in chord YAML |
 | **Silence** | Nothing compelling to build | Remove all items, wave watches its area |
 | **Wake** | Something compelling emerged in a silent wave's area | Add items to a silent wave |
 

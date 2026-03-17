@@ -191,6 +191,7 @@ impl RawLfdConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.mode = AuthMode::parse(trimmed)?;
+                self.auth.mode = AuthMode::parse(trimmed)?;
             }
         }
 
@@ -384,6 +385,8 @@ impl RawLfdConfig {
         self.executor.limits.validate()?;
 
         let mut auth = self.auth;
+        if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
+            auth.mode = AuthMode::Studio;
         if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
             auth.mode = AuthMode::Studio;
         }
@@ -1102,6 +1105,7 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
+        assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(
             resolved

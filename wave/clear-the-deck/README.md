@@ -8,7 +8,7 @@ Keep `lfd`'s deployment surface honest and small. This wave now owns the last ex
 
 The deployment and auth collapse is now the baseline: docs, compose defaults, and config resolution teach two shapes (`native` and `container`) and two auth modes (`local` and `studio`). Do not reopen that matrix while finishing this wave.
 
-The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` and `executor.sandbox` are tuning knobs inside that shape. If sandbox cannot show a concrete win over Docker, or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area, cut it from the blessed story and shrink the code around Docker.
+The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` and `executor.sandbox` are tuning knobs inside that shape. If sandbox cannot show a concrete win over Docker—or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area—cut it from the blessed story and shrink the code around Docker.
 
 Escape hatches are still allowed, but only as clearly experimental overrides. User-facing docs, compose defaults, and installed-service guidance should keep telling one Docker-backed container story.
 

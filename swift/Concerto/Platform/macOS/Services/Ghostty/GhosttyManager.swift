@@ -167,10 +167,6 @@ final class GhosttyManager: ObservableObject {
         }
     }
 
-    func destroySurface(_ surface: ghostty_surface_t) {
-        ghostty_surface_free(surface)
-    }
-
     func registerSurface(_ surface: ghostty_surface_t, sessionId: String) {
         surfaces[sessionId] = surface
     }

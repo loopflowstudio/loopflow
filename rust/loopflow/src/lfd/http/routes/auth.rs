@@ -131,10 +131,14 @@ pub async fn configure_credential_handler(
         .upsert_provider_token(&token)
         .await
         .map_err(map_store_error)?;
-    info!(
-        provider = %provider,
-        "switched to API key (pay-per-token billing)"
-    );
+    if provider.api_key_bills_per_token() {
+        info!(
+            provider = %provider,
+            "switched to API key (pay-per-token billing)"
+        );
+    } else {
+        info!(provider = %provider, "stored API key");
+    }
 
     let snapshot = state
         .provider_auth

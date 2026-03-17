@@ -1,42 +1,42 @@
 ## Try it!
 
 ```bash
-# Build and launch Concerto
-uv run python scripts/concerto-dev.py run-debug
+# New PM auth commands
+lfq auth asana
+lfq auth linear
+lfq auth status
 
-# Observe: daemon starts immediately at launch, sidebar shows "Starting daemon..." spinner
-# Observe: provider connections detect local Claude/Codex auth from credential files
+# Validation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test --all
+uv run pytest python/tests/
 ```
 
-If you have Claude Code authenticated (`~/.claude/.credentials.json` exists), the GitHub/Claude/Codex provider cards should show detected auth without clicking Connect.
-
-Run the new tests:
-```bash
-cargo test -p loopflow extract_codex_token_reads_nested  # Rust: nested Codex token
-swift test --package-path swift --filter CredentialSocket  # Swift: file credential reader
-```
+What to look for:
+- `lfq auth status` now includes **Asana** and **Linear**.
+- PM API-key providers no longer show misleading `pay-per-token` copy in CLI status/output.
+- Rust tests cover PM config parsing, wave `pm:` parsing, and roadmap `pm_id` round-tripping.
 
 ## Intent
 
-Phase 1 of the provider auth redesign. Instead of fake "Connect" buttons that open browser pages the app can't complete, detect credentials that already exist on disk. Instead of waiting for the user to trigger daemon startup, start eagerly at app launch.
-
-The connection handshake for bundled mode is also streamlined — localhost doesn't need TLS trust checks or repo discovery, so those phases are skipped.
+Lay the foundation for PM integration without jumping ahead to provider clients. This branch introduces the shared PM trait/types, makes PM config parseable in waves and global config, and wires Asana/Linear into the existing auth/token plumbing so later waves can build bootstrap/import/export flows on top of stable primitives.
 
 ## Assumptions
 
-- Claude Code stores credentials at `~/.claude/.credentials.json` with an `accessToken` field.
-- Codex CLI stores credentials at `~/.codex/auth.json` with either a top-level `access_token` or nested `tokens.access_token` (ChatGPT auth mode).
-- GitHub credentials are in macOS Keychain under the `gh:github.com` service.
+- Asana and Linear v1 setup is API-key/PAT based, not browser OAuth.
+- Existing encrypted provider-token storage is the right place to keep PM credentials.
+- Waves without PM configuration must continue to behave exactly as they do today.
 
 ## Key decisions
 
-- **Eager daemon start at app launch** rather than on-demand when a repo window opens. Trades a small background process for noticeably faster time-to-interactive.
-- **File reading over CLI shelling** for credential detection. Faster, no dependency on CLI binaries being installed.
-- **Removed orphan worktree sidebar section.** Low-value UI that added code complexity. Worktrees are managed in terminal.
-- **Bundled mode skips TLS and repo discovery phases.** Localhost with a generated token doesn't need either.
+- Added a dedicated `lfd::pm` module as the single source of truth for PM config/item types and roadmap frontmatter parsing.
+- Reused the existing provider auth service and `/auth` endpoints for Asana/Linear instead of creating PM-only credential APIs.
+- Kept PM API-key UX separate from metered model-provider UX: Claude/Codex/OpenCode Zen still warn about pay-per-token billing, Asana/Linear do not.
 
 ## Not included
 
-- Provider-specific auth flows (device code, terminal-assisted login) — Phase 2.
-- Typed `AuthStep` model replacing generic `AuthFlow` — Phase 2.
-- Provider provenance badges in the UI — deferred.
+- Asana/Linear API clients
+- Bootstrap `lf ops asana|linear ...` commands
+- `import-pm` / `export-pm`
+- ingest sync and PR lifecycle sync

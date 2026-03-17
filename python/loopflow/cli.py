@@ -50,6 +50,8 @@ _PROVIDER_API_KEY_CONFIG = {
     "linear": ("LINEAR_API_KEY", "Linear API key"),
 }
 
+_METERED_API_KEY_PROVIDERS = {"claude", "codex", "opencodezen"}
+
 
 def _wave_table(waves: list[Wave]) -> Table:
     table = Table(show_header=True, header_style="bold")
@@ -114,6 +116,10 @@ def _require_provider_api_key_config(provider: str) -> tuple[str, str]:
     if config is None:
         raise ValueError(f"provider does not support API key auth: {provider}")
     return config
+
+
+def _provider_api_key_bills_per_token(provider: str) -> bool:
+    return provider.lower() in _METERED_API_KEY_PROVIDERS
 
 
 def _repo_table(repos: list[Repo]) -> Table:
@@ -199,7 +205,8 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
             if ct == "apikey":
                 icon = "⚠"
                 status_label = "apikey"
-                details = f"{details} · pay-per-token"
+                if _provider_api_key_bills_per_token(status.provider):
+                    details = f"{details} · pay-per-token"
             else:
                 icon = "✓"
                 status_label = "oauth"
@@ -256,9 +263,13 @@ def _configure_provider_token(provider: str, env_name: str, prompt_label: str) -
         typer.echo(f"Error: {env_name} is empty", err=True)
         raise typer.Exit(1)
 
-    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
+    if _provider_api_key_bills_per_token(provider):
+        typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
     status = api.configure_api_key(provider, api_key)
-    typer.echo(f"{_provider_label(status.provider)} switched to API key")
+    if _provider_api_key_bills_per_token(status.provider):
+        typer.echo(f"{_provider_label(status.provider)} switched to API key")
+    else:
+        typer.echo(f"Stored {_provider_label(status.provider)} API key")
 
 
 def _format_tokens(value: int) -> str:

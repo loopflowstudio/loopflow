@@ -135,6 +135,20 @@ def test_auth_status_table_shows_new_pm_providers() -> None:
     assert "Linear" in rendered
 
 
+def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
+    statuses = [
+        AuthProviderStatus.model_validate(
+            {"provider": "asana", "status": "active", "credential_type": "apikey"}
+        )
+    ]
+    console = Console(record=True, width=220)
+    console.print(_auth_status_table(statuses))
+    rendered = console.export_text()
+
+    assert "Asana" in rendered
+    assert "pay-per-token" not in rendered
+
+
 def test_repo_table_shows_registration_columns() -> None:
     repo = Repo.model_validate(REPO_MINIMAL)
     console = Console(record=True, width=220)

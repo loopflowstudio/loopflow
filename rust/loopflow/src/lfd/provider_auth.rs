@@ -102,6 +102,10 @@ impl Provider {
         }
     }
 
+    pub fn api_key_bills_per_token(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex | Self::OpenCodeZen)
+    }
+
     /// Whether this provider supports CLI-based token refresh.
     /// Providers that only re-read files (Claude, OpenCodeZen) can't self-heal
     /// and require user re-authentication when tokens expire.
@@ -1925,6 +1929,16 @@ mod tests {
         assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
         assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
         assert!("gemini".parse::<Provider>().is_err());
+    }
+
+    #[test]
+    fn provider_api_key_billing_only_marks_metered_agent_providers() {
+        assert!(!Provider::GitHub.api_key_bills_per_token());
+        assert!(Provider::Claude.api_key_bills_per_token());
+        assert!(Provider::Codex.api_key_bills_per_token());
+        assert!(Provider::OpenCodeZen.api_key_bills_per_token());
+        assert!(!Provider::Asana.api_key_bills_per_token());
+        assert!(!Provider::Linear.api_key_bills_per_token());
     }
 
     #[test]

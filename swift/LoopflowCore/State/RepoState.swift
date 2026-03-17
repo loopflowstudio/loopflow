@@ -244,7 +244,6 @@ public final class RepoState {
         worktreeStore.removeAll()
         sessionStates.removeAll()
         waitingSessionIds.removeAll()
-        attentionStore.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         selectedWaveId = nil
         isLoading = false

@@ -5,6 +5,7 @@ use deadpool_postgres::{Manager, Pool};
 use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 
+use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
     PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -24,8 +25,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, Stor
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
     ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun,
-    WaveRunStatus, WaveStatus,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -1225,79 +1226,21 @@ impl PostgresStore {
 
     pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
         let wave_id = wave_id.clone();
-        let items = self
-            .list_attention_items(
-                Some(AttentionStatus::Surfaced),
-                Some(AttentionKind::QueueFailure),
-            )
-            .await?;
-        let mut blocks = Vec::new();
-        for item in items.into_iter().filter(|item| item.wave_id == wave_id) {
-            let Some(run_id) = item.run_id else {
-                continue;
-            };
-            let reason = item
-                .context
-                .get("reason")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("promotion_failed")
-                .parse::<QueueBlockReason>()
-                .map_err(StoreError::InvalidData)?;
-            let conflict_files = item
-                .context
-                .get("conflict_files")
-                .and_then(serde_json::Value::as_array)
-                .map(|files| {
-                    files
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let error = item
-                .context
-                .get("error")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string);
-            blocks.push(QueueBlock {
-                wave_id: item.wave_id,
-                run_id,
-                reason,
-                attempted_at: item.surfaced_at,
-                conflict_files,
-                error,
-            });
-        }
-        Ok(blocks)
+        self.list_attention_items(
+            Some(AttentionStatus::Surfaced),
+            Some(AttentionKind::QueueFailure),
+        )
+        .await?
+        .into_iter()
+        .filter(|item| item.wave_id == wave_id)
+        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
+        .filter_map(|result| result.transpose())
+        .collect()
     }
 
     pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        let item = AttentionItem {
-            id: crate::lfd::attention::attention_id(
-                AttentionKind::QueueFailure,
-                &block.wave_id,
-                Some(&block.run_id),
-            ),
-            wave_id: block.wave_id.clone(),
-            run_id: Some(block.run_id.clone()),
-            kind: AttentionKind::QueueFailure,
-            status: AttentionStatus::Surfaced,
-            title: format!("Queue blocked: {}", block.reason.as_str().replace('_', " ")),
-            summary: block
-                .error
-                .clone()
-                .unwrap_or_else(|| "Queue requires attention before it can advance.".to_string()),
-            context: serde_json::json!({
-                "reason": block.reason.as_str(),
-                "conflict_files": block.conflict_files,
-                "error": block.error,
-            }),
-            surfaced_at: block.attempted_at,
-            viewed_at: None,
-            resolved_at: None,
-        };
-        self.upsert_attention_item(&item).await
+        self.upsert_attention_item(&queue_block_attention_item(block))
+            .await
     }
 
     pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {

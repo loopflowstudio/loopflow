@@ -1228,16 +1228,17 @@ impl PostgresStore {
 
     pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
         let wave_id = wave_id.clone();
-        self.list_attention_items(
-            Some(AttentionStatus::Surfaced),
-            Some(AttentionKind::Algedonic),
-        )
-        .await?
-        .into_iter()
-        .filter(|item| item.wave_id == wave_id)
-        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
-        .filter_map(|result| result.transpose())
-        .collect()
+        let blocks = self
+            .list_attention_items(
+                Some(AttentionStatus::Surfaced),
+                Some(AttentionKind::QueueFailure),
+            )
+            .await?
+            .into_iter()
+            .filter(|item| item.wave_id == wave_id)
+            .filter_map(|item| queue_block_from_attention(&item))
+            .collect();
+        Ok(blocks)
     }
 
     pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
@@ -1247,7 +1248,7 @@ impl PostgresStore {
 
     pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
         let attention_id =
-            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+            crate::lfd::attention::attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
         let Some(mut item) = self.get_attention_item(&attention_id).await? else {
             return Ok(0);
         };

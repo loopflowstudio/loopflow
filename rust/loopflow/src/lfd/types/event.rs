@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::provider_auth::Provider;
-use crate::lfd::types::{agent::AgentStatus, AttentionItem};
+use crate::lfd::types::{agent::AgentStatus, AttentionItem, TerminalSession};
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,25 +72,6 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
-    // Secrets provider
-    #[serde(rename = "secrets.connected")]
-    SecretsConnected {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.synced")]
-    SecretsSynced {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.disconnected")]
-    SecretsDisconnected {
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Wave lifecycle
     WaveCreated {
         wave_id: LfdId,
@@ -125,6 +106,8 @@ pub enum Event {
         step: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<LfdId>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        terminal_session_id: Option<LfdId>,
         #[serde(skip_serializing_if = "Option::is_none")]
         initial_user_message: Option<String>,
         #[serde(with = "time::serde::rfc3339")]
@@ -207,6 +190,18 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
+    // Terminal sessions
+    TerminalSessionCreated {
+        session: TerminalSession,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    TerminalSessionUpdated {
+        session: TerminalSession,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+
     // Output
     OutputLine {
         wave_id: LfdId,
@@ -243,22 +238,16 @@ impl Event {
         }
     }
 
-    pub fn secrets_connected(provider: String) -> Self {
-        Self::SecretsConnected {
-            provider,
+    pub fn terminal_session_created(session: TerminalSession) -> Self {
+        Self::TerminalSessionCreated {
+            session,
             timestamp: Self::now(),
         }
     }
 
-    pub fn secrets_synced(provider: String) -> Self {
-        Self::SecretsSynced {
-            provider,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn secrets_disconnected() -> Self {
-        Self::SecretsDisconnected {
+    pub fn terminal_session_updated(session: TerminalSession) -> Self {
+        Self::TerminalSessionUpdated {
+            session,
             timestamp: Self::now(),
         }
     }
@@ -374,6 +363,7 @@ impl Event {
         wave_run_id: LfdId,
         step: String,
         session_id: Option<LfdId>,
+        terminal_session_id: Option<LfdId>,
         initial_user_message: Option<String>,
     ) -> Self {
         Self::WaveWaiting {
@@ -381,6 +371,7 @@ impl Event {
             wave_run_id,
             step,
             session_id,
+            terminal_session_id,
             initial_user_message,
             timestamp: Self::now(),
         }
@@ -485,6 +476,7 @@ mod tests {
             test_id("run-1"),
             "implement".to_string(),
             Some(test_id("session-1")),
+            Some(test_id("terminal-1")),
             Some("Start with user prompt".to_string()),
         );
         let json = serde_json::to_value(&event).unwrap();
@@ -493,6 +485,7 @@ mod tests {
         assert_eq!(json["wave_run_id"], "run-1");
         assert_eq!(json["step"], "implement");
         assert_eq!(json["session_id"], "session-1");
+        assert_eq!(json["terminal_session_id"], "terminal-1");
         assert_eq!(json["initial_user_message"], "Start with user prompt");
         assert!(json["timestamp"].is_string());
     }
@@ -505,9 +498,11 @@ mod tests {
             "implement".to_string(),
             None,
             None,
+            None,
         );
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("session_id").is_none());
+        assert!(json.get("terminal_session_id").is_none());
         assert!(json.get("initial_user_message").is_none());
     }
 
@@ -538,7 +533,7 @@ mod tests {
     fn event_roundtrips_through_json() {
         let id = || LfdId::new();
         let events = vec![
-            Event::wave_waiting(id(), id(), "step".to_string(), None, None),
+            Event::wave_waiting(id(), id(), "step".to_string(), None, None, None),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),

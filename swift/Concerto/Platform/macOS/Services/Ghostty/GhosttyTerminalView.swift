@@ -10,18 +10,21 @@ import GhosttyKit
 
 struct GhosttyTerminalView: View {
     let workingDirectory: String
-    let command: String?
+    let argv: [String]
+    let env: [String: String]
     let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
-        command: String? = nil,
+        argv: [String] = [],
+        env: [String: String] = [:],
         sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
-        self.command = command
+        self.argv = argv
+        self.env = env
         self.sessionId = sessionId
         self.manager = manager
     }
@@ -30,12 +33,22 @@ struct GhosttyTerminalView: View {
         GeometryReader { geo in
             GhosttyTerminalRepresentable(
                 workingDirectory: workingDirectory,
-                command: command,
+                command: shellCommand,
                 sessionId: sessionId,
                 size: geo.size,
                 manager: manager
             )
         }
+    }
+
+    private var shellCommand: String? {
+        let envPrefix = env
+            .sorted { $0.key < $1.key }
+            .map { key, value in "\(key)=\(shellEscape(value))" }
+            .joined(separator: " ")
+        let command = argv.map(shellEscape).joined(separator: " ")
+        let fullCommand = [envPrefix, command].filter { !$0.isEmpty }.joined(separator: " ")
+        return fullCommand.isEmpty ? nil : fullCommand
     }
 }
 
@@ -111,7 +124,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if let surface {
             // Register surface as active session for lifecycle callbacks
             if let sessionId {
-                manager.registerActiveSession(surface, sessionId: sessionId)
+                manager.registerSurface(surface, sessionId: sessionId)
             }
 
             updateContentScale()
@@ -565,23 +578,31 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 }
 
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
+}
+
 #else
 
 // Stub view when GhosttyKit is not available
 struct GhosttyTerminalView: View {
     let workingDirectory: String
-    let command: String?
+    let argv: [String]
+    let env: [String: String]
     let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
-        command: String? = nil,
+        argv: [String] = [],
+        env: [String: String] = [:],
         sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
-        self.command = command
+        self.argv = argv
+        self.env = env
         self.sessionId = sessionId
         self.manager = manager
     }
@@ -603,4 +624,3 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
-

@@ -26,10 +26,35 @@ public struct WaveEvent: Sendable {
     public let waveRunId: String?
     public let step: String?
     public let sessionId: String?
+    public let terminalSessionId: String?
     public let initialUserMessage: String?
     public let name: String?
     public let wave: Wave?
     public let timestamp: Date
+
+    public init(
+        type: WaveEventType,
+        waveId: String,
+        waveRunId: String? = nil,
+        step: String? = nil,
+        sessionId: String? = nil,
+        terminalSessionId: String? = nil,
+        initialUserMessage: String? = nil,
+        name: String? = nil,
+        wave: Wave? = nil,
+        timestamp: Date
+    ) {
+        self.type = type
+        self.waveId = waveId
+        self.waveRunId = waveRunId
+        self.step = step
+        self.sessionId = sessionId
+        self.terminalSessionId = terminalSessionId
+        self.initialUserMessage = initialUserMessage
+        self.name = name
+        self.wave = wave
+        self.timestamp = timestamp
+    }
 }
 
 public struct WorktreeEvent: Sendable {
@@ -61,6 +86,17 @@ public struct AttentionEvent: Sendable {
 
     public let type: EventType
     public let item: AttentionItem?
+    public let timestamp: Date
+}
+
+public struct TerminalSessionEvent: Sendable {
+    public enum EventType: String, Sendable {
+        case created
+        case updated
+    }
+
+    public let type: EventType
+    public let session: TerminalSession?
     public let timestamp: Date
 }
 
@@ -96,6 +132,7 @@ public enum LFDEvent: Sendable {
     case agentEnded(AgentEndedEvent)
     case output(OutputEvent)
     case attention(AttentionEvent)
+    case terminalSession(TerminalSessionEvent)
     case auth(AuthEvent)
     case secrets(SecretsEvent)
 }
@@ -478,6 +515,7 @@ public actor EventService {
                 waveRunId: json["wave_run_id"] as? String,
                 step: json["step"] as? String,
                 sessionId: json["session_id"] as? String,
+                terminalSessionId: json["terminal_session_id"] as? String,
                 initialUserMessage: json["initial_user_message"] as? String,
                 name: json["name"] as? String,
                 wave: wave,
@@ -529,6 +567,20 @@ public actor EventService {
             guard let eventType = typeMap[type] else { return nil }
             let item = (json["item"] as? [String: Any]).flatMap(WaveService.parseAttentionFromJSON)
             return .attention(AttentionEvent(type: eventType, item: item, timestamp: parseTimestamp(json["timestamp"])))
+        case "terminal_session_created", "terminal_session_updated":
+            let typeMap: [String: TerminalSessionEvent.EventType] = [
+                "terminal_session_created": .created,
+                "terminal_session_updated": .updated,
+            ]
+            guard let eventType = typeMap[type] else { return nil }
+            let session = (json["session"] as? [String: Any]).flatMap(WaveService.parseTerminalSessionFromJSON)
+            return .terminalSession(
+                TerminalSessionEvent(
+                    type: eventType,
+                    session: session,
+                    timestamp: parseTimestamp(json["timestamp"])
+                )
+            )
         case "auth.flow_started", "auth.connected", "auth.failed", "auth.disconnected":
             guard let authEvent = parseAuthEvent(type: type, json: json) else {
                 return nil

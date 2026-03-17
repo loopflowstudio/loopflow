@@ -185,7 +185,7 @@ struct PortfolioWindow: View {
         case .auth(let authEvent):
             authProviderStore.handleEvent(authEvent)
 
-        case .worktree, .agentStarted, .agentEnded, .output, .attention, .secrets:
+        case .worktree, .agentStarted, .agentEnded, .output, .attention, .terminalSession, .secrets:
             break
         }
     }

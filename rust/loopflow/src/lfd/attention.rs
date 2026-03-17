@@ -7,13 +7,8 @@ use crate::lfd::types::{
 use serde_json::json;
 use time::OffsetDateTime;
 
-/// Derive a stable attention ID from the underlying object.
-///
-/// Algedonic items reuse the run_id so the same block produces the same
-/// attention item across reconciliation cycles.  Interactive steps generate
-/// a fresh ID (the step invocation is the source of truth).
 pub fn attention_id(kind: AttentionKind, _wave_id: &LfdId, run_id: Option<&LfdId>) -> LfdId {
-    if matches!(kind, AttentionKind::Algedonic) {
+    if matches!(kind, AttentionKind::QueueFailure) {
         if let Some(run_id) = run_id {
             return run_id.clone();
         }
@@ -32,14 +27,13 @@ pub async fn create_code_review_attention(
         id,
         wave_id: wave.id().clone(),
         run_id: Some(run.id.clone()),
-        kind: AttentionKind::InteractiveStep,
+        kind: AttentionKind::CodeReview,
         status: AttentionStatus::Surfaced,
         title: format!("Review ready: {}", wave.name()),
         summary: pr
             .and_then(|pr| pr.title.clone())
             .unwrap_or_else(|| "Wave is ready for code review and shipping.".to_string()),
         context: json!({
-            "step": "code_review",
             "pr_url": pr.map(|pr| pr.url.clone()),
             "pr_number": pr.and_then(|pr| pr.number),
             "pr_title": pr.and_then(|pr| pr.title.clone()),
@@ -68,7 +62,7 @@ pub async fn create_step_failure_attention(
         id,
         wave_id: wave.id().clone(),
         run_id: Some(run.id.clone()),
-        kind: AttentionKind::Algedonic,
+        kind: AttentionKind::StepFailure,
         status: AttentionStatus::Surfaced,
         title: format!("Step failed: {step_name}"),
         summary: error.to_string(),
@@ -124,8 +118,11 @@ pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<Attent
             continue;
         }
         let should_resolve = match item.kind {
-            AttentionKind::Algedonic => should_resolve_algedonic(store, &item).await?,
-            AttentionKind::InteractiveStep => should_resolve_interactive_step(store, &item).await?,
+            AttentionKind::QueueFailure => false,
+            AttentionKind::CodeReview => should_resolve_code_review(store, &item).await?,
+            AttentionKind::StepFailure => should_resolve_step_failure(store, &item).await?,
+            AttentionKind::DesignReview => should_resolve_design_review(store, &item).await?,
+            AttentionKind::Calibration => should_resolve_calibration(store, &item).await?,
         };
         if should_resolve {
             item.status = AttentionStatus::Resolved;
@@ -139,30 +136,6 @@ pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<Attent
     }
 
     Ok(resolved)
-}
-
-/// Algedonic items with a queue block context never auto-resolve (explicit
-/// clearance required).  Step failures resolve when the run is superseded.
-async fn should_resolve_algedonic(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    if item.context.get("reason").is_some() {
-        return Ok(false);
-    }
-    should_resolve_step_failure(store, item).await
-}
-
-/// Interactive steps with PR context resolve when the PR merges/closes.
-/// Others resolve when the wave restarts with a different run.
-async fn should_resolve_interactive_step(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    if item.context.get("pr_url").is_some() {
-        return should_resolve_code_review(store, item).await;
-    }
-    should_resolve_when_wave_restarted(store, item).await
 }
 
 async fn should_resolve_code_review(
@@ -219,7 +192,7 @@ async fn should_resolve_step_failure(
     Ok(latest.is_some_and(|latest| latest.id != run.id))
 }
 
-async fn should_resolve_when_wave_restarted(
+async fn should_resolve_design_review(
     store: &SharedStore,
     item: &AttentionItem,
 ) -> Result<bool, String> {
@@ -227,30 +200,41 @@ async fn should_resolve_when_wave_restarted(
         .get_latest_wave_run(&item.wave_id)
         .await
         .map_err(|err| format!("get latest wave run failed: {err}"))?;
-    Ok(latest.is_some_and(|run| run_id_changed_from(&run, item.run_id.as_ref())))
+    Ok(latest.is_some_and(|run| run.run_id_changed_from(item.run_id.as_ref())))
 }
 
-fn run_id_changed_from(run: &WaveRun, previous_run_id: Option<&LfdId>) -> bool {
-    match previous_run_id {
-        Some(previous_run_id) => &run.id != previous_run_id,
-        None => true,
+async fn should_resolve_calibration(
+    store: &SharedStore,
+    item: &AttentionItem,
+) -> Result<bool, String> {
+    let latest = store
+        .get_latest_wave_run(&item.wave_id)
+        .await
+        .map_err(|err| format!("get latest wave run failed: {err}"))?;
+    Ok(latest.is_some_and(|run| run.run_id_changed_from(item.run_id.as_ref())))
+}
+
+trait RunResolutionExt {
+    fn run_id_changed_from(&self, old: Option<&LfdId>) -> bool;
+}
+
+impl RunResolutionExt for WaveRun {
+    fn run_id_changed_from(&self, old: Option<&LfdId>) -> bool {
+        match old {
+            Some(old) => &self.id != old,
+            None => true,
+        }
     }
 }
 
-pub fn queue_block_from_attention(item: &AttentionItem) -> Result<Option<QueueBlock>, String> {
-    let Some(run_id) = item.run_id.clone() else {
-        return Ok(None);
-    };
-    let Some(reason_str) = item
+pub fn queue_block_from_attention(item: &AttentionItem) -> Option<QueueBlock> {
+    let run_id = item.run_id.clone()?;
+    let reason = item
         .context
         .get("reason")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return Ok(None);
-    };
-    let reason = reason_str
+        .and_then(serde_json::Value::as_str)?
         .parse()
-        .map_err(|err| format!("invalid queue block reason: {err}"))?;
+        .ok()?;
     let conflict_files = item
         .context
         .get("conflict_files")
@@ -268,26 +252,26 @@ pub fn queue_block_from_attention(item: &AttentionItem) -> Result<Option<QueueBl
         .get("error")
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string);
-    Ok(Some(QueueBlock {
+    Some(QueueBlock {
         wave_id: item.wave_id.clone(),
         run_id,
         reason,
         attempted_at: item.surfaced_at,
         conflict_files,
         error,
-    }))
+    })
 }
 
 pub fn queue_block_attention_item(block: &QueueBlock) -> AttentionItem {
     AttentionItem {
         id: attention_id(
-            AttentionKind::Algedonic,
+            AttentionKind::QueueFailure,
             &block.wave_id,
             Some(&block.run_id),
         ),
         wave_id: block.wave_id.clone(),
         run_id: Some(block.run_id.clone()),
-        kind: AttentionKind::Algedonic,
+        kind: AttentionKind::QueueFailure,
         status: AttentionStatus::Surfaced,
         title: format!("Queue blocked: {}", block.reason.as_str().replace('_', " ")),
         summary: block
@@ -313,7 +297,7 @@ pub fn queue_block_attention_item_from_existing(
     let Some(existing) = existing else {
         return item;
     };
-    if existing.kind != AttentionKind::Algedonic || existing.status == AttentionStatus::Resolved {
+    if existing.kind != AttentionKind::QueueFailure || existing.status == AttentionStatus::Resolved {
         return item;
     }
     item.status = existing.status;
@@ -344,9 +328,7 @@ mod tests {
         };
 
         let item = queue_block_attention_item(&block);
-        let restored = queue_block_from_attention(&item)
-            .expect("queue block context parses")
-            .expect("queue block exists");
+        let restored = queue_block_from_attention(&item).expect("queue block exists");
 
         assert_eq!(restored.wave_id, block.wave_id);
         assert_eq!(restored.run_id, block.run_id);

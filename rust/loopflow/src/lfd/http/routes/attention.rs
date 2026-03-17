@@ -159,8 +159,11 @@ fn status_weight(status: AttentionStatus) -> u8 {
 
 fn kind_weight(kind: AttentionKind) -> u8 {
     match kind {
-        AttentionKind::InteractiveStep => 0,
-        AttentionKind::Algedonic => 1,
+        AttentionKind::Calibration => 0,
+        AttentionKind::CodeReview => 1,
+        AttentionKind::DesignReview => 2,
+        AttentionKind::StepFailure => 3,
+        AttentionKind::QueueFailure => 4,
     }
 }
 
@@ -181,7 +184,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::InteractiveStep,
+            kind: AttentionKind::CodeReview,
             status: AttentionStatus::Surfaced,
             title: "code".to_string(),
             summary: "code".to_string(),
@@ -194,7 +197,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::InteractiveStep,
+            kind: AttentionKind::Calibration,
             status: AttentionStatus::Viewed,
             title: "viewed".to_string(),
             summary: "viewed".to_string(),
@@ -207,7 +210,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::Algedonic,
+            kind: AttentionKind::QueueFailure,
             status: AttentionStatus::Resolved,
             title: "resolved".to_string(),
             summary: "resolved".to_string(),

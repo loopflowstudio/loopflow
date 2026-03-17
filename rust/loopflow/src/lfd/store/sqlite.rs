@@ -1226,15 +1226,16 @@ impl SqliteStore {
     }
 
     pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        self.list_attention_items(
-            Some(AttentionStatus::Surfaced),
-            Some(AttentionKind::Algedonic),
-        )?
-        .into_iter()
-        .filter(|item| &item.wave_id == wave_id)
-        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
-        .filter_map(|result| result.transpose())
-        .collect()
+        let blocks = self
+            .list_attention_items(
+                Some(AttentionStatus::Surfaced),
+                Some(AttentionKind::QueueFailure),
+            )?
+            .into_iter()
+            .filter(|item| &item.wave_id == wave_id)
+            .filter_map(|item| queue_block_from_attention(&item))
+            .collect();
+        Ok(blocks)
     }
 
     pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
@@ -1243,7 +1244,7 @@ impl SqliteStore {
 
     pub fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
         let id =
-            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+            crate::lfd::attention::attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
         let Some(mut item) = self.get_attention_item(&id)? else {
             return Ok(0);
         };

@@ -4,15 +4,15 @@ import LoopflowCore
 struct AttentionQueueView: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all
-        case steps
-        case alerts
+        case review
+        case failures
 
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .steps: return "Steps"
-            case .alerts: return "Alerts"
+            case .review: return "Review"
+            case .failures: return "Failures"
             }
         }
     }
@@ -27,10 +27,10 @@ struct AttentionQueueView: View {
             switch filter {
             case .all:
                 return true
-            case .steps:
-                return item.kind == .interactiveStep
-            case .alerts:
-                return item.kind == .algedonic
+            case .review:
+                return item.kind == .codeReview || item.kind == .designReview
+            case .failures:
+                return item.kind == .queueFailure || item.kind == .stepFailure
             }
         }
     }
@@ -161,8 +161,10 @@ private struct AttentionRow: View {
 
     private var color: Color {
         switch item.kind {
-        case .algedonic: return .statusError
-        case .interactiveStep: return .statusSuccess
+        case .queueFailure, .stepFailure: return .statusError
+        case .calibration: return .statusInfo
+        case .designReview: return .statusWarning
+        case .codeReview: return .statusSuccess
         }
     }
 
@@ -258,7 +260,7 @@ private struct AttentionDetailView: View {
     @ViewBuilder
     private func actionButtons(_ item: AttentionItem) -> some View {
         HStack(spacing: Spacing.sm) {
-            switch item.context {
+            switch item.kind {
             case .codeReview:
                 if let wave = repoState.waveStore.wave(for: item.waveId) {
                     Button("Ship") {
@@ -273,7 +275,7 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .queueFailure, .raw:
+            case .designReview, .calibration, .queueFailure:
                 EmptyView()
             }
         }

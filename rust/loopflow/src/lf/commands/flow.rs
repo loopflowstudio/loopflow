@@ -1,5 +1,7 @@
 use crate::engine::flow::expand_direction_names;
-use crate::engine::flow::{load_flow, load_step, OrPath};
+use crate::engine::flow::{
+    build_or_routing_suffix, load_or_path_items, load_step, read_or_verdict,
+};
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
@@ -7,7 +9,7 @@ use crate::engine::fork::{
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
-    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteOr, ConcreteStep, Flow, FlowAction,
+    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteOr, Flow, FlowAction,
 };
 use crate::lf::output::Colors;
 use crate::lf::Cli;
@@ -159,7 +161,7 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
     result?;
     commit_step_work(repo, router_name)?;
 
-    let selected = read_or_verdict(&verdict_path, or_def)?;
+    let selected = read_or_verdict(&verdict_path, or_def).map_err(anyhow::Error::msg)?;
 
     eprintln!(
         "{dim}[or]{reset} {bold}{selected}{reset} selected",
@@ -236,69 +238,6 @@ impl Drop for OrRouteStepGuard {
             );
         }
     }
-}
-
-fn build_or_routing_suffix(or_def: &ConcreteOr) -> String {
-    let mut suffix = String::from(
-        "## Routing\n\nAfter completing your analysis, choose one of these paths:\n\n",
-    );
-    let mut keys: Vec<&String> = or_def.paths.keys().collect();
-    keys.sort();
-    for key in &keys {
-        let path = &or_def.paths[*key];
-        suffix.push_str(&format!("- **{key}**: {}\n", path.description));
-    }
-    suffix.push_str(
-        "\nWrite your choice to `scratch/route-or.md`.\n\
-         First line must be exactly: `path: <key>`\n\
-         Then explain your reasoning briefly.\n",
-    );
-    suffix
-}
-
-fn read_or_verdict(verdict_path: &Path, or_def: &ConcreteOr) -> Result<String> {
-    let content = std::fs::read_to_string(verdict_path)
-        .with_context(|| format!("or verdict not found at {}", verdict_path.display()))?;
-
-    let first_line = content
-        .lines()
-        .next()
-        .ok_or_else(|| anyhow!("or verdict file is empty"))?;
-
-    let selected = first_line
-        .strip_prefix("path:")
-        .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            anyhow!("or verdict first line must start with 'path:', got: {first_line}")
-        })?;
-
-    if !or_def.paths.contains_key(&selected) {
-        let valid_keys: Vec<&String> = or_def.paths.keys().collect();
-        return Err(anyhow!(
-            "unknown or path: {selected}, expected one of: {valid_keys:?}"
-        ));
-    }
-
-    Ok(selected)
-}
-
-fn load_or_path_items(or_path: &OrPath, repo: &Path) -> Result<Vec<ConcreteItem>> {
-    if let Some(ref flow_name) = or_path.flow {
-        let flow = load_flow(flow_name, repo)?;
-        let items = expand_flow(&flow, repo)?;
-        return Ok(items);
-    }
-
-    if let Some(ref step_name) = or_path.step {
-        let step = load_step(step_name, repo)?;
-        return Ok(vec![ConcreteItem::Step(ConcreteStep {
-            step,
-            flow_parents: Vec::new(),
-        })]);
-    }
-
-    // Silence path — no flow or step, just a clean exit.
-    Ok(vec![])
 }
 
 #[derive(Debug, Clone)]

@@ -774,6 +774,67 @@ fn validate_or_paths(branch_def: &OrDef, repo: &Path) -> Result<(), LoadError> {
     Ok(())
 }
 
+pub fn build_or_routing_suffix(or_def: &ConcreteOr) -> String {
+    let mut suffix = String::from(
+        "## Routing\n\nAfter completing your analysis, choose one of these paths:\n\n",
+    );
+    let mut keys: Vec<&String> = or_def.paths.keys().collect();
+    keys.sort();
+    for key in &keys {
+        let path = &or_def.paths[*key];
+        suffix.push_str(&format!("- **{key}**: {}\n", path.description));
+    }
+    suffix.push_str(
+        "\nWrite your choice to `scratch/route-or.md`.\n\
+         First line must be exactly: `path: <key>`\n\
+         Then explain your reasoning briefly.\n",
+    );
+    suffix
+}
+
+pub fn read_or_verdict(verdict_path: &Path, or_def: &ConcreteOr) -> Result<String, String> {
+    let content = fs::read_to_string(verdict_path)
+        .map_err(|err| format!("or verdict not found at {}: {err}", verdict_path.display()))?;
+
+    let first_line = content
+        .lines()
+        .next()
+        .ok_or_else(|| "or verdict file is empty".to_string())?;
+
+    let selected = first_line
+        .strip_prefix("path:")
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| {
+            format!("or verdict first line must start with 'path:', got: {first_line}")
+        })?;
+
+    if !or_def.paths.contains_key(&selected) {
+        let valid_keys: Vec<&String> = or_def.paths.keys().collect();
+        return Err(format!(
+            "unknown or path: {selected}, expected one of: {valid_keys:?}"
+        ));
+    }
+
+    Ok(selected)
+}
+
+pub fn load_or_path_items(or_path: &OrPath, repo: &Path) -> Result<Vec<ConcreteItem>, LoadError> {
+    if let Some(ref flow_name) = or_path.flow {
+        let flow = load_flow(flow_name, repo)?;
+        return expand_flow(&flow, repo);
+    }
+
+    if let Some(ref step_name) = or_path.step {
+        let step = load_step(step_name, repo)?;
+        return Ok(vec![ConcreteItem::Step(ConcreteStep {
+            step,
+            flow_parents: Vec::new(),
+        })]);
+    }
+
+    Ok(Vec::new())
+}
+
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
     let name = value
         .as_str()
@@ -2033,6 +2094,88 @@ Be careful.
         assert!(
             matches!(action, FlowAction::Or { .. }),
             "expected Or action, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn build_or_routing_suffix_sorts_paths() {
+        let mut paths = HashMap::new();
+        paths.insert(
+            "zeta".to_string(),
+            OrPath {
+                flow: None,
+                step: None,
+                description: "Last".to_string(),
+                direction: Vec::new(),
+            },
+        );
+        paths.insert(
+            "alpha".to_string(),
+            OrPath {
+                flow: None,
+                step: None,
+                description: "First".to_string(),
+                direction: Vec::new(),
+            },
+        );
+
+        let suffix = build_or_routing_suffix(&ConcreteOr {
+            router: None,
+            paths,
+            flow_parents: Vec::new(),
+        });
+
+        let alpha = suffix.find("**alpha**").unwrap();
+        let zeta = suffix.find("**zeta**").unwrap();
+        assert!(alpha < zeta, "paths should be listed in sorted order");
+    }
+
+    #[test]
+    fn read_or_verdict_rejects_unknown_path() {
+        let tmp = TempDir::new().unwrap();
+        let verdict = tmp.path().join("route-or.md");
+        fs::write(&verdict, "path: missing\n").unwrap();
+
+        let mut paths = HashMap::new();
+        paths.insert(
+            "known".to_string(),
+            OrPath {
+                flow: None,
+                step: None,
+                description: "Known".to_string(),
+                direction: Vec::new(),
+            },
+        );
+        let err = read_or_verdict(
+            &verdict,
+            &ConcreteOr {
+                router: None,
+                paths,
+                flow_parents: Vec::new(),
+            },
+        )
+        .expect_err("unknown path should fail");
+
+        assert!(err.contains("unknown or path"));
+    }
+
+    #[test]
+    fn load_or_path_items_allows_silence_path() {
+        let tmp = TempDir::new().unwrap();
+        let items = load_or_path_items(
+            &OrPath {
+                flow: None,
+                step: None,
+                description: "Silence".to_string(),
+                direction: Vec::new(),
+            },
+            tmp.path(),
+        )
+        .unwrap();
+
+        assert!(
+            items.is_empty(),
+            "silence path should not expand into items"
         );
     }
 

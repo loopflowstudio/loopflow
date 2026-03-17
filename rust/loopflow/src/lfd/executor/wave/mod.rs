@@ -16,8 +16,8 @@ use crate::engine::agent::build_agent_command;
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
-    expand_flow, load_flow, load_step, next_action, ConcreteItem, ConcreteOr, ConcreteStep,
-    FlowAction, OrPath, Step,
+    build_or_routing_suffix, expand_flow, load_flow, load_or_path_items, load_step, next_action,
+    read_or_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::attention::{create_code_review_attention, create_step_failure_attention};
@@ -1278,69 +1278,6 @@ fn interactive_session_config(
 // -----------------------------------------------------------------------------
 // Or-routing helpers
 // -----------------------------------------------------------------------------
-
-fn build_or_routing_suffix(or_def: &ConcreteOr) -> String {
-    let mut suffix = String::from(
-        "## Routing\n\nAfter completing your analysis, choose one of these paths:\n\n",
-    );
-    let mut keys: Vec<&String> = or_def.paths.keys().collect();
-    keys.sort();
-    for key in &keys {
-        let path = &or_def.paths[*key];
-        suffix.push_str(&format!("- **{key}**: {}\n", path.description));
-    }
-    suffix.push_str(
-        "\nWrite your choice to `scratch/route-or.md`.\n\
-         First line must be exactly: `path: <key>`\n\
-         Then explain your reasoning briefly.\n",
-    );
-    suffix
-}
-
-fn read_or_verdict(verdict_path: &Path, or_def: &ConcreteOr) -> Result<String, String> {
-    let content = std::fs::read_to_string(verdict_path)
-        .map_err(|err| format!("or verdict not found at {}: {err}", verdict_path.display()))?;
-
-    let first_line = content
-        .lines()
-        .next()
-        .ok_or_else(|| "or verdict file is empty".to_string())?;
-
-    let selected = first_line
-        .strip_prefix("path:")
-        .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            format!("or verdict first line must start with 'path:', got: {first_line}")
-        })?;
-
-    if !or_def.paths.contains_key(&selected) {
-        let valid_keys: Vec<&String> = or_def.paths.keys().collect();
-        return Err(format!(
-            "unknown or path: {selected}, expected one of: {valid_keys:?}"
-        ));
-    }
-
-    Ok(selected)
-}
-
-fn load_or_path_items(or_path: &OrPath, repo: &Path) -> Result<Vec<ConcreteItem>> {
-    if let Some(ref flow_name) = or_path.flow {
-        let flow = load_flow(flow_name, repo)?;
-        let items = expand_flow(&flow, repo)?;
-        return Ok(items);
-    }
-
-    if let Some(ref step_name) = or_path.step {
-        let step = load_step(step_name, repo)?;
-        return Ok(vec![ConcreteItem::Step(ConcreteStep {
-            step,
-            flow_parents: Vec::new(),
-        })]);
-    }
-
-    // Silence path — no flow or step, just a clean exit.
-    Ok(vec![])
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct OrphanedForkCleanup {

@@ -30,7 +30,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | Run autonomous waves | `lf init` → `lfd install` |
 | Use the visual app (macOS) | Download Concerto (handles the rest) |
 | Connect from iPhone | Concerto iOS → discovers your lfd |
-| Set up remote dev server | `lfd install --container` on server |
+| Set up remote dev server | `mode: container` in `~/.lf/lfd.yaml`, then `lfd install` |
 
 ---
 
@@ -189,10 +189,14 @@ You can draft wave content with `lf design` locally, or write it by hand. Once `
 Run agents while you sleep. Install `lfd` on a server and your waves run 24/7.
 
 ```bash
-lfd install --container    # Docker mode for isolation
+mkdir -p ~/.lf
+cat > ~/.lf/lfd.yaml <<'YAML'
+mode: container
+YAML
+lfd install
 ```
 
-Concerto mobile connects to remote `lfd` — monitor and manage waves from your phone. `lfq` works the same way over the network.
+Concerto mobile connects to remote `lfd` — monitor and manage waves from your phone. `lfq` works the same way over the network. See `deploy/README.md` for the Docker + TLS recipe.
 
 Auth connects your providers:
 

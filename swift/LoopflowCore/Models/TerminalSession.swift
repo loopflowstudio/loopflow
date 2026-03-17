@@ -68,32 +68,17 @@ public struct TerminalSession: Sendable, Identifiable, Codable, Equatable {
 }
 
 public struct TerminalLaunchSpec: Sendable, Equatable {
-    public let sessionId: String
-    public let waveId: String
-    public let step: String
-    public let agent: String
     public let cwd: String
     public let argv: [String]
     public let env: [String: String]
-    public let completionToken: String
 
     public init(
-        sessionId: String,
-        waveId: String,
-        step: String,
-        agent: String,
         cwd: String,
         argv: [String],
-        env: [String: String],
-        completionToken: String
+        env: [String: String]
     ) {
-        self.sessionId = sessionId
-        self.waveId = waveId
-        self.step = step
-        self.agent = agent
         self.cwd = cwd
         self.argv = argv
         self.env = env
-        self.completionToken = completionToken
     }
 }

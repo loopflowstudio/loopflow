@@ -615,7 +615,10 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
 
 
-@auth_app.command("configure", help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.")
+@auth_app.command(
+    "configure",
+    help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.",
+)
 def auth_configure(
     provider: str,
 ) -> None:
@@ -634,7 +637,7 @@ def auth_configure(
         typer.echo(f"Error: set {env_name} in your environment first", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"API key auth bills per token. OAuth uses your existing subscription.")
+    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
     status = api.configure_api_key(provider, api_key)
     typer.echo(f"{_provider_label(status.provider)} switched to API key")
 

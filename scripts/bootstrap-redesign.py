@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import loopflow.api as loopflow
 
 REPO = "."
@@ -15,21 +17,18 @@ WAVE_NAMES = [
 ]
 
 
-def ensure_wave(name: str) -> None:
-    existing = loopflow.wave(name)
-    if existing is not None:
-        print(f"{name}: exists ({existing.id})")
-        return
+def _ensure_wave(name: str) -> Any:
+    wave = loopflow.wave(name)
+    if wave is None:
+        wave = loopflow.create_wave(name, REPO)
+        print(f"{name}: created ({wave.id})")
+        return wave
 
-    created = loopflow.create_wave(name, REPO)
-    print(f"{name}: created ({created.id})")
+    print(f"{name}: exists ({wave.id})")
+    return wave
 
 
-def print_summary() -> None:
-    redesign = loopflow.wave("redesign")
-    if redesign is None:
-        raise RuntimeError("bootstrap created no redesign wave")
-
+def _print_summary(redesign: Any) -> None:
     print("\nredesign")
     print(f"  id: {redesign.id}")
     print(f"  flow: {redesign.primary_flow}")
@@ -38,9 +37,16 @@ def print_summary() -> None:
 
 
 def main() -> int:
+    redesign = None
     for name in WAVE_NAMES:
-        ensure_wave(name)
-    print_summary()
+        wave = _ensure_wave(name)
+        if name == "redesign":
+            redesign = wave
+
+    if redesign is None:
+        raise RuntimeError("bootstrap created no redesign wave")
+
+    _print_summary(redesign)
     return 0
 
 

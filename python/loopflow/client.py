@@ -27,6 +27,10 @@ from .models import (
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+def _compact_dict(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
 def _resolve_base_url() -> str:
     url = os.environ.get("LFD_URL")
     if url:
@@ -145,16 +149,17 @@ class Client:
         from_: Optional[str] = None,
         to_: Optional[str] = None,
     ) -> UsageSummary:
-        optional = {
-            "wave": wave,
-            "flow": flow,
-            "step": step,
-            "model": model,
-            "source": source,
-            "from": from_,
-            "to": to_,
+        params = {
+            "group_by": group_by,
+            **_compact_dict(
+                wave=wave,
+                flow=flow,
+                step=step,
+                model=model,
+                source=source,
+                **{"from": from_, "to": to_},
+            ),
         }
-        params = {"group_by": group_by, **{k: v for k, v in optional.items() if v is not None}}
         payload = self._request_json("GET", "/v0/usage/summary", params=params)
         return UsageSummary.model_validate(payload)
 
@@ -176,13 +181,11 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
     ) -> Wave:
-        body: dict[str, Any] = {"repo": repo, "name": name}
-        if flow is not None:
-            body["flow"] = flow
-        if direction is not None:
-            body["direction"] = direction
-        if area is not None:
-            body["area"] = area
+        body = {
+            "repo": repo,
+            "name": name,
+            **_compact_dict(flow=flow, direction=direction, area=area),
+        }
         payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)
 
@@ -194,15 +197,7 @@ class Client:
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
     ) -> Wave:
-        body: dict[str, Any] = {}
-        if flow is not None:
-            body["flow"] = flow
-        if direction is not None:
-            body["direction"] = direction
-        if area is not None:
-            body["area"] = area
-        if status is not None:
-            body["status"] = status
+        body = _compact_dict(flow=flow, direction=direction, area=area, status=status)
         payload = self._request_json("PATCH", f"/v0/waves/{name_or_id}", json=body)
         return Wave.model_validate(payload)
 
@@ -247,13 +242,7 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {}
-        if flow is not None:
-            body["flow"] = flow
-        if direction is not None:
-            body["direction"] = direction
-        if area is not None:
-            body["area"] = area
+        body = _compact_dict(flow=flow, direction=direction, area=area)
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
     def add_trigger(
@@ -264,13 +253,14 @@ class Client:
         source_wave_id: Optional[str] = None,
         max_iterations: Optional[int] = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"signal": signal}
-        if flow is not None:
-            body["flow"] = flow
-        if source_wave_id is not None:
-            body["source_wave_id"] = source_wave_id
-        if max_iterations is not None:
-            body["max_iterations"] = max_iterations
+        body = {
+            "signal": signal,
+            **_compact_dict(
+                flow=flow,
+                source_wave_id=source_wave_id,
+                max_iterations=max_iterations,
+            ),
+        }
         return self._request_json("POST", f"/v0/waves/{name_or_id}/triggers", json=body)
 
     def remove_trigger(self, name_or_id: str, trigger_id: str) -> dict[str, Any]:
@@ -287,15 +277,12 @@ class Client:
         create_pr: Optional[bool] = None,
         worktree: Optional[str] = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {}
-        if strict is not None:
-            body["strict"] = strict
-        if local is not None:
-            body["local"] = local
-        if create_pr is not None:
-            body["create_pr"] = create_pr
-        if worktree is not None:
-            body["worktree"] = worktree
+        body = _compact_dict(
+            strict=strict,
+            local=local,
+            create_pr=create_pr,
+            worktree=worktree,
+        )
         return self._request_json("POST", f"/v0/waves/{name_or_id}/land", json=body)
 
     def next_wave(self, name_or_id: str) -> dict[str, Any]:
@@ -307,13 +294,11 @@ class Client:
         repo: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[WaveRun]:
-        params: dict[str, str] = {}
-        if wave_id:
-            params["wave_id"] = wave_id
-        if repo:
-            params["repo"] = repo
-        if limit is not None:
-            params["limit"] = str(limit)
+        params = _compact_dict(
+            wave_id=wave_id,
+            repo=repo,
+            limit=str(limit) if limit is not None else None,
+        )
         payload = self._request_json("GET", "/v0/wave_runs", params=params)
         return self._parse_model_list(payload, WaveRun)
 
@@ -369,9 +354,7 @@ class Client:
         after_seq: Optional[int] = None,
         timeout: float = 60.0,
     ) -> Iterator[SessionEventEnvelope]:
-        params: dict[str, str] = {}
-        if after_seq is not None:
-            params["after_seq"] = str(after_seq)
+        params = _compact_dict(after_seq=str(after_seq) if after_seq is not None else None)
 
         try:
             with self._client.stream(

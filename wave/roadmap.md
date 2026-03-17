@@ -36,7 +36,7 @@ it built.
 
 Build enough to run the first tend cycle. Uses existing flows.
 
-- **chord-model/02** — tend flow steps (scan-waves, assess, propose, apply)
+- **chord-model/02** — tend flow steps (scan-waves, assess, draft-chord, review-chord, apply-chord)
 - **signals/01** — block taxonomy (types, data model, API)
 - **chord-model/03** — Letta integration (stand up, wire into tend)
 
@@ -73,6 +73,78 @@ The default chord absorbs the existing five waves (foundation,
 trust, context, concerto, scale) and restructures them through
 tend cycles. Not manual reshuffling — the chord proposes, the
 human reviews.
+
+---
+
+## Rhythm
+
+A chord's execution alternates between tending and building.
+
+```
+tend (1 global update)
+  scan-waves → assess → branch:
+    chord: draft-chord → review-chord → apply-chord
+    reorg: update-wave (coherence pass, no human review)
+
+build × N (parallel, one per active wave)
+  ingest → branch:
+    build: kickoff → review-design → build → review → land
+    reorg: update-wave (coherence pass, no human review)
+```
+
+One tend cycle, then N parallel build cycles — one per member wave that
+has compelling work. Silent waves don't participate in the build round.
+The chord naturally focuses on the work that matters most.
+
+This is recursive. A chord whose members include sub-chords:
+
+```
+tend (top-level chord)
+  └── apply mutations to sub-chords and leaf waves
+
+build (sub-chord A)           build (sub-chord B)        build (leaf wave C)
+  └── tend (own update)         └── tend (own update)      └── ingest → build
+      └── build × M                └── build × K
+```
+
+The ratio — 1 tend per N builds — is the pulse. Tend observes what
+built, adjusts, then build runs again. The chord doesn't micromanage;
+it sets direction and checks in.
+
+### Beats
+
+Not every cycle produces a PR. A beat is the smallest unit of wave
+activity:
+
+- **Build beat**: ingest finds a compelling item, full flow runs, PR lands
+- **Reorg beat**: ingest finds nothing compelling, or items are stale —
+  wave reorganizes its own plans, updates item coherence, possibly goes
+  silent. Single step, no human review.
+- **Tend beat**: scan + assess finds pressure points, chord is composed
+  and reviewed. Or: nothing to tend, waves reorganize internally.
+
+Reorg beats are how waves maintain their own coherence between tend
+cycles. The codebase evolves — other waves ship code, designs diverge,
+value diminishes. A wave that notices its items are stale and
+reorganizes itself is doing useful work, even though no code ships.
+
+### Silence
+
+Most waves in a large chord should be silent at any given time.
+
+A silent wave has no items (or its items didn't survive coherence
+review). It keeps its README — vision, strategy, goals, risks — as
+its identity and sensor on the area. Silence signals two things:
+
+- To the chord: "nothing compelling to build right now"
+- To the human: "add items here if you want work in this area"
+
+Silence shrinks the blocking queue. Fewer waves competing for review
+means faster throughput on the waves that are actually building. A
+chord that keeps all waves active simultaneously drowns the user.
+
+The chord can wake a silent wave (add items) or close it entirely.
+The human can seed any silent wave's backlog directly.
 
 ---
 
@@ -116,6 +188,9 @@ When the chord (or human) needs to change how a wave operates:
 | Step agents | Different steps need different models |
 | Triggers | Wrong frequency or trigger sources |
 | Lifecycle | Pause, split, combine, or prune |
+| Rhythm | Wrong execution pattern — change beat count, edit the grid |
+| Silence | Nothing compelling to build — remove items, wave watches its area |
+| Wake | Something compelling emerged — add items to a silent wave |
 
 ---
 

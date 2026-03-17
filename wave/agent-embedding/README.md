@@ -13,6 +13,7 @@ Claude Code, Cursor, Windsurf, OpenCode — all ahead on chat polish, all iterat
 - Wave configuration and monitoring
 - Calibration view for tend flow trajectory review
 - Window composition — native Swift alternative to tmux, mixing terminals with native diff viewers, chat views, wave editors
+- Beat synthesizer — sequencer grid for programming chord rhythms
 - Chord-wave graph view — hierarchical visualization of waves-over-waves relationships, derived from area paths
 
 When OpenCode ships a desktop app or native components, evaluate adopting them for the chat view. Until then, Ghostty terminal embedding.

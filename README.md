@@ -185,7 +185,7 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `scan` | scan/scan-report → scan/scan-plan → build |
 
-### Forks
+### Forks (and)
 
 Forks run a step in parallel with different directions, then synthesize the results.
 
@@ -195,9 +195,9 @@ lf wave-reduce    # runs reduce 3x with different perspectives
 
 `wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.
 
-### Branches
+### Branches (or)
 
-Branches route a flow based on an agent's assessment of the current state.
+Branches route a flow based on an agent's assessment of the current state. One path runs.
 
 ```yaml
 # flow: qa-deploy

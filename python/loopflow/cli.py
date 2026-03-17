@@ -61,6 +61,29 @@ def _wave_table(waves: list[Wave]) -> Table:
     return table
 
 
+def _format_wave_value(value: object) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else "-"
+    return str(value)
+
+
+def _wave_detail_table(wave: Wave) -> Table:
+    table = Table(show_header=False)
+    rows = [
+        ("id", wave.id),
+        ("name", wave.name),
+        ("status", wave.status),
+        ("flow", wave.primary_flow),
+        ("repo", wave.repo),
+        ("iteration", wave.iteration),
+        ("direction", wave.direction),
+        ("area", wave.area),
+    ]
+    for key, value in rows:
+        table.add_row(key, _format_wave_value(value))
+    return table
+
+
 def _provider_label(provider: str) -> str:
     labels = {
         "github": "GitHub",
@@ -431,12 +454,7 @@ def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json",
         typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
         return
 
-    data = wave.model_dump()
-    table = Table(show_header=False)
-    for key in ("id", "name", "status", "flow", "repo", "iteration"):
-        if key in data:
-            table.add_row(key, str(data[key]))
-    console.print(table)
+    console.print(_wave_detail_table(wave))
     if wave.active_run:
         active = Table(title="active_run", show_header=False)
         active.add_row("id", wave.active_run.id)
@@ -597,7 +615,10 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
 
 
-@auth_app.command("configure", help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.")
+@auth_app.command(
+    "configure",
+    help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.",
+)
 def auth_configure(
     provider: str,
 ) -> None:
@@ -616,7 +637,7 @@ def auth_configure(
         typer.echo(f"Error: set {env_name} in your environment first", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"API key auth bills per token. OAuth uses your existing subscription.")
+    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
     status = api.configure_api_key(provider, api_key)
     typer.echo(f"{_provider_label(status.provider)} switched to API key")
 

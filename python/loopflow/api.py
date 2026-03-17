@@ -7,7 +7,6 @@ from .client import Client
 from .models import (
     AuthFlow,
     AuthProviderStatus,
-    Chord,
     CommitEntry,
     CostRates,
     ModelInfo,
@@ -17,8 +16,8 @@ from .models import (
     Session,
     SessionConfig,
     SessionEventEnvelope,
-    Trigger,
     TokenTotals,
+    Trigger,
     UsageSummary,
     UsageSummaryGroup,
     Wave,
@@ -161,38 +160,6 @@ def list_parents(owner: str, repo: str) -> list[Repo]:
     return _client().list_parents(owner, repo)
 
 
-def create_chord(name: str) -> Chord:
-    return _client().create_chord(name)
-
-
-def list_chords() -> list[Chord]:
-    return _client().list_chords()
-
-
-def get_chord(chord_id: str) -> Optional[Chord]:
-    return _client().get_chord(chord_id)
-
-
-def delete_chord(chord_id: str) -> None:
-    _client().delete_chord(chord_id)
-
-
-def add_chord_member(chord_id: str, wave_id: str) -> None:
-    _client().add_chord_member(chord_id, wave_id)
-
-
-def remove_chord_member(chord_id: str, wave_id: str) -> None:
-    _client().remove_chord_member(chord_id, wave_id)
-
-
-def list_chord_members(chord_id: str) -> list[Wave]:
-    return _client().list_chord_members(chord_id)
-
-
-def list_wave_chords(wave_id: str) -> list[Chord]:
-    return _client().list_wave_chords(wave_id)
-
-
 def run_wave(
     name_or_id: str,
     flow: Optional[str] = None,
@@ -299,7 +266,6 @@ __all__ = [
     "Client",
     "AuthFlow",
     "AuthProviderStatus",
-    "Chord",
     "CommitEntry",
     "CostRates",
     "ModelInfo",
@@ -322,6 +288,7 @@ __all__ = [
     "disconnect_auth",
     "configure_api_key",
     "providers",
+    "revoke_connection_tokens",
     "usage_summary",
     "waves",
     "wave",
@@ -335,14 +302,6 @@ __all__ = [
     "remove_child",
     "list_children",
     "list_parents",
-    "create_chord",
-    "list_chords",
-    "get_chord",
-    "delete_chord",
-    "add_chord_member",
-    "remove_chord_member",
-    "list_chord_members",
-    "list_wave_chords",
     "run_wave",
     "add_trigger",
     "remove_trigger",

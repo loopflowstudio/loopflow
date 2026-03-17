@@ -5,9 +5,9 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId,
-    Summary, Trigger, Wave, WaveRun, WaveRunStackStatus,
+    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
+    PendingActivation, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave,
+    WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -125,10 +125,6 @@ impl Store {
     }
 
     pub fn sessions(&self) -> &dyn SessionStore {
-        self
-    }
-
-    pub fn chords(&self) -> &dyn ChordStore {
         self
     }
 
@@ -351,10 +347,6 @@ impl Store {
         WaveStateStore::create_chat_message(self, message).await
     }
 
-    pub async fn create_chord(&self, name: &str) -> StoreResult<Chord> {
-        ChordStore::create_chord(self, name).await
-    }
-
     pub async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
         RepoStore::list_repos(self).await
     }
@@ -393,34 +385,6 @@ impl Store {
 
     pub async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
         RepoStore::parents(self, repo_id).await
-    }
-
-    pub async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>> {
-        ChordStore::get_chord(self, chord_id).await
-    }
-
-    pub async fn list_chords(&self) -> StoreResult<Vec<Chord>> {
-        ChordStore::list_chords(self).await
-    }
-
-    pub async fn delete_chord(&self, chord_id: &LfdId) -> StoreResult<()> {
-        ChordStore::delete_chord(self, chord_id).await
-    }
-
-    pub async fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        ChordStore::add_chord_member(self, chord_id, wave_id).await
-    }
-
-    pub async fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        ChordStore::remove_chord_member(self, chord_id, wave_id).await
-    }
-
-    pub async fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>> {
-        ChordStore::list_chord_members(self, chord_id).await
-    }
-
-    pub async fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>> {
-        ChordStore::list_chords_for_wave(self, wave_id).await
     }
 
     pub async fn list_fork_runs(
@@ -689,18 +653,6 @@ pub trait RepoStore: Send + Sync {
     async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()>;
     async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
     async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
-}
-
-#[async_trait::async_trait]
-pub trait ChordStore: Send + Sync {
-    async fn create_chord(&self, name: &str) -> StoreResult<Chord>;
-    async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>>;
-    async fn list_chords(&self) -> StoreResult<Vec<Chord>>;
-    async fn delete_chord(&self, chord_id: &LfdId) -> StoreResult<()>;
-    async fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()>;
-    async fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()>;
-    async fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>>;
-    async fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>>;
 }
 
 #[async_trait::async_trait]
@@ -1464,94 +1416,6 @@ impl RepoStore for Store {
 }
 
 #[async_trait::async_trait]
-impl ChordStore for Store {
-    async fn create_chord(&self, name: &str) -> StoreResult<Chord> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let name = name.to_string();
-                run_sqlite(store, move |store| store.create_chord(&name)).await
-            }
-            StoreBackend::Postgres(store) => store.create_chord(name).await,
-        }
-    }
-
-    async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let chord_id = chord_id.clone();
-                run_sqlite(store, move |store| store.get_chord(&chord_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_chord(chord_id).await,
-        }
-    }
-
-    async fn list_chords(&self) -> StoreResult<Vec<Chord>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_chords()).await,
-            StoreBackend::Postgres(store) => store.list_chords().await,
-        }
-    }
-
-    async fn delete_chord(&self, chord_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let chord_id = chord_id.clone();
-                run_sqlite(store, move |store| store.delete_chord(&chord_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_chord(chord_id).await,
-        }
-    }
-
-    async fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let chord_id = chord_id.clone();
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.add_chord_member(&chord_id, &wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.add_chord_member(chord_id, wave_id).await,
-        }
-    }
-
-    async fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let chord_id = chord_id.clone();
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.remove_chord_member(&chord_id, &wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.remove_chord_member(chord_id, wave_id).await,
-        }
-    }
-
-    async fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let chord_id = chord_id.clone();
-                run_sqlite(store, move |store| store.list_chord_members(&chord_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_chord_members(chord_id).await,
-        }
-    }
-
-    async fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_chords_for_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_chords_for_wave(wave_id).await,
-        }
-    }
-}
-
-#[async_trait::async_trait]
 impl ExecutionStore for Store {
     async fn list_fork_runs(
         &self,
@@ -2222,67 +2086,6 @@ mod tests {
             .expect("list triggers");
         assert_eq!(triggers.len(), 1);
         assert_eq!(triggers[0].source_wave_id.as_ref(), Some(source_wave.id()));
-
-        let chord = store
-            .create_chord("ensemble-a")
-            .await
-            .expect("create chord");
-        let loaded_chord = store
-            .get_chord(chord.id())
-            .await
-            .expect("get chord")
-            .expect("chord exists");
-        assert_eq!(loaded_chord.name(), "ensemble-a");
-        assert!(!loaded_chord.is_default());
-        assert!(loaded_chord.created_at().is_some());
-        assert_eq!(
-            store.list_chords().await.expect("list chords").len(),
-            1,
-            "chord should appear in list"
-        );
-
-        store
-            .add_chord_member(chord.id(), wave.id())
-            .await
-            .expect("add chord member");
-        store
-            .add_chord_member(chord.id(), wave.id())
-            .await
-            .expect("idempotent add chord member");
-        let chord_members = store
-            .list_chord_members(chord.id())
-            .await
-            .expect("list chord members");
-        assert_eq!(chord_members.len(), 1);
-        assert_eq!(chord_members[0].id(), wave.id());
-
-        let chords_for_wave = store
-            .list_chords_for_wave(wave.id())
-            .await
-            .expect("list chords for wave");
-        assert_eq!(chords_for_wave.len(), 1);
-        assert_eq!(chords_for_wave[0].id(), chord.id());
-
-        store
-            .remove_chord_member(chord.id(), wave.id())
-            .await
-            .expect("remove chord member");
-        store
-            .remove_chord_member(chord.id(), wave.id())
-            .await
-            .expect("idempotent remove chord member");
-        assert!(store
-            .list_chord_members(chord.id())
-            .await
-            .expect("list chord members after remove")
-            .is_empty());
-
-        store.delete_chord(chord.id()).await.expect("delete chord");
-        assert!(store
-            .get_chord(chord.id())
-            .await
-            .expect("get deleted chord")
-            .is_none());
 
         let run = make_run(&wave, WaveRunStatus::Running);
         store.create_wave_run(&run).await.expect("create wave run");

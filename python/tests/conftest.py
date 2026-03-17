@@ -50,13 +50,6 @@ WAVE_RUN_MINIMAL = {
     "remote_branch": "wave/reduce",
 }
 
-CHORD_MINIMAL = {
-    "id": "6f4fe5ad-2e7d-47a2-a4ad-722a6f99dbd8",
-    "object": "chord",
-    "name": "ensemble-a",
-    "is_default": False,
-}
-
 REPO_MINIMAL = {
     "path": "/tmp/repo",
     "name": "repo",

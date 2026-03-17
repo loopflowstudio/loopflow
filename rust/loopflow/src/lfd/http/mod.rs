@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    auth as auth_routes, chords, flows, hooks, providers, repos, sessions, system, tokens, usage,
+    auth as auth_routes, flows, hooks, providers, repos, sessions, system, tokens, usage,
     wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
@@ -72,22 +72,6 @@ pub fn router(state: HttpState) -> Router {
             "/repos/{owner}/{repo}/parents",
             get(repos::list_parents_handler),
         )
-        .route(
-            "/chords",
-            get(chords::list_chords_handler).post(chords::create_chord_handler),
-        )
-        .route(
-            "/chords/{id}",
-            get(chords::get_chord_handler).delete(chords::delete_chord_handler),
-        )
-        .route(
-            "/chords/{id}/members",
-            get(chords::list_chord_members_handler).post(chords::add_chord_member_handler),
-        )
-        .route(
-            "/chords/{id}/members/{wave_id}",
-            delete(chords::remove_chord_member_handler),
-        )
         .route("/sessions", post(sessions::create_session_handler))
         .route(
             "/sessions/{id}",
@@ -131,10 +115,6 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/waves/{wave_id}/triggers",
             get(waves::list_triggers_handler),
-        )
-        .route(
-            "/waves/{wave_id}/chords",
-            get(chords::list_wave_chords_handler),
         )
         .route(
             "/waves/{wave_id}/activations",

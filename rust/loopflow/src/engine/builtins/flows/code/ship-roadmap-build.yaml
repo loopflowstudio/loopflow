@@ -1,0 +1,5 @@
+- kickoff
+- review-design
+- build
+- review
+- ops: land --create-pr

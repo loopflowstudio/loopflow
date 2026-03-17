@@ -130,6 +130,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "027_provider_tokens_encrypted",
         sql: include_str!("migrations/027_provider_tokens_encrypted.sql"),
     },
+    Migration {
+        version: "028_drop_chords_tables",
+        sql: include_str!("migrations/028_drop_chords_tables.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations
@@ -342,6 +346,13 @@ mod tests {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"
+            );
+        }
+
+        for unexpected in ["chords", "chord_members"] {
+            assert!(
+                tables.iter().all(|t| t != unexpected),
+                "unexpected table {unexpected} found; tables: {tables:?}"
             );
         }
 

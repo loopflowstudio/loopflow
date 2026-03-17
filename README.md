@@ -98,6 +98,16 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `review-design` | Walk through the design doc, evaluate before implementation |
 | `refine` | Refine existing work |
 
+### Tend steps (`tend/`)
+
+| Step | What it does |
+|------|--------------|
+| `tend/scan-waves` | Read member wave state — PRs, blocks, progress, git activity |
+| `tend/assess` | Judge wave health and identify pressure points |
+| `tend/draft-chord` | Compose coordinated mutations across member waves |
+| `tend/review-chord` | Walk the human through proposed mutations, get verdicts |
+| `tend/apply-chord` | Execute approved mutations to wave configs and items |
+
 ### Scan steps (`scan/`)
 
 | Step | What it does |
@@ -147,7 +157,9 @@ Flows can include mechanical ops items directly:
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → kickoff → review-design → build → review → land |
+| `ship-roadmap` | ingest → branch(build: ship-roadmap-build, reorg: reorg) |
+| `ship-roadmap-build` | kickoff → review-design → build → review → land |
+| `reorg` | update-wave (coherence pass) |
 | `qa-deploy` | qa → triage → branch(fix: qa-fix, deploy: deploy) |
 | `qa-fix` | implement → compress → lint → gate |
 | `deploy` | gate → update-wave |
@@ -160,13 +172,20 @@ Flows can include mechanical ops items directly:
 | `wave-polish` | fork(polish×3) → update-wave |
 | `wave-expand` | fork(expand×3) → update-wave |
 
+### Tend flows (`tend/`)
+
+| Flow | Steps |
+|------|-------|
+| `tend` | scan-waves → assess → branch(chord: tend-chord, reorg: reorg) |
+| `tend-chord` | draft-chord → review-chord → apply-chord |
+
 ### Scan flows (`scan/`)
 
 | Flow | Steps |
 |------|-------|
 | `scan` | scan/scan-report → scan/scan-plan → build |
 
-### Forks
+### Forks (and)
 
 Forks run a step in parallel with different directions, then synthesize the results.
 
@@ -176,9 +195,9 @@ lf wave-reduce    # runs reduce 3x with different perspectives
 
 `wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.
 
-### Branches
+### Branches (or)
 
-Branches route a flow based on an agent's assessment of the current state.
+Branches route a flow based on an agent's assessment of the current state. One path runs.
 
 ```yaml
 # flow: qa-deploy
@@ -286,12 +305,10 @@ loopflow.run_wave("ux")
 ```python
 import loopflow.api as loopflow
 
-chord = loopflow.create_chord("frontend")
-waves = loopflow.waves()
-loopflow.add_chord_member(chord.id, waves[0].id)
-loopflow.list_chord_members(chord.id)
-loopflow.list_wave_chords(waves[0].id)
-loopflow.remove_chord_member(chord.id, waves[0].id)
+loopflow.create_wave("redesign", repo=".")
+redesign = loopflow.wave("redesign")
+print(redesign.primary_flow)
+print(redesign.area)
 ```
 
 [Documentation →](docs/index.md)

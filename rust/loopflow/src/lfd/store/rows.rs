@@ -1,7 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, ActivationOutcome, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
+    ActivationLog, ActivationOutcome, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage,
     LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo, RepoEdge, RepoId,
     Signal, Summary, Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus,
     WaveRunStatus, WaveStatus,
@@ -132,16 +132,6 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         cycle_start_iteration,
         created_at: Some(created_at),
         serialized,
-    })
-}
-
-/// SELECT id, name, is_default, created_at
-pub fn map_chord_row(row: &impl StoreRow) -> StoreResult<Chord> {
-    Ok(Chord {
-        id: LfdId::from_raw(row.text(0)?),
-        name: row.text(1)?,
-        is_default: row.int(2)? != 0,
-        created_at: Some(unix_to_datetime(row.bigint(3)?)),
     })
 }
 

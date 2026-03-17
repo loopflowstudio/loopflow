@@ -89,26 +89,17 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
-Manage chords (wave groups):
+Chord-waves are regular waves whose `area` points at other wave directories:
 
 ```bash
-curl -s -X POST "$LFD_ADDR/v0/chords" \
+curl -s -X POST "$LFD_ADDR/v0/waves" \
   -H "Content-Type: application/json" \
-  -d '{"name":"frontend"}'
+  -d '{"repo":"'"$(pwd)"'","name":"redesign"}'
 
-curl -s "$LFD_ADDR/v0/chords"
-
-curl -s -X POST "$LFD_ADDR/v0/chords/<chord_id>/members" \
-  -H "Content-Type: application/json" \
-  -d '{"wave_id":"<wave_id>"}' \
-  -i
-
-curl -s "$LFD_ADDR/v0/chords/<chord_id>/members"
-
-curl -s "$LFD_ADDR/v0/waves/<wave_id>/chords"
+curl -s "$LFD_ADDR/v0/waves/redesign"
 ```
 
-Membership add/remove and chord delete return `204 No Content`.
+The `wave/redesign/redesign.yaml` file is the source of truth for member waves.
 
 ## Agent sessions API
 

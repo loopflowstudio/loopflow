@@ -1,6 +1,9 @@
 - ingest
-- kickoff
-- review-design
-- build
-- review
-- ops: land --create-pr
+- branch:
+    paths:
+      build:
+        flow: ship-roadmap-build
+        description: "Compelling item found — design and build it"
+      reorg:
+        flow: reorg
+        description: "Nothing compelling — reorganize items and go silent"

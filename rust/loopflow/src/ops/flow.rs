@@ -2,7 +2,7 @@ use std::path::Path;
 
 use clap::Parser;
 
-use crate::engine::flow::OpsItem;
+use crate::engine::flow::Op;
 use crate::engine::git::{get_default_branch, sync_main};
 use crate::lf::{Cli, Commands, OpsCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
@@ -14,7 +14,7 @@ use crate::ops::{
     RebaseOptions,
 };
 
-pub fn execute_flow_ops(repo: &Path, item: &OpsItem, progress: &impl Progress) -> OpsResult<()> {
+pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
     let mut argv = vec!["lf".to_string(), "ops".to_string(), item.command.clone()];
     argv.extend(item.args.iter().cloned());
 

@@ -125,7 +125,7 @@ fn extract_step_names(items: &[crate::engine::flow::ConcreteItem]) -> Vec<String
             crate::engine::flow::ConcreteItem::Step(step) => {
                 names.push(step.step.name.clone());
             }
-            crate::engine::flow::ConcreteItem::Ops(ops) => {
+            crate::engine::flow::ConcreteItem::Op(ops) => {
                 names.push(ops.item.to_string());
             }
             crate::engine::flow::ConcreteItem::Fork(fork) => {

@@ -6,7 +6,6 @@
 mod agent;
 mod chat_memory;
 mod chat_message;
-mod chord;
 mod event;
 mod repo;
 mod summary;
@@ -16,7 +15,6 @@ mod wave;
 pub use agent::{AgentRun, AgentStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
-pub use chord::Chord;
 pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use summary::Summary;

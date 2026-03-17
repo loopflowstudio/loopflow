@@ -15,16 +15,16 @@ use crate::lfd::store::catalog::{
 };
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
-    map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_repo_edge_row, map_repo_row, map_summary_row, map_trigger_row, map_wave_row,
-    map_wave_run_row, now_unix, serialize_pr,
+    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
+    map_repo_row, map_summary_row, map_trigger_row, map_wave_row, map_wave_run_row, now_unix,
+    serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-    RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState,
+    PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId,
+    Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -224,47 +224,6 @@ impl PostgresStore {
             Ok(())
         })
         .await
-    }
-
-    async fn resource_exists(&self, query: &'static str, id: &LfdId) -> StoreResult<bool> {
-        self.with_client(|client| async move {
-            let row = client.query_opt(query, &[&id]).await?;
-            Ok(row.is_some())
-        })
-        .await
-    }
-
-    async fn chord_exists(&self, chord_id: &LfdId) -> StoreResult<bool> {
-        self.resource_exists("SELECT 1 FROM chords WHERE id = $1", chord_id)
-            .await
-    }
-
-    async fn wave_exists(&self, wave_id: &LfdId) -> StoreResult<bool> {
-        self.resource_exists("SELECT 1 FROM waves WHERE id = $1", wave_id)
-            .await
-    }
-
-    async fn ensure_chord_exists(&self, chord_id: &LfdId) -> StoreResult<()> {
-        if self.chord_exists(chord_id).await? {
-            return Ok(());
-        }
-        Err(StoreError::NotFound)
-    }
-
-    async fn ensure_wave_exists(&self, wave_id: &LfdId) -> StoreResult<()> {
-        if self.wave_exists(wave_id).await? {
-            return Ok(());
-        }
-        Err(StoreError::NotFound)
-    }
-
-    async fn ensure_chord_member_resources_exist(
-        &self,
-        chord_id: &LfdId,
-        wave_id: &LfdId,
-    ) -> StoreResult<()> {
-        self.ensure_chord_exists(chord_id).await?;
-        self.ensure_wave_exists(wave_id).await
     }
 
     fn map_session_row(row: &tokio_postgres::Row) -> StoreResult<Session> {
@@ -930,145 +889,6 @@ impl PostgresStore {
                 .execute(Self::sql(Query::DeleteWaveById), &[&wave_id])
                 .await?;
             Ok(())
-        })
-        .await
-    }
-
-    pub async fn create_chord(&self, name: &str) -> StoreResult<Chord> {
-        let chord = Chord {
-            id: LfdId::new(),
-            name: name.to_string(),
-            is_default: false,
-            created_at: Some(time::OffsetDateTime::now_utc()),
-        };
-        let created_at = chord
-            .created_at
-            .map(|value| value.unix_timestamp())
-            .unwrap_or_else(now_unix);
-        let is_default = if chord.is_default { 1i32 } else { 0i32 };
-
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    "INSERT INTO chords (id, name, is_default, created_at)
-                     VALUES ($1, $2, $3, $4)",
-                    &[&chord.id, &chord.name, &is_default, &created_at],
-                )
-                .await?;
-            Ok(chord)
-        })
-        .await
-    }
-
-    pub async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(
-                    "SELECT id, name, is_default, created_at
-                     FROM chords
-                     WHERE id = $1",
-                    &[&chord_id],
-                )
-                .await?;
-            row.as_ref().map(map_chord_row).transpose()
-        })
-        .await
-    }
-
-    pub async fn list_chords(&self) -> StoreResult<Vec<Chord>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(
-                    "SELECT id, name, is_default, created_at
-                     FROM chords
-                     ORDER BY created_at, name",
-                    &[],
-                )
-                .await?;
-            rows.iter().map(map_chord_row).collect()
-        })
-        .await
-    }
-
-    pub async fn delete_chord(&self, chord_id: &LfdId) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let deleted = client
-                .execute("DELETE FROM chords WHERE id = $1", &[&chord_id])
-                .await?;
-            if deleted == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        self.ensure_chord_member_resources_exist(chord_id, wave_id)
-            .await?;
-
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    "INSERT INTO chord_members (chord_id, wave_id)
-                     VALUES ($1, $2)
-                     ON CONFLICT (chord_id, wave_id) DO NOTHING",
-                    &[&chord_id, &wave_id],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        self.ensure_chord_member_resources_exist(chord_id, wave_id)
-            .await?;
-
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    "DELETE FROM chord_members WHERE chord_id = $1 AND wave_id = $2",
-                    &[&chord_id, &wave_id],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>> {
-        self.ensure_chord_exists(chord_id).await?;
-        self.with_client(|client| async move {
-            let rows = client
-                .query(
-                    "SELECT w.id, w.name, w.repo, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized, w.mode, w.primary_flow, w.cron
-                     FROM waves w
-                     INNER JOIN chord_members cm ON cm.wave_id = w.id
-                     WHERE cm.chord_id = $1
-                     ORDER BY w.created_at, w.name",
-                    &[&chord_id],
-                )
-                .await?;
-            rows.iter().map(map_wave_row).collect()
-        })
-        .await
-    }
-
-    pub async fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>> {
-        self.ensure_wave_exists(wave_id).await?;
-        self.with_client(|client| async move {
-            let rows = client
-                .query(
-                    "SELECT c.id, c.name, c.is_default, c.created_at
-                     FROM chords c
-                     INNER JOIN chord_members cm ON cm.chord_id = c.id
-                     WHERE cm.wave_id = $1
-                     ORDER BY c.created_at, c.name",
-                    &[&wave_id],
-                )
-                .await?;
-            rows.iter().map(map_chord_row).collect()
         })
         .await
     }

@@ -11,7 +11,8 @@ Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
 - Shipped items are deleted, not marked as complete
 - Context that upcoming items need is folded into those items before deletion
 - New work from `scratch/` is folded into wave items or becomes new item files
-- When nothing remains, the wave directory is deleted
+- When nothing remains and the wave is standalone, the wave directory is deleted
+- When nothing remains and the wave is a chord member, the wave persists — see "Silence" below
 
 ## Bias: fold, don't drop
 
@@ -29,7 +30,10 @@ Design docs for already-shipped work and other purely historical content can be 
 
 1. Read the diff (if any) to understand what was built on this branch.
 2. Read `wave/<wave>/` — README and item files — to understand current state.
-3. Verify each item against the actual codebase. Check `git log main`, read relevant files, run relevant commands. For each item: is the finish line crossed? If yes, treat it as shipped. For unshipped items: are file paths, function signatures, data structures, and technical approach still accurate given what's on main? Update item content to reflect the codebase as it actually is — not as it was when the item was written.
+3. Verify each item against the actual codebase. Check `git log main`, read relevant files, run relevant commands. For each item, ask three questions:
+   - **Shipped?** Is the finish line crossed? If yes, treat it as shipped.
+   - **Accurate?** Are file paths, function signatures, data structures, and technical approach still accurate given what's on main? Update item content to reflect the codebase as it actually is — not as it was when the item was written.
+   - **Coherent?** Is this item still worth building? The codebase evolves — other waves ship code, the user's understanding deepens, the problem shifts. An item can become stale without being shipped: the 80% case got solved a different way, the design assumed a structure that no longer exists, or the remaining value is marginal. See "Coherence" below.
 4. Read `scratch/` — every file, completely.
 5. Delete shipped items. Before deleting, fold context that remaining items need into those items.
 6. Fold scratch content into `wave/<wave>/`. Merge into existing items where there's a clear match. Create new items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
@@ -40,7 +44,9 @@ Design docs for already-shipped work and other purely historical content can be 
    - **Try-it recipes** — quick ways for a reviewer to exercise the change
    If a scratch doc has none of these, delete it. The goal: a reviewer landing on this branch can find how to evaluate the work without reconstructing it from the diff.
 9. If `wave/<wave>/MEMORY.md` exists, fold useful observations into remaining items and trim.
-10. If the wave directory has no remaining work items, delete the entire `wave/<wave>/` directory.
+10. If the wave directory has no remaining work items:
+    - **Standalone wave** (not referenced by any chord-wave's area): delete the entire `wave/<wave>/` directory.
+    - **Chord member** (referenced by another wave's area): keep the directory. The README survives as the wave's identity and sensor. The wave is now **silent** — alive, watching its area, but not proposing work. See "Silence" below.
 
 ## Creating a new wave
 
@@ -88,6 +94,67 @@ Roadmaps are made up of items. Each item is a numbered file (`01-*.md`, `02-*.md
 - **Sequence by learning, not dependencies.** What are you most uncertain about? Build that first.
 - **Defer abstractions.** Build the concrete thing, then extract the pattern.
 - **Encode uncertainty.** Each item should state what you expect to learn and what might change.
+
+## Coherence
+
+Items go stale. The codebase moves, other waves ship code that changes the
+landscape, the user's understanding evolves. When update-wave detects incoherent
+items, it reorganizes them — this is internal housekeeping, not new work.
+
+An item is incoherent when:
+- **The finish line moved.** The goal was achieved by a different path. The item
+  describes work that's no longer needed as specified.
+- **The design diverged.** The codebase evolved in a direction incompatible with
+  the item's approach. Building it as written would fight the current architecture.
+- **The value diminished.** The 80% case is solved. What remains is marginal
+  improvement that doesn't justify the cost.
+- **Items overlap.** Multiple items now describe aspects of the same work, or
+  items in different waves cover the same ground.
+
+When incoherence is found:
+1. Delete items that are fully obsolete (the work happened differently).
+2. Rewrite items whose goal is still valid but whose approach is stale.
+   Update the finish line, the technical approach, and the rationale to
+   reflect the codebase as it actually is.
+3. Merge items that have converged into the same work.
+4. If remaining items no longer form a compelling roadmap, rewrite the
+   set with a coherent forward-looking vision. What's the most valuable
+   thing this wave could do *now*, given everything that's changed?
+
+This reorganization is a single beat — it doesn't require human review. It's
+the wave maintaining its own coherence, the way a musician adjusts tuning
+between movements. The result should be a wave whose items, if any survive,
+describe genuinely compelling work against the current state of the world.
+
+If no items survive coherence review and the wave is a chord member, it
+becomes silent. That's fine — see below.
+
+## Silence
+
+A silent wave isn't necessarily empty. It may have no items, or it may have
+had items that didn't survive coherence review. Either way, it's a chord member
+that owns an area of the problem space — watching, sensing, but not building.
+
+A silent wave:
+- Keeps its README (vision, strategy, goals, risks, metrics)
+- Has no numbered item files
+- Is a valid, healthy state — not a failure or stall
+- Signals to the human: "this area is covered, add items here if you want work done"
+- Signals to the chord: "nothing compelling to build right now"
+
+Silence is the most important note a wave can play. Shipping mediocre work to
+avoid being empty trains the user to ignore the wave. A wave that stays quiet
+until it has something genuinely compelling earns trust that compounds.
+
+**When to stay silent vs close out:**
+- If the wave is a chord member → stay silent (default)
+- If the wave is standalone with no remaining purpose → delete
+- If the wave's area is still active and evolving → stay silent
+- If the human explicitly closes the wave → delete
+
+The chord's tend flow (specifically assess and draft-chord) can propose waking
+a silent wave by adding items, or closing it entirely. The human reviews these
+proposals in review-chord.
 
 ## What counts as "shipped"
 

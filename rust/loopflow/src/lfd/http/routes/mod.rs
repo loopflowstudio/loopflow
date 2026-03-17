@@ -1,5 +1,4 @@
 pub mod auth;
-pub mod chords;
 pub mod flows;
 pub mod hooks;
 pub mod providers;

@@ -267,7 +267,10 @@ public final class RepoState {
         supportedHarnesses = []
         waveStore.removeAll()
         worktreeStore.removeAll()
-        resetTransientWaveState()
+        sessionStates.removeAll()
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil

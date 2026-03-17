@@ -4,15 +4,15 @@ import LoopflowCore
 struct AttentionQueueView: View {
     enum QueueFilter: String, CaseIterable, Identifiable {
         case all
-        case interactiveOnly = "interactive"
-        case escalationsOnly = "escalations"
+        case review
+        case failures
 
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .interactiveOnly: return "Interactive"
-            case .escalationsOnly: return "Escalations"
+            case .review: return "Review"
+            case .failures: return "Failures"
             }
         }
     }
@@ -27,10 +27,10 @@ struct AttentionQueueView: View {
             switch filter {
             case .all:
                 return true
-            case .interactiveOnly:
-                return item.kind == .interactive
-            case .escalationsOnly:
-                return item.kind == .algedonic
+            case .review:
+                return item.kind == .codeReview || item.kind == .designReview
+            case .failures:
+                return item.kind == .queueFailure || item.kind == .stepFailure
             }
         }
     }
@@ -161,8 +161,10 @@ private struct AttentionRow: View {
 
     private var color: Color {
         switch item.kind {
-        case .algedonic: return .statusError
-        case .interactive: return .statusSuccess
+        case .queueFailure, .stepFailure: return .statusError
+        case .calibration: return .statusInfo
+        case .designReview: return .statusWarning
+        case .codeReview: return .statusSuccess
         }
     }
 
@@ -248,11 +250,11 @@ private struct AttentionDetailView: View {
     @ViewBuilder
     private func actionButtons(_ item: AttentionItem) -> some View {
         HStack(spacing: Spacing.sm) {
-            switch item.context {
-            case .interactive(let context):
-                if let sessionId = context.terminalSessionId {
-                    Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
+            switch item.kind {
+            case .codeReview:
+                if let wave = repoState.waveStore.wave(for: item.waveId) {
+                    Button("Ship") {
+                        Task { try? await repoState.landWave(wave) }
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
@@ -263,7 +265,7 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .raw:
+            case .designReview, .calibration, .queueFailure:
                 EmptyView()
             }
         }

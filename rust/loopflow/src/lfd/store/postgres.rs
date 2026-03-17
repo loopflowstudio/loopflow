@@ -1420,12 +1420,12 @@ impl PostgresStore {
         let blocks = self
             .list_attention_items(
                 Some(AttentionStatus::Surfaced),
-                Some(AttentionKind::Algedonic),
+                Some(AttentionKind::QueueFailure),
             )
             .await?
             .into_iter()
             .filter(|item| item.wave_id == wave_id)
-            .filter_map(|item| queue_block_from_attention(&item).ok().flatten())
+            .filter_map(|item| queue_block_from_attention(&item))
             .collect();
         Ok(blocks)
     }
@@ -1435,8 +1435,9 @@ impl PostgresStore {
             .await
     }
 
-    pub async fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let attention_id = crate::lfd::attention::attention_id_for_queue_block(run_id);
+    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let attention_id =
+            crate::lfd::attention::attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
         let Some(mut item) = self.get_attention_item(&attention_id).await? else {
             return Ok(0);
         };

@@ -1,34 +1,29 @@
 import Foundation
 
-/// Two attention paths:
-/// - `interactive`: `lf` is at a step that needs a human
-/// - `algedonic`: something is wrong and the system is escalating
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
-    case interactive
-    case algedonic
+    case designReview = "design_review"
+    case codeReview = "code_review"
+    case calibration
+    case queueFailure = "queue_failure"
+    case stepFailure = "step_failure"
 
     public var icon: String {
         switch self {
-        case .interactive: return "person.fill.questionmark"
-        case .algedonic: return "exclamationmark.triangle"
+        case .designReview: return "doc.text.magnifyingglass"
+        case .codeReview: return "checkmark.seal"
+        case .calibration: return "dial.high"
+        case .queueFailure: return "exclamationmark.triangle"
+        case .stepFailure: return "xmark.octagon"
         }
     }
 
     public var label: String {
         switch self {
-        case .interactive: return "Interactive"
-        case .algedonic: return "Escalation"
-        }
-    }
-
-    /// Accept legacy kind strings during migration.
-    public init?(rawValue: String) {
-        switch rawValue {
-        case "interactive": self = .interactive
-        case "algedonic": self = .algedonic
-        case "design_review", "code_review", "calibration": self = .interactive
-        case "queue_failure", "step_failure": self = .algedonic
-        default: return nil
+        case .designReview: return "Design"
+        case .codeReview: return "Review"
+        case .calibration: return "Calibration"
+        case .queueFailure: return "Queue"
+        case .stepFailure: return "Failure"
         }
     }
 }
@@ -39,24 +34,32 @@ public enum AttentionStatus: String, Sendable, CaseIterable, Hashable {
     case resolved
 }
 
-/// Context for interactive attention items (step needs human input).
-public struct InteractiveAttentionContext: Sendable, Hashable {
+/// Context for code review attention items.
+public struct CodeReviewAttentionContext: Sendable, Hashable {
+    public let prURL: URL?
+    public let prNumber: Int?
+    public let prTitle: String?
+    public let branch: String?
+}
+
+/// Context for queue failure attention items (rebase conflicts, blocked queues).
+public struct QueueFailureAttentionContext: Sendable, Hashable {
+    public let reason: String?
+    public let conflictFiles: [String]
+    public let error: String?
+}
+
+/// Context for step failure attention items (agent crashed, build failed).
+public struct StepFailureAttentionContext: Sendable, Hashable {
     public let step: String?
     public let terminalSessionId: String?
     public let designPath: String?
 }
 
-/// Context for algedonic attention items (system escalation).
-public struct AlgedonicAttentionContext: Sendable, Hashable {
-    public let step: String?
-    public let error: String?
-    public let reason: String?
-    public let conflictFiles: [String]
-}
-
 public enum AttentionContext: Sendable, Hashable {
-    case interactive(InteractiveAttentionContext)
-    case algedonic(AlgedonicAttentionContext)
+    case codeReview(CodeReviewAttentionContext)
+    case queueFailure(QueueFailureAttentionContext)
+    case stepFailure(StepFailureAttentionContext)
     case raw(String)
 }
 
@@ -103,26 +106,39 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 }
 
 public extension AttentionItem {
-    /// Parse typed context from JSON based on kind.
     static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
         switch kind {
-        case .interactive:
-            return .interactive(
-                InteractiveAttentionContext(
+        case .codeReview:
+            let url = (json["pr_url"] as? String).flatMap(URL.init(string:))
+            return .codeReview(
+                CodeReviewAttentionContext(
+                    prURL: url,
+                    prNumber: json["pr_number"] as? Int,
+                    prTitle: json["pr_title"] as? String,
+                    branch: json["branch"] as? String
+                )
+            )
+        case .queueFailure:
+            return .queueFailure(
+                QueueFailureAttentionContext(
+                    reason: json["reason"] as? String,
+                    conflictFiles: json["conflict_files"] as? [String] ?? [],
+                    error: json["error"] as? String
+                )
+            )
+        case .stepFailure:
+            return .stepFailure(
+                StepFailureAttentionContext(
                     step: json["step"] as? String,
                     terminalSessionId: json["terminal_session_id"] as? String,
                     designPath: json["design_path"] as? String
                 )
             )
-        case .algedonic:
-            return .algedonic(
-                AlgedonicAttentionContext(
-                    step: json["step"] as? String,
-                    error: json["error"] as? String,
-                    reason: json["reason"] as? String,
-                    conflictFiles: json["conflict_files"] as? [String] ?? []
-                )
-            )
+        case .designReview, .calibration:
+            fallthrough
+        @unknown default:
+            let data = (try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])) ?? Data()
+            return .raw(String(data: data, encoding: .utf8) ?? "{}")
         }
     }
 }

@@ -14,7 +14,7 @@ struct AttentionStoreTests {
                 id: "1",
                 waveId: "wave",
                 runId: nil,
-                kind: .interactive,
+                kind: .stepFailure,
                 status: .viewed,
                 title: "viewed",
                 summary: "",
@@ -25,7 +25,7 @@ struct AttentionStoreTests {
                 id: "2",
                 waveId: "wave",
                 runId: nil,
-                kind: .algedonic,
+                kind: .codeReview,
                 status: .surfaced,
                 title: "older escalation",
                 summary: "",
@@ -36,7 +36,7 @@ struct AttentionStoreTests {
                 id: "3",
                 waveId: "wave",
                 runId: nil,
-                kind: .algedonic,
+                kind: .codeReview,
                 status: .surfaced,
                 title: "newer escalation",
                 summary: "",
@@ -48,13 +48,13 @@ struct AttentionStoreTests {
         #expect(store.ordered.map(\.id) == ["2", "3", "1"])
     }
 
-    @Test("parseAttentionFromJSON decodes algedonic context")
+    @Test("parseAttentionFromJSON decodes typed contexts")
     func parsesAttention() throws {
         let json: [String: Any] = [
             "id": "attn-1",
             "wave_id": "wave-1",
             "run_id": "run-1",
-            "kind": "algedonic",
+            "kind": "queue_failure",
             "status": "surfaced",
             "title": "Queue blocked",
             "summary": "Needs help",
@@ -66,8 +66,8 @@ struct AttentionStoreTests {
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .algedonic)
-        if case .algedonic(let context) = item?.context {
+        #expect(item?.kind == .queueFailure)
+        if case .queueFailure(let context) = item?.context {
             #expect(context.conflictFiles == ["src/lib.rs"])
             #expect(context.error == "merge failed")
         } else {

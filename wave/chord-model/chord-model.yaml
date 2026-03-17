@@ -4,8 +4,8 @@ area:
   - rust/loopflow/src/lfd/
   - rust/loopflow/src/engine/
   - python/loopflow/
-  - steps/
-  - flows/
+  - rust/loopflow/src/engine/builtins/steps/
+  - rust/loopflow/src/engine/builtins/flows/
 direction:
   - clarity
   - care

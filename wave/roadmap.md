@@ -19,8 +19,8 @@ chord: redesign
 │  tend:  observes its own waves, surfaces blocks, remembers
 │
 ├── wave: clear-the-deck        4 items — cuts, deletions, collapses
-├── wave: agent-embedding       5 items — Concerto as conductor
-├── wave: chord-model           7 items — tend flow, Letta, mutations
+├── wave: agent-embedding       6 items — Concerto as conductor
+├── wave: chord-model           6 items — tend flow, Letta, mutations
 └── wave: signals               5 items — block taxonomy, cascade, memory
 ```
 
@@ -36,7 +36,6 @@ it built.
 
 Build enough to run the first tend cycle. Uses existing flows.
 
-- **chord-model/01** — register waves, create chord, verify queryability
 - **chord-model/02** — tend flow steps (scan-waves, assess, propose, apply)
 - **signals/01** — block taxonomy (types, data model, API)
 - **chord-model/03** — Letta integration (stand up, wire into tend)

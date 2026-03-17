@@ -2,7 +2,7 @@
 
 ## Problem
 
-Loopflow's PM integration needs a concrete Asana REST client that implements `PmProvider`. The trait and shared types exist (`pm.rs`), credentials flow through `Provider::Asana` and the encrypted token store, and `AsanaConfig` is parsed from `.lf/config.yaml`. What's missing is the HTTP layer that actually talks to Asana.
+Loopflow's PM integration needs a concrete Asana REST client that implements `PmProvider`. The trait and shared types now live in `pm/mod.rs`, credentials flow through `Provider::Asana` and the encrypted token store, and `AsanaConfig` is parsed from `.lf/config.yaml`. What's missing is the HTTP layer that actually talks to Asana.
 
 Teams using Asana for planning need their wave roadmap items to sync: create projects, list/create/update/complete tasks, and post comments. Without this, the PM wave's remaining items (bootstrap CLI, import/export steps, ingest integration, run lifecycle sync) are blocked.
 

@@ -1,30 +1,23 @@
 # 05: iOS TestFlight Distribution
 
-**Status:** Backlog. No distribution pipeline exists. Source code is multiplatform-ready.
+**Finish line:** Concerto's iOS target builds in CI, uploads to TestFlight, and the installed app can sign in, discover `lfd`, and connect on a real device.
 
-## Problem
+## Carried context
 
-Concerto has iOS source code (Platform/iOS/ views, multiplatform targets, iOS 18.0 deployment target) but no way to get it onto a phone. No TestFlight, no provisioning profiles, no iOS CI.
+- The project already has multiplatform Swift and XcodeGen targets for iOS.
+- iOS discovery is the supported connection path; the manual host/token flow was deleted.
+- The project is configured for team `2V3M244HF2` and bundle ID `com.loopflow.concerto`.
+- The macOS release workflow is the closest existing template.
 
-## What exists
+## What to build
 
-- Multiplatform Swift package and XcodeGen project (macOS + iOS)
-- iOS views: DiscoveryView, MobileRootView, MobileWaveListView, MobileWaveDetailView
-- Team ID `2V3M244HF2` in project.yml with automatic signing
-- Bundle ID `com.loopflow.concerto`
-- macOS release pipeline (release.yml, release-concerto.py) as reference
-
-## What's needed
-
-1. **App Store Connect** — create app record for `com.loopflow.concerto`
-2. **Provisioning** — iOS distribution certificate + provisioning profile (automatic signing may handle this)
-3. **Build script** — extend `scripts/release-concerto.py` or new script for iOS archive + TestFlight upload
-4. **CI workflow** — GitHub Actions job: build iOS, archive, upload to TestFlight (manual trigger initially)
-5. **Entitlements** — review `Concerto.entitlements` for iOS-specific needs (currently macOS-only audio input)
-6. **Info.plist** — add `LSMinimumSystemVersion` equivalent for iOS, verify URL scheme works on iOS
+1. Create the App Store Connect record and signing setup for `com.loopflow.concerto`.
+2. Extend the release tooling to archive an iOS build and upload it to TestFlight.
+3. Add a CI path for manual or scheduled iOS uploads.
+4. Verify iOS entitlements, Info.plist settings, and URL-scheme behavior on device.
 
 ## Done when
 
-- `xcodebuild archive` produces an iOS .xcarchive
-- TestFlight build uploaded and installable on device
-- Discovery flow works: sign in → find lfd → connect → see waves
+- `xcodebuild archive` produces a signed iOS archive.
+- A TestFlight build is uploaded and installable.
+- Discovery works on device: sign in, find `lfd`, connect, and view waves.

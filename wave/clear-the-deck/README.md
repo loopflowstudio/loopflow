@@ -1,47 +1,34 @@
 # Clear the Deck
 
-Cut surface area. Every item here is a deletion or a collapse — reducing the number of things that drain attention so the hard design work has room.
+## Vision
 
-These are decisions, not design problems.
+Remove product and deployment choices that create maintenance surface without teaching us anything. This wave is for cuts that simplify how `lfd` is configured, deployed, and executed. It does not own auth expansion or iOS distribution work; those live in `wave/trust/` and `wave/concerto/`.
 
 ## Strategy
 
-Ship the easiest, most reversible cuts first. Each PR stands alone. No item here requires design — the decisions are already made.
+Finish the remaining collapse in two passes.
 
-## Auth consolidation
+First, turn the existing config machinery into three blessed deployment profiles (`solo`, `team`, `ci`) so docs and compose examples stop exposing the underlying auth/storage/runtime matrix. `LFD_MODE=native|container` already centralizes several downstream decisions; build on that instead of reintroducing per-dimension configuration.
 
-Delete the studio auth service. Move WorkOS OAuth into lfd — PKCE, JWT issuance, user identity. Three modes:
+Second, decide whether sandbox stays at all. The current adaptive path only earns its keep if it clearly beats Docker on latency or isolation. If it cannot, demote it to an explicit experiment or delete it.
 
-```
-Solo:   local token (auto-generated, current behavior)
-Team:   WorkOS OAuth built into lfd
-CI:     static token via LFD_AUTH_TOKEN
-```
-
-## Deployment collapse
-
-Stop letting users modulate auth x storage x isolation x agent independently. Three blessed configs:
-
-```
-Solo:   local lfd + local agents + file-based state
-Team:   shared lfd + auth + postgres + container isolation
-CI:     headless lfd + single-run mode + no persistence
-```
+Hidden overrides are acceptable as escape hatches. Documented defaults are not allowed to sprawl.
 
 ## Goals
 
-- Studio auth service deleted, auth consolidated into lfd
-- Deployment configs collapsed from combinatorial matrix to three blessed modes
-- Custom sandbox code removed, Daytona evaluated
-- Growth/marketing infrastructure deleted
+- Users choose a deployment profile, not a bag of orthogonal config knobs.
+- The default container execution path is obvious in both code and docs.
+- Deploy and operator docs describe only blessed paths.
 
 ## Risks
 
-- Auth migration could break existing team deployments if not careful about the WorkOS transition
-- Daytona evaluation might reveal it doesn't meet our needs, requiring a plan B for isolation
+- New profile names could drift from the current `native|container` machinery and accidentally fork behavior.
+- Simplifying sandbox too aggressively could remove a useful path before a replacement is ready.
+- Escape hatches can quietly become the real product if the blessed paths stay incomplete.
 
 ## Metrics
 
-- Lines of code deleted (target: net negative across all PRs)
-- Number of deployment configurations supported (target: 3, down from N)
-- Time to onboard a new deployment mode (target: <10 minutes)
+- Documented deployment profiles: 3
+- Documented deploy-selection knobs outside those profiles: 0
+- User-visible executor backends in blessed docs: 1
+- Remote deploy setup steps before first healthy `lfd`: 10 or fewer

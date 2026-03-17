@@ -1,32 +1,29 @@
 # 06: Team Auth Mode
 
-**Status:** Backlog. Design doc complete at `scratch/clear-the-deck-auth-consolidation.md`.
+**Finish line:** `auth.mode: team` lets a self-hosted `lfd` run login, callback, token refresh, and request validation without the separate studio auth service.
 
-## Problem
+## Carried context
 
-Team deployments currently require the studio auth service for remote client access — a separate deployment with registration heartbeats and connection token distribution. Teams should be able to run lfd self-contained with their own identity provider.
+- `auth.mode` is now the canonical config surface; `auth.provider` is rejected, and `static` survives only as a deprecated alias for `ci`.
+- iOS no longer has a manual host/token connection screen. Remote access should continue to flow through discovery and `AuthService`, not a second manual setup path.
+- `studio` mode still uses `base_url` plus connection-token distribution; `local` and `ci` behavior should stay unchanged.
+- Provider-auth, registration, and token-ledger plumbing already live in `lfd` and should be reused where possible.
 
-## Approach
+## What to build
 
-Add a `Team` variant to `AuthProvider`. lfd runs WorkOS authorization code flow directly, issues short-lived JWTs (HMAC-SHA256, 1 hour), validates them locally. Teams bring their own WorkOS credentials (`WORKOS_CLIENT_ID`, `WORKOS_API_KEY`).
+1. Add a `Team` auth mode with WorkOS credentials and JWT signing config.
+2. Serve the OAuth routes in `lfd` (`/v0/auth/login`, `/v0/auth/callback`, `/v0/auth/refresh`) and validate issued JWTs locally.
+3. Let clients choose auth server URL per connection so team mode can point both auth and wave traffic at the same `lfd`.
+4. Remove the remaining dependency on the hosted studio auth service for self-hosted teams.
 
-New routes: `/v0/auth/login`, `/v0/auth/callback`, `/v0/auth/refresh`.
+## Risks
 
-Client model: every client needs an auth server URL and a wave server URL. In team mode, both point at the same lfd. In studio mode, they're different (auth at `auth.loopflow.studio`, waves at localhost).
-
-## Scope
-
-- Add `Team` variant to `AuthProvider`
-- WorkOS OAuth routes in lfd HTTP server
-- JWT signing/validation
-- Config: `auth.mode: team` with `workos_client_id`, `workos_api_key`, `jwt_secret`
-- Swift AuthService: configurable auth server URL
-- Rename `auth.provider` → `auth.mode`, `static` → `ci` (bundled with this or separate)
+- Team mode touches both daemon auth and client sign-in flows, so partial rollout can strand remote users.
+- JWT issuance and refresh add new secret-management requirements for self-hosted deployments.
 
 ## Done when
 
-- lfd starts in team mode with WorkOS credentials
-- OAuth flow works end-to-end: login → WorkOS → callback → JWT
-- JWT-authenticated requests pass middleware
-- Swift AuthService connects to lfd in team mode
-- Tests pass across Rust, Python, Swift
+- `lfd` starts in team mode with WorkOS credentials.
+- OAuth works end to end: login, WorkOS callback, refresh, authenticated request.
+- Swift clients connect to a team-mode server without the hosted studio auth service.
+- Tests pass across Rust, Python, and Swift.

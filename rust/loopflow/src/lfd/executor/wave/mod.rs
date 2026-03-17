@@ -809,11 +809,12 @@ impl WaveExecutor {
                                 warn!(wave_id = %wave.id(), error = %err, "failed to create code review attention")
                             }
                         }
-                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
+                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,
                             wave.id(),
                             crate::lfd::queue::QueueTrigger::RunCompleted,
+                            Some(&self.event_hub),
                         )
                         .await
                         {

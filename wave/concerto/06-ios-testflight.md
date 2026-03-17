@@ -1,4 +1,4 @@
-# 05: iOS TestFlight Distribution
+# 06: iOS TestFlight Distribution
 
 **Finish line:** Concerto's iOS target builds in CI, uploads to TestFlight, and the installed app can sign in, discover `lfd`, and connect on a real device.
 
@@ -8,6 +8,7 @@
 - iOS discovery is the supported connection path; the manual host/token flow was deleted.
 - The project is configured for team `2V3M244HF2` and bundle ID `com.loopflow.concerto`.
 - The macOS release workflow is the closest existing template.
+- Headless validation is still noisy: `xcodebuild test -scheme Concerto -skip-testing:ConcertoUITests` currently tries to link `ConcertoUITests` anyway and fails before iOS distribution work can reuse that lane.
 
 ## What to build
 

@@ -16,29 +16,6 @@ What you should see:
 - Swift package tests stay green
 - both ripgrep commands print nothing, showing the shipped docs and daemon surface no longer describe `ci` / static-token auth
 
-## Intent
-
-Collapse the daemon auth story to the two paths the product still wants to support: local session tokens for direct use and studio-managed connection tokens for remote use. This removes the extra pre-shared `ci` bearer-token mode, aligns bundled and container launches around the same session-token semantics, and removes the parallel iOS manual host/token setup path that no longer matches the discovery-first remote flow.
-
-## Assumptions
-
-- Remote deployments should authenticate through studio discovery, so hosts already have valid studio credentials (`~/.lf/credentials.json`) and can register successfully.
-- Embedded and bundled launches still need an override path for the local session token, so keeping `auth.token` / `LFD_AUTH_TOKEN` as an internal override is desirable even after deleting `ci` mode.
-- No supported iOS workflow still depends on typing a host and bearer token manually.
-
-## Key decisions
-
-- Deleted `AuthMode::Ci` instead of renaming or deprecating it again.
-- Reused the session-token file path for override tokens so local and studio loopback auth share one persistence path.
-- Switched compose and deploy docs from `LFD_AUTH_PROVIDER` to `LFD_AUTH_MODE`, and documented only the native/local and container/studio shapes.
-- Removed the iOS manual connection view instead of keeping a second remote-entry surface beside discovery.
-
-## Not included
-
-- No new self-hosted `team` auth mode; that follow-on work is captured in `wave/trust/06-team-auth.md`.
-- No sandbox-policy change; clear-the-deck still has a separate sandbox item.
-- No Xcode scheme/workspace fix for the existing `ConcertoUITests` linker issue in this headless environment.
-
 ## Validation
 
 - `cargo fmt --all --check` ✅

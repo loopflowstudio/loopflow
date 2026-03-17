@@ -5,6 +5,7 @@
 ## Carried context
 
 - `auth.mode` is now the canonical config surface; `auth.provider` is rejected, and the pre-shared bearer-token mode is gone.
+- Remote self-hosted deploy docs now assume the host already has valid studio credentials (`~/.lf/credentials.json`) and can register successfully. Team mode should remove that operator dependency.
 - iOS no longer has a manual host/token connection screen. Remote access should continue to flow through discovery and `AuthService`, not a second manual setup path.
 - `studio` mode still uses `base_url` plus connection-token distribution; `local` behavior should stay unchanged.
 - Provider-auth, registration, and token-ledger plumbing already live in `lfd` and should be reused where possible.

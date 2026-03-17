@@ -2,9 +2,12 @@ flow: ship-wave
 mode: manual
 area:
   - deploy/
-  - docs/lfd.md
+  - docker/
+  - docs/
+  - rust/loopflow/src/bin/lfd.rs
   - rust/loopflow/src/lfd/config.rs
   - rust/loopflow/src/lfd/executor/
   - rust/loopflow/src/lfd/service/
+  - scripts/
 direction:
   - simplicity

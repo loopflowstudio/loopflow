@@ -1,10 +1,18 @@
 flow: ship-wave
 area:
+  - deploy/
+  - docker/
+  - docs/lfd.md
+  - rust/loopflow/src/bin/lfd.rs
+  - rust/loopflow/src/lfd/auth.rs
+  - rust/loopflow/src/lfd/config.rs
+  - rust/loopflow/src/lfd/executor/
+  - rust/loopflow/src/lfd/http/routes/
+  - rust/loopflow/src/lfd/mod.rs
   - rust/loopflow/src/lfd/provider_auth.rs
   - rust/loopflow/src/lfd/store/
-  - rust/loopflow/src/lfd/executor/
   - rust/loopflow/src/lfd/triggers/
-  - docker/
+  - swift/
 direction:
   - security
   - reliability

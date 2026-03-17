@@ -1,0 +1,782 @@
+use std::time::Duration;
+
+use async_trait::async_trait;
+use reqwest::{Method, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::time::sleep;
+use tracing::warn;
+
+use crate::engine::config::AsanaConfig;
+use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult};
+
+const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
+const ASANA_RATE_LIMIT_RETRIES: u8 = 3;
+const ASANA_RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
+const TASK_FIELDS: &str = "name,notes,completed";
+
+#[derive(Debug, Clone)]
+pub struct AsanaClient {
+    client: reqwest::Client,
+    token: String,
+    config: AsanaConfig,
+    base_url: String,
+}
+
+impl AsanaClient {
+    pub fn new(token: String, config: AsanaConfig) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            token,
+            config,
+            base_url: ASANA_BASE_URL.to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_base_url(token: String, config: AsanaConfig, base_url: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            token,
+            config,
+            base_url,
+        }
+    }
+
+    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+        self.request_with_query(method, path, &[])
+    }
+
+    fn request_with_query(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> reqwest::RequestBuilder {
+        let mut url = Url::parse(&format!("{}{}", self.base_url, path))
+            .expect("asana base URL should be valid");
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, value);
+            }
+        }
+        self.client.request(method, url).bearer_auth(&self.token)
+    }
+
+    async fn send_json<T, F>(&self, make_request: F) -> PmResult<T>
+    where
+        T: DeserializeOwned,
+        F: Fn() -> reqwest::RequestBuilder,
+    {
+        for attempt in 0..=ASANA_RATE_LIMIT_RETRIES {
+            let response = make_request()
+                .send()
+                .await
+                .map_err(|err| PmError::Message(format!("asana request failed: {err}")))?;
+
+            if response.status() == StatusCode::TOO_MANY_REQUESTS
+                && attempt < ASANA_RATE_LIMIT_RETRIES
+            {
+                let delay = retry_after_delay(response.headers());
+                warn!(
+                    attempt = attempt + 1,
+                    delay_seconds = delay.as_secs(),
+                    "asana rate limited; retrying"
+                );
+                sleep(delay).await;
+                continue;
+            }
+
+            return parse_response(response).await;
+        }
+
+        Err(PmError::Message(
+            "asana request failed after retries".to_string(),
+        ))
+    }
+
+    fn workspace(&self) -> PmResult<&str> {
+        self.config.workspace.as_deref().ok_or_else(|| {
+            PmError::Message("asana.workspace must be configured to create projects".to_string())
+        })
+    }
+}
+
+#[async_trait]
+impl PmProvider for AsanaClient {
+    async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
+        let workspace = self.workspace()?;
+        let team = self.config.default_team.as_deref();
+        let body = AsanaRequest {
+            data: CreateProjectRequest {
+                name,
+                notes: description,
+                workspace,
+                team,
+            },
+        };
+
+        let response: AsanaResponse<AsanaProject> = self
+            .send_json(|| self.request(Method::POST, "/projects").json(&body))
+            .await?;
+        Ok(response.data.gid)
+    }
+
+    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
+        let path = format!("/projects/{project_id}/tasks");
+        let mut offset = None;
+        let mut items = Vec::new();
+
+        loop {
+            let page_offset = offset.clone();
+            let response: AsanaListResponse<AsanaTask> = self
+                .send_json(|| {
+                    let mut query = vec![("opt_fields", TASK_FIELDS)];
+                    if let Some(offset) = page_offset.as_deref() {
+                        query.push(("offset", offset));
+                    }
+                    self.request_with_query(Method::GET, &path, &query)
+                })
+                .await?;
+
+            for task in response.data {
+                let rank = items.len() as u32;
+                items.push(PmItem {
+                    id: task.gid,
+                    name: task.name,
+                    description: task.notes,
+                    rank,
+                    completed: task.completed,
+                });
+            }
+
+            offset = response.next_page.and_then(|page| page.offset);
+            if offset.is_none() {
+                return Ok(items);
+            }
+        }
+    }
+
+    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
+        let body = AsanaRequest {
+            data: CreateTaskRequest {
+                name: &item.name,
+                notes: &item.description,
+                projects: vec![project_id],
+            },
+        };
+
+        let response: AsanaResponse<AsanaTaskRef> = self
+            .send_json(|| self.request(Method::POST, "/tasks").json(&body))
+            .await?;
+        Ok(response.data.gid)
+    }
+
+    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
+        let body = AsanaRequest {
+            data: UpdateTaskRequest {
+                name: update.name.as_deref(),
+                notes: update.description.as_deref(),
+                completed: None,
+            },
+        };
+
+        if body.data.name.is_none() && body.data.notes.is_none() {
+            return Ok(());
+        }
+
+        let path = format!("/tasks/{item_id}");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::PUT, &path).json(&body))
+            .await?;
+        Ok(())
+    }
+
+    async fn complete_item(&self, item_id: &str) -> PmResult<()> {
+        let body = AsanaRequest {
+            data: UpdateTaskRequest {
+                name: None,
+                notes: None,
+                completed: Some(true),
+            },
+        };
+        let path = format!("/tasks/{item_id}");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::PUT, &path).json(&body))
+            .await?;
+        Ok(())
+    }
+
+    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
+        let request = AsanaRequest {
+            data: CreateStoryRequest { text: body },
+        };
+        let path = format!("/tasks/{item_id}/stories");
+        let response: AsanaResponse<AsanaStory> = self
+            .send_json(|| self.request(Method::POST, &path).json(&request))
+            .await?;
+        let _story_gid = response.data.gid;
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+struct AsanaRequest<T> {
+    data: T,
+}
+
+#[derive(Serialize)]
+struct CreateProjectRequest<'a> {
+    name: &'a str,
+    notes: &'a str,
+    workspace: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct CreateTaskRequest<'a> {
+    name: &'a str,
+    notes: &'a str,
+    projects: Vec<&'a str>,
+}
+
+#[derive(Serialize)]
+struct UpdateTaskRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completed: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct CreateStoryRequest<'a> {
+    text: &'a str,
+}
+
+#[derive(Deserialize)]
+struct AsanaResponse<T> {
+    data: T,
+}
+
+#[derive(Deserialize)]
+struct AsanaListResponse<T> {
+    data: Vec<T>,
+    next_page: Option<AsanaPageInfo>,
+}
+
+#[derive(Deserialize)]
+struct AsanaTask {
+    gid: String,
+    name: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    completed: bool,
+}
+
+#[derive(Deserialize)]
+struct AsanaTaskRef {
+    gid: String,
+}
+
+#[derive(Deserialize)]
+struct AsanaProject {
+    gid: String,
+}
+
+#[derive(Deserialize)]
+struct AsanaStory {
+    gid: String,
+}
+
+#[derive(Deserialize)]
+struct AsanaPageInfo {
+    offset: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AsanaErrorBody {
+    errors: Vec<AsanaErrorMessage>,
+}
+
+#[derive(Deserialize)]
+struct AsanaErrorMessage {
+    message: String,
+}
+
+async fn parse_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
+    let status = response.status();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|err| PmError::Message(format!("failed to read asana response: {err}")))?;
+
+    if !status.is_success() {
+        return Err(PmError::Message(parse_error_message(status, &body)));
+    }
+
+    serde_json::from_slice(&body)
+        .map_err(|err| PmError::Message(format!("failed to decode asana response: {err}")))
+}
+
+fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
+    if let Ok(error_body) = serde_json::from_slice::<AsanaErrorBody>(body) {
+        if let Some(error) = error_body.errors.first() {
+            return format!(
+                "asana request failed with status {status}: {}",
+                error.message
+            );
+        }
+    }
+
+    let body_text = String::from_utf8_lossy(body).trim().to_string();
+    if body_text.is_empty() {
+        format!("asana request failed with status {status}")
+    } else {
+        format!("asana request failed with status {status}: {body_text}")
+    }
+}
+
+fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(ASANA_RETRY_AFTER_FALLBACK)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+
+    use axum::body::Bytes;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, Method, StatusCode, Uri};
+    use axum::routing::any;
+    use axum::{response::Response, Router};
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
+
+    use super::*;
+    use crate::engine::config::AsanaConfig;
+    use crate::lfd::pm::PmProvider;
+
+    #[tokio::test]
+    async fn create_project_uses_workspace_and_team() {
+        let (base_url, requests) = spawn_test_server(vec![json_response(
+            StatusCode::CREATED,
+            json!({ "data": { "gid": "project-123" } }),
+        )])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: Some("team-9".to_string()),
+            },
+            base_url,
+        );
+
+        let project_id = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect("create project should succeed");
+
+        assert_eq!(project_id, "project-123");
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "POST");
+        assert_eq!(requests[0].path, "/projects");
+        assert_eq!(
+            requests[0].authorization.as_deref(),
+            Some("Bearer secret-token")
+        );
+        let body: Value = serde_json::from_str(&requests[0].body).expect("json body");
+        assert_eq!(
+            body,
+            json!({
+                "data": {
+                    "name": "Wave PM",
+                    "notes": "Ship the Asana client",
+                    "workspace": "workspace-1",
+                    "team": "team-9"
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn create_project_requires_workspace() {
+        let client = AsanaClient::new("secret-token".to_string(), AsanaConfig::default());
+
+        let error = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect_err("workspace should be required");
+
+        assert_eq!(
+            error,
+            PmError::Message("asana.workspace must be configured to create projects".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn list_items_collects_all_pages_and_assigns_rank_by_response_order() {
+        let (base_url, requests) = spawn_test_server(vec![
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": [
+                        { "gid": "task-1", "name": "First", "notes": "one", "completed": false },
+                        { "gid": "task-2", "name": "Second", "notes": "two", "completed": true }
+                    ],
+                    "next_page": { "offset": "cursor-2" }
+                }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": [
+                        { "gid": "task-3", "name": "Third", "notes": "three", "completed": false }
+                    ],
+                    "next_page": null
+                }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        let items = client
+            .list_items("project-123")
+            .await
+            .expect("list items should succeed");
+
+        assert_eq!(
+            items,
+            vec![
+                PmItem {
+                    id: "task-1".to_string(),
+                    name: "First".to_string(),
+                    description: "one".to_string(),
+                    rank: 0,
+                    completed: false,
+                },
+                PmItem {
+                    id: "task-2".to_string(),
+                    name: "Second".to_string(),
+                    description: "two".to_string(),
+                    rank: 1,
+                    completed: true,
+                },
+                PmItem {
+                    id: "task-3".to_string(),
+                    name: "Third".to_string(),
+                    description: "three".to_string(),
+                    rank: 2,
+                    completed: false,
+                },
+            ]
+        );
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/projects/project-123/tasks");
+        assert_eq!(
+            requests[0].query.as_deref(),
+            Some("opt_fields=name%2Cnotes%2Ccompleted")
+        );
+        assert_eq!(
+            requests[1].query.as_deref(),
+            Some("opt_fields=name%2Cnotes%2Ccompleted&offset=cursor-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_update_complete_and_comment_map_to_asana_endpoints() {
+        let (base_url, requests) = spawn_test_server(vec![
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "task-123" } }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-123" } })),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-123" } })),
+            json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        let item_id = client
+            .create_item(
+                "project-123",
+                &PmItemCreate {
+                    name: "Implement client".to_string(),
+                    description: "Build the HTTP adapter".to_string(),
+                    rank: 7,
+                },
+            )
+            .await
+            .expect("create item should succeed");
+        client
+            .update_item(
+                &item_id,
+                &PmItemUpdate {
+                    name: Some("Implement Asana client".to_string()),
+                    description: Some("Build the HTTP adapter and tests".to_string()),
+                    rank: Some(0),
+                },
+            )
+            .await
+            .expect("update item should succeed");
+        client
+            .complete_item(&item_id)
+            .await
+            .expect("complete item should succeed");
+        client
+            .comment(&item_id, "Shipped in v0.9.9")
+            .await
+            .expect("comment should succeed");
+
+        assert_eq!(item_id, "task-123");
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 4);
+
+        assert_eq!(requests[0].method, "POST");
+        assert_eq!(requests[0].path, "/tasks");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
+            json!({
+                "data": {
+                    "name": "Implement client",
+                    "notes": "Build the HTTP adapter",
+                    "projects": ["project-123"]
+                }
+            })
+        );
+
+        assert_eq!(requests[1].method, "PUT");
+        assert_eq!(requests[1].path, "/tasks/task-123");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
+            json!({
+                "data": {
+                    "name": "Implement Asana client",
+                    "notes": "Build the HTTP adapter and tests"
+                }
+            })
+        );
+
+        assert_eq!(requests[2].method, "PUT");
+        assert_eq!(requests[2].path, "/tasks/task-123");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
+            json!({ "data": { "completed": true } })
+        );
+
+        assert_eq!(requests[3].method, "POST");
+        assert_eq!(requests[3].path, "/tasks/task-123/stories");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[3].body).expect("json body"),
+            json!({ "data": { "text": "Shipped in v0.9.9" } })
+        );
+    }
+
+    #[tokio::test]
+    async fn update_item_skips_rank_only_updates() {
+        let (base_url, requests) = spawn_test_server(Vec::new()).await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        client
+            .update_item(
+                "task-123",
+                &PmItemUpdate {
+                    name: None,
+                    description: None,
+                    rank: Some(1),
+                },
+            )
+            .await
+            .expect("rank-only update should no-op");
+
+        assert!(requests.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retries_after_rate_limit_response() {
+        let (base_url, requests) = spawn_test_server(vec![
+            response(
+                StatusCode::TOO_MANY_REQUESTS,
+                vec![("retry-after", "0")],
+                json!({ "errors": [{ "message": "slow down" }] }).to_string(),
+            ),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "task-123" } }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        let item_id = client
+            .create_item(
+                "project-123",
+                &PmItemCreate {
+                    name: "Implement client".to_string(),
+                    description: "Build the HTTP adapter".to_string(),
+                    rank: 0,
+                },
+            )
+            .await
+            .expect("request should succeed after retry");
+
+        assert_eq!(item_id, "task-123");
+        assert_eq!(requests.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn surfaces_asana_error_messages() {
+        let (base_url, _requests) = spawn_test_server(vec![json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "errors": [{ "message": "workspace is required" }] }),
+        )])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            base_url,
+        );
+
+        let error = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect_err("asana error should surface");
+
+        assert_eq!(
+            error,
+            PmError::Message(
+                "asana request failed with status 400 Bad Request: workspace is required"
+                    .to_string()
+            )
+        );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct CapturedRequest {
+        method: String,
+        path: String,
+        query: Option<String>,
+        authorization: Option<String>,
+        body: String,
+    }
+
+    #[derive(Debug, Clone)]
+    struct QueuedResponse {
+        status: StatusCode,
+        headers: Vec<(String, String)>,
+        body: String,
+    }
+
+    #[derive(Clone)]
+    struct TestServerState {
+        requests: Arc<Mutex<Vec<CapturedRequest>>>,
+        responses: Arc<Mutex<VecDeque<QueuedResponse>>>,
+    }
+
+    async fn spawn_test_server(
+        responses: Vec<QueuedResponse>,
+    ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
+        let state = TestServerState {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(VecDeque::from(responses))),
+        };
+        let requests = state.requests.clone();
+        let app = Router::new()
+            .route("/", any(handle_request))
+            .route("/{*path}", any(handle_request))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+        (format!("http://{addr}"), requests)
+    }
+
+    async fn handle_request(
+        State(state): State<TestServerState>,
+        method: Method,
+        uri: Uri,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        state.requests.lock().await.push(CapturedRequest {
+            method: method.to_string(),
+            path: uri.path().to_string(),
+            query: uri.query().map(str::to_string),
+            authorization: headers
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            body: String::from_utf8(body.to_vec()).expect("utf8 body"),
+        });
+
+        let response = state.responses.lock().await.pop_front().unwrap_or_else(|| {
+            json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "errors": [{ "message": "unexpected request" }] }),
+            )
+        });
+
+        let mut builder = Response::builder().status(response.status);
+        for (name, value) in response.headers {
+            builder = builder.header(name, value);
+        }
+        builder.body(response.body.into()).expect("build response")
+    }
+
+    fn json_response(status: StatusCode, body: Value) -> QueuedResponse {
+        response(
+            status,
+            vec![("content-type", "application/json")],
+            body.to_string(),
+        )
+    }
+
+    fn response(status: StatusCode, headers: Vec<(&str, &str)>, body: String) -> QueuedResponse {
+        QueuedResponse {
+            status,
+            headers: headers
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            body,
+        }
+    }
+}

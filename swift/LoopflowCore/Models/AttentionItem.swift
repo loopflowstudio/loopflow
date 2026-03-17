@@ -1,29 +1,20 @@
 import Foundation
 
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
-    case designReview = "design_review"
-    case codeReview = "code_review"
-    case calibration
-    case queueFailure = "queue_failure"
-    case stepFailure = "step_failure"
+    case interactiveStep = "interactive_step"
+    case algedonic
 
     public var icon: String {
         switch self {
-        case .designReview: return "doc.text.magnifyingglass"
-        case .codeReview: return "checkmark.seal"
-        case .calibration: return "dial.high"
-        case .queueFailure: return "exclamationmark.triangle"
-        case .stepFailure: return "xmark.octagon"
+        case .interactiveStep: return "hand.raised"
+        case .algedonic: return "exclamationmark.triangle"
         }
     }
 
     public var label: String {
         switch self {
-        case .designReview: return "Design"
-        case .codeReview: return "Review"
-        case .calibration: return "Calibration"
-        case .queueFailure: return "Queue"
-        case .stepFailure: return "Failure"
+        case .interactiveStep: return "Step"
+        case .algedonic: return "Alert"
         }
     }
 }
@@ -106,9 +97,21 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 }
 
 public extension AttentionItem {
+    /// Parse typed context from JSON based on discriminator fields.
+    /// Context type is determined by the payload shape, not the kind enum.
     static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
-        switch kind {
-        case .codeReview:
+        // Queue failure: has "reason" field
+        if json["reason"] != nil {
+            return .queueFailure(
+                QueueFailureAttentionContext(
+                    reason: json["reason"] as? String,
+                    conflictFiles: json["conflict_files"] as? [String] ?? [],
+                    error: json["error"] as? String
+                )
+            )
+        }
+        // Code review: has "pr_url" field
+        if json["pr_url"] != nil {
             let url = (json["pr_url"] as? String).flatMap(URL.init(string:))
             return .codeReview(
                 CodeReviewAttentionContext(
@@ -118,15 +121,9 @@ public extension AttentionItem {
                     branch: json["branch"] as? String
                 )
             )
-        case .queueFailure:
-            return .queueFailure(
-                QueueFailureAttentionContext(
-                    reason: json["reason"] as? String,
-                    conflictFiles: json["conflict_files"] as? [String] ?? [],
-                    error: json["error"] as? String
-                )
-            )
-        case .stepFailure:
+        }
+        // Step failure: has "error" field (and "step")
+        if json["error"] != nil {
             return .stepFailure(
                 StepFailureAttentionContext(
                     step: json["step"] as? String,
@@ -134,11 +131,9 @@ public extension AttentionItem {
                     designPath: json["design_path"] as? String
                 )
             )
-        case .designReview, .calibration:
-            fallthrough
-        @unknown default:
-            let data = (try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])) ?? Data()
-            return .raw(String(data: data, encoding: .utf8) ?? "{}")
         }
+        // Fallback
+        let data = (try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])) ?? Data()
+        return .raw(String(data: data, encoding: .utf8) ?? "{}")
     }
 }

@@ -76,15 +76,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cancel = CancellationToken::new();
 
-    if requires_secure_bind(&lfd_config.auth.provider)
+    if requires_secure_bind(&lfd_config.auth.mode)
         && !allow_insecure_bind
         && !http_addr.ip().is_loopback()
         && !is_tailscale_ip(http_addr.ip())
     {
         return Err(format!(
-            "refusing insecure non-loopback bind for auth.provider={}: {}. \
+            "refusing insecure non-loopback bind for auth.mode={}: {}. \
              use --allow-insecure-bind to override",
-            lfd_config.auth.provider, http_addr
+            lfd_config.auth.mode, http_addr
         )
         .into());
     }
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let is_loopback = http_addr.ip().is_loopback();
     let (auth_provider, registration_client, registration_creds) =
-        if is_loopback && lfd_config.auth.provider == "local" {
+        if is_loopback && lfd_config.auth.mode == "local" {
             // Loopback + local auth stays on startup session token behavior.
             (loopflow::lfd::setup_local_auth(), None, None)
         } else {
@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !is_loopback && matches!(provider, AuthProvider::Local { .. }) {
                 tracing::warn!(
                     addr = %http_addr,
-                    "binding to non-loopback address with auth.provider=local; \
+                    "binding to non-loopback address with auth.mode=local; \
                      remote requests require the session token"
                 );
             }
@@ -377,7 +377,7 @@ fn storage_config_from_config(
 
 fn format_token_rotation_output(token: &str) -> String {
     format!(
-        "new static auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
+        "new ci auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
     )
 }
 
@@ -470,6 +470,7 @@ mod tests {
     fn secure_bind_required_for_studio() {
         assert!(requires_secure_bind("studio"));
         assert!(!requires_secure_bind("local"));
+        assert!(!requires_secure_bind("ci"));
         assert!(!requires_secure_bind("static"));
     }
 

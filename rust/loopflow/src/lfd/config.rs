@@ -25,9 +25,9 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
-/// `provider` selects the auth strategy:
+/// `mode` selects the auth strategy:
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
-/// - `"static"`: validate against a pre-shared token
+/// - `"ci"`: validate against a pre-shared token
 /// - `"studio"`: registered with studio for discovery. Static token on
 ///   loopback, connection tokens validated locally for remote clients.
 ///   Connection tokens are session credentials: valid from mint until expiry
@@ -36,8 +36,8 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 ///   round-trip to studio on connect).
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthConfig {
-    #[serde(default = "default_provider")]
-    pub provider: String,
+    #[serde(default = "default_auth_mode", alias = "provider")]
+    pub mode: String,
     pub token: Option<SecretString>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
@@ -46,14 +46,14 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            provider: default_provider(),
+            mode: default_auth_mode(),
             token: None,
             base_url: default_base_url(),
         }
     }
 }
 
-fn default_provider() -> String {
+fn default_auth_mode() -> String {
     "local".to_string()
 }
 
@@ -153,7 +153,7 @@ impl RawLfdConfig {
         if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                self.auth.provider = trimmed.to_string();
+                self.auth.mode = trimmed.to_string();
             }
         }
 
@@ -347,8 +347,9 @@ impl RawLfdConfig {
         self.executor.limits.validate()?;
 
         let mut auth = self.auth;
-        if self.mode == Mode::Container && auth.provider == "local" && auth.token.is_none() {
-            auth.provider = "studio".to_string();
+        auth.mode = canonicalize_auth_mode(&auth.mode)?;
+        if self.mode == Mode::Container && auth.mode == "local" && auth.token.is_none() {
+            auth.mode = "studio".to_string();
         }
 
         Ok(LfdConfig {
@@ -369,6 +370,17 @@ impl RawLfdConfig {
             http_security: self.http_security.resolve()?,
             output_log_retention_days: self.output_log_retention_days,
         })
+    }
+}
+
+fn canonicalize_auth_mode(mode: &str) -> Result<String> {
+    match mode.trim() {
+        "local" | "studio" | "ci" => Ok(mode.trim().to_string()),
+        "static" => {
+            warn!("auth mode `static` is deprecated; use `ci`");
+            Ok("ci".to_string())
+        }
+        other => bail!("invalid auth.mode value '{other}'; expected 'local', 'studio', or 'ci'"),
     }
 }
 
@@ -921,7 +933,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.provider, "studio");
+        assert_eq!(resolved.auth.mode, "studio");
     }
 
     #[test]
@@ -953,12 +965,12 @@ executor:
         let raw = r#"
 mode: container
 auth:
-  provider: local
+  mode: local
   token: explicit-token
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.auth.provider, "local");
+        assert_eq!(resolved.auth.mode, "local");
     }
 
     #[test]
@@ -1065,7 +1077,7 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.provider, "static");
+        assert_eq!(resolved.auth.mode, "ci");
         assert_eq!(
             resolved
                 .auth
@@ -1126,6 +1138,28 @@ executor:
             err.to_string(),
             "invalid LFD_MODE value 'invalid'; expected 'native' or 'container'"
         );
+    }
+
+    #[test]
+    fn auth_mode_yaml_accepts_static_alias_and_canonicalizes_to_ci() {
+        let raw = r#"
+auth:
+  mode: static
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("static alias resolves");
+        assert_eq!(resolved.auth.mode, "ci");
+    }
+
+    #[test]
+    fn auth_mode_legacy_provider_key_still_deserializes() {
+        let raw = r#"
+auth:
+  provider: studio
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("legacy provider key resolves");
+        assert_eq!(resolved.auth.mode, "studio");
     }
 
     #[test]

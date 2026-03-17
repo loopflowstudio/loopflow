@@ -44,7 +44,7 @@ use self::token_ledger::TokenLedger;
 /// Set up auth provider based on config.
 ///
 /// Returns the auth provider, an optional registration client (for Studio
-/// provider status/deregistration), and optional credentials for deregistration.
+/// auth status/deregistration), and optional credentials for deregistration.
 pub async fn setup_auth(
     config: &LfdConfig,
     store: SharedStore,
@@ -56,28 +56,28 @@ pub async fn setup_auth(
     Option<RegistrationClient>,
     Option<(String, String)>,
 ) {
-    match config.auth.provider.as_str() {
+    match config.auth.mode.as_str() {
         "local" => (setup_local_auth(), None, None),
-        "static" => {
+        "ci" => {
             let token = config
                 .auth
                 .token
                 .as_ref()
                 .unwrap_or_else(|| {
                     tracing::error!(
-                        "auth.provider=static requires auth.token in config or LFD_AUTH_TOKEN env"
+                        "auth.mode=ci requires auth.token in config or LFD_AUTH_TOKEN env"
                     );
                     std::process::exit(1);
                 })
                 .clone();
-            tracing::info!("static token auth configured");
-            (AuthProvider::Static { token }, None, None)
+            tracing::info!("ci token auth configured");
+            (AuthProvider::Ci { token }, None, None)
         }
         "studio" => {
             setup_studio_registration(config, store, storage_config, http_addr, cancel).await
         }
         other => {
-            tracing::error!(provider = other, "unknown auth provider");
+            tracing::error!(mode = other, "unknown auth mode");
             std::process::exit(1);
         }
     }
@@ -117,13 +117,13 @@ async fn setup_studio_registration(
         .token
         .as_ref()
         .unwrap_or_else(|| {
-            tracing::error!("auth.provider=studio requires auth.token in config or LFD_AUTH_TOKEN");
+            tracing::error!("auth.mode=studio requires auth.token in config or LFD_AUTH_TOKEN");
             std::process::exit(1);
         })
         .clone();
 
     let Some(jwt) = self::credentials::load_jwt() else {
-        tracing::error!("auth.provider=studio requires a JWT in ~/.lf/credentials.json");
+        tracing::error!("auth.mode=studio requires a JWT in ~/.lf/credentials.json");
         std::process::exit(1);
     };
 

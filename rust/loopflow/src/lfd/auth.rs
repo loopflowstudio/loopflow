@@ -23,15 +23,15 @@ const MAX_BEARER_TOKEN_BYTES: usize = 4096;
 
 /// Auth provider for lfd connections.
 ///
-/// Selected from config (`auth.provider`). Determines how requests are
+/// Selected from config (`auth.mode`). Determines how requests are
 /// authenticated.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum AuthProvider {
     /// Local mode: loopback only, session token required.
     Local { session_token: SecretString },
-    /// Validate against a pre-shared static token.
-    Static { token: SecretString },
+    /// CI mode: validate against a pre-shared token.
+    Ci { token: SecretString },
     /// Registered with studio. Static token on loopback, connection tokens
     /// validated locally via ledger for remote clients.
     Studio {
@@ -57,7 +57,7 @@ impl AuthProvider {
             AuthProvider::Local { session_token } => {
                 authorize_expected_token(session_token, provided_token)
             }
-            AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
+            AuthProvider::Ci { token } => authorize_expected_token(token, provided_token),
             AuthProvider::Studio {
                 local_token,
                 ledger,
@@ -100,7 +100,7 @@ impl AuthProvider {
         };
 
         match self {
-            AuthProvider::Static { token: local_token } => token_matches(local_token, token),
+            AuthProvider::Ci { token: local_token } => token_matches(local_token, token),
             AuthProvider::Studio { local_token, .. } => token_matches(local_token, token),
             _ => false,
         }
@@ -245,7 +245,7 @@ fn token_matches(expected: &SecretString, provided: &str) -> bool {
 
 fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'static str) {
     match auth {
-        AuthProvider::Local { .. } | AuthProvider::Static { .. } => {
+        AuthProvider::Local { .. } | AuthProvider::Ci { .. } => {
             (StatusCode::UNAUTHORIZED, "malformed token")
         }
         AuthProvider::Studio { .. } => {

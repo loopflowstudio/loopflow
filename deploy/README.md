@@ -8,7 +8,7 @@ Run lfd remotely behind Caddy TLS and verify it from your laptop.
 - Docker + Docker Compose plugin
 - Domain (or host name) pointing to the instance
 - Security group allows inbound `443/tcp` and `80/tcp` (ACME challenge)
-- Static token for remote auth (`LFD_AUTH_TOKEN`)
+- CI auth token for remote auth (`LFD_AUTH_TOKEN`)
 
 ## Quick start
 
@@ -16,7 +16,7 @@ Run lfd remotely behind Caddy TLS and verify it from your laptop.
 git clone https://github.com/loopflowstudio/loopflow.git
 cd loopflow
 
-export LFD_AUTH_PROVIDER=static
+export LFD_AUTH_PROVIDER=ci
 export LFD_AUTH_TOKEN='<strong-random-token>'
 export LF_DOMAIN='lfd.example.com'
 
@@ -36,7 +36,7 @@ docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up
 
 ```bash
 # Required for remote auth
-export LFD_AUTH_PROVIDER=static
+export LFD_AUTH_PROVIDER=ci
 export LFD_AUTH_TOKEN='<token>'
 
 # Caddy domain and TLS mode

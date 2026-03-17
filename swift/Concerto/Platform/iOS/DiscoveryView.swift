@@ -80,11 +80,6 @@ struct DiscoveryView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            NavigationLink("Manual connection ›") {
-                ConnectionSetupView()
-            }
-            .font(Typography.body())
-
             Spacer()
         }
         .padding(Spacing.xl)
@@ -124,12 +119,6 @@ struct DiscoveryView: View {
                         .buttonStyle(.plain)
                         .disabled(isConnecting && !isCurrentlyConnecting(daemon))
                     }
-                }
-            }
-
-            Section {
-                NavigationLink("Manual connection ›") {
-                    ConnectionSetupView()
                 }
             }
 

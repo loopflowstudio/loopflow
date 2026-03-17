@@ -23,7 +23,7 @@ lfd migrate --status  # print schema_version=<version>
 `lfd migrate` uses the `mode` setting in `~/.lf/lfd.yaml` to choose backend (`sqlite` for native,
 `postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations.
 
-## Rotate static auth token
+## Rotate CI auth token
 
 ```bash
 lfd token rotate
@@ -178,8 +178,8 @@ LFD_HTTP_ADDR     # daemon listen address (default 127.0.0.1:2486)
 LFD_DB_PATH       # sqlite path override (relative to ~/.lf or absolute path)
 LFD_DATABASE_URL  # required for container mode (postgres)
 LFD_MAX_SLOTS     # concurrent run slots
-LFD_AUTH_PROVIDER # local (default), static, or studio
-LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
+LFD_AUTH_PROVIDER # local (default), ci, or studio; static also works as a deprecated alias
+LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=ci
 LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
 LFD_EXECUTOR_AGENT_TIMEOUT # override per-agent timeout (default 45m)
 LFD_EXECUTOR_LIMITS_MEMORY # override docker memory bytes (default 8589934592)
@@ -204,9 +204,9 @@ LFD_HTTP_TRUSTED_PROXY_CIDRS      # comma-separated trusted proxy CIDRs for X-Fo
 mode: native  # native (default) or container
 
 auth:
-  provider: local # local (default), static, or studio
-  token: your-static-token # required when provider=static or studio
-  base_url: https://auth.loopflow.studio # used by studio provider
+  mode: local # local (default), ci, or studio
+  token: your-ci-token # required when mode=ci or studio
+  base_url: https://auth.loopflow.studio # used by studio mode
 executor:
   sandbox: false # default in container mode; set true to opt into experimental sandbox executor
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
@@ -273,8 +273,8 @@ Standard Docker Compose merge rules apply — the override file is layered on to
 Environment overrides (non-identity fields only):
 
 ```bash
-LFD_AUTH_PROVIDER=static
-LFD_AUTH_TOKEN=your-static-token
+LFD_AUTH_PROVIDER=ci
+LFD_AUTH_TOKEN=your-ci-token
 LFD_EXECUTOR_IMAGE=loopflow/agent:latest # base image for generated Dockerfiles
 LFD_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 LFD_GITHUB_TOKEN=ghp_xxx
@@ -282,11 +282,11 @@ LFD_GITHUB_TOKEN=ghp_xxx
 
 Auth behavior:
 
-- `auth.provider=local` (default) writes a startup session token to `~/.lf/session-token` (`0600` on Unix).
+- `auth.mode=local` (default) writes a startup session token to `~/.lf/session-token` (`0600` on Unix).
 - All protected routes require `Authorization: Bearer <token>`.
 - Clients (`lfq`, Concerto) auto-discover the local session token from `~/.lf/session-token`. Set `LFD_TOKEN` for shell use.
-- In `auth.provider=static`, the configured bearer token is required from any source.
-- In `auth.provider=studio`, the static token is accepted on loopback; remote clients use connection tokens distributed by studio.
+- In `auth.mode=ci`, the configured bearer token is required from any source. `static` still works as a deprecated alias.
+- In `auth.mode=studio`, the configured local token is accepted on loopback; remote clients use connection tokens distributed by studio.
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 

@@ -227,7 +227,7 @@ final class BundledDaemonManager {
         var env = ProcessInfo.processInfo.environment
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
-        env["LFD_AUTH_PROVIDER"] = connectWithPhone ? "studio" : "static"
+        env["LFD_AUTH_PROVIDER"] = connectWithPhone ? "studio" : "ci"
         env["LFD_AUTH_TOKEN"] = token
         process.environment = env
 
@@ -377,7 +377,7 @@ final class BundledDaemonManager {
         connectWithPhone: Bool
     ) -> [String] {
         let portMapping = connectWithPhone ? "\(port):2486" : "127.0.0.1:\(port):2486"
-        let authProvider = connectWithPhone ? "studio" : "static"
+        let authProvider = connectWithPhone ? "studio" : "ci"
         var args = [
             "run", "-d",
             "--name", containerName,

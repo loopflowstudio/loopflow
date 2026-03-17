@@ -180,6 +180,17 @@ class TestClientResponses:
         assert flow.user_code == "ABCD-1234"
         client.close()
 
+    def test_complete_auth_posts_authorization_code(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/asana/complete"
+            assert request.method == "POST"
+            assert json.loads(request.content) == {"code": "auth-code-123"}
+            return httpx.Response(200, json={"provider": "asana", "status": "accepted"})
+
+        client = _mock_client(handler)
+        client.complete_auth("asana", "auth-code-123")
+        client.close()
+
     def test_disconnect_auth_returns_status(self):
         def handler(request):
             assert request.url.path == "/v0/auth/github"
@@ -396,14 +407,16 @@ class TestClientResponses:
         def handler(request):
             return httpx.Response(
                 200,
-                text='\n'.join([
-                    "id: 0",
-                    'data: {"type":"status_changed","status":"starting"}',
-                    "",
-                    "id: 1",
-                    'data: {"type":"turn_completed","status":"completed"}',
-                    "",
-                ]),
+                text="\n".join(
+                    [
+                        "id: 0",
+                        'data: {"type":"status_changed","status":"starting"}',
+                        "",
+                        "id: 1",
+                        'data: {"type":"turn_completed","status":"completed"}',
+                        "",
+                    ]
+                ),
             )
 
         client = _mock_client(handler)
@@ -447,7 +460,9 @@ def _mock_token_client(token=None, base_url="http://test"):
     transport = httpx.MockTransport(handler)
     client = Client(base_url=base_url, token=token)
     client._client = httpx.Client(
-        base_url=base_url, transport=transport, headers=client._client.headers,
+        base_url=base_url,
+        transport=transport,
+        headers=client._client.headers,
     )
     return client, received_headers
 

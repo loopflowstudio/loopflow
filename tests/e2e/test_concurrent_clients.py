@@ -103,9 +103,7 @@ def test_both_clients_stream_output(lfd_runtime: LfdRuntime, lf_client: Client) 
     assert lines.keys() == {"client_a", "client_b"}, (
         f"both log readers should report a result, got {lines}"
     )
-    assert lines["client_a"] == lines["client_b"], (
-        "both clients should observe the same result"
-    )
+    assert lines["client_a"] == lines["client_b"], "both clients should observe the same result"
 
 
 def test_both_clients_receive_session_events(
@@ -166,14 +164,16 @@ def test_suggested_actions_event_type_is_parseable() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            text='\n'.join([
-                "id: 7",
-                (
-                    'data: {"type":"suggested_actions","turn_id":"turn_1",'
-                    '"actions":[{"label":"Try again"}]}'
-                ),
-                "",
-            ]),
+            text="\n".join(
+                [
+                    "id: 7",
+                    (
+                        'data: {"type":"suggested_actions","turn_id":"turn_1",'
+                        '"actions":[{"label":"Try again"}]}'
+                    ),
+                    "",
+                ]
+            ),
         )
 
     client = _mock_client(handler)

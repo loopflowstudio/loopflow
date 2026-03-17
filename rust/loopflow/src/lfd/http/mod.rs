@@ -49,6 +49,10 @@ pub fn router(state: HttpState) -> Router {
                 .delete(auth_routes::disconnect_auth_handler),
         )
         .route(
+            "/auth/{provider}/complete",
+            post(auth_routes::complete_auth_handler),
+        )
+        .route(
             "/auth/{provider}/credential",
             put(auth_routes::configure_credential_handler),
         )

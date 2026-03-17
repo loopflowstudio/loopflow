@@ -22,9 +22,7 @@ REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 
 
-def run(
-    cmd: list[str], cwd: Path | None = None, check: bool = True
-) -> subprocess.CompletedProcess:
+def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, check=check)
 
 
@@ -45,8 +43,13 @@ def _detect_signing_identity() -> str | None:
 
 def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = None) -> int:
     cmd = [
-        "codesign", "--force", "--deep", "--sign", identity,
-        "--options", "runtime",
+        "codesign",
+        "--force",
+        "--deep",
+        "--sign",
+        identity,
+        "--options",
+        "runtime",
         "--timestamp",
     ]
     if entitlements and entitlements.exists():
@@ -72,13 +75,22 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
     try:
         print("Submitting for notarization...")
-        result = run([
-            "xcrun", "notarytool", "submit", str(dmg_path),
-            "--key", key_path,
-            "--key-id", key_id,
-            "--issuer", issuer,
-            "--wait",
-        ], check=False)
+        result = run(
+            [
+                "xcrun",
+                "notarytool",
+                "submit",
+                str(dmg_path),
+                "--key",
+                key_path,
+                "--key-id",
+                key_id,
+                "--issuer",
+                issuer,
+                "--wait",
+            ],
+            check=False,
+        )
         if result.returncode != 0:
             return result.returncode
 
@@ -145,8 +157,7 @@ def release() -> int:
             return rc
     else:
         print("No Developer ID found — signing ad-hoc (DMG will trigger Gatekeeper)")
-        run(["codesign", "--force", "--deep", "--sign", "-",
-             str(dist_dir / f"{app_name}.app")])
+        run(["codesign", "--force", "--deep", "--sign", "-", str(dist_dir / f"{app_name}.app")])
 
     # Create DMG
     dmg_path = dist_dir / "LoopflowConcerto.dmg"
@@ -160,14 +171,27 @@ def release() -> int:
     if has_create_dmg and bg_image.exists():
         cmd = [
             "create-dmg",
-            "--volname", app_name,
-            "--window-pos", "200", "120",
-            "--window-size", "660", "400",
-            "--icon-size", "128",
-            "--icon", f"{app_name}.app", "180", "185",
-            "--app-drop-link", "480", "185",
-            "--background", str(bg_image),
-            "--hide-extension", f"{app_name}.app",
+            "--volname",
+            app_name,
+            "--window-pos",
+            "200",
+            "120",
+            "--window-size",
+            "660",
+            "400",
+            "--icon-size",
+            "128",
+            "--icon",
+            f"{app_name}.app",
+            "180",
+            "185",
+            "--app-drop-link",
+            "480",
+            "185",
+            "--background",
+            str(bg_image),
+            "--hide-extension",
+            f"{app_name}.app",
             "--no-internet-enable",
             str(dmg_path),
             str(dmg_staging),
@@ -178,13 +202,20 @@ def release() -> int:
             return result.returncode
     else:
         (dmg_staging / "Applications").symlink_to("/Applications")
-        run([
-            "hdiutil", "create",
-            "-volname", app_name,
-            "-srcfolder", str(dmg_staging),
-            "-ov", "-format", "UDZO",
-            str(dmg_path),
-        ])
+        run(
+            [
+                "hdiutil",
+                "create",
+                "-volname",
+                app_name,
+                "-srcfolder",
+                str(dmg_staging),
+                "-ov",
+                "-format",
+                "UDZO",
+                str(dmg_path),
+            ]
+        )
 
     shutil.rmtree(dmg_staging)
 

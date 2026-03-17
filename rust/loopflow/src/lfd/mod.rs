@@ -31,7 +31,7 @@ pub mod triggers;
 pub mod types;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
@@ -41,6 +41,7 @@ use self::config::{AuthConfig, AuthMode, LfdConfig};
 use self::registration::RegistrationClient;
 use self::store::{SharedStore, StorageConfig};
 use self::token_ledger::TokenLedger;
+use crate::lfd::security::path_within_root_planned;
 
 /// Set up auth provider based on config.
 ///
@@ -181,6 +182,53 @@ pub(crate) fn lf_home_dir() -> PathBuf {
 
 pub fn default_db_path() -> PathBuf {
     lf_home_dir().join("lfd.db")
+}
+
+pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
+    if let Ok(database_url) = std::env::var("LFD_DATABASE_URL") {
+        let trimmed = database_url.trim();
+        if trimmed.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "LFD_DATABASE_URL is set but empty",
+            ));
+        }
+        return Ok(StorageConfig::postgres(trimmed.to_string()));
+    }
+
+    let db_root = default_db_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "failed to resolve sqlite root directory",
+            )
+        })?;
+    std::fs::create_dir_all(&db_root)?;
+
+    let db_candidate = std::env::var("LFD_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("lfd.db"));
+    let db_path = if db_candidate.is_absolute() {
+        let parent = db_candidate.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid LFD_DB_PATH: absolute path must include a parent directory",
+            )
+        })?;
+        std::fs::create_dir_all(parent)?;
+        db_candidate
+    } else {
+        path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid LFD_DB_PATH: {err}"),
+            )
+        })?
+    };
+
+    Ok(StorageConfig::sqlite(db_path))
 }
 
 pub fn default_output_dir() -> PathBuf {

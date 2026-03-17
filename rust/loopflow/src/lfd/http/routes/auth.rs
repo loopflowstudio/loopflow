@@ -82,6 +82,35 @@ pub async fn start_auth_handler(
     Ok(Json(flow_dto(response)))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CompleteAuthRequest {
+    pub code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompleteAuthResponse {
+    pub provider: String,
+    pub status: String,
+}
+
+pub async fn complete_auth_handler(
+    State(state): State<HttpState>,
+    Path(provider): Path<String>,
+    Json(body): Json<CompleteAuthRequest>,
+) -> ApiResult<CompleteAuthResponse> {
+    let provider = parse_provider(&provider)?;
+    state
+        .provider_auth
+        .complete_auth(provider, &body.code)
+        .await
+        .map_err(map_auth_error)?;
+
+    Ok(Json(CompleteAuthResponse {
+        provider: provider.as_str().to_string(),
+        status: "accepted".to_string(),
+    }))
+}
+
 pub async fn disconnect_auth_handler(
     State(state): State<HttpState>,
     Path(provider): Path<String>,
@@ -161,7 +190,16 @@ pub(super) fn map_auth_error(err: AuthError) -> ApiError {
         AuthError::FlowAlreadyPending(_) => {
             api_error(StatusCode::CONFLICT, ApiMessage::Safe(err.to_string()))
         }
+        AuthError::NoPendingFlow(_) => {
+            api_error(StatusCode::CONFLICT, ApiMessage::Safe(err.to_string()))
+        }
+        AuthError::CompletionUnavailable(_) => {
+            api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(err.to_string()))
+        }
         AuthError::CommandUnavailable { .. } => {
+            api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(err.to_string()))
+        }
+        AuthError::CodeExchangeRejected { .. } => {
             api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(err.to_string()))
         }
         AuthError::CommandSpawn { .. }
@@ -169,6 +207,7 @@ pub(super) fn map_auth_error(err: AuthError) -> ApiError {
         | AuthError::CommandIo { .. }
         | AuthError::MissingVerificationUrl { .. }
         | AuthError::Filesystem(_)
+        | AuthError::OAuthRequest { .. }
         | AuthError::CredentialSocket { .. } => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(err.to_string()),

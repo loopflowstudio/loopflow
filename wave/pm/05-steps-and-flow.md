@@ -1,8 +1,13 @@
+---
+pm_id: '1213718054761190'
+---
 # 05: import-pm, export-pm steps and pm-sync flow
 
 **Finish line:** `lf import-pm` and `lf export-pm` work as composable steps. `pm-sync` flow chains import → build → export.
 
-The roadmap file round-trip helper already exists in `RoadmapItemDocument`. Import/export should use that helper for every `pm_id` read/write instead of open-coding frontmatter edits.
+The roadmap file round-trip helper already exists in `RoadmapItemDocument`, and Asana already proved the provider seam. Import/export should use that helper for every `pm_id` read/write instead of open-coding frontmatter edits.
+
+Ordering is the tricky part. Asana does not expose a numeric rank field, so export cannot treat `PmItemUpdate.rank` as a real remote reorder. When filename order matters, implement provider-aware ordering (`insert_before` / `insert_after` for Asana, whatever Linear actually supports) or emit a clear limitation. Do not fake a successful reorder by writing a local rank nobody uses.
 
 ## What to build
 
@@ -71,6 +76,7 @@ Run `lf ops pm import` and commit any changes.
 - These are ops commands, not LLM steps. No agent involved — deterministic sync.
 - Steps exist so they're composable in flows and visible in `lf --help`.
 - Import overwrites local; export creates/updates remote. No merge logic.
+- Keep provider-specific reorder behavior out of `RoadmapItemDocument`; this item should normalize file I/O once and delegate remote ordering to the provider/export layer.
 
 ## Done when
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from loopflow.client import Client
 
 from .api_harness import ApiAssertions, ApiClient
-from .lfd_runtime import LfdRuntime
 
 
 def add_trigger_repo_happy(client: Client, state: dict[str, str]) -> None:

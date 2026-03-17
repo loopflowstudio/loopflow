@@ -19,6 +19,7 @@ from conftest import (
 from loopflow.cli import (
     _auth_status_table,
     _billing_tables,
+    _extract_authorization_code,
     _estimate_cost,
     _format_cost,
     _format_tokens,
@@ -147,6 +148,19 @@ def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
 
     assert "Asana" in rendered
     assert "pay-per-token" not in rendered
+
+
+def test_extract_authorization_code_accepts_raw_code() -> None:
+    assert _extract_authorization_code("abc123") == "abc123"
+
+
+def test_extract_authorization_code_parses_redirect_url() -> None:
+    assert (
+        _extract_authorization_code(
+            "urn:ietf:wg:oauth:2.0:oob?code=abc123&state=ignored"
+        )
+        == "abc123"
+    )
 
 
 def test_repo_table_shows_registration_columns() -> None:

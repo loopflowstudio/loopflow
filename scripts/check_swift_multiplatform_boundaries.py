@@ -24,9 +24,7 @@ APP_WIRING_FILES = {
     "swift/Concerto/ConcertoApp.swift",
 }
 
-PLATFORM_PREFIXES = (
-    "swift/Concerto/Platform/",
-)
+PLATFORM_PREFIXES = ("swift/Concerto/Platform/",)
 
 
 def _resolve_main_ref() -> str:

@@ -243,6 +243,46 @@ pub enum OpsCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
+    /// Export wave roadmap items to PM tool
+    Export {
+        /// Wave name
+        wave: String,
+        /// Show what would happen without calling the PM API
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Provider authentication for local lf steps and ops
+    Auth {
+        #[command(subcommand)]
+        cmd: AuthCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AuthCommand {
+    /// Show authentication status for local credentials
+    Status {
+        /// Provider name (optional)
+        provider: Option<String>,
+    },
+    /// Disconnect a provider from local lf credentials
+    Disconnect {
+        /// Provider name
+        provider: String,
+    },
+    /// Store an API key from the provider's environment variable
+    Configure {
+        /// Provider name
+        provider: String,
+    },
+    /// Start a provider auth flow explicitly
+    Connect {
+        /// Provider name
+        provider: String,
+    },
+    /// External: provider name (so `lf ops auth asana` works)
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug)]

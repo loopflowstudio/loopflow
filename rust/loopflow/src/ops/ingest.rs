@@ -89,14 +89,14 @@ pub fn ingest(
 }
 
 #[derive(Debug)]
-struct WaveItem {
-    filename: String,
-    prefix: u32,
-    slug: String,
+pub(crate) struct WaveItem {
+    pub filename: String,
+    pub prefix: u32,
+    pub slug: String,
 }
 
 /// List numbered .md files in a wave directory, skipping README.md.
-fn list_numbered_items(dir: &Path) -> OpsResult<Vec<WaveItem>> {
+pub(crate) fn list_numbered_items(dir: &Path) -> OpsResult<Vec<WaveItem>> {
     let mut items = Vec::new();
 
     let entries = std::fs::read_dir(dir)?;

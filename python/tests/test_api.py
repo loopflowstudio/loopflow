@@ -9,3 +9,7 @@ def test_api_exports_revoke_connection_tokens() -> None:
     assert "revoke_connection_tokens" in api.__all__
     assert api.revoke_connection_tokens is not None
 
+
+def test_api_exports_complete_auth() -> None:
+    assert "complete_auth" in api.__all__
+    assert api.complete_auth is not None

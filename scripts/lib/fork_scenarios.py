@@ -323,9 +323,7 @@ def wait_for_fork_launch(
         stripped = line.strip()
         if "launching fork branch agent" in stripped:
             return True, "".join(lines) + "\n[FORK_AGENT_LAUNCHED]"
-        if "creating agent container" in stripped and (
-            wave_name is None or wave_name in stripped
-        ):
+        if "creating agent container" in stripped and (wave_name is None or wave_name in stripped):
             return True, "".join(lines) + "\n[FORK_CONTAINER_CREATED]"
         if "fork branch completed" in stripped or "fork branch failed" in stripped:
             return True, "".join(lines) + "\n[FORK_BRANCH_FINISHED]"
@@ -334,7 +332,9 @@ def wait_for_fork_launch(
 
 
 def _run(
-    cmd: list[str], capture_output: bool = False, **kwargs,
+    cmd: list[str],
+    capture_output: bool = False,
+    **kwargs,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=capture_output, text=True, **kwargs)
 

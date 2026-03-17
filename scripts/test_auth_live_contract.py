@@ -36,8 +36,15 @@ PROVIDER_CREDENTIAL_ROOTS = {
 PROVIDER_AUTH_COMMANDS = {
     "github": (
         [
-            "gh", "auth", "login", "--web", "--hostname", "github.com",
-            "--git-protocol", "https", "--skip-ssh-key",
+            "gh",
+            "auth",
+            "login",
+            "--web",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+            "--skip-ssh-key",
         ],
         {"GH_BROWSER": "echo"},
     ),
@@ -194,7 +201,9 @@ async def run_provider_contract(
     connect_kwargs = websocket_connect_kwargs(token, event_timeout_seconds)
 
     async with httpx.AsyncClient(
-        base_url=base_url, timeout=http_timeout_seconds, headers=headers,
+        base_url=base_url,
+        timeout=http_timeout_seconds,
+        headers=headers,
     ) as client:
         result["status_before"] = await fetch_auth_status(client, provider)
         _write_json(evidence_dir / "status-before.json", result["status_before"])
@@ -222,7 +231,9 @@ async def run_provider_contract(
                     return result
 
                 pending_samples = await poll_provider_status(
-                    client, provider, pending_timeout_seconds,
+                    client,
+                    provider,
+                    pending_timeout_seconds,
                 )
                 result["status_samples"] = pending_samples
                 _write_json(evidence_dir / "status-samples.json", pending_samples)
@@ -365,7 +376,9 @@ def validate_start_payload(provider: str, payload: dict[str, Any]) -> str | None
         return f"start payload provider mismatch: expected {provider!r}, got {got!r}"
 
     verification_uri = payload.get("verification_uri")
-    if not isinstance(verification_uri, str) or not verification_uri.startswith(("http://", "https://")):
+    if not isinstance(verification_uri, str) or not verification_uri.startswith(
+        ("http://", "https://")
+    ):
         return f"invalid verification_uri: {verification_uri!r}"
 
     verification_uri_complete = payload.get("verification_uri_complete")
@@ -396,10 +409,10 @@ def validate_claude_disconnect(
 ) -> ProviderResult:
     claude_dir = runtime_home / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
-    (claude_dir / "settings.json").write_text("{\"theme\":\"dark\"}\n", encoding="utf-8")
-    (claude_dir / "projects.json").write_text("{\"recent\":[]}\n", encoding="utf-8")
-    (claude_dir / "auth.json").write_text("{\"token\":\"secret\"}\n", encoding="utf-8")
-    (claude_dir / "oauth-tokens.json").write_text("{\"token\":\"secret\"}\n", encoding="utf-8")
+    (claude_dir / "settings.json").write_text('{"theme":"dark"}\n', encoding="utf-8")
+    (claude_dir / "projects.json").write_text('{"recent":[]}\n', encoding="utf-8")
+    (claude_dir / "auth.json").write_text('{"token":"secret"}\n', encoding="utf-8")
+    (claude_dir / "oauth-tokens.json").write_text('{"token":"secret"}\n', encoding="utf-8")
     session_cache = claude_dir / "session-cache"
     session_cache.mkdir(parents=True, exist_ok=True)
     (session_cache / "entry").write_text("session", encoding="utf-8")

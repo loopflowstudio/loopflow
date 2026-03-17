@@ -1,8 +1,11 @@
+---
+pm_id: '1213718537307877'
+---
 # 04: Bootstrap CLI
 
 **Finish line:** `lf ops asana init` and `lf ops linear init` create and link projects in both directions. `lf ops asana/linear status` shows sync state.
 
-The file formats are already settled: wave YAML uses `PmConfig`, and roadmap frontmatter uses `RoadmapItemDocument` + `pm_id`. This item should wire real commands onto those existing shapes rather than creating another representation.
+The file formats, auth, and config plumbing are already on main: wave YAML uses `PmConfig` (`pm/mod.rs`), roadmap frontmatter uses `RoadmapItemDocument` + `pm_id`, `lfq auth asana|linear` stores credentials via `Provider::Asana`/`Provider::Linear`, and `AsanaConfig`/`LinearConfig` in `engine::config` carry workspace/team IDs. This item wires real commands onto those existing shapes rather than creating another representation.
 
 ## What to build
 
@@ -37,6 +40,8 @@ Implement these as deterministic Rust ops commands so they compose cleanly with 
 5. Write `pm_id` to each roadmap item through `RoadmapItemDocument`
 6. Commit changes
 
+Missing provider config should fail here with actionable messages (`asana.workspace`, optional `asana.default_team`, `linear.team`) instead of bubbling up opaque API errors.
+
 ### `init --project` (PM project exists, no wave)
 
 1. `provider.list_items(project_id)`
@@ -67,6 +72,7 @@ For each wave with a `pm` block:
 - `init` should fail clearly if the wave or project already has a `pm` link (use `link` to reconnect)
 - Provider resolves from command name (`lf ops asana` → Asana, `lf ops linear` → Linear)
 - Reuse existing auth lookup and config parsing — no PM-only credential plumbing
+- Reuse the existing Asana/Linear provider clients directly; the commands should orchestrate wave/project/file changes, not duplicate HTTP code.
 
 ## Done when
 

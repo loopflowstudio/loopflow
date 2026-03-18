@@ -180,7 +180,7 @@ pub async fn reconcile_wave_queue(
     wave_id: &LfdId,
     trigger: QueueTrigger,
 ) -> Result<(), String> {
-    reconcile_wave_queue_with_events(store, github_config, wave_id, trigger, None).await
+    reconcile_wave_queue_with_events(store, github_config, wave_id, trigger, Some(event_hub)).await
 }
 
 pub async fn reconcile_wave_queue_with_events(
@@ -421,7 +421,7 @@ pub async fn handle_pr_merged(
         wave_id,
         merged_pr_number,
         merged_at,
-        None,
+        Some(event_hub),
     )
     .await
 }

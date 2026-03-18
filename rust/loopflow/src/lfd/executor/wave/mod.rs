@@ -808,7 +808,6 @@ impl WaveExecutor {
                         }
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
-                            &self.event_hub,
                             &self.github_config,
                             wave.id(),
                             crate::lfd::queue::QueueTrigger::RunCompleted,

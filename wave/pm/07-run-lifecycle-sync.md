@@ -3,51 +3,40 @@ pm_id: '1213718325464924'
 ---
 # 07: Run lifecycle → PM sync
 
-**Finish line:** PR creation and merge automatically update the corresponding PM item. Best-effort, non-blocking.
+**Finish line:** PR creation, merge, and failure events comment on or complete the corresponding PM item without affecting wave execution.
+
+Both providers now expose the verbs this needs (`comment`, `complete_item`), and the daemon already has patterns for best-effort side effects: queue/attention updates log warnings instead of breaking the run. The missing work is wiring run + PR lifecycle data back to the roadmap item's `pm_id` and calling the provider at the right transition points.
 
 ## What to build
 
-The provider seam already has the required verbs (`comment`, `complete_item`), and Asana implements them today. This item is about wiring those calls into executor lifecycle transitions once both providers are available.
-
 ### Sync points
 
-Add sync points to the wave run lifecycle in the executor:
-
-| Run state transition | Action |
-|---------------------|--------|
+| Transition | PM action |
+|------------|-----------|
 | PR created | `provider.comment(pm_id, "PR opened: {url}")` |
-| PR merged (run complete) | `provider.complete_item(pm_id)` |
+| PR merged / run complete | `provider.complete_item(pm_id)` |
 | Run failed | `provider.comment(pm_id, "Run failed: {error}")` |
 
-### Resolution
+### Resolution path
 
-The run already knows its wave and roadmap item. Resolve PM context through the existing files and helpers:
-
-1. Run → wave → wave YAML → `pm` block (`provider`, `project`)
+1. Run → wave → wave YAML → `pm` block
 2. Run → roadmap item file → `RoadmapItemDocument` → `pm_id`
-3. Construct provider client from stored credentials + config
-4. Call the appropriate method
+3. Stored credentials + config → provider client
+4. Call the provider method and log any failure
 
-Skip the sync entirely when the wave has no `pm` block or the item has no `pm_id`.
-
-### Error handling
-
-Best-effort: if the PM API call fails, log a warning and continue. Never block wave execution on external sync.
-
-### Implementation
-
-Synchronous dispatch initially — call the provider directly from the run lifecycle transition handler. No event bus, no queue, no subscriber layer unless real latency proves that necessary.
+The store already tracks PR state and merge events; reuse that data flow instead of adding a second source of truth for PR URLs or merge timing.
 
 ## Constraints
 
-- PM sync failures must not affect wave execution.
-- No new infrastructure: direct function call, not an event system.
-- Only fires when the wave has a `pm` block and the item has a `pm_id`.
+- Best-effort only: PM failures log warnings and stop there.
+- No new event bus or background sync service unless the direct call path proves too slow.
+- Skip the sync entirely when the wave has no `pm` block or the roadmap item has no `pm_id`.
+- Keep provider-specific completion details inside the provider client (`workflowStates` lookup for Linear, rich-text quirks for Asana).
 
 ## Done when
 
-- Merging a PR for a wave run marks the corresponding PM item complete
-- Creating a PR adds a comment on the PM item with the PR URL
-- A failed run adds an error comment on the PM item
-- PM API failure logs a warning but doesn't affect the run
-- Waves without `pm` configuration are completely unaffected
+- Creating a PR adds a PM comment with the PR URL
+- Merging/completing the run marks the remote item complete
+- A failed run adds an error comment
+- PM API failures are visible in logs but do not affect run status
+- Waves without PM configuration behave exactly as before

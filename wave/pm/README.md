@@ -2,59 +2,50 @@
 
 ## Vision
 
-Loopflow syncs with the PM tools teams already use. Plan in Asana or Linear, execute in loopflow, results flow back. The wave is the unit of work in both systems.
+Loopflow syncs with the PM tools teams already use. Plan in Asana or Linear, execute in loopflow, and let progress flow back without hand-editing wave files.
 
 ### Not here
 
-- Jira, Notion, or other providers (future waves)
+- Jira, Notion, or other providers
 - Board/kanban view sync (sections, statuses, columns)
-- Bidirectional real-time sync (loopflow owns `.md` files, PM tools own planning)
+- Bidirectional real-time sync or webhook-driven merge logic
 
 ## Strategy
 
-The shared PM seam lives in `rust/loopflow/src/lfd/pm/mod.rs`: `PmProviderKind`, `PmConfig`, `PmItem`/`PmItemCreate`/`PmItemUpdate`, `PmProvider` trait (6 async methods), `RoadmapItemDocument` with frontmatter parse/render. Asana is now the reference implementation in `rust/loopflow/src/lfd/pm/asana.rs`. Provider clients, ops commands, ingest hooks, and run-lifecycle sync should extend this seam instead of inventing provider-specific side paths.
+The PM architecture centers on a shared seam and a single set of file formats:
 
-Keep the layers narrow:
+- `rust/loopflow/src/lfd/pm/mod.rs` owns the provider-agnostic language (`PmProviderKind`, `PmConfig`, `PmItem*`, `PmProvider`, `RoadmapItemDocument`)
+- `rust/loopflow/src/lfd/pm/asana.rs` and `rust/loopflow/src/lfd/pm/linear.rs` are the concrete transport adapters
+- `lf ops auth ...`, `lfq auth ...`, provider-token storage, and HTTP auth routes handle Asana OAuth and Linear API-key flows
+- `rust/loopflow/src/ops/export.rs` is the starting point for mechanical sync: it exports a wave to Asana, can create a missing project, and writes `pm` / `pm_id` state back through the shared helpers
 
-- Provider clients are pure HTTP adapters constructed from stored token + config. They do not own token-store lookups or wave-file mutations.
-- Higher-level ops commands resolve credentials, read wave config, and write roadmap files through `RoadmapItemDocument`.
-- New provider code should live beside Asana (`pm/linear.rs`, future `pm/<provider>.rs`) so shared types stay isolated from transport code.
+Future items should deepen that path instead of creating a second one.
 
-### Model
+### Invariants
 
-- Wave ↔ project
-- Roadmap item ↔ Asana task / Linear issue
-- `wave/<name>/<name>.yaml` carries the provider + project in `pm:` block (parsed as `PmConfig`), plus optional per-wave `team` override when project bootstrap needs a specific team
-- Roadmap item frontmatter carries provider-agnostic `pm_id` (parsed via `RoadmapItemDocument`)
-- External IDs stay strings end to end (Asana GID strings, Linear UUID/project IDs)
-
-### Ownership
-
-Provider credentials live in the existing encrypted provider-token store (`Provider::Asana`, `Provider::Linear`). PM API-key UX is separate from metered model-provider UX — Asana and Linear don't show pay-per-token billing copy in CLI status/output.
-
-Global config (`engine::config`) carries `AsanaConfig` (workspace, default_team) and `LinearConfig` (team) for project creation paths.
-
-Import is a pull: the PM tool wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state. Avoid bidirectional merge logic.
+- Provider clients stay thin. They translate API semantics; they do not read config files, mutate wave markdown, or own credential lookup policy.
+- `lf ops auth` remains the single local credential surface. Future PM commands should consume stored credentials, not invent provider-specific auth side paths.
+- `RoadmapItemDocument` stays the only writer for roadmap frontmatter. PM sync code should normalize file edits through it instead of open-coding markdown mutations.
+- Import is a pull: the PM tool wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state.
+- Missing config (`asana.workspace`, `asana.default_team`, `linear.team`) should fail with actionable messages at the command boundary, not opaque provider errors.
 
 ## Goals
 
-- Linear client implements `PmProvider`, matching the Asana seam and test coverage
-- Bootstrap CLI creates/links projects in either direction
-- `import-pm` / `export-pm` steps compose into flows
-- `ingest` auto-refreshes from tracker when PM is configured
-- Run lifecycle events sync completion back to the PM tool
+- Bootstrap/link/status commands create or connect Asana and Linear projects without manual YAML or frontmatter edits
+- Import/export become provider-aware mechanical ops with built-in steps and a `pm-sync` flow
+- `ingest` refreshes from PM before picking the next item when a wave is linked
+- Run lifecycle events comment on and complete PM items best-effort after PR activity and merge
 
 ## Risks
 
-- **Asana rich text vs markdown.** Asana descriptions are rich text (HTML-ish), not markdown. Conversion may lose formatting or produce ugly results. Linear is native markdown.
-- **Rate limits differ.** Asana: 1500 req/min. Linear: 400 req/min. A wave with 50 items could hit Linear's limit during bulk operations.
-- **Ordering semantics differ.** Asana has explicit task order but no numeric rank field; exporting filename order will require relative move operations (`insert_before` / `insert_after`) instead of pretending a rank update exists. Linear issues have priority levels but ordering within a priority is less structured.
-- **Project bootstrap is config-sensitive.** Asana project creation depends on `asana.workspace` (and sometimes `default_team`); Linear creation depends on `linear.team`. Bootstrap commands need crisp failures and status output when those values are missing.
-- **Credential metadata may need to grow.** PM credentials currently reuse the generic provider-token shape. If later sync needs workspace/team metadata at auth time, extend that model carefully instead of bolting on PM-only storage.
-- **Roadmap frontmatter parsing is narrow today.** `RoadmapItemDocument` assumes the repo's current `--- ... ---` frontmatter shape. Import/export work should normalize files through that helper instead of open-coding markdown edits.
+- **Asana rich text vs markdown.** Import/export still needs a crisp normalization story so descriptions do not thrash on every sync.
+- **Ordering semantics differ.** Asana needs relative move operations; Linear may need a documented limitation or a separate ordering strategy.
+- **Today's export path is Asana-only.** `ops/export.rs` already writes `pm_id` and can create a project, but the remaining work must generalize that code instead of leaving an Asana-only branch beside new PM commands.
+- **Lifecycle sync depends on reliable lookup.** Run → wave → roadmap item → `pm_id` must resolve cleanly, and failures must stay non-blocking.
+- **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set.
 
 ## Metrics
 
-- Import/export round-trip fidelity: items created in PM tool appear correctly in `wave/` and vice versa (target: 100% for name, description, order)
-- Sync latency: time from PR merge to PM item marked complete (target: <30s)
-- API calls per sync operation (target: 1 per item + 1 for project, no redundant calls)
+- Import/export round-trip fidelity for title, description, and order: 100%
+- Sync latency from merge to remote completion: <30s
+- Redundant API calls during steady-state sync: 0

@@ -4,7 +4,7 @@ area:
 - rust/loopflow/src/lf/
 - rust/loopflow/src/lfd/
 - rust/loopflow/src/engine/
-- python/loopflow/
+- wave/pm/
 direction:
 - clarity
 - simplicity

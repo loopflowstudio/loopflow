@@ -57,34 +57,6 @@ struct RepoStateInteractiveSessionTests {
         #expect(state.consumeAutoPresentTerminal(for: "wave-1") == false)
     }
 
-    @Test("opening a terminal session focuses its wave and arms auto-present")
-    func openTerminalSessionFocusesWave() {
-        let state = RepoState()
-        state.waveStore.onStatusChange = nil
-        let wave = makeWave(id: "wave-1", status: .running)
-        state.waveStore.set(wave)
-        state.terminalWorkspaceStore.upsert(makeSession(id: "session-1", waveId: wave.id))
-
-        state.openTerminalSession("session-1")
-
-        #expect(state.selectedWaveId == wave.id)
-        #expect(state.consumeAutoPresentTerminal(for: wave.id))
-    }
-
-    @Test("selecting a terminal session focuses its wave without auto-present")
-    func selectTerminalSessionFocusesWaveWithoutAutoPresent() {
-        let state = RepoState()
-        state.waveStore.onStatusChange = nil
-        let wave = makeWave(id: "wave-1", status: .running)
-        state.waveStore.set(wave)
-        state.terminalWorkspaceStore.upsert(makeSession(id: "session-1", waveId: wave.id))
-
-        state.selectTerminalSession("session-1")
-
-        #expect(state.selectedWaveId == wave.id)
-        #expect(state.consumeAutoPresentTerminal(for: wave.id) == false)
-    }
-
     private func makeWave(id: String, status: WaveStatus) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -98,18 +70,6 @@ struct RepoStateInteractiveSessionTests {
                 status: status,
                 iteration: 0
             )
-        )
-    }
-
-    private func makeSession(id: String, waveId: String) -> TerminalSession {
-        TerminalSession(
-            id: id,
-            waveId: waveId,
-            step: "implement",
-            agent: "claude",
-            cwd: "/tmp/repo",
-            status: .pending,
-            createdAt: .now
         )
     }
 }

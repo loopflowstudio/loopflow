@@ -101,6 +101,7 @@ public final class RepoState {
     private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
+    private var autoPresentTerminalWaveIds: Set<String> = []
     private var roadmapBootstrapRepos: Set<String> = []
     private var bootstrappingRoadmapRepoPath: String?
 
@@ -187,6 +188,25 @@ public final class RepoState {
         sessionStates[waveId]?.setAwaitingSession(false)
     }
 
+    public func markAutoPresentTerminal(for waveId: String) {
+        autoPresentTerminalWaveIds.insert(waveId)
+    }
+
+    public func consumeAutoPresentTerminal(for waveId: String) -> Bool {
+        autoPresentTerminalWaveIds.remove(waveId) != nil
+    }
+
+    private func resetTransientWaveState(includeSessionStates: Bool = true) {
+        if includeSessionStates {
+            sessionStates.removeAll()
+        }
+        waitingSessionIds.removeAll()
+        attentionStore.removeAll()
+        terminalWorkspaceStore.setAll([])
+        optimisticInteractiveWaveIds.removeAll()
+        autoPresentTerminalWaveIds.removeAll()
+    }
+
     // In-flight actions (land) — buttons disable while pending
     private(set) var inFlightActions: Set<String> = []
 
@@ -250,12 +270,8 @@ public final class RepoState {
         flows = []
         supportedHarnesses = []
         waveStore.removeAll()
-        attentionStore.removeAll()
         worktreeStore.removeAll()
-        sessionStates.removeAll()
-        waitingSessionIds.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
@@ -437,11 +453,7 @@ public final class RepoState {
             cancelTrackedTerminalSessions()
         }
 
-        sessionStates.removeAll()
-        waitingSessionIds.removeAll()
-        attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
         hasCompletedInitialLoad = false
         currentRepo = canonicalURL
         repoTarget = .local(canonicalURL)
@@ -469,10 +481,7 @@ public final class RepoState {
             await eventService?.disconnect()
         }
         eventService = nil
-        waitingSessionIds.removeAll()
-        attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
     }
 
     // MARK: - Event Subscription
@@ -563,6 +572,9 @@ public final class RepoState {
                     state.seedInitialUserMessage(initialUserMessage)
                 }
                 if let terminalSessionId = event.terminalSessionId {
+                    if selectedWaveId == nil || selectedWaveId == event.waveId {
+                        markAutoPresentTerminal(for: event.waveId)
+                    }
                     await loadTerminalSession(id: terminalSessionId, select: true)
                     if selectedWaveId == nil {
                         selectedWaveId = event.waveId
@@ -1150,11 +1162,7 @@ public final class RepoState {
             }
         }
 
-        sessionStates.removeAll()
-        waitingSessionIds.removeAll()
-        attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
 
         let probeService = Self.makeEventService(
             connection: connection,
@@ -1182,11 +1190,7 @@ public final class RepoState {
 
     public func selectRemoteRepo(path: String) {
         cancelTrackedTerminalSessions()
-        sessionStates.removeAll()
-        waitingSessionIds.removeAll()
-        attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
         repoTarget = .remote(path: path, host: host)

@@ -123,7 +123,7 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
             repoState.loadWaveContent(for: wave.id)
-            runTargetSelection = wave.flow
+            runTargetSelection = wave.configuredFlow
             previousCommitSHAs = Set(wave.commits.map(\.sha))
             displayedCommits = wave.commits
             displayedDiffStat = wave.diffStat
@@ -143,7 +143,7 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: newId)
             repoState.loadRuns(for: newId)
             repoState.loadWaveContent(for: newId)
-            runTargetSelection = wave.flow
+            runTargetSelection = wave.configuredFlow
             previousCommitSHAs = Set(wave.commits.map(\.sha))
             displayedCommits = wave.commits
             highlightedCommitSHAs.removeAll()
@@ -163,8 +163,9 @@ struct WaveDetailPanel: View {
             syncDiffHeaderPulse(for: newStatus)
         }
         .onChange(of: wave.flow) { oldFlow, newFlow in
-            if runTargetSelection.isEmpty || runTargetSelection == oldFlow {
-                runTargetSelection = newFlow
+            if normalizedRunTarget(runTargetSelection) == nil ||
+                normalizedRunTarget(runTargetSelection) == normalizedRunTarget(oldFlow) {
+                runTargetSelection = normalizedRunTarget(newFlow) ?? ""
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -319,7 +320,7 @@ struct WaveDetailPanel: View {
                     HStack(spacing: Spacing.md) {
                         FlowTypeahead(
                             wave: wave,
-                            initialSelection: runTargetSelection.isEmpty ? wave.flow : runTargetSelection,
+                            initialSelection: runTargetSelection.isEmpty ? wave.configuredFlow : runTargetSelection,
                             style: .compact,
                             onSubmitSelection: { selection in
                                 runSelectedTarget(selection)
@@ -428,24 +429,20 @@ struct WaveDetailPanel: View {
     }
 
     private var selectedRunTarget: String {
-        let trimmed = runTargetSelection.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            return trimmed
-        }
-        return wave.flow.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalizedRunTarget(runTargetSelection) ?? wave.configuredFlow
     }
 
     private var headerRunDisabled: Bool {
         selectedRunTarget.isEmpty || isSendingHeaderRun || !isRunnableWorkspace
     }
 
-    private func runSelectedTarget() {
-        runSelectedTarget(nil)
+    private func normalizedRunTarget(_ target: String?) -> String? {
+        let trimmed = target?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func runSelectedTarget(_ explicitTarget: String?) {
-        let trimmedExplicitTarget = explicitTarget?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let target = trimmedExplicitTarget.flatMap { $0.isEmpty ? nil : $0 } ?? selectedRunTarget
+    private func runSelectedTarget(_ explicitTarget: String? = nil) {
+        let target = normalizedRunTarget(explicitTarget) ?? selectedRunTarget
         guard !target.isEmpty, !isSendingHeaderRun, isRunnableWorkspace else { return }
 
         isSendingHeaderRun = true
@@ -473,7 +470,12 @@ struct WaveDetailPanel: View {
         HStack(spacing: Spacing.lg) {
             configLabel("folder", wave.areaDisplay)
             configLabel("target", wave.directionDisplay)
-            configLabel("arrow.triangle.branch", wave.flow)
+            if let runFlowOverride = wave.runFlowOverride {
+                configLabel("play.fill", runFlowOverride)
+                configLabel("arrow.triangle.branch", wave.configuredFlow)
+            } else {
+                configLabel("arrow.triangle.branch", wave.displayFlow)
+            }
         }
     }
 
@@ -775,7 +777,7 @@ struct WaveDetailPanel: View {
                 // Status description with progress
                 if wave.status == .running {
                     FlowProgressPills(
-                        steps: wave.flowSteps.isEmpty ? [wave.flow] : wave.flowSteps,
+                        steps: wave.displayFlowSteps,
                         currentIndex: wave.stepIndex,
                         startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt,
                         stepAgents: wave.stepAgents,

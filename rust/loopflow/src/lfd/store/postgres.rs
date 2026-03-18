@@ -1450,7 +1450,7 @@ impl PostgresStore {
             .await?
             .into_iter()
             .filter(|item| item.wave_id == wave_id)
-            .filter_map(|item| queue_block_from_attention(&item))
+            .filter_map(|item| queue_block_from_attention(&item).ok().flatten())
             .collect();
         Ok(blocks)
     }

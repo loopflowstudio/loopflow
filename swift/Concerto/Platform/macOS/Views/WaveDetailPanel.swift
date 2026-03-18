@@ -37,6 +37,8 @@ struct WaveDetailPanel: View {
     @State private var highlightedCommitSHAs: Set<String> = []
     @State private var displayedDiffStat: String?
     @State private var diffHeaderPulseActive = false
+    @State private var runTargetSelection: String = ""
+    @State private var isSendingHeaderRun = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
@@ -57,6 +59,9 @@ struct WaveDetailPanel: View {
     private var isReviewStep: Bool {
         guard let step = wave.activeRun?.currentStep?.lowercased() else { return false }
         return step.contains("review")
+    }
+    private var isRunnableWorkspace: Bool {
+        wave.status == .idle || wave.status == .paused || wave.status == .failed
     }
 
     private var ideApp: IDEApp { .cursor }
@@ -118,6 +123,7 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
             repoState.loadWaveContent(for: wave.id)
+            runTargetSelection = wave.flow
             previousCommitSHAs = Set(wave.commits.map(\.sha))
             displayedCommits = wave.commits
             displayedDiffStat = wave.diffStat
@@ -137,6 +143,7 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: newId)
             repoState.loadRuns(for: newId)
             repoState.loadWaveContent(for: newId)
+            runTargetSelection = wave.flow
             previousCommitSHAs = Set(wave.commits.map(\.sha))
             displayedCommits = wave.commits
             highlightedCommitSHAs.removeAll()
@@ -154,6 +161,11 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.status) { _, newStatus in
             repoState.loadWaveContent(for: wave.id)
             syncDiffHeaderPulse(for: newStatus)
+        }
+        .onChange(of: wave.flow) { oldFlow, newFlow in
+            if runTargetSelection.isEmpty || runTargetSelection == oldFlow {
+                runTargetSelection = newFlow
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, isSelectedWave else { return }
@@ -183,8 +195,10 @@ struct WaveDetailPanel: View {
                 ScrollView {
                     VStack(spacing: Spacing.lg) {
                         if selectedTab == .current {
-                            if wave.status == .idle || wave.status == .failed {
-                                if wave.status == .idle {
+                            if isRunnableWorkspace {
+                                StepRunner(wave: wave, mode: .advanced)
+
+                                if wave.status == .idle || wave.status == .paused {
                                     goalsSection
                                 }
 
@@ -193,8 +207,6 @@ struct WaveDetailPanel: View {
                                 if wave.status == .failed {
                                     failedRunDetail
                                 }
-
-                                StepRunner(wave: wave)
 
                                 if !displayedCommits.isEmpty {
                                     commitLogSection
@@ -206,7 +218,7 @@ struct WaveDetailPanel: View {
 
                                 if !displayedCommits.isEmpty || wave.prURL != nil {
                                     opsActionsBar
-                                } else if wave.status == .idle && !wave.recentSteps.isEmpty {
+                                } else if (wave.status == .idle || wave.status == .paused) && !wave.recentSteps.isEmpty {
                                     Divider()
                                     NextActionsBar(wave: wave)
                                 }
@@ -243,93 +255,134 @@ struct WaveDetailPanel: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                HStack(spacing: Spacing.sm) {
-                    // Status indicator
-                    Image(systemName: wave.statusIndicator.icon)
-                        .font(Typography.body())
-                        .foregroundStyle(wave.statusIndicator.color)
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .top, spacing: Spacing.lg) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.sm) {
+                        // Status indicator
+                        Image(systemName: wave.statusIndicator.icon)
+                            .font(Typography.body())
+                            .foregroundStyle(wave.statusIndicator.color)
 
-                    if isEditingName {
-                        TextField("Wave name", text: $editingName)
-                            .font(Typography.sectionTitle())
-                            .fontWeight(.semibold)
-                            .textFieldStyle(.plain)
-                            .focused($isNameFocused)
-                            .frame(minWidth: 150)
-                            .onSubmit {
-                                commitNameChange()
-                            }
-                            .onExitCommand {
-                                cancelNameEdit()
-                            }
-                    } else {
-                        Text(wave.displayName)
-                            .font(Typography.sectionTitle())
-                            .fontWeight(.semibold)
-                            .help("Edit wave name (E)")
-                            .onTapGesture {
-                                startNameEdit()
-                            }
+                        if isEditingName {
+                            TextField("Wave name", text: $editingName)
+                                .font(Typography.sectionTitle())
+                                .fontWeight(.semibold)
+                                .textFieldStyle(.plain)
+                                .focused($isNameFocused)
+                                .frame(minWidth: 150)
+                                .onSubmit {
+                                    commitNameChange()
+                                }
+                                .onExitCommand {
+                                    cancelNameEdit()
+                                }
+                        } else {
+                            Text(wave.displayName)
+                                .font(Typography.sectionTitle())
+                                .fontWeight(.semibold)
+                                .help("Edit wave name (E)")
+                                .onTapGesture {
+                                    startNameEdit()
+                                }
+                        }
+
+                        if wave.iteration > 0 {
+                            Text("iter \(wave.iteration)")
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.xxs)
+                                .background(palette.surface)
+                                .clipShape(Capsule())
+                        }
+
+                        if !waveRuns.isEmpty {
+                            IterationTimeline(runs: waveRuns)
+                        }
                     }
 
-                    if wave.iteration > 0 {
-                        Text("iter \(wave.iteration)")
+                    if let vision = waveContent?.vision, !vision.isEmpty {
+                        Text(vision)
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
-                            .padding(.horizontal, Spacing.sm)
-                            .padding(.vertical, Spacing.xxs)
-                            .background(palette.surface)
-                            .clipShape(Capsule())
+                            .lineLimit(2)
+                            .truncationMode(.tail)
                     }
 
-                    if !waveRuns.isEmpty {
-                        IterationTimeline(runs: waveRuns)
-                    }
-                }
-
-                if let vision = waveContent?.vision, !vision.isEmpty {
-                    Text(vision)
+                    Text(wave.statusText)
                         .font(Typography.caption())
                         .foregroundStyle(palette.textSecondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
                 }
 
-                Text(wave.statusText)
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
+                if isRunnableWorkspace, selectedTab == .current {
+                    HStack(spacing: Spacing.md) {
+                        FlowTypeahead(
+                            wave: wave,
+                            initialSelection: runTargetSelection.isEmpty ? wave.flow : runTargetSelection,
+                            style: .compact
+                        ) { selection in
+                            runTargetSelection = selection
+                        }
+                        .frame(minWidth: 220, maxWidth: 300)
 
-            Spacer()
-
-            // PR badge if available (from Wave fields)
-            if let prNumber = wave.prNumber, let prState = wave.prState {
-                prBadge(number: prNumber, state: prState, url: wave.prURL)
-            }
-            if wave.effectiveOpenPRCount > 1 {
-                openPRCountBadge
-            }
-
-            // Stop button when running
-            if wave.status == .running || wave.status == .waiting {
-                Button {
-                    showingStopConfirmation = true
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
+                        Button {
+                            runSelectedTarget()
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                if isSendingHeaderRun {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "play.fill")
+                                }
+                                Text("Run")
+                                    .fontWeight(.semibold)
+                            }
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.md)
+                            .background(headerRunDisabled ? Color.statusNeutral : Color.statusSuccess)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(headerRunDisabled)
+                        .opacity(headerRunDisabled ? 0.6 : 1)
+                    }
                 }
-                .buttonStyle(DestructiveButtonStyle())
-                .help("Stop wave (S)")
+
+                Spacer()
             }
 
-            Picker("", selection: $selectedTab) {
-                Text("Current").tag(DetailTab.current)
-                Text("Runs (\(waveRuns.count))").tag(DetailTab.runs)
-                Text("Chat").tag(DetailTab.chat)
+            HStack(spacing: Spacing.md) {
+                if let prNumber = wave.prNumber, let prState = wave.prState {
+                    prBadge(number: prNumber, state: prState, url: wave.prURL)
+                }
+                if wave.effectiveOpenPRCount > 1 {
+                    openPRCountBadge
+                }
+
+                Spacer()
+
+                if wave.status == .running || wave.status == .waiting {
+                    Button {
+                        showingStopConfirmation = true
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(DestructiveButtonStyle())
+                    .help("Stop wave (S)")
+                }
+
+                Picker("", selection: $selectedTab) {
+                    Text("Current").tag(DetailTab.current)
+                    Text("Runs (\(waveRuns.count))").tag(DetailTab.runs)
+                    Text("Chat").tag(DetailTab.chat)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 320)
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)
@@ -369,6 +422,40 @@ struct WaveDetailPanel: View {
             .foregroundStyle(Color.statusWarning)
             .clipShape(Capsule())
             .help("\(wave.effectiveOpenPRCount) open PRs in this stack")
+    }
+
+    private var selectedRunTarget: String {
+        let trimmed = runTargetSelection.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return wave.flow.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var headerRunDisabled: Bool {
+        selectedRunTarget.isEmpty || isSendingHeaderRun || !isRunnableWorkspace
+    }
+
+    private func runSelectedTarget() {
+        guard !headerRunDisabled else { return }
+
+        isSendingHeaderRun = true
+        Task {
+            do {
+                try await repoState.runWave(
+                    wave: wave,
+                    flow: selectedRunTarget
+                )
+            } catch {
+                await MainActor.run {
+                    actionError = error.localizedDescription
+                    showingActionError = true
+                }
+            }
+            await MainActor.run {
+                isSendingHeaderRun = false
+            }
+        }
     }
 
     // MARK: - Wave Config Summary (read-only, shown when running)

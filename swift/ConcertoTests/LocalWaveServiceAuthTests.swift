@@ -175,6 +175,32 @@ struct LocalWaveServiceAuthTests {
         #expect(wave.status == .paused)
         #expect(wave.name == "agent-embedding")
     }
+
+    @Test("run sends one-shot flow override")
+    func runSendsFlowOverride() async throws {
+        let service = makeService { request in
+            #expect(request.httpMethod == "POST")
+            #expect(request.url?.path == "/v0/waves/wave-1/run")
+
+            let body = try #require(httpBodyData(for: request))
+            let json = try #require(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            #expect(json["flow"] as? String == "design")
+            #expect(json["area"] == nil)
+            #expect(json["direction"] == nil)
+
+            return StubResponse(
+                statusCode: 200,
+                body: Data("{\"ok\":true}".utf8)
+            )
+        }
+
+        try await service.run(
+            "wave-1",
+            overrides: RunOverrides(flow: "design")
+        )
+    }
 }
 
 private struct StubResponse {

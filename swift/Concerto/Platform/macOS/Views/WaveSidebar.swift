@@ -45,11 +45,6 @@ struct WaveSidebar: View {
                 onSelect: {
                     selectWave(wave.id)
                 },
-                onRun: {
-                    Task {
-                        try? await repoState.runWave(wave: wave)
-                    }
-                },
                 onDelete: {
                     Task {
                         try? await repoState.deleteWave(wave)

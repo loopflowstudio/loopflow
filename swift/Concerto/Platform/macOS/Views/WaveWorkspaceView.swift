@@ -50,6 +50,12 @@ struct WaveWorkspaceView: View {
                 selectedTab = .work
             }
         }
+        .onChange(of: terminalSession?.id) { _, sessionId in
+            guard let sessionId,
+                  repoState.consumeAutoPresentTerminal(for: wave.id) else { return }
+            selectedTab = .terminal
+            repoState.selectTerminalSession(sessionId)
+        }
         .onChange(of: wave.id) { _, _ in
             selectedTab = .work
         }

@@ -1,13 +1,10 @@
 flow: build-or-silent
 mode: manual
 area:
-- rust/loopflow/src/lfd/
-- rust/loopflow/src/lf/
-- python/loopflow/
-- wave/lfd/
+  - rust/loopflow/src/lfd/
+  - rust/loopflow/src/lf/
+  - python/loopflow/
+  - wave/lfd/
 direction:
-- clarity
-- simplicity
-pm:
-  provider: linear
-  linear_project: f5ce42b4-71b4-4a79-abe0-8cc336517006
+  - clarity
+  - simplicity

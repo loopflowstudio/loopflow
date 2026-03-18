@@ -560,34 +560,42 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
 fn wt_switch(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
+    let worktrees = list_worktrees(&main_repo)?;
 
-    let target = worktree_path(&main_repo, name);
-    let path = if target.exists() {
-        target
+    let path = if let Some(exact_branch_match) = worktrees
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(name))
+        .map(|wt| wt.path.clone())
+    {
+        exact_branch_match
     } else {
-        let worktrees = list_worktrees(&main_repo)?;
-        let mut matches = worktrees
-            .into_iter()
-            .filter(|wt| {
-                let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
-                wt_name.as_deref() == Some(name)
-                    || wt_name
-                        .as_ref()
-                        .map(|n| n.starts_with(&format!("{name}.")))
-                        .unwrap_or(false)
-                    || wt
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy() == name)
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-        if matches.len() == 1 {
-            matches.remove(0).path
-        } else if matches.is_empty() {
-            return Err(anyhow!("no worktree found for '{}'", name));
+        let target = worktree_path(&main_repo, name);
+        if target.exists() {
+            target
         } else {
-            return Err(anyhow!("multiple worktrees match '{}'", name));
+            let mut matches = worktrees
+                .into_iter()
+                .filter(|wt| {
+                    let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
+                    wt_name.as_deref() == Some(name)
+                        || wt_name
+                            .as_ref()
+                            .map(|n| n.starts_with(&format!("{name}.")))
+                            .unwrap_or(false)
+                        || wt
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy() == name)
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
+            if matches.len() == 1 {
+                matches.remove(0).path
+            } else if matches.is_empty() {
+                return Err(anyhow!("no worktree found for '{}'", name));
+            } else {
+                return Err(anyhow!("multiple worktrees match '{}'", name));
+            }
         }
     };
 

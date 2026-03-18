@@ -4,6 +4,8 @@
 
 ## Carried context
 
+Secrets provider (01) shipped Doppler integration with a `login: "via doppler"` prefix as ownership marker for provider-supplied credentials. The provenance display in this item should unify with that pattern — secrets-supplied keys already have provenance via the "via " prefix; OAuth and file-detected credentials need equivalent tagging. `SecretsProviderService` protocol is already extended by `WaveService` in Swift.
+
 Phase 1 shipped credential detection and eager daemon startup:
 
 - `FileCredentialReader` detects Claude/Codex credentials from disk files. Keychain fallback for GitHub.

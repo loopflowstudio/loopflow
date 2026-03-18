@@ -16,7 +16,7 @@ Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-
 
 Finish the remaining user-facing gaps in the order that teaches the most with the least churn.
 
-Secrets provider comes first because it changes the auth model across lfd, CLI, and both Concerto shells. Release UI comes next because the underlying release commands already exist; the missing work is a clear operator surface, not new release mechanics. Auto-send comes last because the voice stack already records, transcribes, and resumes listening — the hard part left is making silence-based sending trustworthy without surprising people.
+Secrets provider shipped Doppler integration across lfd, HTTP API, and both Concerto shells. CLI commands (`lf auth doppler`) and periodic auto-sync are deferred. Release UI comes next because the underlying release commands already exist; the missing work is a clear operator surface, not new release mechanics. Auto-send comes last because the voice stack already records, transcribes, and resumes listening — the hard part left is making silence-based sending trustworthy without surprising people.
 
 Keep shared SwiftUI and LoopflowCore surfaces dominant. If a feature forces large macOS/iOS forks, the design is probably wrong.
 

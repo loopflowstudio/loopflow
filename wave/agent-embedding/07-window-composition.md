@@ -47,9 +47,10 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
    - Promote the existing tabbed terminal workspace into split layouts instead of replacing it with a second workspace stack
 
 3. **Wave-aware context switching.** The tmux session concept, but bound to waves:
-   - Each wave has a workspace — its layout, its terminal sessions, its open files
-   - Switch wave = switch everything
+   - Each wave has a foreground workspace — the selected run, its layout, its terminal session, its open files
+   - Switch wave = switch the foreground run context for that wave
    - Multiple waves visible simultaneously in split layouts (the conductor view)
+   - Background runs for the same wave remain real; the compositor is choosing what to foreground, not asserting exclusivity in the daemon
 
 4. **Cross-pane interaction.** Panes aren't isolated — they understand each other:
    - Click a file path in terminal → opens in file editor pane
@@ -68,6 +69,7 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
    - Terminal panes restore around existing terminal-session ids; do not invent pane-local terminal identity
    - Open files and scroll positions restored
    - Wave context maintained
+   - Foreground-run selection is restored as product state, without collapsing multiple runs into one daemon concept
 
 ## Open questions
 

@@ -9,6 +9,17 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 ## Strategy
 
 ## Execution model
+<<<<<<< HEAD
+=======
+
+The daemon should stay **parallel-first**. A wave is configuration and grouping; a run is execution. `primary_flow` is the wave default, while each `WaveRun` owns its actual `snapshot.flow`, worktree, branch, status, and any interactive terminal session. Reactive work like CI-fix, repo triggers, cron, and listener activations should compose as additional runs, not as special cases that mutate the wave's identity.
+
+The execution path should also converge on the real CLI. `lfd` still decides when runs start, but it should start them by forking normal `lf <flow-or-step>` commands in the correct worktree and executor environment instead of carrying a second bespoke executor forever. Interactive clients should attach to daemon-owned shells or PTYs — SSH-like in product feel whether or not the first transport is literal SSH — and run the same `lf` commands there. In that environment, `lf` should detect that it is running under `lfd` and emit structured lifecycle events so the daemon observes execution instead of scraping terminal output or receiving one-off launch-spec requests.
+
+Concerto can still present a calmer singular surface: one selected wave, one foreground run, one presented terminal. That is a product policy, not an infrastructure limit. Serialized waves remain useful where roadmap UX wants one thing at a time, but the base model should allow many runs and worktrees per wave.
+
+Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, `WaveRun` remains the execution unit, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
+>>>>>>> eb790e5f (concerto: stabilize bundled daemon terminal handoff)
 
 The daemon should stay **parallel-first**. A wave is configuration and grouping; a run is execution. `primary_flow` is the wave default, while each `WaveRun` owns its actual `snapshot.flow`, worktree, branch, status, and any interactive terminal session. Reactive work like CI-fix, repo triggers, cron, and listener activations should compose as additional runs, not as special cases that mutate the wave's identity.
 
@@ -59,6 +70,7 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
 <<<<<<< HEAD
+<<<<<<< HEAD
 - The direct-key typing path uses `NSTextInputContext.selectedKeyboardInputSource` containing `inputmethod` to detect IME keyboards; unusual input sources may route incorrectly until validated with broader CJK and third-party input methods
 - Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state until the shared-store contract replaces that path
 - `ConcertoUITests-Runner` exits during bootstrap before establishing the UI-test connection; `xcodebuild test` passes app build and unit/package tests but the UI-test harness fails locally even after clean DerivedData rebuilds
@@ -66,6 +78,10 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 =======
 - Terminal session cleanup relies on `onSessionClosed` callback; processes killed via SIGKILL can leave sessions stuck in `running` state
 >>>>>>> a08749ac (wave: update agent-embedding after terminal embedding ships)
+=======
+- Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state
+- This branch does **not** close out interactive sessions end-to-end inside the Swift app yet. Flow override visibility, bundled-`lfd` lifecycle, and terminal auto-presentation moved forward, but the in-app interactive session path still needs final stabilization before item 02 can be called done.
+>>>>>>> eb790e5f (concerto: stabilize bundled daemon terminal handoff)
 
 ## Metrics
 

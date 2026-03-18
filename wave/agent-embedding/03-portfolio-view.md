@@ -37,10 +37,14 @@ Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the cond
 5. **Trend lines.** Per wave: velocity (PRs/week), attention frequency, time-to-resolve, and recent terminal-session success/failure trend. Derive the terminal metrics from persisted `terminal_sessions` rows so the same data can back both reviewer measurement and in-product trend lines. Not detailed charts — sparklines or directional indicators. “This wave is accelerating” vs “this wave is slowing down.”
 
 <<<<<<< HEAD:wave/agent-embedding/03-portfolio-view.md
+<<<<<<< HEAD:wave/agent-embedding/03-portfolio-view.md
 6. **Shared data model, not a dashboard fork.** Build the view from the same wave/run/attention/terminal-session stores already used by the queue and terminal sidebar. If the portfolio needs a new summary query, add it at the store/service layer rather than introducing a portfolio-only cache or extending `PortfolioRepoState` into a second source of truth. Treat wave-level cards as summaries over potentially many runs: foreground run, running-run count, waiting-run count, and active terminal presence should all be derivations from run/session state rather than assumptions that a wave only has one execution. Note: the current workspace UI foregrounds one run per selected wave — portfolio should surface run multiplicity explicitly rather than inheriting that single-run presentation.
 =======
 6. **Shared data model, not a dashboard fork.** Build the view from the same wave/run/attention/terminal-session stores already used by the queue and terminal sidebar. If the portfolio needs a new summary query, add it at the store/service layer rather than introducing a portfolio-only cache or extending `PortfolioRepoState` into a second source of truth.
 >>>>>>> 1566a2ad (wave: fold shipped workspace context into agent-embedding roadmap):wave/agent-embedding/04-portfolio-view.md
+=======
+6. **Shared data model, not a dashboard fork.** Build the view from the same wave/run/attention/terminal-session stores already used by the queue and terminal sidebar. If the portfolio needs a new summary query, add it at the store/service layer rather than introducing a portfolio-only cache or extending `PortfolioRepoState` into a second source of truth. Treat wave-level cards as summaries over potentially many runs: foreground run, running-run count, waiting-run count, and active terminal presence should all be derivations from run/session state rather than assumptions that a wave only has one execution.
+>>>>>>> eb790e5f (concerto: stabilize bundled daemon terminal handoff):wave/agent-embedding/04-portfolio-view.md
 
 ## Done when
 

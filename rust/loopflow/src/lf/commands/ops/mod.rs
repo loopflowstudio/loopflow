@@ -1,9 +1,11 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
+use crate::engine::git::{
+    current_branch, delete_local_branch, get_default_branch, rev_parse, sync_main,
+};
 use crate::engine::worktrees::{
     create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
-    wave_name_from_worktree_and_main, worktree_path,
+    wave_name_from_worktree_and_main, worktree_path, worktree_path_with_config,
 };
 use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, Surface};
 use crate::lf::commands::util::find_repo_root;
@@ -560,34 +562,48 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
 fn wt_switch(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
+    let config = load_config_or_default(Some(&main_repo));
+    let branch_config = config.branch_names.as_ref();
+    let worktrees = list_worktrees(&main_repo)?;
 
-    let target = worktree_path(&main_repo, name);
-    let path = if target.exists() {
-        target
+    let path = if let Some(exact_branch_match) = worktrees
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(name))
+        .map(|wt| wt.path.clone())
+    {
+        exact_branch_match
     } else {
-        let worktrees = list_worktrees(&main_repo)?;
-        let mut matches = worktrees
-            .into_iter()
-            .filter(|wt| {
-                let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
-                wt_name.as_deref() == Some(name)
-                    || wt_name
-                        .as_ref()
-                        .map(|n| n.starts_with(&format!("{name}.")))
-                        .unwrap_or(false)
-                    || wt
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy() == name)
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-        if matches.len() == 1 {
-            matches.remove(0).path
-        } else if matches.is_empty() {
-            return Err(anyhow!("no worktree found for '{}'", name));
+        let target = if branch_ref_exists(&main_repo, name) {
+            worktree_path_with_config(&main_repo, name, branch_config)
         } else {
-            return Err(anyhow!("multiple worktrees match '{}'", name));
+            worktree_path(&main_repo, name)
+        };
+        if target.exists() {
+            target
+        } else {
+            let mut matches = worktrees
+                .into_iter()
+                .filter(|wt| {
+                    let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
+                    wt_name.as_deref() == Some(name)
+                        || wt_name
+                            .as_ref()
+                            .map(|n| n.starts_with(&format!("{name}.")))
+                            .unwrap_or(false)
+                        || wt
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy() == name)
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
+            if matches.len() == 1 {
+                matches.remove(0).path
+            } else if matches.is_empty() {
+                return Err(anyhow!("no worktree found for '{}'", name));
+            } else {
+                return Err(anyhow!("multiple worktrees match '{}'", name));
+            }
         }
     };
 
@@ -595,6 +611,11 @@ fn wt_switch(name: &str) -> Result<()> {
         println!("cd {}", path.display());
     }
     Ok(())
+}
+
+fn branch_ref_exists(repo: &Path, branch: &str) -> bool {
+    rev_parse(repo, &format!("refs/heads/{branch}")).is_ok()
+        || rev_parse(repo, &format!("refs/remotes/origin/{branch}")).is_ok()
 }
 
 fn wt_list(format: Option<&str>) -> Result<()> {

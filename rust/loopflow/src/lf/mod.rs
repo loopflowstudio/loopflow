@@ -369,7 +369,7 @@ pub enum WtCommand {
     },
     /// Switch to a worktree
     Switch {
-        /// Worktree name to switch to
+        /// Worktree name or full branch name to switch to
         name: String,
     },
     /// List worktrees

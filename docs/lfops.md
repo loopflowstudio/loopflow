@@ -145,10 +145,11 @@ If the input matches an existing `origin/<branch>` name, `lf` checks out that br
 
 ### lf ops wt switch
 
-Switch to a worktree by its short directory name.
+Switch to a worktree by its short directory name or full branch name.
 
 ```bash
 lf ops wt switch my-feature       # switches to ../loopflow.my-feature
+lf ops wt switch jack.my-feature.20260316_1856  # resolves that exact branch's worktree
 ```
 
 ### lf ops wt list

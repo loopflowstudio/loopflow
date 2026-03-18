@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
@@ -239,6 +240,105 @@ fn wt_switch_finds_timestamped_worktree_by_short_name() {
         })
         .collect();
     assert_eq!(prefix.len(), 1);
+}
+
+#[test]
+fn wt_switch_prefers_exact_branch_match_over_wave_name_path() {
+    let repo = TestRepo::new();
+    let old_branch = "jack.chord-model.20260316_1856";
+    let new_branch = "jack.chord-model.20260318_0010";
+    let old_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.chord-model.20260316_1856",
+        repo.path().file_name().expect("repo dir").to_string_lossy()
+    ));
+    let new_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.chord-model",
+        repo.path().file_name().expect("repo dir").to_string_lossy()
+    ));
+
+    add_worktree(repo.path(), &old_path, old_branch);
+    add_worktree(repo.path(), &new_path, new_branch);
+
+    let directive_path = repo.path().join("directive.txt");
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["ops", "wt", "switch", old_branch])
+        .current_dir(repo.path())
+        .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
+        .status()
+        .expect("run lf ops wt switch");
+    assert!(status.success(), "lf ops wt switch should succeed");
+
+    let directive = fs::read_to_string(&directive_path).expect("read directive");
+    let target = PathBuf::from(
+        directive
+            .trim()
+            .strip_prefix("cd ")
+            .expect("directive should start with cd "),
+    );
+    assert_eq!(
+        fs::canonicalize(target).expect("canonicalize directive target"),
+        fs::canonicalize(old_path).expect("canonicalize old path")
+    );
+}
+
+#[test]
+fn wt_switch_uses_existing_worktree_for_saved_branch_with_custom_schema() {
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "branch_names:\n  schema: \"{user}/{name}\"\n",
+    )
+    .expect("write config");
+
+    let feature_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.feature",
+        repo.path().file_name().expect("repo dir").to_string_lossy()
+    ));
+    add_worktree(repo.path(), &feature_path, "feature-live");
+
+    let status = Command::new("git")
+        .args(["branch", "jack/feature"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git branch");
+    assert!(status.success(), "git branch should succeed");
+
+    let directive_path = repo.path().join("directive.txt");
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["ops", "wt", "switch", "jack/feature"])
+        .current_dir(repo.path())
+        .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
+        .status()
+        .expect("run lf ops wt switch");
+    assert!(status.success(), "lf ops wt switch should succeed");
+
+    let directive = fs::read_to_string(&directive_path).expect("read directive");
+    let target = PathBuf::from(
+        directive
+            .trim()
+            .strip_prefix("cd ")
+            .expect("directive should start with cd "),
+    );
+    assert_eq!(
+        fs::canonicalize(target).expect("canonicalize directive target"),
+        fs::canonicalize(feature_path).expect("canonicalize feature path")
+    );
+}
+
+fn add_worktree(repo: &std::path::Path, path: &std::path::Path, branch: &str) {
+    let status = Command::new("git")
+        .args(["worktree", "add", "-b", branch])
+        .arg(path)
+        .arg("main")
+        .current_dir(repo)
+        .status()
+        .expect("git worktree add");
+    assert!(
+        status.success(),
+        "git worktree add should succeed for {}",
+        branch
+    );
 }
 
 #[test]

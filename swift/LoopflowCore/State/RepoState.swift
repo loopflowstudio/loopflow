@@ -169,13 +169,9 @@ public final class RepoState {
     }
 
     public func shouldShowInteractiveSession(for wave: WaveViewModel) -> Bool {
-        if isOptimisticallyStartingInteractiveSession(for: wave.id) {
-            return true
-        }
-        if interactiveSessionId(for: wave.id) != nil {
-            return true
-        }
-        return wave.status == .waiting
+        isOptimisticallyStartingInteractiveSession(for: wave.id)
+            || interactiveSessionId(for: wave.id) != nil
+            || wave.status == .waiting
     }
 
     func setOptimisticInteractiveSessionStart(for waveId: String, isStarting: Bool) {
@@ -835,24 +831,27 @@ public final class RepoState {
     }
 
     public func selectTerminalSession(_ id: String?) {
-        terminalWorkspaceStore.select(id)
-        if let id, let session = terminalWorkspaceStore.sessionsById[id] {
-            selectedWaveId = session.waveId
-            loadWaveContent(for: session.waveId)
-            loadRuns(for: session.waveId)
-        }
+        focusTerminalSession(id)
     }
 
     /// Navigate to a terminal session from the attention queue.
     /// Selects the wave, switches to the terminal tab, and selects the session.
     public func openTerminalSession(_ sessionId: String) {
+        focusTerminalSession(sessionId, autoPresent: true)
+    }
+
+    private func focusTerminalSession(_ sessionId: String?, autoPresent: Bool = false) {
         terminalWorkspaceStore.select(sessionId)
-        if let session = terminalWorkspaceStore.sessionsById[sessionId] {
-            selectedWaveId = session.waveId
-            markAutoPresentTerminal(for: session.waveId)
-            loadWaveContent(for: session.waveId)
-            loadRuns(for: session.waveId)
+        guard let sessionId,
+              let session = terminalWorkspaceStore.sessionsById[sessionId] else {
+            return
         }
+        selectedWaveId = session.waveId
+        if autoPresent {
+            markAutoPresentTerminal(for: session.waveId)
+        }
+        loadWaveContent(for: session.waveId)
+        loadRuns(for: session.waveId)
     }
 
     public func loadRuns(for waveId: String) {

@@ -115,6 +115,8 @@ Capture the decision with both a support-surface metric and a reality check.
 **Re-run before landing**
 
 ```bash
-cargo test -p loopflow config_tests compose_ land_tests pr_tests
+cargo test -p loopflow config_
+cargo test -p loopflow compose_
+cargo test -p loopflow --test land_tests --test pr_tests
 rg -n "executor\.sandbox|ExecutorType::Sandbox|AdaptiveContainerExecutor" rust/loopflow docs deploy docker
 ```

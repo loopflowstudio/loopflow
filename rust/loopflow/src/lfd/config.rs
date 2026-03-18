@@ -380,7 +380,7 @@ impl RawLfdConfig {
             bail!("`executor.type` is managed by `mode`; remove this key");
         }
 
-        if self.executor.sandbox.is_some() {
+        if self.executor.sandbox.is_present() {
             bail!(
                 "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
             );
@@ -754,7 +754,7 @@ impl Default for ExecutorLimitsConfig {
 struct RawExecutorConfig {
     r#type: Option<ExecutorType>,
     #[serde(default)]
-    sandbox: Option<serde_yaml_ng::Value>,
+    sandbox: RemovedExecutorSandboxConfig,
     #[serde(default = "default_executor_image")]
     image: String,
     #[serde(default)]
@@ -772,7 +772,7 @@ impl Default for RawExecutorConfig {
     fn default() -> Self {
         Self {
             r#type: None,
-            sandbox: None,
+            sandbox: RemovedExecutorSandboxConfig::default(),
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
@@ -787,6 +787,29 @@ fn default_executor_image() -> String {
 
 fn default_agent_timeout() -> Duration {
     Duration::from_secs(DEFAULT_AGENT_TIMEOUT_SECS)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum RemovedExecutorSandboxConfig {
+    #[default]
+    Absent,
+    Present,
+}
+
+impl RemovedExecutorSandboxConfig {
+    fn is_present(self) -> bool {
+        matches!(self, Self::Present)
+    }
+}
+
+impl<'de> Deserialize<'de> for RemovedExecutorSandboxConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let _ = serde_yaml_ng::Value::deserialize(deserializer)?;
+        Ok(Self::Present)
+    }
 }
 
 fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, String> {
@@ -964,6 +987,21 @@ mod tests {
 mode: container
 executor:
   sandbox: true
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let err = config.resolve().expect_err("sandbox key should fail");
+        assert_eq!(
+            err.to_string(),
+            "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
+        );
+    }
+
+    #[test]
+    fn executor_sandbox_null_key_is_rejected() {
+        let raw = r#"
+mode: container
+executor:
+  sandbox:
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let err = config.resolve().expect_err("sandbox key should fail");

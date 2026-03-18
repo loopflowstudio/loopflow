@@ -18,8 +18,8 @@ struct HomeOverride {
 impl HomeOverride {
     fn new_temp() -> Self {
         let temp = TempDir::new().expect("temp home dir");
-        let original = env::var_os("HOME");
-        env::set_var("HOME", temp.path());
+        let original = env::var_os("LF_HOME");
+        env::set_var("LF_HOME", temp.path());
         Self {
             original,
             _temp: Some(temp),
@@ -30,8 +30,8 @@ impl HomeOverride {
 impl Drop for HomeOverride {
     fn drop(&mut self) {
         match &self.original {
-            Some(prev) => env::set_var("HOME", prev),
-            None => env::remove_var("HOME"),
+            Some(prev) => env::set_var("LF_HOME", prev),
+            None => env::remove_var("LF_HOME"),
         }
     }
 }

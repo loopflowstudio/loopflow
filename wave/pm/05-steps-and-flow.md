@@ -1,64 +1,99 @@
 ---
-pm_id: '1213718054761190'
+asana_id: '1213718054761190'
+linear_id: b83b8ee6-7a17-4090-87fa-aedeac30c524
 ---
-# 05: PM import/export commands, steps, and flow
+# 05: import-pm, export-pm steps and pm-sync flow
 
-**Finish line:** `lf ops pm import` and `lf ops pm export` sync a linked wave with either Asana or Linear, and `pm-sync` wraps import → build → export.
+**Finish line:** `lf import-pm` and `lf export-pm` work as composable steps. `pm-sync` flow chains import → build → export.
 
-`rust/loopflow/src/ops/export.rs` already proves the core export path for Asana: it reads numbered roadmap items, uses `RoadmapItemDocument` for `pm_id`, creates a missing project on first export, and updates or creates remote items. Linear's `PmProvider` is fully implemented (CRUD, pagination, completion-state lookup) but the export dispatcher currently returns an error for Linear — the generalization is mechanical. The missing pieces are Linear export dispatch, an import path, step/flow entry points, and honest ordering behavior.
+The roadmap file round-trip helper already exists in `RoadmapItemDocument`, and both Asana and Linear implement the provider seam. Import/export should use `id_for(provider)` and `set_id(provider, id)` for every provider-ID read/write instead of open-coding frontmatter edits.
+
+Ordering is the tricky part. Asana does not expose a numeric rank field, so export cannot treat `PmItemUpdate.rank` as a real remote reorder. Note that `PmTextUpdate` already filters rank-only updates at the trait boundary — both providers skip API calls when only rank changed. When filename order matters, implement provider-aware ordering (`insert_before` / `insert_after` for Asana, whatever Linear actually supports) or emit a clear limitation. Do not fake a successful reorder by writing a local rank nobody uses.
+
+## Sync model
+
+The wave files are the local state. No separate snapshot or ledger. Import produces what the remote looks like; export pushes local state to the remote.
+
+Import and export are one-directional — one side wins entirely. The `pm-sync` flow is the steady-state operation.
 
 ## What to build
 
-### Generalize the current export path
+### `import-pm` step
 
-Turn the existing Asana-only exporter into the shared PM export implementation instead of leaving it as a side branch.
-
-```bash
-lf ops pm export --wave scale
-```
-
-- Resolve provider + project from the wave's `pm` block
-- For items with `pm_id`, call `update_item`
-- For items without `pm_id`, call `create_item` and write the returned ID back through `RoadmapItemDocument`
-- Keep project bootstrap logic shared with item 04 rather than duplicating it here
-
-### Add import
+Not an LLM step — this is a mechanical operation. Implemented as a Rust ops command that the step invokes:
 
 ```bash
-lf ops pm import --wave scale
+lf ops pm import    # reads pm.provider from wave YAML, pulls items
 ```
 
-- Resolve provider + project from the wave's `pm` block
-- `provider.list_items(project_id)`
-- Rewrite numbered roadmap items from remote state, preserving `pm_id`
-- Remove or clearly flag local items whose remote ID no longer exists
-- Normalize every frontmatter edit through `RoadmapItemDocument`
+1. Read `pm` block from wave YAML
+2. Resolve provider, get credentials
+3. `provider.list_items(project_id)`
+4. For each item: write/update `NN-slug.md` with content and provider ID via `set_id(provider, id)`
+5. Remove or flag local items whose provider ID no longer exists remotely
+6. Commit if changes were made
 
-### Add step and flow surfaces
+Import is a pull: the external PM state wins.
 
-- Built-in step wrappers for import/export so the operations are visible in discovery/help
-- `pm-sync` flow that runs import → build → export
-- `ship-roadmap` can either branch into `pm-sync` when linked or reuse the same underlying commands directly, but there should be one sync implementation
+### `export-pm` step
 
-### Ordering
+Same pattern — mechanical, not LLM:
 
-Do not fake reordering success.
+```bash
+lf ops pm export    # reads pm.provider from wave YAML, pushes state
+```
 
-- Asana needs provider-aware move operations (`insert_before` / `insert_after` style behavior)
-- Linear may need either a concrete ordering API or a clearly documented limitation
-- `RoadmapItemDocument` owns file normalization, not remote ordering semantics
+1. Read `pm` block from wave YAML
+2. For each roadmap item:
+   - Has provider ID (`id_for(provider)` returns Some) → `provider.update_item(id, update)`
+   - No provider ID → `provider.create_item(project_id, item)`, write ID back via `set_id(provider, id)`
+3. Sync order to match filename prefix
+4. Commit if provider ID values were written
+
+Export is a push: loopflow's markdown and filename order become the desired remote state.
+
+### `pm-sync` flow
+
+```yaml
+# flows/pm-sync.yaml
+steps:
+  - ops: pm import
+  - implement
+  - ops: pm export
+```
+
+### Step definitions
+
+The step `.md` files are thin — they just invoke the ops command:
+
+```markdown
+---
+requires: wave with pm block
+produces: updated wave/ items
+---
+Import items from the configured PM provider into wave/.
+
+Run `lf ops pm import` and commit any changes.
+```
+
+## Open design questions
+
+These surfaced during sync design work and need decisions during implementation:
+
+- **Deletes:** Should `import` automatically delete local items missing from remote, or require `--destructive`?
+- **Normalization:** How fuzzy should "same content" be for detecting changes? Exact match will false-positive on whitespace diffs from provider round-trips.
+- **Order sync:** Asana has relative move operations; Linear doesn't expose ordering the same way. Sync order or document the limitation?
 
 ## Constraints
 
-- Mechanical ops only — no LLM step for sync itself.
-- Import is a pull; export is a push.
-- Replace or wrap the current top-level `lf ops export`; do not keep an Asana-only implementation drifting away from the shared PM commands.
-- Provider-specific reorder behavior belongs in the provider/export layer, not in generic markdown helpers.
+- These are ops commands, not LLM steps. No agent involved — deterministic sync.
+- Steps exist so they're composable in flows and visible in `lf --help`.
+- Import overwrites local; export creates/updates remote. No merge logic.
+- Keep provider-specific reorder behavior out of `RoadmapItemDocument`; this item should normalize file I/O once and delegate remote ordering to the provider/export layer.
 
 ## Done when
 
-- `lf ops pm import --wave test` pulls items from both Asana and Linear
-- `lf ops pm export --wave test` pushes items to both Asana and Linear
-- New remote IDs are written back through `RoadmapItemDocument`
-- `lf pm-sync` (or the equivalent built-in flow entry) is discoverable in `lf --help`
-- Reorder behavior is either implemented per provider or reported as an explicit limitation
+- `lf ops pm import` pulls items from configured provider
+- `lf ops pm export` pushes items to configured provider
+- `lf pm-sync` runs the full flow (import → build → export)
+- Steps appear in `lf --help` output

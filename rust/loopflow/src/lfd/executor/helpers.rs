@@ -52,7 +52,7 @@ pub async fn create_parallel_wave_run(
     let parent_run_id = last_run.as_ref().map(|run| run.id.clone());
     let parent_pr_number = last_run
         .as_ref()
-        .and_then(|run| run.snapshot.pr.as_ref())
+        .and_then(|run| run.pr.as_ref())
         .and_then(|pr| pr.number);
     let stack_group_id = last_run
         .as_ref()
@@ -71,7 +71,6 @@ pub async fn create_parallel_wave_run(
             flow: wave.primary_flow().clone(),
             direction: wave.direction().clone(),
             area: wave.area().clone(),
-            pr: None,
         },
         iteration,
         step_index: 0,
@@ -91,6 +90,7 @@ pub async fn create_parallel_wave_run(
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
         repair_of: None,
+        pr: None,
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
@@ -127,7 +127,7 @@ pub async fn create_wave_run_with_id(
     let parent_run_id = last_run.as_ref().map(|run| run.id.clone());
     let parent_pr_number = last_run
         .as_ref()
-        .and_then(|run| run.snapshot.pr.as_ref())
+        .and_then(|run| run.pr.as_ref())
         .and_then(|pr| pr.number);
     let stack_group_id = last_run
         .as_ref()
@@ -156,7 +156,6 @@ pub async fn create_wave_run_with_id(
             flow: wave.primary_flow().clone(),
             direction: wave.direction().clone(),
             area: wave.area().clone(),
-            pr: None,
         },
         iteration,
         step_index: 0,
@@ -176,6 +175,7 @@ pub async fn create_wave_run_with_id(
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
         repair_of: None,
+        pr: None,
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {

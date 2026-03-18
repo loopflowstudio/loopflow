@@ -453,9 +453,13 @@ fn merge_config_values(
 
 /// Load config, merging global (~/.lf/config.yaml) with repo (.lf/config.yaml).
 pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError> {
-    let global_path = dirs::home_dir()
-        .map(|h| h.join(".lf").join("config.yaml"))
-        .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"));
+    let global_path = if let Ok(home) = std::env::var("LF_HOME") {
+        PathBuf::from(home).join("config.yaml")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join(".lf").join("config.yaml"))
+            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
+    };
 
     let repo_path = repo_root.map(|r| r.join(".lf").join("config.yaml"));
 

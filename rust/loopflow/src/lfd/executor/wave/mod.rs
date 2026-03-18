@@ -20,10 +20,9 @@ use crate::engine::flow::{
     read_or_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
 };
 use crate::engine::worktree::remove_worktree;
-use crate::lfd::attention::{create_code_review_attention, create_step_failure_attention};
+use crate::lfd::attention::create_code_review_attention;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
-use crate::lfd::executor::helpers::resolve_current_step_name;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
@@ -734,7 +733,7 @@ impl WaveExecutor {
                         {
                             Ok(Some(pr)) => {
                                 info!(run_id = %run.id, url = %pr.url, "auto-created PR");
-                                run.snapshot.pr = Some(pr);
+                                run.pr = Some(pr);
                             }
                             Ok(None) => {}
                             Err(err) => {
@@ -743,7 +742,7 @@ impl WaveExecutor {
                         }
                     }
 
-                    if let Some(pr) = run.snapshot.pr.as_ref() {
+                    if let Some(pr) = run.pr.as_ref() {
                         if let Some(pr_number) = pr.number {
                             let live_state = LivePullRequestState {
                                 repo_id: run.snapshot.repo.clone(),
@@ -772,7 +771,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if should_manage_pr && run.snapshot.pr.is_some() && is_recurring {
+                    if should_manage_pr && run.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -808,7 +807,7 @@ impl WaveExecutor {
                     self.output.close_writer(&run.id.to_string());
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
-                    if should_manage_pr && run.snapshot.pr.is_some() {
+                    if should_manage_pr && run.pr.is_some() {
                         match create_code_review_attention(&self.store, &wave, &run).await {
                             Ok(item) => self.event_hub.send(Event::attention_created(item)),
                             Err(err) => {
@@ -950,43 +949,16 @@ impl WaveExecutor {
     }
 
     async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
-        let step_name = resolve_current_step_name(run, run.step_index);
         run.status = WaveRunStatus::Failed;
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error.clone());
         self.store.update_wave_run(run).await?;
 
-        // Only create algedonic signal if this was a repair attempt or if
-        // we don't support auto-repair for this failure. The repair dispatch
-        // happens in `maybe_launch_repair` (called from the spawned task
-        // context where Send is satisfied).
-        if run.repair_of.is_some() {
-            // Repair attempt failed — escalate.
-            info!(
-                run_id = %run.id,
-                wave_id = %wave.id(),
-                "repair attempt failed, creating algedonic signal"
-            );
-            match create_step_failure_attention(&self.store, wave, run, &step_name, &error).await {
-                Ok(item) => self.event_hub.send(Event::attention_created(item)),
-                Err(err) => {
-                    warn!(wave_id = %wave.id(), error = %err, "failed to create algedonic signal")
-                }
-            }
-        }
-        // If repair_of is None, the caller (execute_run_inner / trigger common)
-        // will check and potentially launch a repair run. We don't create an
-        // attention item yet — give repair a chance first.
+        // Repair dispatch and algedonic escalation are handled in
+        // execute_run_inner (triggers/common.rs), which checks the full
+        // repair chain depth and applies backoff.
 
         self.output.close_writer(&run.id.to_string());
-
-        // Clean up run-scoped worktrees if no repair will follow.
-        if run.repair_of.is_some() {
-            let wt = Path::new(&run.worktree);
-            if let Err(err) = cleanup_run_worktree(wt) {
-                warn!(run_id = %run.id, error = %err, "failed to clean up run worktree on failure");
-            }
-        }
 
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
@@ -1009,7 +981,6 @@ impl WaveExecutor {
                 flow: repair_flow.to_string(),
                 direction: failed_run.snapshot.direction.clone(),
                 area: failed_run.snapshot.area.clone(),
-                pr: failed_run.snapshot.pr.clone(),
             },
             iteration: failed_run.iteration,
             step_index: 0,
@@ -1029,6 +1000,7 @@ impl WaveExecutor {
             lineage_inferred: false,
             target_branch: failed_run.target_branch.clone(),
             repair_of: Some(failed_run.id.clone()),
+            pr: failed_run.pr.clone(),
         };
         self.store.create_wave_run(&repair_run).await?;
         Ok(repair_run)
@@ -1436,7 +1408,6 @@ mod tests {
                 flow: flow_name.to_string(),
                 direction: vec![],
                 area: vec![],
-                pr: None,
             },
             iteration: 0,
             step_index: 0,
@@ -1456,6 +1427,7 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: None,
         };
         store
             .create_wave_run(&run)
@@ -1491,7 +1463,6 @@ mod tests {
                 flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
-                pr: None,
             },
             iteration: 0,
             step_index: 0,
@@ -1511,6 +1482,7 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: None,
         };
         store
             .create_wave_run(&run)

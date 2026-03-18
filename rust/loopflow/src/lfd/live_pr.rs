@@ -47,7 +47,7 @@ impl LivePrSnapshot {
 }
 
 pub fn run_live_pr_key(run: &WaveRun) -> Option<LivePrKey> {
-    let pr_number = run.snapshot.pr.as_ref()?.number?;
+    let pr_number = run.pr.as_ref()?.number?;
     Some(LivePrKey {
         repo_id: run.snapshot.repo.clone(),
         pr_number,

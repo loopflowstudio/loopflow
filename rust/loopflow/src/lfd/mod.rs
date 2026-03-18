@@ -176,6 +176,9 @@ fn load_or_create_session_token(auth: &AuthConfig) -> secrecy::SecretString {
 }
 
 pub(crate) fn lf_home_dir() -> PathBuf {
+    if let Ok(home) = std::env::var("LF_HOME") {
+        return PathBuf::from(home);
+    }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".lf")
@@ -240,4 +243,28 @@ pub fn default_max_slots() -> usize {
     std::thread::available_parallelism()
         .map(|count| std::cmp::max(1, count.get() / 2))
         .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lf_home_dir_uses_env_var() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+
+        // Save and restore to avoid polluting other tests.
+        let prev = std::env::var("LF_HOME").ok();
+        std::env::set_var("LF_HOME", &path);
+        assert_eq!(lf_home_dir(), path);
+
+        std::env::remove_var("LF_HOME");
+        let default = lf_home_dir();
+        assert!(default.ends_with(".lf"));
+
+        if let Some(val) = prev {
+            std::env::set_var("LF_HOME", val);
+        }
+    }
 }

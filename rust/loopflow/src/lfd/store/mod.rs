@@ -1026,7 +1026,7 @@ impl WaveStateStore for Store {
                 continue;
             }
 
-            let Some(pr_number) = run.snapshot.pr.as_ref().and_then(|pr| pr.number) else {
+            let Some(pr_number) = run.pr.as_ref().and_then(|pr| pr.number) else {
                 return Ok(Some(run));
             };
 
@@ -2086,7 +2086,6 @@ mod tests {
                 flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
-                pr: None,
             },
             iteration: 0,
             step_index: 0,
@@ -2106,6 +2105,7 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: None,
         }
     }
 
@@ -2755,13 +2755,6 @@ mod tests {
                         flow: wave.primary_flow().clone(),
                         direction: wave.direction().clone(),
                         area: wave.area().clone(),
-                        pr: Some(PullRequest {
-                            url: format!("https://example.test/pr/{pr_number}"),
-                            number: Some(pr_number),
-                            state: Some("open".to_string()),
-                            title: Some(format!("run-{iteration}")),
-                            branch: Some(format!("feature-{pr_number}")),
-                        }),
                     },
                     iteration,
                     step_index: 0,
@@ -2781,6 +2774,13 @@ mod tests {
                     lineage_inferred: false,
                     target_branch: "main".to_string(),
                     repair_of: None,
+                    pr: Some(PullRequest {
+                        url: format!("https://example.test/pr/{pr_number}"),
+                        number: Some(pr_number),
+                        state: Some("open".to_string()),
+                        title: Some(format!("run-{iteration}")),
+                        branch: Some(format!("feature-{pr_number}")),
+                    }),
                 }
             };
 
@@ -2849,7 +2849,7 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
 
         let mut run = make_run(&wave, WaveRunStatus::Completed);
-        run.snapshot.pr = Some(PullRequest {
+        run.pr = Some(PullRequest {
             url: "https://example.test/pr/42".to_string(),
             number: Some(42),
             state: Some("open".to_string()),

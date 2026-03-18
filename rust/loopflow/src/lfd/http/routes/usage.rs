@@ -762,7 +762,6 @@ mod tests {
                 flow: flow.to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
-                pr: None,
             },
             iteration: wave.iteration,
             step_index: 0,
@@ -782,6 +781,7 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: None,
         };
         state
             .store

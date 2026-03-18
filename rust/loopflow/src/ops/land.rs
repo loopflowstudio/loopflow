@@ -13,7 +13,7 @@ use crate::engine::worktrees::{
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pr::generate_pr_copy;
+use crate::ops::pr::{generate_pr_copy, PrInfo};
 
 use crate::ops::progress::Progress;
 
@@ -32,6 +32,8 @@ pub struct LandOptions {
 pub struct LandResult {
     pub merged: bool,
     pub rotation: Option<RotationResult>,
+    /// The PR associated with this land, if one was created or already existed.
+    pub pr: Option<PrInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,8 +66,9 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     clear_scratch(&repo_root, progress)?;
 
-    if options.local {
+    let pr = if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
+        None
     } else {
         ensure_pr(
             &repo_root,
@@ -82,12 +85,15 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
             pr_body.as_deref(),
             progress,
         )?;
-    }
+        // Capture PR info before worktree rotation may invalidate the path.
+        crate::ops::pr::current_pr(&repo_root).ok().flatten()
+    };
 
     let rotation = rotate_worktree(&repo_root, &main_repo, &feature_branch, progress)?;
     Ok(LandResult {
         merged: true,
         rotation,
+        pr,
     })
 }
 

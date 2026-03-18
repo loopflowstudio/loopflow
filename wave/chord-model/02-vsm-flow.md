@@ -6,9 +6,9 @@
 
 The VSM flow is the default chord flow. It replaces `tend` as the general-purpose way a chord assesses and acts on its members. `tend` remains as an interactive variant.
 
-Prerequisite: algedonic signals (01) give the control step (s3) concrete operational data — which waves are healthy, which are struggling, what repair attempts have been tried.
+Algedonic signals are live: repair lineage, error classification, retry limit (3 attempts with backoff), and escalation to the attention queue all work end-to-end (`scripts/demo-algedonic.py` proves the chain). `LF_HOME` env var isolates dev lfd instances. PR state syncs to the run after `ops: land --create-pr`. The s3 control step can now read real algedonic history and repair chain data.
 
-**Before starting:** re-evaluate the 01 live demo. The repair dispatch code (`execute_run_inner` → `create_repair_run` → algedonic escalation) is built and unit-tested but hasn't run end-to-end in lfd. Infra gaps (dev lfd token isolation, PR state sync for `check-ci` polling) blocked the demo. Try again — the gaps may have been fixed by other work, or may be quick to close now.
+**Remaining from algedonic work:** The CI webhook → ci-fix → escalation path exists but hasn't been proven against real GitHub CI. The mechanism is there — `ci_failure_handler` creates runs, repair chains work — but a live CI test would validate the full loop. Consider running that as part of proving s3.
 
 ## Steps
 

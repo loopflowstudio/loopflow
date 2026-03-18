@@ -363,7 +363,6 @@ async fn create_running_wave_and_run(
             flow: "test-flow".to_string(),
             direction: vec![],
             area: vec![],
-            pr: None,
         },
         iteration: 0,
         step_index: 0,
@@ -383,6 +382,7 @@ async fn create_running_wave_and_run(
         lineage_inferred: false,
         target_branch: "main".to_string(),
         repair_of: None,
+        pr: None,
     };
     store
         .create_wave_run(&run)
@@ -607,7 +607,6 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
             flow: "test-flow".to_string(),
             direction: vec![],
             area: vec![],
-            pr: None,
         },
         iteration: 0,
         step_index: 0,
@@ -627,6 +626,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         lineage_inferred: false,
         target_branch: "main".to_string(),
         repair_of: None,
+        pr: None,
     };
     store
         .create_wave_run(&run)

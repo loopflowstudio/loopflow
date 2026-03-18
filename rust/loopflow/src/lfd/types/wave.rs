@@ -319,7 +319,6 @@ pub struct WaveRunSnapshot {
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
-    pub pr: Option<PullRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -355,6 +354,9 @@ pub struct WaveRun {
     /// The executor uses this to decide whether to escalate (algedonic signal)
     /// or attempt another repair on failure.
     pub repair_of: Option<LfdId>,
+    /// The pull request created or associated with this run.
+    /// Set when the run creates a PR (auto-create or land --create-pr).
+    pub pr: Option<PullRequest>,
 }
 
 fn default_target_branch() -> String {
@@ -424,6 +426,7 @@ impl WaveRun {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: None,
         }
     }
 }

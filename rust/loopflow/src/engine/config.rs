@@ -199,8 +199,10 @@ pub struct LinearConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PmDefaultConfig {
-    pub provider: crate::lfd::pm::PmProviderKind,
+pub struct PmRolesConfig {
+    pub rw_provider: crate::lfd::pm::PmProviderKind,
+    #[serde(default)]
+    pub export_providers: Vec<crate::lfd::pm::PmProviderKind>,
 }
 
 /// Main configuration struct.
@@ -310,9 +312,9 @@ pub struct Config {
     #[serde(default)]
     pub linear: LinearConfig,
 
-    /// Default PM provider for waves without an explicit `pm.provider` in their wave config.
+    /// Default PM provider roles for PM-enabled waves.
     #[serde(default)]
-    pub pm: Option<PmDefaultConfig>,
+    pub pm: Option<PmRolesConfig>,
 
     /// Max concurrent RLM sub-agents
     #[serde(default = "default_rlm_max_parallel")]
@@ -566,6 +568,10 @@ asana:
   default_team: "9876543210"
 linear:
   team: "TEAM-ID"
+pm:
+  rw_provider: linear
+  export_providers:
+    - asana
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
@@ -581,6 +587,13 @@ linear:
             LinearConfig {
                 team: Some("TEAM-ID".to_string()),
             }
+        );
+        assert_eq!(
+            config.pm,
+            Some(PmRolesConfig {
+                rw_provider: crate::lfd::pm::PmProviderKind::Linear,
+                export_providers: vec![crate::lfd::pm::PmProviderKind::Asana],
+            })
         );
     }
 

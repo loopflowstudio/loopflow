@@ -265,6 +265,12 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
+    /// Bootstrap PM provider roles for a wave
+    Init {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
     /// Import roadmap items from PM tool to wave files
     Import {
         /// Wave name (auto-detected if omitted)
@@ -281,6 +287,12 @@ pub enum PmCommand {
     /// Three-way sync between local wave files and PM tool
     Sync {
         /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+    },
+    /// Show PM provider status for linked waves
+    Status {
+        /// Wave name (all PM-enabled waves if omitted)
+        #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
 }

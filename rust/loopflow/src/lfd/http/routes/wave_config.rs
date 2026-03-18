@@ -14,8 +14,12 @@ pub(crate) struct TriggerDef {
 }
 
 /// Per-provider project IDs stored in wave config.
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub(crate) struct WavePmConfig {
+    #[serde(default)]
+    pub rw_provider: Option<PmProviderKind>,
+    #[serde(default)]
+    pub export_providers: Vec<PmProviderKind>,
     #[serde(default)]
     pub asana_project: Option<String>,
     #[serde(default)]
@@ -28,19 +32,6 @@ impl WavePmConfig {
             PmProviderKind::Asana => self.asana_project.as_deref(),
             PmProviderKind::Linear => self.linear_project.as_deref(),
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn set_project(&mut self, provider: PmProviderKind, id: String) {
-        match provider {
-            PmProviderKind::Asana => self.asana_project = Some(id),
-            PmProviderKind::Linear => self.linear_project = Some(id),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.asana_project.is_none() && self.linear_project.is_none()
     }
 }
 
@@ -159,12 +150,14 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\npm:\n  asana_project: \"1234567890\"\n",
+            "flow: build\npm:\n  rw_provider: linear\n  export_providers:\n    - asana\n  asana_project: \"1234567890\"\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
+        assert_eq!(pm.rw_provider, Some(PmProviderKind::Linear));
+        assert_eq!(pm.export_providers, vec![PmProviderKind::Asana]);
         assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
         assert_eq!(pm.linear_project, None);
     }

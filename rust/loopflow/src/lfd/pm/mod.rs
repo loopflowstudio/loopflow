@@ -17,10 +17,22 @@ pub enum PmProviderKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmConfig {
-    pub provider: PmProviderKind,
-    pub project: String,
+    pub rw_provider: PmProviderKind,
     #[serde(default)]
-    pub team: Option<String>,
+    pub export_providers: Vec<PmProviderKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asana_project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_project: Option<String>,
+}
+
+impl PmConfig {
+    pub fn project_for(&self, provider: PmProviderKind) -> Option<&str> {
+        match provider {
+            PmProviderKind::Asana => self.asana_project.as_deref(),
+            PmProviderKind::Linear => self.linear_project.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

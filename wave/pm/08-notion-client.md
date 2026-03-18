@@ -4,11 +4,11 @@ linear_id: 9147c3a0-8f29-4d0c-b16f-d0ac3a5e72e5
 ---
 # 08: Notion client
 
-**Finish line:** `NotionClient` implements `PmProvider` using Notion's REST API, and `lf ops export --wave <wave>` works end-to-end with `provider: notion` in wave config.
+**Finish line:** `NotionClient` implements `PmProvider`, and a wave can set `pm.rw_provider: notion` or include `notion` in `export_providers` and sync through the same PM commands/lifecycle hooks as Asana and Linear.
 
 ## Context
 
-Asana and Linear cover project-management-native tools. Notion covers teams that plan in docs and databases rather than dedicated PM software. The `PmProvider` trait and export dispatcher already handle multi-provider dispatch — this item adds a third transport adapter without changing the shared machinery.
+Asana and Linear cover project-management-native tools. Notion covers teams that plan in docs and databases rather than dedicated PM software. The provider-role model and `PmProvider` seam are already in place — this item adds a third transport adapter without creating a second integration stack.
 
 ## What to build
 
@@ -26,9 +26,10 @@ Asana and Linear cover project-management-native tools. Notion covers teams that
 
 1. Add `Notion` variant to `PmProviderKind`.
 2. Add `notion_id` field to `RoadmapItemFrontmatter` and extend `id_for`/`set_id` dispatch.
-3. Add `Notion` to `Provider` in `provider_auth.rs` with `api_key_env_name` → `NOTION_API_KEY`.
-4. Add Notion branch to export dispatcher in `ops/export.rs`.
-5. Use the shared test server (`pm::test_server`) and retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`) from `pm::mod.rs`.
+3. Add `notion_project` to wave PM config and `project_for(provider)` helpers so the provider-role model can address Notion the same way it addresses Asana and Linear.
+4. Add `Notion` to `Provider` in `provider_auth.rs` with `api_key_env_name` → `NOTION_API_KEY`.
+5. Route `ops/pm.rs` and `ops/export.rs` through the existing provider-role orchestration so Notion can act as the read/write provider or as an export-only mirror.
+6. Use the shared test server (`pm::test_server`) and retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`) from `pm::mod.rs`.
 
 ## Constraints
 
@@ -40,5 +41,5 @@ Asana and Linear cover project-management-native tools. Notion covers teams that
 
 - `cargo test` passes with Notion client unit tests covering all 6 `PmProvider` methods
 - `lf ops auth configure notion` stores and retrieves the token
-- `lf ops export --wave <wave>` creates/updates Notion database pages for a wave configured with `provider: notion`
+- `lf ops pm init|import|export|status` work for a wave configured with Notion as the read/write or export provider
 - Existing Asana and Linear exports are unaffected

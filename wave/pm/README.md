@@ -12,13 +12,15 @@ Loopflow syncs with the PM tools teams already use. Plan in Asana or Linear, exe
 
 ## Strategy
 
-The PM architecture centers on a shared seam and a single set of file formats:
+The PM architecture now centers on provider roles, a shared seam, and a single set of file formats:
 
 - `rust/loopflow/src/lfd/pm/mod.rs` owns the provider-agnostic language (`PmProviderKind`, `PmConfig`, `PmItem*`, `PmProvider`, `PmTextUpdate`, `RoadmapItemDocument`), shared retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`), and the shared test server (`test_server` module)
 - `rust/loopflow/src/lfd/pm/asana.rs` and `rust/loopflow/src/lfd/pm/linear.rs` are the concrete transport adapters — both implement the full `PmProvider` trait with rate-limit retry and noop-update filtering via `PmTextUpdate`
-- `RoadmapItemFrontmatter` uses per-provider ID fields (`asana_id`, `linear_id`) with `id_for(provider)` and `set_id(provider, id)` dispatch, enabling multi-provider linking
+- `RoadmapItemFrontmatter` uses per-provider ID fields (`asana_id`, `linear_id`) with `id_for(provider)` and `set_id(provider, id)` dispatch, enabling multi-provider linking without a second frontmatter shape
 - `lf ops auth ...`, `lfq auth ...`, provider-token storage, and HTTP auth routes handle Asana OAuth and Linear API-key flows
-- `rust/loopflow/src/ops/export.rs` is the starting point for mechanical sync: it dispatches to Asana or Linear based on wave config, can create a missing project, and writes provider IDs back through the shared helpers
+- `rust/loopflow/src/ops/pm.rs` owns role-aware bootstrap/status/import/sync orchestration (`rw_provider` plus `export_providers`) and writes wave YAML/frontmatter through the shared helpers
+- `rust/loopflow/src/ops/export.rs` pushes local roadmap state to every configured provider role and can create missing provider projects
+- `WaveExecutor::execute()` already imports from the read/write provider at the start of PR-oriented runs and exports back to the configured providers when those runs finish
 
 Future items should deepen that path instead of creating a second one.
 
@@ -27,23 +29,28 @@ Future items should deepen that path instead of creating a second one.
 - Provider clients stay thin. They translate API semantics; they do not read config files, mutate wave markdown, or own credential lookup policy.
 - `lf ops auth` remains the single local credential surface. Future PM commands should consume stored credentials, not invent provider-specific auth side paths.
 - `RoadmapItemDocument` stays the only writer for roadmap frontmatter. PM sync code should use `id_for(provider)` / `set_id(provider, id)` for provider-ID access, not open-coding frontmatter mutations.
-- Import is a pull: the PM tool wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state.
+- Provider roles stay explicit: one read/write provider drives local state; export providers mirror writes but never become import sources.
+- Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state.
+- Automatic wave-level import/export is now the default lifecycle path for PR-oriented runs. Remaining work should hook into that path rather than inventing extra sync entrypoints.
 - Missing config (`asana.workspace`, `asana.default_team`, `linear.team`) should fail with actionable messages at the command boundary, not opaque provider errors.
 - `PmTextUpdate` filters rank-only updates at the trait boundary. Providers never see rank changes — rank is a local concern.
+- Item-level PR/merge/failure sync must survive `ingest` moving a roadmap item into `scratch/`. Stable item identity belongs on the run, not in a transient file lookup.
 
 ## Goals
 
-- Bootstrap/link/status commands create or connect Asana and Linear projects without manual YAML or frontmatter edits
-- Import/export become provider-aware mechanical ops with built-in steps and a `pm-sync` flow
+- Thin `import-pm` / `export-pm` step wrappers and a `pm-sync` flow expose the existing mechanical ops commands to normal flows
 - `ingest` refreshes from PM before picking the next item when a wave is linked
-- Run lifecycle events comment on and complete PM items best-effort after PR activity and merge
+- Runs retain stable roadmap-item identity so PR open/failure/merge can comment on or complete the specific linked PM item
+- Notion can join the provider-role model without bypassing the shared `PmProvider` seam or frontmatter helpers
 
 ## Risks
 
 - **Asana rich text vs markdown.** Import/export still needs a crisp normalization story so descriptions do not thrash on every sync.
 - **Ordering semantics differ.** Asana needs relative move operations; Linear may need a documented limitation or a separate ordering strategy.
+- **Item identity is still fragile.** `ingest` moves a roadmap item into `scratch/`, and current runs do not retain a durable link back to that item for later PR/merge comments or completion.
+- **Repo-default export providers may be too broad.** If some waves need to opt out of mirrored exports, add an explicit per-wave override instead of special-casing execution.
+- **Live provider round-trips still need manual verification.** Automated tests cover the Rust behavior, but real Linear/Asana credentials and hosted projects are still the only way to prove the full sync path.
 - **Notion block model complexity.** Notion's rich content model is far more structured than Asana/Linear descriptions. The first pass intentionally keeps it simple (paragraph blocks), but round-trip fidelity will need more work if users start editing descriptions in Notion.
-- **Lifecycle sync depends on reliable lookup.** Run → wave → roadmap item → `id_for(provider)` must resolve cleanly, and failures must stay non-blocking.
 - **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set.
 - **Linear `completed_state_id` not cached.** Each `complete_item` call makes two API requests. Acceptable for wave-scale usage but would need caching at higher volumes.
 - **Linear team auto-creation.** `resolve_team_id` creates a "Loopflow" team if none exists. Could surprise users who don't expect team creation.

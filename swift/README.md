@@ -84,7 +84,7 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
 - `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
 - `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
-- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
 - `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
@@ -138,15 +138,6 @@ Concerto launches into a portfolio window instead of a single welcome panel:
 - Use the `+` card to scan `~/src` and add another main git worktree
 - Added repos persist between launches
 
-## Attention Queue
-
-Repo windows now open into a queue view when no wave is selected:
-
-- Review-ready, failed, and queue-blocked waves are listed in urgency order
-- Click an item to open its detail without drilling into the wave first
-- Code review items offer `Ship`; step failures offer `Retry`
-- Empty queues show `Nothing needs you. Waves are running.`
-
 ## Wave Detail: Current + Runs
 
 Wave detail now has two tabs:
@@ -159,7 +150,6 @@ Wave detail now has two tabs:
 
 - Select text in an assistant bubble to open the reply popover
 - Queue text replies, emoji reacts, and free-text notes in the draft tray
-- Edit queued text replies in place, drag to reorder them, and delete entries before sending
 - Send once to assemble queued replies and composer text into one structured message
 
 Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
@@ -201,7 +191,7 @@ Two patterns, intentionally different:
 
 2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
    - Connects to active server (`ws://.../ws` or `wss://.../ws`)
-   - Uses the current connection credential (local session token or remote connection token)
+   - Uses configured auth mode (none or static token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 

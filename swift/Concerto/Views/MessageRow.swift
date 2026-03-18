@@ -287,27 +287,28 @@ private struct ReplyComposerPresentation: ViewModifier {
         if isCompact {
             content.sheet(isPresented: isPresented) {
                 if let quoted = composerQuote {
-                    composer(for: quoted)
+                    ReplyComposerContent(
+                        quoted: quoted,
+                        replyDraft: $replyDraft,
+                        onSubmitText: onSubmitText,
+                        onEmoji: onEmoji
+                    )
                     .presentationDetents([.medium])
                 }
             }
         } else {
             content.popover(isPresented: isPresented, arrowEdge: .top) {
                 if let quoted = composerQuote {
-                    composer(for: quoted)
+                    ReplyComposerContent(
+                        quoted: quoted,
+                        replyDraft: $replyDraft,
+                        onSubmitText: onSubmitText,
+                        onEmoji: onEmoji
+                    )
                     .frame(width: 320)
                 }
             }
         }
-    }
-
-    private func composer(for quoted: String) -> ReplyComposerContent {
-        ReplyComposerContent(
-            quoted: quoted,
-            replyDraft: $replyDraft,
-            onSubmitText: onSubmitText,
-            onEmoji: onEmoji
-        )
     }
 }
 

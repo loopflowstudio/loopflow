@@ -1,4 +1,3 @@
-import Foundation
 import Testing
 @testable import Concerto
 
@@ -98,48 +97,5 @@ struct ReplyQueueTests {
         let queue = ReplyQueue()
         queue.addFreeText("line one\r\nline two")
         #expect(queue.entries[0].responseText == "line one\nline two")
-    }
-
-    @Test("move reorders queued entries")
-    func moveReordersEntries() {
-        let queue = ReplyQueue()
-        queue.addFreeText("first")
-        queue.addFreeText("second")
-        queue.addFreeText("third")
-
-        queue.move(fromOffsets: IndexSet(integer: 0), toOffset: 3)
-
-        #expect(queue.entries.map(\.responseText) == ["second", "third", "first"])
-    }
-
-    @Test("update replaces an entry in place and keeps its id")
-    func updateReplacesEntryInPlace() {
-        let queue = ReplyQueue()
-        queue.addFreeText("first")
-        queue.addFreeText("second")
-
-        let originalID = queue.entries[1].id
-        queue.update(id: originalID, newEntry: .freeText(id: UUID(), text: "updated"))
-
-        #expect(queue.entries.map(\.responseText) == ["first", "updated"])
-        #expect(queue.entries[1].id == originalID)
-    }
-
-    @Test("edited entries round-trip through assembleMessage")
-    func editedEntriesRoundTripThroughAssembledMessage() {
-        let queue = ReplyQueue()
-        queue.addQuoteReply(quoted: "add an index", reply: "Use an index.")
-
-        let entryID = queue.entries[0].id
-        queue.update(
-            id: entryID,
-            newEntry: .quoteReply(
-                quoted: "  add an index  ",
-                reply: "  Use a partial index instead.  "
-            )
-        )
-
-        #expect(queue.assembleMessage() == "> add an index\n\nUse a partial index instead.")
-        #expect(queue.entries[0].id == entryID)
     }
 }

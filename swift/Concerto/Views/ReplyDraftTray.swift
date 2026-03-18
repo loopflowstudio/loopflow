@@ -6,58 +6,24 @@ import LoopflowCore
 struct ReplyDraftTray: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-#if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
 
     @Bindable var queue: ReplyQueue
     @Binding var isExpanded: Bool
 
-    @State private var editingEntryID: UUID?
-    @State private var editingReplyDraft = ""
-
     var body: some View {
-        trayContent
-            .modifier(ReplyDraftEditPresentation(
-                editingEntry: editingEntry,
-                editingReplyDraft: $editingReplyDraft,
-                isPresented: editComposerIsPresented,
-                onSubmitText: saveEdit,
-                onEmoji: saveEmojiEdit,
-                isCompact: editPresentationIsCompact
-            ))
-    }
-
-    private var trayContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
             if isExpanded {
-                List {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(queue.entries) { entry in
-                        ReplyDraftEntryRow(
-                            entry: entry,
-                            onEdit: entry.isEditable ? { beginEditing(entry) } : nil,
-                            onDelete: { delete(entry) }
-                        )
-                        .listRowInsets(EdgeInsets(
-                            top: Spacing.xs,
-                            leading: Spacing.md,
-                            bottom: Spacing.xs,
-                            trailing: Spacing.md
-                        ))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                        ReplyDraftEntryRow(entry: entry) {
+                            queue.remove(id: entry.id)
+                        }
                     }
-                    .onMove(perform: queue.move)
-                    .onDelete(perform: deleteEntries)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .scrollDisabled(queue.count <= 4)
-                .frame(height: listHeight)
-                .padding(.bottom, Spacing.xs)
+                .padding(.horizontal, Spacing.md)
+                .padding(.bottom, Spacing.sm)
             }
         }
     }
@@ -88,85 +54,12 @@ struct ReplyDraftTray: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
     }
-
-    private var editingEntry: ReplyEntry? {
-        guard let editingEntryID else { return nil }
-        return queue.entries.first { $0.id == editingEntryID }
-    }
-
-    private var editComposerIsPresented: Binding<Bool> {
-        Binding(
-            get: { editingEntry != nil },
-            set: { if !$0 { closeEditor() } }
-        )
-    }
-
-    private var listHeight: CGFloat {
-        CGFloat(min(max(queue.count, 1), 4)) * 84
-    }
-
-    private var editPresentationIsCompact: Bool {
-#if os(iOS)
-        horizontalSizeClass == .compact
-#else
-        false
-#endif
-    }
-
-    private func beginEditing(_ entry: ReplyEntry) {
-        editingEntryID = entry.id
-        editingReplyDraft = entry.responseText
-    }
-
-    private func saveEdit() {
-        guard let entry = editingEntry else { return }
-
-        switch entry {
-        case .quoteReply(_, let quoted, _):
-            queue.update(id: entry.id, newEntry: .quoteReply(quoted: quoted, reply: editingReplyDraft))
-            closeEditor()
-        case .freeText:
-            queue.update(id: entry.id, newEntry: .freeText(text: editingReplyDraft))
-            closeEditor()
-        case .emojiReact:
-            break
-        }
-    }
-
-    private func saveEmojiEdit(_ emoji: String) {
-        guard let entry = editingEntry else { return }
-        guard case .quoteReply(_, let quoted, _) = entry else { return }
-
-        queue.update(id: entry.id, newEntry: .emojiReact(quoted: quoted, emoji: emoji))
-        closeEditor()
-    }
-
-    private func delete(_ entry: ReplyEntry) {
-        if editingEntryID == entry.id {
-            closeEditor()
-        }
-        queue.remove(id: entry.id)
-    }
-
-    private func deleteEntries(at offsets: IndexSet) {
-        let idsToDelete = offsets.map { queue.entries[$0].id }
-        if let editingEntryID, idsToDelete.contains(editingEntryID) {
-            closeEditor()
-        }
-        queue.remove(atOffsets: offsets)
-    }
-
-    private func closeEditor() {
-        editingEntryID = nil
-        editingReplyDraft = ""
-    }
 }
 
 private struct ReplyDraftEntryRow: View {
     @Environment(\.palette) private var palette
 
     let entry: ReplyEntry
-    let onEdit: (() -> Void)?
     let onDelete: () -> Void
 
     var body: some View {
@@ -203,10 +96,6 @@ private struct ReplyDraftEntryRow: View {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(palette.surfaceMuted)
         )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onEdit?()
-        }
     }
 
     private func truncate(_ text: String, limit: Int) -> String {
@@ -221,62 +110,40 @@ private struct ReplyDraftEntryRow: View {
 struct ReplyComposerContent: View {
     @Environment(\.palette) private var palette
 
-    let title: String
-    let quoted: String?
+    let quoted: String
     @Binding var replyDraft: String
-    let submitLabel: String
 
     let onSubmitText: () -> Void
-    let onEmoji: ((String) -> Void)?
-
-    init(
-        title: String = "Reply to selection",
-        quoted: String?,
-        replyDraft: Binding<String>,
-        submitLabel: String = "Queue",
-        onSubmitText: @escaping () -> Void,
-        onEmoji: ((String) -> Void)? = nil
-    ) {
-        self.title = title
-        self.quoted = quoted
-        _replyDraft = replyDraft
-        self.submitLabel = submitLabel
-        self.onSubmitText = onSubmitText
-        self.onEmoji = onEmoji
-    }
+    let onEmoji: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(title)
+            Text("Reply to selection")
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
 
-            if let quoted {
-                Text("“\(quoted)”")
-                    .font(Typography.body())
-                    .foregroundStyle(palette.text)
-                    .lineLimit(4)
-            }
+            Text("“\(quoted)”")
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+                .lineLimit(4)
 
-            TextField(quoted == nil ? "Type a message" : "Type a reply", text: $replyDraft, axis: .vertical)
+            TextField("Type a reply", text: $replyDraft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
 
             HStack(spacing: Spacing.xs) {
-                if let onEmoji, quoted != nil {
-                    ForEach(reactionEmojis, id: \.emoji) { emoji, label in
-                        Button(emoji) {
-                            onEmoji(emoji)
-                        }
-                        .buttonStyle(.bordered)
-                        .minHitTarget()
-                        .accessibilityLabel(label)
+                ForEach(reactionEmojis, id: \.emoji) { emoji, label in
+                    Button(emoji) {
+                        onEmoji(emoji)
                     }
+                    .buttonStyle(.bordered)
+                    .minHitTarget()
+                    .accessibilityLabel(label)
                 }
 
                 Spacer()
 
-                Button(submitLabel) {
+                Button("Queue") {
                     onSubmitText()
                 }
                 .buttonStyle(DarkButtonStyle())
@@ -290,50 +157,21 @@ struct ReplyComposerContent: View {
 // MARK: - Platform Presentation Wrappers
 
 struct ReplyComposerPopover: View {
-    let title: String
-    let quoted: String?
+    let quoted: String
     @Binding var replyDraft: String
-    let submitLabel: String
 
     let onSubmitText: () -> Void
-    let onEmoji: ((String) -> Void)?
-
-    init(
-        title: String = "Reply to selection",
-        quoted: String?,
-        replyDraft: Binding<String>,
-        submitLabel: String = "Queue",
-        onSubmitText: @escaping () -> Void,
-        onEmoji: ((String) -> Void)? = nil
-    ) {
-        self.title = title
-        self.quoted = quoted
-        _replyDraft = replyDraft
-        self.submitLabel = submitLabel
-        self.onSubmitText = onSubmitText
-        self.onEmoji = onEmoji
-    }
+    let onEmoji: (String) -> Void
 
     var body: some View {
         ReplyComposerContent(
-            title: title,
             quoted: quoted,
             replyDraft: $replyDraft,
-            submitLabel: submitLabel,
             onSubmitText: onSubmitText,
             onEmoji: onEmoji
         )
         .frame(width: 320)
     }
-}
-
-struct ReplyDraftEditPresentation: ViewModifier {
-    let editingEntry: ReplyEntry?
-    @Binding var editingReplyDraft: String
-    @Binding var isPresented: Bool
-    let onSubmitText: () -> Void
-    let onEmoji: (String) -> Void
-    let isCompact: Bool
 }
 
 private struct ReplyDraftTrayPreviewHarness: View {

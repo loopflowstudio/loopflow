@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftUI
 
 // MARK: - Reaction Emojis
 
@@ -49,29 +48,9 @@ enum ReplyEntry: Identifiable, Equatable {
         }
     }
 
-    var isEditable: Bool {
-        switch self {
-        case .quoteReply, .freeText:
-            return true
-        case .emojiReact:
-            return false
-        }
-    }
-
     var assembledBlock: String {
         guard let quotedText else { return responseText }
         return "\(formattedQuote(quotedText))\n\n\(responseText)"
-    }
-
-    func withID(_ id: UUID) -> ReplyEntry {
-        switch self {
-        case .quoteReply(_, let quoted, let reply):
-            return .quoteReply(id: id, quoted: quoted, reply: reply)
-        case .emojiReact(_, let quoted, let emoji):
-            return .emojiReact(id: id, quoted: quoted, emoji: emoji)
-        case .freeText(_, let text):
-            return .freeText(id: id, text: text)
-        }
     }
 
     private func formattedQuote(_ text: String) -> String {
@@ -115,20 +94,6 @@ final class ReplyQueue {
 
     func remove(id: UUID) {
         entries.removeAll { $0.id == id }
-    }
-
-    func remove(atOffsets offsets: IndexSet) {
-        entries.remove(atOffsets: offsets)
-    }
-
-    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
-        entries.move(fromOffsets: source, toOffset: destination)
-    }
-
-    func update(id: UUID, newEntry: ReplyEntry) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        guard let normalizedEntry = normalized(newEntry.withID(id)) else { return }
-        entries[index] = normalizedEntry
     }
 
     func clear() {

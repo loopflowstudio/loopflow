@@ -196,22 +196,14 @@ pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCo
         )));
     }
 
+    let combined = format!("{}\n{}", result.stdout, result.stderr);
     parse_generated_pr_copy(&result.stdout)
         .or_else(|| parse_generated_pr_copy(&result.stderr))
-        .or_else(|| {
-            let combined = format!("{}\n{}", result.stdout, result.stderr);
-            parse_generated_pr_copy(&combined)
-        })
+        .or_else(|| parse_generated_pr_copy(&combined))
         .ok_or_else(|| {
-            let combined = format!("{}\n{}", result.stdout.trim(), result.stderr.trim());
-            let preview = truncate_chars(combined.trim(), 400);
-            let detail = if preview.trim().is_empty() {
-                "agent output was empty".to_string()
-            } else {
-                format!("agent output preview:\n{preview}")
-            };
             OpsError::Message(format!(
-                "failed to parse generated PR copy from agent output ({detail})"
+                "failed to parse generated PR copy from agent output\n{}",
+                format_pr_copy_parse_preview(&combined)
             ))
         })
 }
@@ -410,14 +402,21 @@ struct GeneratedPrCopy {
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
     parse_json_copy(raw)
         .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
-        .or_else(|| extract_json_candidates(raw).find_map(parse_json_copy))
+        .or_else(|| {
+            let mut candidates = extract_json_candidates(raw).collect::<Vec<_>>();
+            candidates.reverse();
+            candidates.into_iter().find_map(|candidate| {
+                parse_json_copy(candidate).or_else(|| parse_loose_json_copy(candidate))
+            })
+        })
+        .or_else(|| extract_last_object_like_candidate(raw).and_then(parse_loose_json_copy))
         .or_else(|| parse_labeled_copy(raw))
 }
 
 fn parse_json_copy(raw: &str) -> Option<PrCopy> {
     let parsed: GeneratedPrCopy = serde_json::from_str(raw.trim()).ok()?;
     let title = parsed.title.trim().to_string();
-    if title.is_empty() {
+    if title.is_empty() || is_placeholder_pr_copy(&title, &parsed.body) {
         return None;
     }
     Some(PrCopy {
@@ -570,6 +569,115 @@ fn extract_json_candidates(raw: &str) -> impl Iterator<Item = &str> {
     candidates.into_iter()
 }
 
+fn extract_last_object_like_candidate(raw: &str) -> Option<&str> {
+    let title_idx = raw.rfind("\"title\"");
+    let body_idx = raw.rfind("\"body\"");
+    let key_idx = title_idx.into_iter().chain(body_idx).max()?;
+    let start = raw[..key_idx].rfind('{')?;
+    let end = raw[key_idx..].rfind('}')? + key_idx;
+    Some(&raw[start..=end])
+}
+
+fn parse_loose_json_copy(raw: &str) -> Option<PrCopy> {
+    let raw = raw.trim();
+    if !raw.starts_with('{') || !raw.ends_with('}') {
+        return None;
+    }
+
+    let title = extract_loose_field(raw, "title", false)?.trim().to_string();
+    let body = extract_loose_field(raw, "body", true)?;
+    if title.is_empty() || is_placeholder_pr_copy(&title, &body) {
+        return None;
+    }
+    Some(PrCopy { title, body })
+}
+
+fn is_placeholder_pr_copy(title: &str, body: &str) -> bool {
+    title.trim() == "..." && body.trim() == "..."
+}
+
+fn format_pr_copy_parse_preview(raw: &str) -> String {
+    const MAX_CHARS: usize = 400;
+    let preview = raw.trim();
+    if preview.is_empty() {
+        return "Agent output was empty.".to_string();
+    }
+
+    let truncated = if preview.chars().count() > MAX_CHARS {
+        let end = preview
+            .char_indices()
+            .nth(MAX_CHARS)
+            .map(|(idx, _)| idx)
+            .unwrap_or(preview.len());
+        format!("{}…", &preview[..end])
+    } else {
+        preview.to_string()
+    };
+    format!("Output preview:\n{truncated}")
+}
+
+fn extract_loose_field(raw: &str, key: &str, allow_object_end: bool) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let key_start = raw.find(&needle)?;
+    let after_key = &raw[key_start + needle.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    let opening_quote = after_colon.find('"')?;
+    let value = &after_colon[opening_quote + 1..];
+
+    let end = if allow_object_end {
+        let object_end = value.rfind('}')?;
+        value[..object_end].rfind('"')?
+    } else {
+        find_loose_field_end(value)?
+    };
+
+    decode_loose_json_string(&value[..end])
+}
+
+fn find_loose_field_end(raw: &str) -> Option<usize> {
+    for (idx, ch) in raw.char_indices() {
+        if ch != '"' {
+            continue;
+        }
+
+        let next = raw[idx + ch.len_utf8()..]
+            .chars()
+            .find(|candidate| !candidate.is_whitespace());
+        if next.is_none_or(|candidate| candidate == ',' || candidate == '}') {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn decode_loose_json_string(raw: &str) -> Option<String> {
+    let mut decoded = String::new();
+    let mut chars = raw.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            decoded.push(ch);
+            continue;
+        }
+
+        let escaped = chars.next()?;
+        decoded.push(match escaped {
+            '"' => '"',
+            '\\' => '\\',
+            '/' => '/',
+            'b' => '\u{0008}',
+            'f' => '\u{000C}',
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            other => other,
+        });
+    }
+
+    Some(decoded)
+}
+
 fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
     let output = Command::new("git").args(args).current_dir(repo).output()?;
     if !output.status.success() {
@@ -657,6 +765,43 @@ lf ops linear init
     }
 
     #[test]
+    fn parse_generated_pr_copy_prefers_final_object_over_prompt_schema() {
+        let raw = r###"Return exactly one JSON object with this schema:
+{"title":"...","body":"..."}
+No markdown fences.
+
+{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage\n\nRun the demo."}"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                body: "## Usage\n\nRun the demo.".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_handles_literal_newlines_in_body() {
+        let raw = r###"codex
+{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage
+
+```bash
+cargo test repair_chain
+```
+
+## Summary
+
+Repairs now back off before escalating."}"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                body: "## Usage\n\n```bash\ncargo test repair_chain\n```\n\n## Summary\n\nRepairs now back off before escalating.".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn parse_generated_pr_copy_accepts_markdown_section_labels() {
         let raw = r#"## Title
 pm: add linear provider
@@ -670,6 +815,21 @@ pm: add linear provider
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
                 body: "## Usage\n\n- bootstrap a Linear-backed wave".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
+        let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
+
+Use "lf ops pr" after gating to open or update the PR."}"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "ops: harden pr copy parsing".to_string(),
+                body: "## Summary\n\nUse \"lf ops pr\" after gating to open or update the PR."
+                    .to_string(),
             })
         );
     }

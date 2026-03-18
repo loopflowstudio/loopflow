@@ -301,30 +301,26 @@ lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens
 ```
 
-PM provider config:
+PM provider roles:
 
 ```yaml
 # .lf/config.yaml
 pm:
-  provider: notion
-notion:
-  parent_page: 32af8f99-...  # optional: reuse an existing parent page/teamspace
-  title_property: Name        # optional schema overrides
-  status_property: Status
-  done_value: Done
-  priority_property: Priority
+  rw_provider: linear
+  export_providers:
+    - asana
 ```
 
 ```bash
-lf op pm init pm           # connect/create one wave project, link items, write IDs
-lf op pm init --all        # bootstrap every wave/ project on the shared PM team
-lf op pm pull pm           # rewrite one wave from PM; remote changes win
-lf op pm pull --all        # rewrite every wave from PM; remote changes win
-lf op pm export pm         # push one wave to PM; local changes win
-lf op pm export --all      # push every PM-enabled wave
-lf op pm push-diff pm      # push only branch-changed items to PM
-lf op pm push-diff --all   # push-diff every PM-enabled wave
-lf op pm status            # show linked waves and local/remote counts
+lf ops pm init --wave pm   # connect/create projects, link items, write IDs
+lf ops pm init --all       # bootstrap every wave/ project on the shared PM team
+lf ops pm pull pm          # rewrite one wave from PM; remote changes win
+lf ops pm pull --all       # rewrite every wave from PM; remote changes win
+lf ops pm export pm        # push one wave to PM; local changes win
+lf ops pm export --all     # push every PM-enabled wave
+lf ops pm push-diff pm     # push only branch-changed items to PM
+lf ops pm push-diff --all  # push-diff every PM-enabled wave
+lf ops pm status           # show linked waves and local/remote counts
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

@@ -2156,6 +2156,7 @@ mod tests {
             .expect("bootstrap succeeds");
 
         assert_eq!(result.created_local, vec!["02-second-task.md"]);
+        assert_eq!(result.created_remote, Vec::<String>::new());
 
         let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
         assert!(existing.contains("linear_id: lin-1"));

@@ -90,3 +90,99 @@ pub struct TerminalSession {
     #[serde(skip_serializing)]
     pub completion_token: Option<String>,
 }
+
+impl TerminalSession {
+    pub fn attach(&mut self) -> bool {
+        if self.status != TerminalSessionStatus::Pending {
+            return false;
+        }
+        self.status = TerminalSessionStatus::Attached;
+        self.attached_at = Some(OffsetDateTime::now_utc());
+        true
+    }
+
+    pub fn start(&mut self) -> bool {
+        if self.status.is_terminal() {
+            return false;
+        }
+        if self.attached_at.is_none() {
+            self.attached_at = Some(OffsetDateTime::now_utc());
+        }
+        self.status = TerminalSessionStatus::Running;
+        self.started_at = Some(OffsetDateTime::now_utc());
+        true
+    }
+
+    pub fn complete(&mut self, exit_code: i32) -> bool {
+        if self.status.is_terminal() {
+            return false;
+        }
+        self.status = TerminalSessionStatus::from_exit_code(exit_code);
+        self.completed_at = Some(OffsetDateTime::now_utc());
+        true
+    }
+
+    pub fn cancel(&mut self) -> bool {
+        if self.status.is_terminal() {
+            return false;
+        }
+        self.status = TerminalSessionStatus::Canceled;
+        self.completed_at = Some(OffsetDateTime::now_utc());
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TerminalSession, TerminalSessionStatus};
+    use crate::lfd::id::LfdId;
+    use time::OffsetDateTime;
+
+    fn session(status: TerminalSessionStatus) -> TerminalSession {
+        TerminalSession {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            wave_run_id: None,
+            step: "design".to_string(),
+            agent: "claude".to_string(),
+            cwd: "/tmp/repo".to_string(),
+            argv: vec!["lf".to_string(), "design".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        }
+    }
+
+    #[test]
+    fn attach_marks_pending_sessions_attached() {
+        let mut session = session(TerminalSessionStatus::Pending);
+
+        assert!(session.attach());
+        assert_eq!(session.status, TerminalSessionStatus::Attached);
+        assert!(session.attached_at.is_some());
+    }
+
+    #[test]
+    fn start_auto_attaches_session() {
+        let mut session = session(TerminalSessionStatus::Pending);
+
+        assert!(session.start());
+        assert_eq!(session.status, TerminalSessionStatus::Running);
+        assert!(session.attached_at.is_some());
+        assert!(session.started_at.is_some());
+    }
+
+    #[test]
+    fn terminal_sessions_do_not_restart_or_complete_twice() {
+        let mut session = session(TerminalSessionStatus::Succeeded);
+
+        assert!(!session.start());
+        assert!(!session.complete(1));
+        assert!(!session.cancel());
+    }
+}

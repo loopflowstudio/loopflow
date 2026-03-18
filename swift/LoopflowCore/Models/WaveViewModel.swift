@@ -148,7 +148,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var displayName: String {
         if !name.isEmpty { return name }
         let areaStr = area.first.map { $0 == "." ? "root" : $0 } ?? "root"
-        return "\(areaStr) · \(flow.isEmpty ? "default" : flow)"
+        return "\(areaStr) · \(configuredFlow.isEmpty ? "default" : configuredFlow)"
     }
 
     public var areaDisplay: String {
@@ -163,6 +163,32 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
     public var flowSteps: [String] { api.flowSteps }
+    private var activeRunFlow: String? {
+        let runFlow = activeRun?.flow.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return runFlow.isEmpty ? nil : runFlow
+    }
+
+    public var configuredFlow: String {
+        flow.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var runFlowOverride: String? {
+        guard let activeRunFlow, activeRunFlow != configuredFlow else { return nil }
+        return activeRunFlow
+    }
+
+    public var displayFlow: String {
+        activeRunFlow ?? configuredFlow
+    }
+
+    public var displayFlowSteps: [String] {
+        if let runFlowOverride { return [runFlowOverride] }
+        if !flowSteps.isEmpty {
+            return flowSteps
+        }
+        return displayFlow.isEmpty ? [] : [displayFlow]
+    }
+
     public var openPRCount: Int { api.openPRCount }
     public var effectiveOpenPRCount: Int { max(openPRCount, pendingPR == nil ? 0 : 1) }
     public var hasOpenPRs: Bool { effectiveOpenPRCount > 0 }
@@ -184,7 +210,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var detailText: String {
         var parts: [String] = []
         if !areaDisplay.isEmpty { parts.append(areaDisplay) }
-        if !flow.isEmpty { parts.append(flow) }
+        if !displayFlow.isEmpty { parts.append(displayFlow) }
         if let t = trigger { parts.append(t.signal.rawValue) }
         return parts.joined(separator: " · ")
     }

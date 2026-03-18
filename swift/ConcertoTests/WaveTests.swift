@@ -202,6 +202,78 @@ struct WaveModelTests {
         #expect(wave.detailText == ". · debug")
     }
 
+    @Test("displayFlow prefers active run flow")
+    func displayFlowPrefersActiveRunFlow() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "design",
+            area: ".",
+            repo: "/tmp/repo"
+        )
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "ship-roadmap",
+                area: ["."],
+                status: .running,
+                activeRun: run
+            )
+        )
+
+        #expect(wave.displayFlow == "design")
+        #expect(wave.detailText == ". · design")
+    }
+
+    @Test("displayFlowSteps collapse to active run flow when override is running")
+    func displayFlowStepsPreferActiveRunOverride() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "design",
+            area: ".",
+            repo: "/tmp/repo"
+        )
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "ship-roadmap",
+                status: .running,
+                flowSteps: ["ingest", "kickoff", "build"],
+                activeRun: run
+            )
+        )
+
+        #expect(wave.displayFlowSteps == ["design"])
+    }
+
+    @Test("displayFlowSteps ignore equivalent active run flow formatting")
+    func displayFlowStepsIgnoreEquivalentRunFlowFormatting() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: " ship-roadmap ",
+            area: ".",
+            repo: "/tmp/repo"
+        )
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "ship-roadmap",
+                status: .running,
+                flowSteps: ["ingest", "kickoff", "build"],
+                activeRun: run
+            )
+        )
+
+        #expect(wave.runFlowOverride == nil)
+        #expect(wave.displayFlow == "ship-roadmap")
+        #expect(wave.displayFlowSteps == ["ingest", "kickoff", "build"])
+    }
+
     // MARK: - Iteration Text
 
     @Test("iterationText shows iter count when positive")

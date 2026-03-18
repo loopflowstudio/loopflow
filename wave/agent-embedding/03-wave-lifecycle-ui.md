@@ -8,13 +8,13 @@ linear_id: 2c9c7c0b-7b1e-4855-bbc8-18592d1c8f49
 
 ## Context
 
-The workspace and queue surfaces now cover “I saw a wave” and “I am acting inside this wave.” `WaveWorkspaceView` composes native session + optional terminal tab; `AttentionQueueView` handles repo-level triage. The missing piece is the control plane: creating waves, editing configs, starting and stopping runs, and seeing run history without dropping to `lfq` or raw YAML.
+The workspace and queue surfaces now cover “I saw a wave” and “I am acting inside this wave.” `WaveWorkspaceView` composes native session + optional terminal tab; `AttentionQueueView` handles repo-level triage. The shared state and HTTP layer already expose more lifecycle machinery than the UI currently admits: `RepoState` / `WaveService` can create waves, create-and-run, clone, delete, run, stop, and restart steps, and `WaveDetailPanel` already shows current state plus run history. The missing piece is the control plane: editing configs, exposing the existing lifecycle actions coherently, and making worktree/run monitoring first-class without dropping to `lfq` or raw YAML.
 
 Concerto should make wave management visual — especially for the conductor managing multiple waves. It also needs to stay honest about product boundaries: local repos hand interactive steps off into embedded terminals or native sessions; remote repos may only show queue and run state until remote PTY support exists.
 
 ## What to build
 
-1. **Wave creation.** New wave wizard: name, area (file picker), direction (picker with descriptions), flow (picker with step preview). Creates the YAML and registers with `lfd`.
+1. **Wave creation.** Promote the existing create/create-and-run capabilities into a dedicated UI: name, area (file picker), direction (picker with descriptions), flow (picker with step preview). Creates the YAML and registers with `lfd` through the current service path instead of shelling out separately.
 
 2. **Wave configuration.** Edit any wave parameter from Concerto. Direction, area, flow, agent, triggers. Changes write back to YAML and update `lfd`. This is also where the chord's proposed mutations surface for human review.
 
@@ -22,7 +22,7 @@ Concerto should make wave management visual — especially for the conductor man
 
 4. **Worktree management.** Each wave's worktree visible and manageable. Create, switch, prune. Integrated with wave lifecycle — starting a wave ensures its worktree exists, and interactive waves surface the matching worktree in the terminal sidebar.
 
-5. **Run history.** Per wave: recent runs, their status, what shipped, where they got stuck, and any associated attention items or terminal sessions. Drill into a run to see the flow execution and the human checkpoints it triggered.
+5. **Run history.** Per wave: recent runs, their status, what shipped, where they got stuck, and any associated attention items or terminal sessions. Start from the current Current/Runs split in wave detail, then add drill-in on flow execution and the human checkpoints it triggered.
 
 ## Done when
 

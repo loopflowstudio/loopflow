@@ -12,6 +12,7 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 
 The daemon should stay **parallel-first**. A wave is configuration and grouping; a run is execution. `primary_flow` is the wave default, while each `WaveRun` owns its actual `snapshot.flow`, worktree, branch, status, and any interactive terminal session. Reactive work like CI-fix, repo triggers, cron, and listener activations should compose as additional runs, not as special cases that mutate the wave's identity.
 
+<<<<<<< HEAD
 The execution path should also converge on the real CLI. The first cut is not "daemon-owned PTYs everywhere." The first cut is that `lf` writes structured lifecycle state to a globally agreed runtime store when that store is present. `lfd` can supervise and later launch normal `lf <flow-or-step>` commands against that same store instead of carrying a second bespoke executor forever. Concerto can then consume the same runtime state whether the work started from the CLI, from the app, or from daemon automation.
 
 Concerto can still present a calmer singular surface: one selected wave, one foreground run, one presented terminal. That is a product policy, not an infrastructure limit. Serialized waves remain useful where roadmap UX wants one thing at a time, but the base model should allow many runs and worktrees per wave.
@@ -34,6 +35,10 @@ The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items
 
 The multiplexer is now in place: a recursive binary split tree per wave, persisted via `MultiplexerStore`, with four pane types (terminal, markdown, diff, launchpad). The terminal pane is backed by tmux (`TmuxSession`), and focus-aware keyboard routing dispatches to SwiftUI or tmux based on first-responder detection. `TerminalWorkspaceStore` manages session ordering and selection per repo; the multiplexer extends that model with spatial layout. Remaining composition work (richer pane content, directional focus, named layouts) should deepen these surfaces rather than introducing parallel state.
 
+=======
+Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities. In particular, session ordering and selection already persist per repo; compositor work needs to either extend that repo-scoped state deliberately or replace it with a richer layout model in one move.
+
+>>>>>>> 1566a2ad (wave: fold shipped workspace context into agent-embedding roadmap)
 Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. The existing portfolio window already proves the repo-card shell: basic per-repo wave counts, blocked counts, and diff summaries. Future portfolio work should deepen that surface with shared wave/run/attention/session queries instead of building a second dashboard stack beside it. The persisted `terminal_sessions` records in `lfd` are also the source of truth for adoption and latency measurement: portfolio trend lines, in-app completion rate, and resume-latency work should query those rows rather than inventing a second analytics cache.
 
 ## Goals

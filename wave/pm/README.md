@@ -16,8 +16,9 @@ The PM architecture now centers on provider roles, a shared seam, and a single s
 
 - `rust/loopflow/src/lfd/pm/mod.rs` owns the provider-agnostic language (`PmProviderKind`, `PmConfig`, `PmItem*`, `PmProvider`, `PmTextUpdate`, `RoadmapItemDocument`), shared retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`), and the shared test server (`test_server` module)
 - `rust/loopflow/src/lfd/pm/asana.rs`, `rust/loopflow/src/lfd/pm/linear.rs`, and `rust/loopflow/src/lfd/pm/notion.rs` are the concrete transport adapters; all carry `PriorityBucket` through their native vocabularies (Asana custom-field labels, Linear native priorities, Notion select properties)
-- `RoadmapItemFrontmatter` remains the place for per-provider item IDs via `id_for(provider)` / `set_id(provider, id)`
-- `rust/loopflow/src/ops/pm.rs` remains the orchestration layer for `pm_init`, `pm_pull`, `pm_status`, `pm_import`, and `pm_sync`
+- `RoadmapItemFrontmatter` uses per-provider ID fields (`asana_id`, `linear_id`, `notion_id`) with `id_for(provider)` and `set_id(provider, id)` dispatch, enabling multi-provider linking without a second frontmatter shape
+- `rust/loopflow/src/ops/pm.rs` owns role-aware bootstrap/status/import/sync orchestration (`rw_provider` plus `export_providers`) and writes wave YAML/frontmatter through the shared helpers
+- `rust/loopflow/src/ops/export.rs` pushes local roadmap state to every configured provider role and can create missing provider projects
 - `WaveExecutor::execute()` already imports from the read/write provider at PR-oriented run start and exports back to configured providers at the end; future work should keep using that lifecycle instead of inventing a second sync path
 
 Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. Notion item descriptions sync as real pages with full markdown↔blocks conversion (`pm/notion_blocks.rs`), not flattened text. The next steps are wiring ingest to auto-refresh from PM before picking, cleaning up auth to OAuth-only, and extending Notion into doc-native README and supporting-doc sync.
@@ -29,8 +30,8 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 - `RoadmapItemDocument` stays the only writer for roadmap frontmatter. PM sync code should use `id_for(provider)` / `set_id(provider, id)` for provider-ID access, not open-coding frontmatter mutations.
 - Provider roles stay explicit: one read/write provider drives local state; export providers mirror writes but never become import sources.
 - Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow only writes back on explicit push events with known local diffs or lifecycle payloads.
-- The shared roadmap model should be semantic first: broken/unblock-now, clear next step, committed later, speculative. Providers should speak their native vocabulary where possible.
-- Default day-to-day usage is pull. `lf op pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
+- Default day-to-day usage is pull. `lf ops pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
+- Automatic wave-level import/export is now the default lifecycle path for PR-oriented runs. Remaining work should hook into that path rather than inventing extra sync entrypoints.
 - Missing config (`asana.workspace`, `asana.default_team`, `linear.team`) should fail with actionable messages at the command boundary, not opaque provider errors.
 - `PmTextUpdate` filters rank-only updates at the trait boundary. Providers never see rank changes — rank is a local concern.
 - Item-level PR/merge/failure sync must survive `ingest` moving a roadmap item into `scratch/`. Stable item identity belongs on the run, not in a transient file lookup.
@@ -47,10 +48,11 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 
 - **Within-level choice is unresolved.** The priority model is landed, but multiple items at the same level use filename order as a local fast path. Anything that assumes a deterministic total order will need a follow-up rule.
 - **Asana label recognition is brittle.** Priority mapping relies on custom-field option names being semantically recognizable (`Urgent`/`High`/`Medium`/`Low`). Unexpected labels will need follow-up.
-- **Legacy numbered files coexist with priority files.** Ingest prefers priority-prefixed files but still reads numbered items as a fallback. Mixed local states need to behave well during transition.
+- **Item identity is still fragile.** `ingest` moves a roadmap item into `scratch/`, and current runs do not retain a durable link back to that item for later PR/merge comments or completion.
 - **Notion body rewrites are destructive.** `update_item` deletes top-level blocks and re-appends the new body, so concurrent edits in Notion and locally can conflict at the page-body level. No merge — last writer wins.
 - **Notion read amplification.** `list_items` is inherently N+1 (1 database query + 1 block-children fetch per page). Inherent to Notion's API — no workaround.
-- **Credential drift is user-facing.** PM flows will still feel broken until the auth cleanup removes mixed setup paths and points users at the right browser-based connect flow.
+- **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set.
+- **Linear `completed_state_id` not cached.** Each `complete_item` call makes two API requests. Acceptable for wave-scale usage but would need caching at higher volumes.
 
 ## Metrics
 

@@ -33,17 +33,12 @@ struct WaveWorkspaceView: View {
                 Divider()
             }
 
-            switch selectedTab {
-            case .work:
+            if selectedTab == .terminal,
+               repoState.terminalWorkspaceStore.selectedSession != nil {
+                TerminalWorkspaceView()
+            } else {
                 WaveDetailPanel(wave: wave)
                     .id(wave.id)
-            case .terminal:
-                if repoState.terminalWorkspaceStore.selectedSession != nil {
-                    TerminalWorkspaceView()
-                } else {
-                    WaveDetailPanel(wave: wave)
-                        .id(wave.id)
-                }
             }
         }
         .onChange(of: hasTerminal) { _, hasIt in

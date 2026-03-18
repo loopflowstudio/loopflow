@@ -860,14 +860,19 @@ impl PostgresStore {
         .await
     }
 
+    const TERMINAL_SESSION_COLS: &str =
+        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status, \
+         completion_token, created_at, attached_at, started_at, completed_at";
+
     pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO terminal_sessions (
-                        id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                        completion_token, created_at, attached_at, started_at, completed_at
-                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                    &format!(
+                        "INSERT INTO terminal_sessions ({cols}) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
+                    ),
                     &[
                         &session.id,
                         &session.wave_id,
@@ -896,13 +901,11 @@ impl PostgresStore {
         &self,
         session_id: &LfdId,
     ) -> StoreResult<Option<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                            completion_token, created_at, attached_at, started_at, completed_at
-                     FROM terminal_sessions
-                     WHERE id = $1",
+                    &format!("SELECT {cols} FROM terminal_sessions WHERE id = $1"),
                     &[&session_id],
                 )
                 .await?;
@@ -916,58 +919,32 @@ impl PostgresStore {
         wave_id: Option<&LfdId>,
         statuses: Option<&[TerminalSessionStatus]>,
     ) -> StoreResult<Vec<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
-            let rows = match (wave_id, statuses) {
-                (Some(wave_id), Some(statuses)) => {
-                    let statuses: Vec<i32> = statuses.iter().map(|status| status.as_i32()).collect();
-                    client
-                        .query(
-                            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                                    completion_token, created_at, attached_at, started_at, completed_at
-                             FROM terminal_sessions
-                             WHERE wave_id = $1 AND status = ANY($2)
-                             ORDER BY created_at ASC",
-                            &[&wave_id, &statuses],
-                        )
-                        .await?
-                }
-                (Some(wave_id), None) => {
-                    client
-                        .query(
-                            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                                    completion_token, created_at, attached_at, started_at, completed_at
-                             FROM terminal_sessions
-                             WHERE wave_id = $1
-                             ORDER BY created_at ASC",
-                            &[&wave_id],
-                        )
-                        .await?
-                }
-                (None, Some(statuses)) => {
-                    let statuses: Vec<i32> = statuses.iter().map(|status| status.as_i32()).collect();
-                    client
-                        .query(
-                            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                                    completion_token, created_at, attached_at, started_at, completed_at
-                             FROM terminal_sessions
-                             WHERE status = ANY($1)
-                             ORDER BY created_at ASC",
-                            &[&statuses],
-                        )
-                        .await?
-                }
-                (None, None) => {
-                    client
-                        .query(
-                            "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                                    completion_token, created_at, attached_at, started_at, completed_at
-                             FROM terminal_sessions
-                             ORDER BY created_at ASC",
-                            &[],
-                        )
-                        .await?
-                }
-            };
+            let mut sql = format!("SELECT {cols} FROM terminal_sessions");
+            let mut predicates = Vec::new();
+            let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
+
+            if let Some(wave_id) = wave_id {
+                params.push(Box::new(wave_id.clone()));
+                predicates.push(format!("wave_id = ${}", params.len()));
+            }
+            if let Some(statuses) = statuses {
+                let status_ints: Vec<i32> = statuses.iter().map(|status| status.as_i32()).collect();
+                params.push(Box::new(status_ints));
+                predicates.push(format!("status = ANY(${})", params.len()));
+            }
+            if !predicates.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&predicates.join(" AND "));
+            }
+            sql.push_str(" ORDER BY created_at ASC");
+
+            let param_refs: Vec<&(dyn ToSql + Sync)> = params
+                .iter()
+                .map(|p| p.as_ref() as &(dyn ToSql + Sync))
+                .collect();
+            let rows = client.query(&sql, &param_refs).await?;
             rows.iter().map(Self::map_terminal_session_row).collect()
         })
         .await
@@ -977,23 +954,21 @@ impl PostgresStore {
         &self,
         wave_run_id: &LfdId,
     ) -> StoreResult<Option<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        let active_statuses = vec![
+            TerminalSessionStatus::Pending.as_i32(),
+            TerminalSessionStatus::Attached.as_i32(),
+            TerminalSessionStatus::Running.as_i32(),
+        ];
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status,
-                            completion_token, created_at, attached_at, started_at, completed_at
-                     FROM terminal_sessions
-                     WHERE wave_run_id = $1 AND status = ANY($2)
-                     ORDER BY created_at DESC
-                     LIMIT 1",
-                    &[
-                        &wave_run_id,
-                        &&[
-                            TerminalSessionStatus::Pending.as_i32(),
-                            TerminalSessionStatus::Attached.as_i32(),
-                            TerminalSessionStatus::Running.as_i32(),
-                        ][..],
-                    ],
+                    &format!(
+                        "SELECT {cols} FROM terminal_sessions \
+                         WHERE wave_run_id = $1 AND status = ANY($2) \
+                         ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    &[&wave_run_id, &active_statuses],
                 )
                 .await?;
             row.as_ref().map(Self::map_terminal_session_row).transpose()

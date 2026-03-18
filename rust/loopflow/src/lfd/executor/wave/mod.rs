@@ -38,7 +38,7 @@ use crate::lfd::triggers::{
 };
 use crate::lfd::types::{
     Event, LivePrState, LivePullRequestState, Signal, TerminalSession, TerminalSessionStatus, Wave,
-    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
 use super::docker::DockerExecutor;

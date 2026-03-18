@@ -8,6 +8,7 @@ struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
     let onSelect: () -> Void
+    var onRun: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     var onRename: ((String) -> Void)? = nil
     @Binding var isEditingAnyName: Bool
@@ -45,6 +46,22 @@ struct WaveRow: View {
                 Spacer()
 
                 HStack(spacing: 6) {
+                    if let onRun, canRunFromSidebar {
+                        Button {
+                            onRun()
+                        } label: {
+                            Image(systemName: "play.fill")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 20, height: 20)
+                                .background(Color.white.opacity(0.12))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(runButtonLabel)
+                        .accessibilityLabel(runButtonLabel)
+                    }
+
                     // PR badge (if pending review) or Flow badge
                     if let pr = wave.pendingPR {
                         Button {
@@ -195,6 +212,17 @@ struct WaveRow: View {
         case .wave: return "wave"
         case .ciFailure: return "ci-fix"
         }
+    }
+
+    private var canRunFromSidebar: Bool {
+        wave.status == .paused || wave.status == .idle
+    }
+
+    private var runButtonLabel: String {
+        if wave.flow.isEmpty {
+            return "Run wave"
+        }
+        return "Run \(wave.flow)"
     }
 
     /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").

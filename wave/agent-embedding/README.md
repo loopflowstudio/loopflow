@@ -8,13 +8,13 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 
 ## Strategy
 
-Use one durable human-attention model across the product. `AttentionItem` is the shared contract for code review, design review, calibration, and failure states; the queue stays the home screen, and later portfolio/lifecycle/compositor surfaces should reuse that model instead of inventing parallel status systems.
+Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
 
-Complete the attention queue before broadening the shell around it. The remaining work in this wave is to finish the missing design-review and calibration paths, then embed the terminal, then widen into portfolio, lifecycle, and composition views. Each later surface should reduce clicks from “I see a problem” to “I’m acting on it,” not add another place to check.
+The local-first terminal workspace is now in place: `lfd` owns terminal lifecycle, Concerto embeds Ghostty tabs keyed by terminal-session ID, and the sidebar already shows wave context beside the real terminal. Launch args, completion tokens, and run resumption still flow through `lfd`, so follow-on UI work should keep that authority instead of adding a second Swift-side callback path. The remaining work is to finish attention coverage for design review and chord calibration, then widen out into portfolio, lifecycle, and richer window composition without reintroducing chat-shaped coding surfaces.
 
-Keep the agent in a real terminal. Concerto should wrap Ghostty or another full terminal with wave-aware context, not compete with purpose-built chat clients on chat chrome.
+Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities.
 
-Derive cross-wave and cross-chord views from existing wave data, run history, and attention streams. No separate dashboard-only model that can drift from lfd.
+Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. If a surface needs wave health, queue pressure, recent PRs, or terminal presence, it should come from the shared run/attention/session state rather than a second reporting pipeline.
 
 ## Goals
 
@@ -28,10 +28,10 @@ Derive cross-wave and cross-chord views from existing wave data, run history, an
 
 ## Risks
 
-- Partial attention coverage creates blind spots until design review and calibration moments surface through `AttentionItem`
-- Ghostty terminal embedding is still unproven in SwiftUI and may require a fallback
-- Portfolio scope can expand unboundedly; repo-scoped attention queries will need store-level aggregation before cross-repo scale
-- Lifecycle UI could duplicate CLI flows instead of simplifying them if it diverges from existing wave/worktree semantics
+- Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
+- Local-only terminal embedding creates a temporary product split; remote repos need explicit queue/detail states until a remote PTY transport exists
+- Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
+- Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 
 ## Metrics
 
@@ -39,3 +39,4 @@ Derive cross-wave and cross-chord views from existing wave data, run history, an
 - Share of unresolved human checkpoints represented as attention items (target: 100%)
 - Time to assess all-waves status (target: <10 seconds glance)
 - Percentage of coding sessions that happen inside Concerto vs external terminal (target: >70%)
+- Terminal session resume latency from process exit to wave resumption (target: p95 <2s)

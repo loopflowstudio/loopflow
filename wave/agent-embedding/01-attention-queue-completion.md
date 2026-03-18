@@ -8,11 +8,13 @@ linear_id: 0f0f48cb-741f-4746-8e75-76113f00b058
 
 ## Context
 
-The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen that already handles code review, queue failures, and step failures.
+The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen that already handles code review, queue failures, and step failures. Terminal waiting work now has its own `TerminalSession` flow, so the remaining queue gap is specifically about the human review checkpoints that still lack durable attention items.
 
 The remaining gap is coverage. Design review and chord review checkpoints still fall back to raw context and never get created by the executor or tend flow. Until those two paths are real, the queue cannot fully replace drilling into individual waves.
 
-The naming model also needs to stay clean while we finish coverage. We do **not** want a growing top-level `AttentionKind` enum for every workflow concept. The contract should stay coarse:
+The naming model also needs to stay clean while we finish coverage. Today the code-review path still leans on legacy payload shape and `step: code_review`; this item should normalize the queue onto canonical step ids instead of adding more top-level enums or one-off Swift cases.
+
+The contract should stay coarse:
 
 - `interactive_step` — a human needs to review, decide, or continue work
 - `algedonic` — the system is signaling pressure, breakage, or blocked progress

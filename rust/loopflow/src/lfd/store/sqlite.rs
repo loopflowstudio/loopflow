@@ -1438,8 +1438,7 @@ impl SqliteStore {
     }
 
     pub fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let id =
-            crate::lfd::attention::attention_id_for_queue_block(run_id);
+        let id = crate::lfd::attention::attention_id_for_queue_block(run_id);
         let Some(mut item) = self.get_attention_item(&id)? else {
             return Ok(0);
         };

@@ -9,15 +9,17 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
 use crate::engine::worktrees::main_repo_root;
-use crate::lfd::attention::{attention_id_for_queue_block, queue_block_attention_item_from_existing};
+use crate::lfd::attention::{
+    attention_id_for_queue_block, queue_block_attention_item_from_existing,
+};
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock,
-    QueueBlockReason, QueueMergeEvent, WaveRun, WaveRunStackStatus,
+    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason,
+    QueueMergeEvent, WaveRun, WaveRunStackStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

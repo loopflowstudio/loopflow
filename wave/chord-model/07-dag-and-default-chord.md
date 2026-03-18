@@ -4,7 +4,7 @@
 
 ## Context
 
-The redesign chord-wave already proves the first level: a wave can coordinate other waves by pointing its `area` at their directories. The remaining question is how far that model stretches. This item validates nesting and uses the same area-derived membership model to introduce a default top-level chord-wave.
+The redesign chord-wave already proves the first level: a wave can coordinate other waves by pointing its `area` at their directories. The trigger/runtime work also means sourceless `wave` and `block` triggers already treat repo-local `wave/<name>/` entries as membership. The remaining question is how far that model stretches. This item validates nesting and uses the same area-derived membership model to introduce a default top-level chord-wave.
 
 ## What to build
 

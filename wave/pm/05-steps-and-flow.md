@@ -23,7 +23,7 @@ Import and export are one-directional — one side wins entirely. The `pm-sync` 
 Not an LLM step — this is a mechanical operation. Implemented as a Rust ops command that the step invokes:
 
 ```bash
-lf ops pm import    # reads pm.provider from wave YAML, pulls items
+lf ops pm import    # reads PM provider roles + project ids, pulls from the RW provider
 ```
 
 1. Read `pm` block from wave YAML
@@ -40,7 +40,7 @@ Import is a pull: the external PM state wins.
 Same pattern — mechanical, not LLM:
 
 ```bash
-lf ops pm export    # reads pm.provider from wave YAML, pushes state
+lf ops pm export    # reads PM provider roles + project ids, pushes to the RW + export providers
 ```
 
 1. Read `pm` block from wave YAML

@@ -34,7 +34,9 @@ pub struct SuppliedKey {
 pub struct SecretsProviderStatus {
     pub provider: String,
     pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<String>,
     pub keys: Vec<SuppliedKey>,
 }
@@ -143,14 +145,14 @@ pub async fn sync_secrets(
     let mut supplied_keys = Vec::new();
 
     for &(env_name, target_provider) in KEY_MAPPINGS {
-        let present = secrets.contains_key(env_name);
+        let value = secrets.get(env_name);
         supplied_keys.push(SuppliedKey {
             env_name: env_name.to_string(),
             provider: target_provider.as_str().to_string(),
-            present,
+            present: value.is_some(),
         });
 
-        if let Some(value) = secrets.get(env_name) {
+        if let Some(value) = value {
             let token = ProviderToken {
                 provider: target_provider.as_str().to_string(),
                 access_token: value.clone(),

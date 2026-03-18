@@ -569,13 +569,6 @@ impl Store {
         TokenStore::list_provider_tokens(self).await
     }
 
-    pub async fn get_secrets_provider_config(
-        &self,
-        provider: &str,
-    ) -> StoreResult<Option<SecretsProviderConfig>> {
-        SecretsProviderStore::get_secrets_provider_config(self, provider).await
-    }
-
     pub async fn upsert_secrets_provider_config(
         &self,
         config: &SecretsProviderConfig,
@@ -851,10 +844,6 @@ pub struct SecretsProviderConfig {
 
 #[async_trait::async_trait]
 pub trait SecretsProviderStore: Send + Sync {
-    async fn get_secrets_provider_config(
-        &self,
-        provider: &str,
-    ) -> StoreResult<Option<SecretsProviderConfig>>;
     async fn upsert_secrets_provider_config(
         &self,
         config: &SecretsProviderConfig,
@@ -1960,22 +1949,6 @@ impl TokenStore for Store {
 
 #[async_trait::async_trait]
 impl SecretsProviderStore for Store {
-    async fn get_secrets_provider_config(
-        &self,
-        provider: &str,
-    ) -> StoreResult<Option<SecretsProviderConfig>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let provider = provider.to_string();
-                run_sqlite(store, move |store| {
-                    store.get_secrets_provider_config(&provider)
-                })
-                .await
-            }
-            StoreBackend::Postgres(_) => Ok(None),
-        }
-    }
-
     async fn upsert_secrets_provider_config(
         &self,
         config: &SecretsProviderConfig,

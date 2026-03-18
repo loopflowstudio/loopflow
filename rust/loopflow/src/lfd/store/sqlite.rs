@@ -358,25 +358,6 @@ impl SqliteStore {
 
     // -- Secrets provider config -----------------------------------------------
 
-    pub fn get_secrets_provider_config(
-        &self,
-        provider: &str,
-    ) -> StoreResult<Option<super::SecretsProviderConfig>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT provider, access_token, project, config, updated_at, encrypted
-             FROM secrets_provider_config WHERE provider = ?1",
-        )?;
-        let row = stmt
-            .query_row(params![provider], |row| Ok(read_secrets_config_row(row)))
-            .optional()?;
-
-        match row {
-            Some(raw) => Ok(Some(decrypt_secrets_config(raw?)?)),
-            None => Ok(None),
-        }
-    }
-
     pub fn upsert_secrets_provider_config(
         &self,
         config: &super::SecretsProviderConfig,

@@ -1,43 +1,20 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
-use crate::lfd::secrets::{self, DopplerSecretsProvider, SecretsProviderStatus, SuppliedKey};
+use crate::lfd::secrets::{self, DopplerSecretsProvider, SecretsProviderStatus};
 use crate::lfd::store::SecretsProviderConfig;
 use crate::lfd::types::Event;
 
-#[derive(Debug, Serialize)]
-pub struct SecretsStatusResponse {
-    pub provider: String,
-    pub connected: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<String>,
-    pub keys: Vec<SuppliedKey>,
-}
-
-impl From<SecretsProviderStatus> for SecretsStatusResponse {
-    fn from(s: SecretsProviderStatus) -> Self {
-        Self {
-            provider: s.provider,
-            connected: s.connected,
-            project: s.project,
-            config: s.config,
-            keys: s.keys,
-        }
-    }
-}
-
 pub async fn secrets_status_handler(
     State(state): State<HttpState>,
-) -> ApiResult<SecretsStatusResponse> {
+) -> ApiResult<SecretsProviderStatus> {
     let status = secrets::secrets_status(&state.store).await;
-    Ok(Json(status.into()))
+    Ok(Json(status))
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,7 +28,7 @@ pub struct ConnectSecretsRequest {
 pub async fn connect_secrets_handler(
     State(state): State<HttpState>,
     Json(body): Json<ConnectSecretsRequest>,
-) -> ApiResult<SecretsStatusResponse> {
+) -> ApiResult<SecretsProviderStatus> {
     if body.provider != "doppler" {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
@@ -86,12 +63,12 @@ pub async fn connect_secrets_handler(
     }
 
     let status = secrets::secrets_status(&state.store).await;
-    Ok(Json(status.into()))
+    Ok(Json(status))
 }
 
 pub async fn sync_secrets_handler(
     State(state): State<HttpState>,
-) -> ApiResult<SecretsStatusResponse> {
+) -> ApiResult<SecretsProviderStatus> {
     let configs = state
         .store
         .list_secrets_provider_configs()
@@ -116,21 +93,19 @@ pub async fn sync_secrets_handler(
     .map_err(map_secrets_error)?;
 
     let status = secrets::secrets_status(&state.store).await;
-    Ok(Json(status.into()))
+    Ok(Json(status))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateSecretsConfigRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<String>,
 }
 
 pub async fn update_secrets_config_handler(
     State(state): State<HttpState>,
     Json(body): Json<UpdateSecretsConfigRequest>,
-) -> ApiResult<SecretsStatusResponse> {
+) -> ApiResult<SecretsProviderStatus> {
     let configs = state
         .store
         .list_secrets_provider_configs()
@@ -159,12 +134,12 @@ pub async fn update_secrets_config_handler(
         .map_err(map_store_error)?;
 
     let status = secrets::secrets_status(&state.store).await;
-    Ok(Json(status.into()))
+    Ok(Json(status))
 }
 
 pub async fn disconnect_secrets_handler(
     State(state): State<HttpState>,
-) -> ApiResult<SecretsStatusResponse> {
+) -> ApiResult<SecretsProviderStatus> {
     let configs = state
         .store
         .list_secrets_provider_configs()
@@ -183,7 +158,7 @@ pub async fn disconnect_secrets_handler(
     state.event_hub.send(Event::secrets_disconnected());
 
     let status = secrets::secrets_status(&state.store).await;
-    Ok(Json(status.into()))
+    Ok(Json(status))
 }
 
 fn resolve_provider(name: &str) -> Result<Box<dyn secrets::SecretsProvider>, ApiError> {

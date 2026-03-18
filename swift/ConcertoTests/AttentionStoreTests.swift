@@ -14,7 +14,7 @@ struct AttentionStoreTests {
                 id: "1",
                 waveId: "wave",
                 runId: nil,
-                kind: .algedonic,
+                kind: .codeReview,
                 status: .viewed,
                 title: "viewed",
                 summary: "",
@@ -25,7 +25,7 @@ struct AttentionStoreTests {
                 id: "2",
                 waveId: "wave",
                 runId: nil,
-                kind: .interactiveStep,
+                kind: .designReview,
                 status: .surfaced,
                 title: "older escalation",
                 summary: "",
@@ -38,7 +38,7 @@ struct AttentionStoreTests {
                 id: "3",
                 waveId: "wave",
                 runId: nil,
-                kind: .interactiveStep,
+                kind: .designReview,
                 status: .surfaced,
                 title: "newer escalation",
                 summary: "",
@@ -58,7 +58,7 @@ struct AttentionStoreTests {
             "id": "attn-1",
             "wave_id": "wave-1",
             "run_id": "run-1",
-            "kind": "algedonic",
+            "kind": "queue_failure",
             "status": "surfaced",
             "title": "Queue blocked",
             "summary": "Needs help",
@@ -70,7 +70,7 @@ struct AttentionStoreTests {
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .algedonic)
+        #expect(item?.kind == .queueFailure)
         if case .queueFailure(let context) = item?.context {
             #expect(context.conflictFiles == ["src/lib.rs"])
             #expect(context.error == "merge failed")

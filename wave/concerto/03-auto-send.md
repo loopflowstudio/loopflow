@@ -4,7 +4,7 @@
 
 ## Context
 
-Concerto already has the pieces up to the edge of this experience. `VoiceInputButton` supports push-to-talk and VAD entry, `VoiceInputService` can pause/resume listening around agent turns, and transcripts already land in the composer. The remaining gap is the final handoff from "transcript in composer" to "message sent".
+Concerto already has the pieces up to the edge of this experience. `VoiceInputButton` supports push-to-talk and VAD entry, `VoiceInputService` can pause/resume listening around agent turns, and transcripts already land in the composer. `WaveSessionView.handleTurnStateChange` already pauses listening while a turn runs, resumes on `.completed` and `.idle`, and leaves `.failed` untouched, so continuous mode needs an explicit failure policy instead of accidentally stranding VAD in a paused state. The remaining gap is the final handoff from "transcript in composer" to "message sent".
 
 This branch also made reply staging real: queued replies are now editable, reorderable, and assembled through `ReplyQueue`. Auto-send must respect that send path rather than bypass it. If the user has staged replies, continuous mode should still send the same assembled message and honor the same empty-input rules.
 

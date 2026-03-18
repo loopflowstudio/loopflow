@@ -6,7 +6,7 @@
 
 API key auth already exists server-side via `PUT /v0/auth/{provider}/credential`, and the existing provider cards already surface `credential_type == apikey`. What does not exist is a durable way to source and refresh those keys without pasting them by hand.
 
-The current Swift auth model only exposes GitHub, Claude, and Codex. For this first pass, the secrets-provider mapping only needs to light up Claude and Codex. Concerto already has connection surfaces on macOS (`ConnectionSettingsView`) and iOS (`ConnectionSetupView`); the missing piece is provider-agnostic secrets status below those cards.
+The current Swift auth model only exposes GitHub, Claude, and Codex. For this first pass, the secrets-provider mapping only needs to light up Claude and Codex. Concerto already has connection surfaces on macOS (`ConnectionSettingsView`) and iOS (`ConnectionSetupView`); the missing piece is provider-agnostic secrets status below those cards. `AuthProvider` and `AuthProviderCard` stay harness-provider-specific, so Doppler status needs its own shared model and view section instead of pretending to be another auth provider.
 
 ## What to build
 

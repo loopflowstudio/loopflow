@@ -35,7 +35,17 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
    - CI status on open PRs
    - Any `scratch/` artifacts from in-progress work
 
-4. **Read blocks.** Look for signals that a wave is stuck:
+4. **Read unlanded branches.** Look for work that was pushed but never landed:
+   - `git branch -r` filtered to branches matching the wave name
+   - For each branch ahead of main, show `git log main..<branch> --oneline`
+     and `git diff --stat main..<branch>`
+   - Check whether a PR exists for the branch (`gh pr list --head <branch>`)
+   - Note branches with significant unlanded commits — these represent
+     work the wave already did that the chord can't see from main alone
+   - Check local worktrees too (`git worktree list`) — a worktree with
+     uncommitted changes or unpushed commits is the same signal
+
+5. **Read blocks.** Look for signals that a wave is stuck:
    - PRs with failing CI that haven't been fixed
    - Items with no recent commits
    - Merge conflicts
@@ -73,6 +83,9 @@ Write `scratch/tend-scan.md`:
 
 ### Open PRs
 <PR number, title, CI status, age>
+
+### Unlanded Branches
+<branch name, commits ahead of main, diff stats, PR status (none/open/closed)>
 
 (repeat for each member wave)
 

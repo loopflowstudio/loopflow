@@ -10,7 +10,9 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 
 Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
 
-The local-first terminal workspace is now in place: `lfd` owns terminal lifecycle, Concerto embeds Ghostty tabs keyed by terminal-session ID, and the sidebar already shows wave context beside the real terminal. Launch args, completion tokens, and run resumption still flow through `lfd`, so follow-on UI work should keep that authority instead of adding a second Swift-side callback path. The remaining work is to finish attention coverage for design review and chord calibration, then widen out into portfolio, lifecycle, and richer window composition without reintroducing chat-shaped coding surfaces.
+The local-first terminal workspace is now in place: `lfd` persists `terminal_sessions`, emits terminal-session events, and Concerto embeds tracked Ghostty tabs keyed by terminal-session ID while keeping Work as the default surface. That gives the queue, workspace, and future portfolio views one shared state model for interactive runs instead of a separate Swift-only terminal stack.
+
+But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next risky infrastructure step is to replace that shim with a real `lfd`-owned PTY transport that keeps executor choice, auth, and attach semantics in one place for local, container, and future remote runs.
 
 Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities. In particular, session ordering and selection already persist per repo; compositor work needs to either extend that repo-scoped state deliberately or replace it with a richer layout model in one move.
 
@@ -29,11 +31,11 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 ## Risks
 
 - Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
-- Local-only terminal embedding creates a temporary product split; remote repos need explicit queue/detail states until a remote PTY transport exists
+- The current launch-spec shim diverges from the eventual daemon-owned PTY design; remote repos and true `lf <step-or-flow>` parity stay blocked until transport is upgraded
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
-- Terminal session cleanup relies on `onSessionClosed` callback; processes killed via SIGKILL can leave sessions stuck in `running` state
+- Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state
 
 ## Metrics
 

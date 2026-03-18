@@ -1,5 +1,6 @@
 ---
-pm_id: '1213718325451034'
+asana_id: '1213718325451034'
+linear_id: eb086ebe-2987-4cf3-aba1-147facc51145
 ---
 # 06: Ingest auto-import
 
@@ -14,6 +15,16 @@ Modify the `ingest` step to check for `pm` configuration:
 3. Proceed with existing ingest logic — pick the next unshipped item by priority rank
 
 This keeps PM planning authoritative without inventing a second sync path. Reprioritize items, update descriptions, add new items — `ingest` should pick up the latest state without a manual `import-pm` run.
+
+### Integration with land
+
+The pm-sync design establishes that `lf ops land` runs sync for each wave that has a `pm` block before merge. This ensures main is always consistent with the remote PM state. The three-way diff inputs are clean: main = base, branch = local, remote = current.
+
+```
+ingest → sync(wave) → agent works → PR → land → next cycle syncs again
+```
+
+If the remote changes again between sync and land, those changes get caught on the next sync. The invariant is eventual consistency, not perfect-at-every-moment.
 
 ### Ship-roadmap flow update
 

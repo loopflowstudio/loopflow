@@ -88,7 +88,7 @@ pub fn ingest(
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct WaveItem {
     pub filename: String,
     pub prefix: u32,

@@ -1,3 +1,7 @@
+---
+asana_id: '1213717741058350'
+linear_id: a170df59-33ca-48f1-9f7d-6485553629d8
+---
 # 01: Block Taxonomy
 
 **Finish line:** Block types defined by what actually blocks work, not speculation. Each type has: detection criteria, self-healing options, escalation path. The taxonomy is a living document — new types added as they're discovered.

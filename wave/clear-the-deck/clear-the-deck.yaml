@@ -12,4 +12,6 @@ area:
   - swift/Concerto/
   - swift/LoopflowCore/
 direction:
-  - simplicity
+- simplicity
+pm:
+  asana_project: '1213718096117694'

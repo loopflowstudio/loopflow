@@ -3,3 +3,9 @@ exclude:
 
 branch_names:
   schema: "{user}.{name}.{ts}"
+
+pm:
+  provider: asana
+
+internal:
+  use_rust: true

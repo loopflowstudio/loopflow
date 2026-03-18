@@ -17,6 +17,7 @@ from conftest import (
     WAVE_MINIMAL,
 )
 from loopflow.cli import (
+    _auth_poll_timeout_seconds,
     _auth_status_table,
     _billing_tables,
     _extract_authorization_code,
@@ -148,6 +149,15 @@ def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
 
     assert "Asana" in rendered
     assert "pay-per-token" not in rendered
+
+
+def test_auth_poll_timeout_uses_provider_expiry_when_present() -> None:
+    assert _auth_poll_timeout_seconds(900) == 900
+
+
+def test_auth_poll_timeout_falls_back_for_missing_or_invalid_expiry() -> None:
+    assert _auth_poll_timeout_seconds(None) == 180
+    assert _auth_poll_timeout_seconds(0) == 180
 
 
 def test_extract_authorization_code_accepts_raw_code() -> None:

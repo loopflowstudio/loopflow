@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
-use crate::lfd::pm::PmConfig;
+use crate::lfd::pm::PmProviderKind;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TriggerDef {
@@ -11,6 +11,37 @@ pub(crate) struct TriggerDef {
     pub flow: Option<String>,
     pub source: Option<String>,
     pub source_repo: Option<String>,
+}
+
+/// Per-provider project IDs stored in wave config.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub(crate) struct WavePmConfig {
+    #[serde(default)]
+    pub asana_project: Option<String>,
+    #[serde(default)]
+    pub linear_project: Option<String>,
+}
+
+impl WavePmConfig {
+    pub fn project_for(&self, provider: PmProviderKind) -> Option<&str> {
+        match provider {
+            PmProviderKind::Asana => self.asana_project.as_deref(),
+            PmProviderKind::Linear => self.linear_project.as_deref(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_project(&mut self, provider: PmProviderKind, id: String) {
+        match provider {
+            PmProviderKind::Asana => self.asana_project = Some(id),
+            PmProviderKind::Linear => self.linear_project = Some(id),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.asana_project.is_none() && self.linear_project.is_none()
+    }
 }
 
 /// Config read from `wave/<name>/<name>.yaml` during wave creation.
@@ -25,7 +56,7 @@ pub(crate) struct WaveConfig {
     pub direction: Option<Vec<String>>,
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
-    pub pm: Option<PmConfig>,
+    pub pm: Option<WavePmConfig>,
 }
 
 /// Read wave config from `wave/<name>/<name>.yaml`.
@@ -128,33 +159,31 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\npm:\n  provider: asana\n  project: \"1234567890\"\n",
+            "flow: build\npm:\n  asana_project: \"1234567890\"\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
-        assert_eq!(pm.provider, crate::lfd::pm::PmProviderKind::Asana);
-        assert_eq!(pm.project, "1234567890");
-        assert_eq!(pm.team, None);
+        assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
+        assert_eq!(pm.linear_project, None);
     }
 
     #[test]
-    fn read_wave_config_parses_pm_team_override() {
+    fn read_wave_config_parses_multiple_provider_projects() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\npm:\n  provider: asana\n  project: \"1234567890\"\n  team: \"eng-platform\"\n",
+            "flow: build\npm:\n  asana_project: \"1234567890\"\n  linear_project: \"uuid-here\"\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
-        assert_eq!(pm.provider, crate::lfd::pm::PmProviderKind::Asana);
-        assert_eq!(pm.project, "1234567890");
-        assert_eq!(pm.team.as_deref(), Some("eng-platform"));
+        assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
+        assert_eq!(pm.linear_project.as_deref(), Some("uuid-here"));
     }
 
     #[test]

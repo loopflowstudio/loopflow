@@ -1,3 +1,7 @@
+---
+asana_id: '1213718096104795'
+linear_id: 197904a5-23aa-41c2-afc4-edc1b078d2e5
+---
 # 07: Beat Synthesizer
 
 **Finish line:** A Concerto view where you program a chord's rhythm — assign waves to beat slots in a sequencer grid, visualize the pattern, and run it. The chord's own tend flow is the downbeat.

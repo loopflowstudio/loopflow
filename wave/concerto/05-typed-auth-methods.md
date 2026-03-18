@@ -1,3 +1,7 @@
+---
+asana_id: '1213718558926550'
+linear_id: 5e7adfcd-3057-4da9-88aa-a24230dcb551
+---
 # 05: Typed Auth Methods
 
 **Finish line:** `AuthFlow` replaced with a tagged step model. Provider cards render device-code, terminal-assisted, API key, and browser flows using provider-declared capabilities — not one generic "Connect" button.

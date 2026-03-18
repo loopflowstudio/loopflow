@@ -1,3 +1,7 @@
+---
+asana_id: '1213718096138768'
+linear_id: a2bf1cc2-f95a-44e1-a0f8-0e3447765a54
+---
 # 08: API Expansion
 
 **Finish line:** Concerto can inspect remote worktrees and drive typeahead/config UX through lfd HTTP APIs, without local filesystem assumptions.

@@ -1,3 +1,7 @@
+---
+asana_id: '1213718081065257'
+linear_id: 2c9c7c0b-7b1e-4855-bbc8-18592d1c8f49
+---
 # 04: Wave Lifecycle UI
 
 **Finish line:** Create, configure, start, stop, and monitor waves from Concerto. Worktree management integrated. The full wave lifecycle without touching the terminal (unless you want to).

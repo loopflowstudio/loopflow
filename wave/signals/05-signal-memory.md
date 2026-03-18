@@ -1,3 +1,7 @@
+---
+asana_id: '1213717741050188'
+linear_id: 71e98eb6-ae12-4ad5-8112-3c5ab9ae9ef7
+---
 # 05: Signal Memory
 
 **Finish line:** Block resolutions feed back into Letta memory. The chord learns from how blocks were resolved and applies that judgment to future similar situations.

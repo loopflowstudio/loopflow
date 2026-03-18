@@ -1,3 +1,7 @@
+---
+asana_id: '1213718096106556'
+linear_id: ff18178d-77f8-4557-a9bb-b183e78b944d
+---
 # 02: Terminal Embedding
 
 **Finish line:** Coding sessions run in embedded Ghostty terminals inside Concerto. The agent runs there. Concerto wraps it with wave context — not replacing the terminal, enriching it.

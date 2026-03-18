@@ -45,6 +45,12 @@ const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
 const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
 const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
 const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
+const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
+const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
+const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
+const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
+const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
+const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -330,11 +336,6 @@ pub struct SocketAuthBroker {
 }
 
 #[derive(Debug, Clone)]
-struct ApiKeyBroker {
-    provider: Provider,
-}
-
-#[derive(Debug, Clone)]
 struct AsanaOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
     pending_flow: Arc<Mutex<Option<PendingAsanaOAuthFlow>>>,
@@ -371,12 +372,6 @@ struct AsanaOAuthUser {
 struct OAuthErrorResponse {
     error: Option<String>,
     error_description: Option<String>,
-}
-
-impl ApiKeyBroker {
-    fn new(provider: Provider) -> Self {
-        Self { provider }
-    }
 }
 
 impl AsanaOAuthBroker {
@@ -515,28 +510,6 @@ impl AsanaOAuthBroker {
 }
 
 #[async_trait]
-impl AuthBroker for ApiKeyBroker {
-    fn provider(&self) -> Provider {
-        self.provider
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        Err(AuthError::CommandUnavailable {
-            provider: self.provider,
-            command: "lfq auth configure".to_string(),
-        })
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        Ok(AuthStatus::None)
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl AuthBroker for AsanaOAuthBroker {
     fn provider(&self) -> Provider {
         Provider::Asana
@@ -621,6 +594,275 @@ impl AuthBroker for AsanaOAuthBroker {
                 Err(err)
             }
         }
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        self.completed_token.lock().await.clone()
+    }
+}
+
+// ── Linear OAuth ────────────────────────────────────────────────────
+
+struct LinearOAuthBroker {
+    completed_token: Arc<Mutex<Option<ProviderToken>>>,
+}
+
+#[derive(Debug, Clone)]
+struct LinearOAuthApp {
+    client_id: String,
+    client_secret: String,
+    scope: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinearOAuthTokenResponse {
+    access_token: String,
+    expires_in: Option<i64>,
+}
+
+impl LinearOAuthBroker {
+    fn new() -> Self {
+        Self {
+            completed_token: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
+        let client_id = read_nonempty_env(LINEAR_CLIENT_ID_ENV).ok_or_else(|| {
+            AuthError::CommandUnavailable {
+                provider: Provider::Linear,
+                command: format!(
+                    "set {LINEAR_CLIENT_ID_ENV} and {LINEAR_CLIENT_SECRET_ENV} to enable Linear OAuth"
+                ),
+            }
+        })?;
+        let client_secret = read_nonempty_env(LINEAR_CLIENT_SECRET_ENV).ok_or_else(|| {
+            AuthError::CommandUnavailable {
+                provider: Provider::Linear,
+                command: format!(
+                    "set {LINEAR_CLIENT_ID_ENV} and {LINEAR_CLIENT_SECRET_ENV} to enable Linear OAuth"
+                ),
+            }
+        })?;
+
+        Ok(LinearOAuthApp {
+            client_id,
+            client_secret,
+            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
+        })
+    }
+
+    fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
+        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+        let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
+            .expect("linear oauth authorize URL should parse");
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("client_id", &app.client_id);
+            pairs.append_pair("redirect_uri", LINEAR_OAUTH_REDIRECT_URI);
+            pairs.append_pair("response_type", "code");
+            pairs.append_pair("state", state);
+            pairs.append_pair("scope", &app.scope);
+            pairs.append_pair("code_challenge", &code_challenge);
+            pairs.append_pair("code_challenge_method", "S256");
+            pairs.append_pair("prompt", "consent");
+        }
+        url.to_string()
+    }
+
+    async fn exchange_code(
+        &self,
+        app: &LinearOAuthApp,
+        code_verifier: &str,
+        code: &str,
+    ) -> Result<ProviderToken, AuthError> {
+        let body = serde_urlencoded::to_string([
+            ("grant_type", "authorization_code"),
+            ("client_id", app.client_id.as_str()),
+            ("client_secret", app.client_secret.as_str()),
+            ("redirect_uri", LINEAR_OAUTH_REDIRECT_URI),
+            ("code", code),
+            ("code_verifier", code_verifier),
+        ])
+        .map_err(|err| AuthError::OAuthRequest {
+            provider: Provider::Linear,
+            message: format!("failed to encode token request: {err}"),
+        })?;
+        let response = reqwest::Client::new()
+            .post(LINEAR_OAUTH_TOKEN_URL)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: err.to_string(),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|err| AuthError::OAuthRequest {
+                    provider: Provider::Linear,
+                    message: err.to_string(),
+                })?;
+            let message = oauth_error_message(body.as_ref())
+                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
+            if status == reqwest::StatusCode::BAD_REQUEST
+                || status == reqwest::StatusCode::UNAUTHORIZED
+            {
+                return Err(AuthError::CodeExchangeRejected {
+                    provider: Provider::Linear,
+                    message,
+                });
+            }
+            return Err(AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("HTTP {status}: {message}"),
+            });
+        }
+
+        let payload = response
+            .json::<LinearOAuthTokenResponse>()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("failed to decode token response: {err}"),
+            })?;
+
+        let expires_at = payload
+            .expires_in
+            .filter(|seconds| *seconds > 0)
+            .map(|seconds| now_unix() + seconds);
+
+        Ok(ProviderToken {
+            provider: Provider::Linear.as_str().to_string(),
+            access_token: payload.access_token,
+            refresh_token: None,
+            expires_at,
+            login: None,
+            updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
+        })
+    }
+}
+
+#[async_trait]
+impl AuthBroker for LinearOAuthBroker {
+    fn provider(&self) -> Provider {
+        Provider::Linear
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        let app = Self::oauth_app()?;
+        let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        let state = Uuid::new_v4().to_string();
+        let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
+
+        // Spin up a localhost listener to catch the OAuth redirect
+        let listener = std::net::TcpListener::bind("127.0.0.1:19222").map_err(|err| {
+            AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("failed to bind localhost:19222 for OAuth callback: {err}"),
+            }
+        })?;
+        listener.set_nonblocking(true).ok();
+        let listener =
+            tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("failed to create async listener: {err}"),
+            })?;
+
+        let completed_token = self.completed_token.clone();
+        let monitor = tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(15 * 60);
+            loop {
+                if Instant::now() >= deadline {
+                    return Err(AuthError::CommandFailed {
+                        provider: Provider::Linear,
+                        message: "linear OAuth timed out".to_string(),
+                    });
+                }
+                let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
+                let (stream, _) = match accept {
+                    Ok(Ok(conn)) => conn,
+                    Ok(Err(_)) | Err(_) => continue,
+                };
+
+                // Read the HTTP request to extract the code
+                let (mut reader, mut writer) = stream.into_split();
+                let mut buf = vec![0u8; 4096];
+                let n = match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let code = extract_oauth_code_from_request(&request);
+
+                // Send a response to the browser
+                let response_body = if code.is_some() {
+                    "Authenticated! You can close this tab."
+                } else {
+                    "Authentication failed — no code found."
+                };
+                let http_response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
+                );
+                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes())
+                    .await;
+                let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
+
+                let Some(code) = code else {
+                    continue;
+                };
+
+                // Exchange the code for a token
+                let broker = LinearOAuthBroker::new();
+                match broker.exchange_code(&app, &code_verifier, &code).await {
+                    Ok(token) => {
+                        *completed_token.lock().await = Some(token);
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        return Err(AuthError::CommandFailed {
+                            provider: Provider::Linear,
+                            message: err.to_string(),
+                        });
+                    }
+                }
+            }
+        });
+
+        let response = AuthFlowResponse {
+            provider: Provider::Linear,
+            verification_uri_complete: Some(verification_uri.clone()),
+            verification_uri,
+            user_code: None,
+            expires_in: Some(15 * 60),
+        };
+
+        Ok(AuthFlowHandle::new(response, monitor))
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        let token = self.completed_token.lock().await;
+        let Some(token) = token.as_ref() else {
+            return Ok(AuthStatus::None);
+        };
+        if token
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now_unix())
+        {
+            return Ok(AuthStatus::Expired);
+        }
+        Ok(AuthStatus::Active { login: None })
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        *self.completed_token.lock().await = None;
+        Ok(())
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
@@ -1018,7 +1260,7 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
 fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
     [
         Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>,
-        Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
+        Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -2004,6 +2246,23 @@ fn oauth_error_message(body: &[u8]) -> Option<String> {
         (None, Some(description)) => Some(description),
         (None, None) => None,
     }
+}
+
+/// Extract the `code` query parameter from an HTTP request line like
+/// `GET /oauth/callback?code=abc123&state=xyz HTTP/1.1`.
+fn extract_oauth_code_from_request(request: &str) -> Option<String> {
+    let first_line = request.lines().next()?;
+    let path = first_line.split_whitespace().nth(1)?;
+    let query = path.split_once('?')?.1;
+    for pair in query.split('&') {
+        if let Some(value) = pair.strip_prefix("code=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {

@@ -1,3 +1,7 @@
+---
+asana_id: '1213718096106716'
+linear_id: 0f0f48cb-741f-4746-8e75-76113f00b058
+---
 # 01: Attention Queue Completion
 
 **Finish line:** Design review and calibration checkpoints surface as typed attention items with queue-specific detail and actions, so the attention queue covers every human decision in build and tend flows.

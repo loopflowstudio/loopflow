@@ -1,3 +1,7 @@
+---
+asana_id: '1213718347010726'
+linear_id: 23581d6d-b363-463a-936d-f7e29efbcac7
+---
 # 05: Calibration View
 
 **Finish line:** The tend flow's human checkpoint has a dedicated UX. Not a notification, not a PR review — a trajectory review across all waves. The highest-leverage human moment in the system.

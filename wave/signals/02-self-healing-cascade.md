@@ -1,3 +1,7 @@
+---
+asana_id: '1213717741066428'
+linear_id: 3c7611de-dc6a-4b9b-abe5-7f504a1352b4
+---
 # 02: Self-Healing Cascade
 
 **Finish line:** When a block occurs, the system tries to unblock itself before involving a human. Wave tries first. If it can't, the chord tries. If neither can, the human sees it.

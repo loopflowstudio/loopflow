@@ -1,3 +1,7 @@
+---
+asana_id: '1213718096104955'
+linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
+---
 # 06: Window Composition
 
 **Finish line:** Concerto is a native Swift window compositor for development work. Terminals, chat views, diff viewers, file editors, wave configs — composed into layouts the way tmux composes terminal panes, but with native UI where it matters.

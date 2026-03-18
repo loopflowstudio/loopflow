@@ -1,10 +1,12 @@
 flow: tend
 mode: manual
 area:
-  - wave/chord-model/
-  - wave/clear-the-deck/
-  - wave/agent-embedding/
-  - wave/signals/
+- wave/chord-model/
+- wave/clear-the-deck/
+- wave/agent-embedding/
+- wave/signals/
 direction:
-  - care
-  - clarity
+- care
+- clarity
+pm:
+  asana_project: '1213718558946552'

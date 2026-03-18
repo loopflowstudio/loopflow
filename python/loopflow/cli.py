@@ -229,6 +229,12 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     return table
 
 
+def _auth_poll_timeout_seconds(expires_in: Optional[int]) -> int:
+    if expires_in is not None and expires_in > 0:
+        return expires_in
+    return 180
+
+
 def _connect_provider(provider: str) -> None:
     flow = api.start_auth(provider)
     verification_url = flow.verification_uri_complete or flow.verification_uri
@@ -242,7 +248,7 @@ def _connect_provider(provider: str) -> None:
     if provider == "asana":
         _complete_oauth_code_flow(provider)
 
-    deadline = time.time() + 180
+    deadline = time.time() + _auth_poll_timeout_seconds(flow.expires_in)
     while time.time() < deadline:
         status = api.auth_status(provider)
         if status.status == "active":

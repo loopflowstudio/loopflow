@@ -7,12 +7,13 @@ mod flow;
 pub(crate) mod ingest;
 mod land;
 mod next;
+pub mod pm;
 mod pr;
 mod progress;
 mod rebase;
 mod release;
 pub mod trace;
-mod util;
+pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub use combine::{combine_prs, CombineOptions, CombineResult};

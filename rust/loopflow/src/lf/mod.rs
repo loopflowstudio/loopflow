@@ -251,10 +251,37 @@ pub enum OpsCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// PM tool integration (import, export, sync)
+    Pm {
+        #[command(subcommand)]
+        cmd: PmCommand,
+    },
     /// Provider authentication for local lf steps and ops
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmCommand {
+    /// Import roadmap items from PM tool to wave files
+    Import {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+    },
+    /// Export wave files to PM tool
+    Export {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Show what would happen without calling the PM API
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Three-way sync between local wave files and PM tool
+    Sync {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
     },
 }
 

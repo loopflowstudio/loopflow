@@ -1,3 +1,7 @@
+---
+asana_id: '1213718081081138'
+linear_id: 5cf2ea91-2903-4ae0-b171-0e73192ae5b4
+---
 # 02: Tend Flow Steps
 
 **Finish line:** A registered `redesign` wave completes a real `lf tend` cycle against live member-wave state. The run writes scan and routing artifacts from lfd-backed data, chooses a real path (`tune` or `silence`), and leaves a reviewer-visible recipe for reproducing the cycle.

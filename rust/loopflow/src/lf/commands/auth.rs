@@ -9,9 +9,7 @@ use time::OffsetDateTime;
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
 use crate::lfd::events::EventHub;
-use crate::lfd::provider_auth::{
-    AuthError, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
-};
+use crate::lfd::provider_auth::{AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot};
 use crate::lfd::store::{open_store, CredentialType, ProviderToken, SharedStore};
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -62,18 +60,7 @@ async fn status(provider: Option<&str>) -> Result<()> {
 async fn connect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
-    let flow = match service.start_auth(provider, EventHub::new(16)).await {
-        Ok(flow) => flow,
-        Err(AuthError::CommandUnavailable {
-            provider: Provider::Linear,
-            ..
-        }) => {
-            return Err(anyhow!(
-                "Linear uses API key auth today. Export LINEAR_API_KEY, then run `lf ops auth configure linear`."
-            ));
-        }
-        Err(err) => return Err(err.into()),
-    };
+    let flow = service.start_auth(provider, EventHub::new(16)).await?;
 
     let verification_url = flow
         .verification_uri_complete
@@ -87,7 +74,7 @@ async fn connect(raw_provider: &str) -> Result<()> {
     open_url(&verification_url);
 
     if provider == Provider::Asana {
-        complete_asana_oauth(&service).await?;
+        complete_oauth_code_paste(&service, provider).await?;
     }
 
     wait_for_active_status(&service, provider, flow.expires_in).await
@@ -155,10 +142,11 @@ async fn local_store() -> Result<SharedStore> {
     Ok(Arc::new(store))
 }
 
-async fn complete_asana_oauth(service: &ProviderAuthService) -> Result<()> {
-    println!(
-        "Asana will show an out-of-band redirect page. Paste the full redirect URL or just the authorization code."
-    );
+async fn complete_oauth_code_paste(
+    service: &ProviderAuthService,
+    provider: Provider,
+) -> Result<()> {
+    println!("Paste the full redirect URL or just the authorization code.");
     print!("Authorization code: ");
     let _ = io::stdout().flush();
 
@@ -173,7 +161,7 @@ async fn complete_asana_oauth(service: &ProviderAuthService) -> Result<()> {
         ));
     }
 
-    service.complete_auth(Provider::Asana, &code).await?;
+    service.complete_auth(provider, &code).await?;
     Ok(())
 }
 

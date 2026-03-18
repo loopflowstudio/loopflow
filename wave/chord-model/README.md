@@ -89,6 +89,8 @@ Waves exist as YAML in `wave/`. lfd discovers them, reconciles against the store
 
 Once waves are self-starting and self-healing, the chord's VSM flow has real operational data. It can read algedonic history, see which waves are healthy vs struggling, and make coordination decisions grounded in observed behavior.
 
+The old standalone `signals` wave folds back here. Stall detection, repeated repair failure, and later signal memory are chord concerns, not a second block system beside attention items.
+
 ### Recursion
 
 Chords can contain chords. Each is a viable system with its own S5. Acyclicity enforced. The area-derived membership model handles nesting naturally — a chord's area entries that match `wave/<name>/` are its members.
@@ -101,6 +103,7 @@ Chords can contain chords. Each is a viable system with its own S5. Acyclicity e
 - Each chord holds its own identity and policy
 - Root chord as terminal escalation point to human
 - Recursive viable systems: chords containing chords
+- Repeated stall/algedonic patterns feed later mutation and memory work without inventing a parallel block model
 
 ## Risks
 

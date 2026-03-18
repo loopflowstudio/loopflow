@@ -20,7 +20,7 @@ The structural wiring is in place now:
 
 What is still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted. No other redesign item owns that operational gap — this item does.
 
-Phase 1 also expects `signals/01` to move in parallel. Treat that as coordination pressure, not a prerequisite excuse: this item still needs to close the lfd bootstrap + live tend proof on its own branch of work.
+This item is the active Phase 1 proving slice. Later algedonic polish — stall detection, richer self-healing heuristics, and memory-backed pattern recall — can follow once the live tend cycle exists, but they are not prerequisites for closing this gap.
 
 ## Validation baseline
 
@@ -48,9 +48,14 @@ That baseline is the setup for the real remaining proof: boot lfd, register the 
 
 3. **Exercise a real routed path.** Expect the first run to choose `silence` while the chord is quiet. If that happens, create one small, reversible pressure point and rerun so the `tune` path also gets a live exercise.
 
-4. **Capture the operating recipe.** Leave one reviewer-friendly script or command sequence showing how to start lfd, bootstrap the waves, run tend, and inspect the resulting artifacts.
+4. **Close the runtime gaps the demo exposed.**
+   - isolate dev lfd auth state from any other local daemon (`LF_HOME` or equivalent)
+   - make sure PR state is visible to the run snapshot so CI polling sees the right targets
+   - keep the tend demo from depending on hand-edited token files or ad hoc setup
 
-5. **Keep the rename separate.** `lf ops` → `lf op` is still a worthwhile cleanup, but it is not part of proving tend live. Do it after the first real cycle exists.
+5. **Capture the operating recipe.** Leave one reviewer-friendly script or command sequence showing how to start lfd, bootstrap the waves, run tend, and inspect the resulting artifacts.
+
+6. **Keep the rename separate.** `lf ops` → `lf op` is still a worthwhile cleanup, but it is not part of proving tend live. Do it after the first real cycle exists.
 
 ## Done when
 

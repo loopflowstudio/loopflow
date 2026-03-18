@@ -18,21 +18,19 @@ A wave builds — code, tests, PRs. A chord-wave tends — `scan-waves`, `assess
 
 This wave is the first chord-wave. Its first job is building itself. Its second job is tending the waves that build everything else. The recursive case — a chord-wave that tends its own construction — is the real test.
 
-All four member waves use existing `build` / `ship-wave` flows until the chord-model wave produces `tend`. Then this wave starts using what it built.
+Both member waves use existing `build` / `ship-wave` flows until the chord-model wave produces `tend`. Then this wave starts using what it built.
 
 During bootstrap, these waves register in `manual` mode. Wiring the structure together should not immediately start build/tend loops.
 
 ```
 wave: redesign (chord-wave)
 │
-│  area: wave/chord-model/, wave/clear-the-deck/,
-│        wave/agent-embedding/, wave/signals/
+│  area: wave/chord-model/,
+│        wave/agent-embedding/
 │  flow: tend
 │
-├── wave: chord-model           6 items — tend flow, Letta, mutations
-├── wave: clear-the-deck        2 items — deploy collapse and sandbox pruning
-├── wave: agent-embedding       6 items — Concerto as conductor
-└── wave: signals               5 items — block taxonomy, cascade, memory
+├── wave: chord-model           8 items — tend flow, Letta, mutations, APIs
+└── wave: agent-embedding       7 items — Concerto as conductor
 ```
 
 ## Phasing
@@ -42,14 +40,12 @@ wave: redesign (chord-wave)
 Build enough to run the first tend cycle. Uses existing flows.
 
 - **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
-- **signals/01** — block taxonomy (types, data model, API) in parallel with item 02
 - **chord-model/03** — Letta integration once live tend output exists to remember
 
 Current sequencing matters:
 - `chord-model/02` owns the operational gap between "the tend machinery parses" and "the redesign chord actually runs in lfd"
-- `signals/01` should start alongside item 02, not after it — the block queue work is already waiting on concrete block types
+- stall detection, algedonic polish, and memory-backed pattern work stay inside `chord-model` after the live proof exists
 - `agent-embedding/01` can keep building isolated Swift scaffolding, but backend/auth/pm work that escapes `swift/` should move into the owning wave instead of broadening its scope silently
-- `clear-the-deck` stays intentionally quiet until the shared `lfd/` + `python/loopflow/` area settles
 
 First tend cycle runs. The chord-wave observes its own bootstrap commits. Letta records its first memories. The recursive loop is live.
 
@@ -57,20 +53,16 @@ First tend cycle runs. The chord-wave observes its own bootstrap commits. Letta 
 
 Waves produce real PRs. The chord-wave tends them. Build and tend alternate — waves create, chord-wave observes, chord-wave proposes, waves adjust.
 
-**clear-the-deck** runs fast — two remaining cuts, each a PR-sized decision.
-
 **agent-embedding** starts with block queue view (01) — the chord-wave needs somewhere to surface blocks. Terminal embedding (02) and portfolio (03) follow.
 
-**chord-model** continues with triggers (04), area model (05), wave mutation (06). Each informed by what tend reveals.
-
-**signals** builds cascade (02), stall detection (03), quality signals (04) as real blocks emerge from the other waves' work.
+**chord-model** continues with Letta (04), area model (05), wave mutation (06), and later API expansion (08). Stall detection, self-healing polish, and signal memory now live here instead of in a separate `signals` lane.
 
 ### Phase 3: The Chord-Wave Earns Its Keep
 
 Enough tend cycles to answer the open questions with evidence.
 
 - chord-model/07 — DAG enforcement and default chord-wave
-- signals/05 — signal memory (patterns from resolutions)
+- chord-model/04 — memory starts carrying repeated algedonic and calibration patterns
 - agent-embedding/05 — calibration view (trajectory review UX)
 
 The default chord-wave absorbs the existing five waves (foundation, trust, context, concerto, scale) and restructures them through tend cycles. Not manual reshuffling — the chord-wave proposes, the human reviews.
@@ -109,14 +101,12 @@ The five existing waves (foundation, trust, context, concerto, scale) keep runni
 Some existing work items are already covered by the new waves:
 - scale/04 (chord UI) -> agent-embedding/01 + 03
 - scale/05 (cross-repo UI) -> agent-embedding/03
-- trust/04-05 (sandbox) -> clear-the-deck/02
-- foundation/01 (code cleanup) -> clear-the-deck energy
 
 These overlaps resolve naturally when the default chord-wave runs its first tend cycle and proposes consolidation.
 
 ## What this proves
 
-If this chord-wave works — coordinates four parallel streams, remembers across runs, surfaces what matters, reshapes waves based on accumulated judgment — then chord-waves work.
+If this chord-wave works — coordinates parallel streams, remembers across runs, surfaces what matters, reshapes waves based on accumulated judgment — then chord-waves work.
 
 The second chord-wave is whatever the default chord-wave proposes when it absorbs the existing waves. The third is Cadenza (../cadenza).
 
@@ -128,7 +118,7 @@ The recursive test is the hardest test. A wave that can build itself, tend itsel
 
 Stafford Beer's Viable System Model applied to coding agents. Seven agent roles (S1-S5), persistent Letta memory, signal propagation, algedonic channel.
 
-Useful as conceptual framework. We take the meta-layer concept (chord-waves) and signal propagation (blocks). We don't take fixed governance layers, mechanical trust scoring, rigid autonomy tiers, or per-agent persistence at every level.
+Useful as conceptual framework. We take the meta-layer concept (chord-waves) and algedonic escalation. We don't take fixed governance layers, mechanical trust scoring, rigid autonomy tiers, or a separate block system parallel to attention items.
 
 ### Letta
 

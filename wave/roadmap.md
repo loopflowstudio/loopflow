@@ -16,18 +16,16 @@ coordinate anything.
 ```
 chord: redesign
 │
-│  build: creates chord machinery, signals, Letta integration
+│  build: creates chord machinery and Letta integration
 │  tend:  observes its own waves, routes to tune/silence, remembers
 │
-├── wave: clear-the-deck        6 items — cuts, deletions, collapses, cleanup
-├── wave: agent-embedding       8 items — Concerto as conductor
-├── wave: chord-model           7 items — tend flow, Letta, mutations, APIs
-└── wave: signals               5 items — block taxonomy, cascade, memory
+├── wave: agent-embedding       7 items — Concerto as conductor
+└── wave: chord-model           8 items — tend flow, Letta, mutations, APIs
 
 wave: dogfood                   3 items — Mac Mini server, phone deploy, team workflow
 ```
 
-All four waves use existing `build` / `ship-wave` flows until the
+Both waves use existing `build` / `ship-wave` flows until the
 chord-model wave produces `tend`. Then the chord starts using what
 it built.
 
@@ -40,13 +38,11 @@ it built.
 Build enough to run the first tend cycle. Uses existing flows.
 
 - **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
-- **signals/01** — block taxonomy (types, data model, API) in parallel with item 02
 - **chord-model/03** — Letta integration once live tend output exists to remember
 
 Current bootstrap pressure:
 - chord-model/02 still owns the live lfd proof; the structural tend work is not the finish line
-- signals/01 should start in parallel so block types exist before the queue UI hardens around placeholders
-- clear-the-deck waits until shared `lfd/` and `python/loopflow/` files stop moving under the bootstrap work
+- stall detection, self-healing polish, and signal memory come later inside chord-model rather than as a separate wave
 
 First tend cycle runs. The chord observes its own bootstrap commits.
 Letta records its first memories. The recursive loop is live.
@@ -57,24 +53,20 @@ Waves produce real PRs. The chord tends them. Build and tend
 alternate — waves create, chord observes, chord proposes, waves
 adjust.
 
-**clear-the-deck** runs fast — two remaining cuts, each a PR-sized decision.
-
 **agent-embedding** starts with block queue view (01) — the chord
 needs somewhere to surface blocks. Terminal embedding (02) and
 portfolio (03) follow.
 
 **chord-model** continues with triggers (04), area model (05),
-wave mutation (06). Each informed by what tend reveals.
-
-**signals** builds cascade (02), stall detection (03), quality
-signals (04) as real blocks emerge from the other waves' work.
+wave mutation (06), and later API expansion (08). Stall detection,
+algedonic polish, and memory work stay in this wave.
 
 ### Phase 3: The Chord Earns Its Keep
 
 Enough tend cycles to answer the open questions with evidence.
 
 - chord-model/07 — DAG enforcement and default chord
-- signals/05 — signal memory (patterns from resolutions)
+- chord-model/04 — memory of repeated algedonic and calibration patterns
 - agent-embedding/05 — calibration view (trajectory review UX)
 
 The default chord absorbs the existing five waves (foundation,
@@ -208,10 +200,8 @@ have been triaged. Useful items integrated into redesign waves,
 the rest dropped or saved in `wave/backlog.md`.
 
 **Integrated:**
-- foundation/01 (code cleanup) → clear-the-deck/05
 - foundation/03 (API expansion) → chord-model/08
 - concerto/01 (queue management) → agent-embedding/08
-- concerto/02 (API key entry) → clear-the-deck/06
 - foundation/02 (Mac Mini dogfood) → dogfood/01
 
 **Dropped** (built on things not yet solid):
@@ -236,7 +226,7 @@ environment.
 
 ## What This Proves
 
-If the redesign chord works — coordinates four parallel streams,
+If the redesign chord works — coordinates parallel streams,
 remembers across runs, surfaces what matters, reshapes waves based
 on accumulated judgment — then chords work.
 

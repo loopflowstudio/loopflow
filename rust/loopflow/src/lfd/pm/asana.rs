@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -9,11 +7,11 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::engine::config::AsanaConfig;
-use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult};
+use crate::lfd::pm::{
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult, RATE_LIMIT_RETRIES,
+};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const ASANA_RATE_LIMIT_RETRIES: u8 = 3;
-const ASANA_RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
 const TASK_FIELDS: &str = "name,notes,completed";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
 
@@ -67,16 +65,14 @@ impl AsanaClient {
         T: DeserializeOwned,
         F: Fn() -> reqwest::RequestBuilder,
     {
-        for attempt in 0..=ASANA_RATE_LIMIT_RETRIES {
+        for attempt in 0..=RATE_LIMIT_RETRIES {
             let response = make_request()
                 .send()
                 .await
                 .map_err(|err| PmError::Message(format!("asana request failed: {err}")))?;
 
-            if response.status() == StatusCode::TOO_MANY_REQUESTS
-                && attempt < ASANA_RATE_LIMIT_RETRIES
-            {
-                let delay = retry_after_delay(response.headers());
+            if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < RATE_LIMIT_RETRIES {
+                let delay = super::retry_after_delay(response.headers());
                 warn!(
                     attempt = attempt + 1,
                     delay_seconds = delay.as_secs(),
@@ -437,40 +433,23 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
     }
 }
 
-fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(ASANA_RETRY_AFTER_FALLBACK)
-}
-
 fn task_path(item_id: &str) -> String {
     format!("/tasks/{item_id}")
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-
-    use axum::body::Bytes;
-    use axum::extract::State;
-    use axum::http::{HeaderMap, Method, StatusCode, Uri};
-    use axum::routing::any;
-    use axum::{response::Response, Router};
+    use axum::http::StatusCode;
     use serde_json::json;
-    use tokio::net::TcpListener;
-    use tokio::sync::Mutex;
 
     use super::*;
     use crate::engine::config::AsanaConfig;
+    use crate::lfd::pm::test_server::{self, json_response, response};
     use crate::lfd::pm::PmProvider;
 
     #[tokio::test]
     async fn create_project_uses_workspace_and_team() {
-        let (base_url, requests) = spawn_test_server(vec![json_response(
+        let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::CREATED,
             json!({ "data": { "gid": "project-123" } }),
         )])
@@ -512,7 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_project_reuses_existing_loopflow_team_when_default_missing() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
@@ -553,7 +532,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_project_creates_loopflow_team_when_missing() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(StatusCode::OK, json!({ "data": [] })),
             json_response(
                 StatusCode::CREATED,
@@ -602,7 +581,7 @@ mod tests {
     #[tokio::test]
     async fn create_project_fails_with_no_workspaces() {
         let (base_url, _requests) =
-            spawn_test_server(vec![json_response(StatusCode::OK, json!({ "data": [] }))]).await;
+            test_server::spawn(vec![json_response(StatusCode::OK, json!({ "data": [] }))]).await;
         let client = AsanaClient::with_base_url(
             "secret-token".to_string(),
             AsanaConfig::default(),
@@ -635,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_items_collects_all_pages_and_assigns_rank_by_response_order() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
@@ -709,7 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_update_complete_and_comment_map_to_asana_endpoints() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::CREATED,
                 json!({ "data": { "gid": "task-123" } }),
@@ -802,7 +781,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_item_skips_rank_only_updates() {
-        let (base_url, requests) = spawn_test_server(Vec::new()).await;
+        let (base_url, requests) = test_server::spawn(Vec::new()).await;
         let client = AsanaClient::with_base_url(
             "secret-token".to_string(),
             AsanaConfig::default(),
@@ -826,7 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn retries_after_rate_limit_response() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             response(
                 StatusCode::TOO_MANY_REQUESTS,
                 vec![("retry-after", "0")],
@@ -862,7 +841,7 @@ mod tests {
 
     #[tokio::test]
     async fn surfaces_asana_error_messages() {
-        let (base_url, _requests) = spawn_test_server(vec![json_response(
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
             StatusCode::BAD_REQUEST,
             json!({ "errors": [{ "message": "workspace is required" }] }),
         )])
@@ -888,100 +867,5 @@ mod tests {
                     .to_string()
             )
         );
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct CapturedRequest {
-        method: String,
-        path: String,
-        query: Option<String>,
-        authorization: Option<String>,
-        body: String,
-    }
-
-    #[derive(Debug, Clone)]
-    struct QueuedResponse {
-        status: StatusCode,
-        headers: Vec<(String, String)>,
-        body: String,
-    }
-
-    #[derive(Clone)]
-    struct TestServerState {
-        requests: Arc<Mutex<Vec<CapturedRequest>>>,
-        responses: Arc<Mutex<VecDeque<QueuedResponse>>>,
-    }
-
-    async fn spawn_test_server(
-        responses: Vec<QueuedResponse>,
-    ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
-        let state = TestServerState {
-            requests: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(VecDeque::from(responses))),
-        };
-        let requests = state.requests.clone();
-        let app = Router::new()
-            .route("/", any(handle_request))
-            .route("/{*path}", any(handle_request))
-            .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("serve test app");
-        });
-        (format!("http://{addr}"), requests)
-    }
-
-    async fn handle_request(
-        State(state): State<TestServerState>,
-        method: Method,
-        uri: Uri,
-        headers: HeaderMap,
-        body: Bytes,
-    ) -> Response {
-        state.requests.lock().await.push(CapturedRequest {
-            method: method.to_string(),
-            path: uri.path().to_string(),
-            query: uri.query().map(str::to_string),
-            authorization: headers
-                .get(reqwest::header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            body: String::from_utf8(body.to_vec()).expect("utf8 body"),
-        });
-
-        let response = state.responses.lock().await.pop_front().unwrap_or_else(|| {
-            json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "errors": [{ "message": "unexpected request" }] }),
-            )
-        });
-
-        let mut builder = Response::builder().status(response.status);
-        for (name, value) in response.headers {
-            builder = builder.header(name, value);
-        }
-        builder.body(response.body.into()).expect("build response")
-    }
-
-    fn json_response(status: StatusCode, body: Value) -> QueuedResponse {
-        response(
-            status,
-            vec![("content-type", "application/json")],
-            body.to_string(),
-        )
-    }
-
-    fn response(status: StatusCode, headers: Vec<(&str, &str)>, body: String) -> QueuedResponse {
-        QueuedResponse {
-            status,
-            headers: headers
-                .into_iter()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect(),
-            body,
-        }
     }
 }

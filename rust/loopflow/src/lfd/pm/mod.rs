@@ -1,6 +1,8 @@
 pub mod asana;
 pub mod linear;
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -86,13 +88,29 @@ pub trait PmProvider: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RoadmapItemFrontmatter {
-    #[serde(default)]
-    pub pm_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asana_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_id: Option<String>,
 }
 
 impl RoadmapItemFrontmatter {
     fn is_empty(&self) -> bool {
-        self.pm_id.is_none()
+        self.asana_id.is_none() && self.linear_id.is_none()
+    }
+
+    pub fn id_for(&self, provider: PmProviderKind) -> Option<&str> {
+        match provider {
+            PmProviderKind::Asana => self.asana_id.as_deref(),
+            PmProviderKind::Linear => self.linear_id.as_deref(),
+        }
+    }
+
+    pub fn set_id(&mut self, provider: PmProviderKind, id: String) {
+        match provider {
+            PmProviderKind::Asana => self.asana_id = Some(id),
+            PmProviderKind::Linear => self.linear_id = Some(id),
+        }
     }
 }
 
@@ -130,6 +148,18 @@ impl RoadmapItemDocument {
     }
 }
 
+const RATE_LIMIT_RETRIES: u8 = 3;
+const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
+
+fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(RETRY_AFTER_FALLBACK)
+}
+
 fn split_frontmatter(content: &str) -> Option<(String, String)> {
     let rest = content.strip_prefix("---\n")?;
     let (frontmatter, body) = rest.split_once("\n---\n")?;
@@ -137,17 +167,132 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
 }
 
 #[cfg(test)]
+pub(crate) mod test_server {
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+
+    use axum::body::Bytes;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, Method, StatusCode, Uri};
+    use axum::response::Response;
+    use axum::routing::any;
+    use axum::Router;
+    use serde_json::{json, Value};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct CapturedRequest {
+        pub method: String,
+        pub path: String,
+        pub query: Option<String>,
+        pub authorization: Option<String>,
+        pub body: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct QueuedResponse {
+        pub status: StatusCode,
+        pub headers: Vec<(String, String)>,
+        pub body: String,
+    }
+
+    #[derive(Clone)]
+    struct ServerState {
+        requests: Arc<Mutex<Vec<CapturedRequest>>>,
+        responses: Arc<Mutex<VecDeque<QueuedResponse>>>,
+    }
+
+    pub async fn spawn(
+        responses: Vec<QueuedResponse>,
+    ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
+        let state = ServerState {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(VecDeque::from(responses))),
+        };
+        let requests = state.requests.clone();
+        let app = Router::new()
+            .route("/", any(handle_request))
+            .route("/{*path}", any(handle_request))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+        (format!("http://{addr}"), requests)
+    }
+
+    async fn handle_request(
+        State(state): State<ServerState>,
+        method: Method,
+        uri: Uri,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        state.requests.lock().await.push(CapturedRequest {
+            method: method.to_string(),
+            path: uri.path().to_string(),
+            query: uri.query().map(str::to_string),
+            authorization: headers
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            body: String::from_utf8(body.to_vec()).expect("utf8 body"),
+        });
+
+        let response = state.responses.lock().await.pop_front().unwrap_or_else(|| {
+            json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "errors": [{ "message": "unexpected request" }] }),
+            )
+        });
+
+        let mut builder = Response::builder().status(response.status);
+        for (name, value) in response.headers {
+            builder = builder.header(name, value);
+        }
+        builder.body(response.body.into()).expect("build response")
+    }
+
+    pub fn json_response(status: StatusCode, body: Value) -> QueuedResponse {
+        response(
+            status,
+            vec![("content-type", "application/json")],
+            body.to_string(),
+        )
+    }
+
+    pub fn response(
+        status: StatusCode,
+        headers: Vec<(&str, &str)>,
+        body: String,
+    ) -> QueuedResponse {
+        QueuedResponse {
+            status,
+            headers: headers
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            body,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn roadmap_item_document_parses_pm_id_frontmatter() {
+    fn roadmap_item_document_parses_asana_id_frontmatter() {
         let doc = RoadmapItemDocument::parse(
-            "---\npm_id: \"9876543210\"\n---\n# 01: Ship offline sync\n",
+            "---\nasana_id: \"9876543210\"\n---\n# 01: Ship offline sync\n",
         )
         .expect("frontmatter should parse");
 
-        assert_eq!(doc.frontmatter.pm_id.as_deref(), Some("9876543210"));
+        assert_eq!(doc.frontmatter.asana_id.as_deref(), Some("9876543210"));
         assert_eq!(doc.body, "# 01: Ship offline sync\n");
     }
 
@@ -156,15 +301,16 @@ mod tests {
         let doc = RoadmapItemDocument::parse("# 01: Ship offline sync\n")
             .expect("body-only documents should parse");
 
-        assert_eq!(doc.frontmatter.pm_id, None);
+        assert_eq!(doc.frontmatter.asana_id, None);
         assert_eq!(doc.body, "# 01: Ship offline sync\n");
     }
 
     #[test]
-    fn roadmap_item_document_render_round_trips_pm_id() {
+    fn roadmap_item_document_render_round_trips_provider_id() {
         let original = RoadmapItemDocument {
             frontmatter: RoadmapItemFrontmatter {
-                pm_id: Some("9876543210".to_string()),
+                asana_id: Some("9876543210".to_string()),
+                ..RoadmapItemFrontmatter::default()
             },
             body: "# 01: Ship offline sync\n".to_string(),
         };

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
@@ -8,13 +6,31 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult};
+use crate::lfd::pm::{
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult, RATE_LIMIT_RETRIES,
+};
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
-const LINEAR_RATE_LIMIT_RETRIES: u8 = 3;
-const LINEAR_RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
 const COMPLETED_STATE_TYPE: &str = "completed";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+
+const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
+  teams {
+    nodes {
+      id
+      name
+    }
+  }
+}"#;
+
+const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!) {
+  teamCreate(input: { name: $name }) {
+    team {
+      id
+    }
+  }
+}"#;
 
 const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: String!) {
   projectCreate(input: { name: $name, description: $description, teamIds: [$teamId] }) {
@@ -89,12 +105,12 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
 pub struct LinearClient {
     client: reqwest::Client,
     token: String,
-    team_id: String,
+    team_id: Option<String>,
     base_url: String,
 }
 
 impl LinearClient {
-    pub fn new(token: String, team_id: String) -> Self {
+    pub fn new(token: String, team_id: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
             token,
@@ -104,7 +120,7 @@ impl LinearClient {
     }
 
     #[cfg(test)]
-    fn with_base_url(token: String, team_id: String, base_url: String) -> Self {
+    fn with_base_url(token: String, team_id: Option<String>, base_url: String) -> Self {
         Self {
             client: reqwest::Client::new(),
             token,
@@ -113,26 +129,53 @@ impl LinearClient {
         }
     }
 
+    async fn resolve_team_id(&self) -> PmResult<String> {
+        if let Some(team_id) = &self.team_id {
+            return Ok(team_id.clone());
+        }
+
+        // Look for a team named "Loopflow", create if not found
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        if let Some(team) = response
+            .teams
+            .nodes
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(DEFAULT_LOOPFLOW_TEAM_NAME))
+        {
+            return Ok(team.id.clone());
+        }
+
+        // Create the team
+        let response: TeamCreateData = self
+            .graphql(
+                CREATE_TEAM_MUTATION,
+                json!({ "name": DEFAULT_LOOPFLOW_TEAM_NAME }),
+            )
+            .await?;
+        Ok(response.team_create.team.id)
+    }
+
     async fn graphql<T>(&self, query: &str, variables: Value) -> PmResult<T>
     where
         T: DeserializeOwned,
     {
         let request = GraphqlRequest { query, variables };
 
-        for attempt in 0..=LINEAR_RATE_LIMIT_RETRIES {
+        for attempt in 0..=RATE_LIMIT_RETRIES {
             let response = self
                 .client
                 .post(&self.base_url)
-                .header(reqwest::header::AUTHORIZATION, &self.token)
+                .header(
+                    reqwest::header::AUTHORIZATION,
+                    format!("Bearer {}", self.token),
+                )
                 .json(&request)
                 .send()
                 .await
                 .map_err(|err| PmError::Message(format!("linear request failed: {err}")))?;
 
-            if response.status() == StatusCode::TOO_MANY_REQUESTS
-                && attempt < LINEAR_RATE_LIMIT_RETRIES
-            {
-                let delay = retry_after_delay(response.headers());
+            if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < RATE_LIMIT_RETRIES {
+                let delay = super::retry_after_delay(response.headers());
                 warn!(
                     attempt = attempt + 1,
                     delay_seconds = delay.as_secs(),
@@ -151,10 +194,11 @@ impl LinearClient {
     }
 
     async fn completed_state_id(&self) -> PmResult<String> {
+        let team_id = self.resolve_team_id().await?;
         let response: WorkflowStatesData = self
             .graphql(
                 LIST_COMPLETED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": self.team_id }),
+                json!({ "teamId": team_id }),
             )
             .await?;
 
@@ -166,8 +210,7 @@ impl LinearClient {
             .map(|state| state.id)
             .ok_or_else(|| {
                 PmError::Message(format!(
-                    "no completed Linear workflow state found for team {}",
-                    self.team_id
+                    "no completed Linear workflow state found for team {team_id}"
                 ))
             })
     }
@@ -176,13 +219,14 @@ impl LinearClient {
 #[async_trait]
 impl PmProvider for LinearClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
+        let team_id = self.resolve_team_id().await?;
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
                 json!({
                     "name": name,
                     "description": description,
-                    "teamId": self.team_id,
+                    "teamId": team_id,
                 }),
             )
             .await?;
@@ -220,11 +264,12 @@ impl PmProvider for LinearClient {
     }
 
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
+        let team_id = self.resolve_team_id().await?;
         let response: IssueCreateData = self
             .graphql(
                 CREATE_ITEM_MUTATION,
                 json!({
-                    "teamId": self.team_id,
+                    "teamId": team_id,
                     "projectId": project_id,
                     "title": item.name,
                     "description": item.description,
@@ -314,21 +359,16 @@ struct IssueCreateData {
 
 #[derive(Deserialize)]
 struct ProjectPayload {
-    project: ProjectNode,
+    project: IdNode,
 }
 
 #[derive(Deserialize)]
 struct IssuePayload {
-    issue: IssueIdNode,
+    issue: IdNode,
 }
 
 #[derive(Deserialize)]
-struct ProjectNode {
-    id: String,
-}
-
-#[derive(Deserialize)]
-struct IssueIdNode {
+struct IdNode {
     id: String,
 }
 
@@ -406,6 +446,33 @@ struct WorkflowStateNode {
     id: String,
 }
 
+#[derive(Deserialize)]
+struct TeamsData {
+    teams: TeamsConnection,
+}
+
+#[derive(Deserialize)]
+struct TeamsConnection {
+    nodes: Vec<TeamNode>,
+}
+
+#[derive(Deserialize)]
+struct TeamNode {
+    id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct TeamCreateData {
+    #[serde(rename = "teamCreate")]
+    team_create: TeamCreatePayload,
+}
+
+#[derive(Deserialize)]
+struct TeamCreatePayload {
+    team: IdNode,
+}
+
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
     let status = response.status();
     let body = response
@@ -446,33 +513,16 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
 }
 
-fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(LINEAR_RETRY_AFTER_FALLBACK)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-
     use super::*;
-    use axum::body::Bytes;
-    use axum::extract::State;
-    use axum::http::{HeaderMap, Method, StatusCode, Uri};
-    use axum::routing::any;
-    use axum::{response::Response, Router};
+    use crate::lfd::pm::test_server::{self, json_response, response};
+    use axum::http::StatusCode;
     use serde_json::json;
-    use tokio::net::TcpListener;
-    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn create_project_sends_team_id_and_bare_api_key_header() {
-        let (base_url, requests) = spawn_test_server(vec![json_response(
+        let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({
                 "data": {
@@ -485,7 +535,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -499,7 +549,10 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, "POST");
         assert_eq!(requests[0].path, "/");
-        assert_eq!(requests[0].authorization.as_deref(), Some("linear-secret"));
+        assert_eq!(
+            requests[0].authorization.as_deref(),
+            Some("Bearer linear-secret")
+        );
         assert_eq!(
             serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
             json!({
@@ -515,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_items_paginates_and_assigns_rank_by_response_order() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
@@ -572,7 +625,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -636,7 +689,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_update_and_comment_map_to_linear_mutations() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
@@ -671,7 +724,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -742,7 +795,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_item_queries_completed_workflow_state_before_update() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
@@ -773,7 +826,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -807,7 +860,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_item_fails_when_team_has_no_completed_state() {
-        let (base_url, requests) = spawn_test_server(vec![json_response(
+        let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({
                 "data": {
@@ -820,7 +873,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -840,10 +893,10 @@ mod tests {
 
     #[tokio::test]
     async fn update_item_skips_rank_only_updates() {
-        let (base_url, requests) = spawn_test_server(Vec::new()).await;
+        let (base_url, requests) = test_server::spawn(Vec::new()).await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -864,7 +917,7 @@ mod tests {
 
     #[tokio::test]
     async fn retries_after_rate_limit_response() {
-        let (base_url, requests) = spawn_test_server(vec![
+        let (base_url, requests) = test_server::spawn(vec![
             response(
                 StatusCode::TOO_MANY_REQUESTS,
                 vec![("retry-after", "0")],
@@ -884,7 +937,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -906,7 +959,7 @@ mod tests {
 
     #[tokio::test]
     async fn graphql_errors_override_data() {
-        let (base_url, _requests) = spawn_test_server(vec![json_response(
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({
                 "data": {
@@ -920,7 +973,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
-            "team-9".to_string(),
+            Some("team-9".to_string()),
             base_url,
         );
 
@@ -962,98 +1015,5 @@ mod tests {
             );
         }
         panic!("expected graphql error message")
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct CapturedRequest {
-        method: String,
-        path: String,
-        authorization: Option<String>,
-        body: String,
-    }
-
-    #[derive(Debug, Clone)]
-    struct QueuedResponse {
-        status: StatusCode,
-        headers: Vec<(String, String)>,
-        body: String,
-    }
-
-    #[derive(Clone)]
-    struct TestServerState {
-        requests: Arc<Mutex<Vec<CapturedRequest>>>,
-        responses: Arc<Mutex<VecDeque<QueuedResponse>>>,
-    }
-
-    async fn spawn_test_server(
-        responses: Vec<QueuedResponse>,
-    ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
-        let state = TestServerState {
-            requests: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(VecDeque::from(responses))),
-        };
-        let requests = state.requests.clone();
-        let app = Router::new()
-            .route("/", any(handle_request))
-            .route("/{*path}", any(handle_request))
-            .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("serve test app");
-        });
-        (format!("http://{addr}"), requests)
-    }
-
-    async fn handle_request(
-        State(state): State<TestServerState>,
-        method: Method,
-        uri: Uri,
-        headers: HeaderMap,
-        body: Bytes,
-    ) -> Response {
-        state.requests.lock().await.push(CapturedRequest {
-            method: method.to_string(),
-            path: uri.path().to_string(),
-            authorization: headers
-                .get(reqwest::header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            body: String::from_utf8(body.to_vec()).expect("utf8 body"),
-        });
-
-        let response = state.responses.lock().await.pop_front().unwrap_or_else(|| {
-            json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "errors": [{ "message": "unexpected request" }] }),
-            )
-        });
-
-        let mut builder = Response::builder().status(response.status);
-        for (name, value) in response.headers {
-            builder = builder.header(name, value);
-        }
-        builder.body(response.body.into()).expect("build response")
-    }
-
-    fn json_response(status: StatusCode, body: Value) -> QueuedResponse {
-        response(
-            status,
-            vec![("content-type", "application/json")],
-            body.to_string(),
-        )
-    }
-
-    fn response(status: StatusCode, headers: Vec<(&str, &str)>, body: String) -> QueuedResponse {
-        QueuedResponse {
-            status,
-            headers: headers
-                .into_iter()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect(),
-            body,
-        }
     }
 }

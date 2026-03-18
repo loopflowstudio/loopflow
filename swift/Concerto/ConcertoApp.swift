@@ -88,8 +88,15 @@ private enum VoiceInputWarmup {
     }
 }
 
+private enum AppRuntime {
+    static var isAutomatedTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
 private func bootstrapConcertoApp() {
     AppFontRegistration.registerBundledFonts()
+    guard !AppRuntime.isAutomatedTest else { return }
     Task {
         try? await NotificationService.shared.requestAuthorization()
     }

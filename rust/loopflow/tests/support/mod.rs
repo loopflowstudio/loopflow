@@ -65,6 +65,7 @@ impl EnvGuard {
             write_executable(temp.path(), name, content);
         }
         let previous_path = env::var("PATH").ok();
+        let previous_home = env::var("HOME").ok();
         let new_path = match &previous_path {
             Some(prev) => format!("{}:{}", temp.path().display(), prev),
             None => temp.path().display().to_string(),

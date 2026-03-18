@@ -2,10 +2,8 @@
 import SwiftUI
 
 extension ReplyDraftEditPresentation {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
     func body(content: Content) -> some View {
-        if horizontalSizeClass == .compact {
+        if isCompact {
             content.sheet(isPresented: $isPresented) {
                 if let editingEntry {
                     editComposer(for: editingEntry)

@@ -159,6 +159,7 @@ Wave detail now has two tabs:
 
 - Select text in an assistant bubble to open the reply popover
 - Queue text replies, emoji reacts, and free-text notes in the draft tray
+- Edit queued text replies in place, drag to reorder them, and delete entries before sending
 - Send once to assemble queued replies and composer text into one structured message
 
 Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).

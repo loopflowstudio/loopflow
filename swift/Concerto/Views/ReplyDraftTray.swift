@@ -6,6 +6,9 @@ import LoopflowCore
 struct ReplyDraftTray: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
 
     @Bindable var queue: ReplyQueue
     @Binding var isExpanded: Bool
@@ -20,7 +23,8 @@ struct ReplyDraftTray: View {
                 editingReplyDraft: $editingReplyDraft,
                 isPresented: editComposerIsPresented,
                 onSubmitText: saveEdit,
-                onEmoji: saveEmojiEdit
+                onEmoji: saveEmojiEdit,
+                isCompact: editPresentationIsCompact
             ))
     }
 
@@ -99,6 +103,14 @@ struct ReplyDraftTray: View {
 
     private var listHeight: CGFloat {
         CGFloat(min(max(queue.count, 1), 4)) * 84
+    }
+
+    private var editPresentationIsCompact: Bool {
+#if os(iOS)
+        horizontalSizeClass == .compact
+#else
+        false
+#endif
     }
 
     private func beginEditing(_ entry: ReplyEntry) {
@@ -315,12 +327,13 @@ struct ReplyComposerPopover: View {
     }
 }
 
-private struct ReplyDraftEditPresentation: ViewModifier {
+struct ReplyDraftEditPresentation: ViewModifier {
     let editingEntry: ReplyEntry?
     @Binding var editingReplyDraft: String
     @Binding var isPresented: Bool
     let onSubmitText: () -> Void
     let onEmoji: (String) -> Void
+    let isCompact: Bool
 }
 
 private struct ReplyDraftTrayPreviewHarness: View {

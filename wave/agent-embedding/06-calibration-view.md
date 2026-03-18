@@ -15,7 +15,7 @@ Three kinds of human intervention, each with different UX needs:
 
 Design and code review have existing UX patterns (PR review, design doc review). Calibration is new — there's no established pattern for "review the trajectory of a coordinated system of agents."
 
-The attention queue groundwork is already in place, and item 01 is explicitly keeping attention kinds coarse. Calibration should therefore ship as a structured `interactive_step` attention item with `context.step = "chord/review"`, not as a one-off top-level kind.
+The attention queue groundwork is already in place, and item 01 is explicitly keeping attention kinds coarse. The current code already reserves `calibration` as a first-class attention label in Rust/Swift ordering and rendering, but no executor path creates one yet and Swift still has no typed calibration context. Calibration should therefore ship as a structured `interactive_step` attention item with `context.step = "chord/review"`, not as a one-off top-level kind that drifts from the eventual step-id contract.
 
 ## What to build
 

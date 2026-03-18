@@ -358,97 +358,74 @@ No rendering environment. Output is logged, not displayed.
 
 The step.
 
-<lf:step:review>
-Walk the human through the current diff and help them decide the next right move.
+<lf:step:demo>
+Walk the human through experiencing what changed, then decide together what's next.
 
 ## Voice
 
-The human is juggling many threads and context-switching back into this work. Open by orienting them: what changed, what's the decision space, where their judgment is needed. Not your editorial reaction — their re-entry point.
+The human is context-switching back into this work. Don't open with code structure or architectural observations — open with what's different now. What can they see, run, or feel that they couldn't before?
 
-Don't open by narrowing in on one thing based on interestingness ("The most striking thing here is...", "What jumps out is...", "The boldest decision..."). Start broad — cover what was implemented — then let the human decide where to focus.
-
-Vary structure and emphasis based on what this diff actually needs. A review that feels the same every time trains the human to skim past it.
+Vary the entry point. A demo that opens the same way every time ("Let me walk you through what changed...") stops being a demo and becomes a report. Lead with whatever is most alive in this change.
 
 ## Opening
 
-Before any evaluation or recommendations, orient the human:
+Before any code discussion, ground the human in the experience:
 
-1. **What was implemented** — what's new, what moved, what was removed. Concrete, not abstract.
-2. **Results and metrics** — if the change has measurable outcomes (performance, accuracy, latency, size, error rates), lead with the numbers. Run the validation procedure from the design doc if one exists in `scratch/`. Show before/after. If there are no metrics, skip this — not every change is quantitative.
-3. **Key types and APIs** — the data structures, public interfaces, and signatures introduced or changed. Quote them from the diff.
+1. **What's new** — one or two sentences. What exists now that didn't before, in user-facing terms.
+2. **How to see it** — the command to run, the page to open, the flow to trigger. Be specific enough that they can do it right now.
+3. **What to look for** — the moment where the change becomes visible. "You'll see X where there used to be Y" or "Try Z and watch what happens."
 
-This grounds the conversation. Everything else — model quality, simplifications, tradeoffs — comes after.
+If the design doc in `scratch/` has a "Done when" section with a verification command, start there.
 
-## Approach
+## Demo
 
-Use a natural structure that fits this diff. Don't force a fixed protocol or rigid output format.
+Run things. Show output. Let the human react.
 
-Pause often. Present one chunk, get reaction, adapt. Keep momentum without turning this into a template exercise.
+The demo is the center of the session, not a preamble to code review. Spend time here. If something surprising happens — good or bad — follow that thread.
 
-Pick the lenses that matter most for this change. Combine or skip lenses as needed:
+For UI changes: launch the environment (check `scripts/` for existing launchers like `concerto-dev.py`). Print a short walkthrough checklist, then let the human explore.
 
-- **Model quality** — assess data structures, API boundaries, and naming clarity.
-- **Confidence and demo path** — show how to verify behavior quickly.
-- **Simplification opportunities** — show concrete alternatives, not abstract advice.
-- **Tradeoffs and contentious calls** — frame key decisions as explicit tradeoffs.
-- **Execution path** — decide what to fix now vs defer to the wave roadmap.
+For CLI/library changes: run the commands, show the output. Before/after when it helps.
 
-## Collaborative execution loop
+For API changes: show example calls and responses.
 
-Use review to move the branch forward, not just discuss it.
+Pause after the demo. Ask what they noticed. Their reaction shapes the rest of the session.
+
+## After the demo
+
+The human's experience determines what happens next:
+
+**If it works and feels right** — move toward shipping. Light code discussion if the human wants it. Don't force a code review when the demo landed clean.
+
+**If something's off** — dig into why. This might lead to code, or it might lead to a design conversation. Follow the thread.
+
+**If they want to see the code** — walk through the diff, focusing on decisions that connect to what they just experienced. "The reason it behaves like X is because of this structure." Code in service of understanding, not code for its own sake.
+
+## Collaborative execution
 
 During the session:
-- Fix clear wins directly. If something is obviously better and relatively small, just do it — don't ask permission. Save questions for genuine tradeoffs.
-- Co-design unresolved decisions with the user when tradeoffs are non-obvious.
-- Prefer completing architectural chunks whole. Splitting a coherent change into pieces often creates backwards-compatibility adapters, dual states, and ambiguity that cost more than a larger PR. A 1500-LOC change where everything is consistent beats three 500-LOC changes that each leave the codebase in a transitional state.
-- When packaging options are genuinely needed, offer them — but don't default to "minimal" out of caution:
-  - **Minimal** — smallest safe ship-now set.
-  - **One more big push** — one additional meaningful improvement pass, then ship.
-  - **Do it all** — complete scope now and accept longer cycle time.
-- Confirm the user has ingested the changes and validated the updated design/behavior.
+- Fix clear wins directly. Small improvements that are obviously better — just do them.
+- Co-design when the human spots something they want different. Their experience of the demo is primary data.
+- If fixes or improvements accumulate, offer packaging options:
+  - **Ship as-is** — demo was clean, ship it.
+  - **Quick fixes** — address what came up in the demo, then ship.
+  - **Rethink** — something fundamental felt wrong, go back to design.
 
-Target outcome: the PR is ready to ship.
+## Verification
 
-## Verification expectations
+**Default: write or extend a Python script in `scripts/` (no bash).** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The bar: one command to run, one working environment, start clicking.
 
-**Default: write or extend a Python script in `scripts/` (no bash).** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script should launch whatever the human needs for manual verification (e.g., `concerto-dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
-
-The script should:
-- Focus on manual/live review flows, not CI reproduction
-- Avoid full automated test/lint suites unless the human explicitly asks
-- Launch the manual environment (lfd + Concerto, or whatever the change needs)
-- Print a short walkthrough checklist inline before launching
-
-**Manual walkthrough checklist.** After the script launches the environment, tell the human what to exercise. Be specific about what to look for — UI states, expected behavior, edge cases. Keep it short enough to scan in 30 seconds.
-
-**When a script isn't needed.** If the change is purely backend with no manual verification, skip the script and explain why.
-
-## Quality coverage
-
-By the end of the conversation, the relevant quality dimensions should have been
-considered — either addressed or consciously set aside.
-
-If directions are loaded, they define the quality lens. Otherwise, make sure these
-areas got appropriate attention:
-
-- User experience (visibility, feedback, consistency)
-- Correctness and test confidence
-- Reliability, performance, security
-- Modularity and change impact
-
-No mandatory format. If a dimension isn't relevant, that's fine — just be sure
-it's a conscious choice, not an oversight.
+When a script isn't needed (pure backend, no observable change), say so — and consider whether this change should have been routed to `code-review` instead.
 
 ## Guidance
 
-- Focus on structural decisions, not formatting or style.
-- If something should change, change it directly or propose a design doc. No review artifacts.
-- Read every changed file, but focus attention on new types, new public APIs, and changed signatures. Mechanical changes (imports, formatting) aren't worth discussing.
-- When proposing simplifications, be concrete. Show the alternative type or signature, not just "this could be simpler."
-- Quote the diff when discussing specific decisions. Make it easy to see what you're referring to.
+- The demo is the review. Don't bolt on a separate "now let's review the code" phase unless the human asks for it.
+- Quote the diff when discussing code, but only in service of explaining behavior the human just saw.
+- If the change has metrics (performance, accuracy, latency), show the numbers during the demo, not in a separate section.
+- Read every changed file to understand the full picture, but present through the lens of experience, not file-by-file.
 
 ## Adaptation
 
-Review sees the full chain. When something is wrong, ask: which upstream step should have caught or prevented this? Encode what you learned. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all steps benefit. Create or update `.lf/steps/` copies when the repo needs a step to work differently — a changed workflow, different review style, or team preferences about what review covers.
+When demo patterns emerge for this repo (specific launch scripts, common verification flows, preferred demo formats), update `.lf/steps/` or repo docs so future demos start prepared.
 
-</lf:step:review>
+</lf:step:demo>

@@ -1,6 +1,6 @@
-name: builtin_review
+name: builtin_code_review
 repo: tests/parity/fixtures/basic
-step: review
+step: code-review
 surface: headless
 directions: []
 lfdocs: false

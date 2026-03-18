@@ -27,11 +27,38 @@ This contract has to work for both automated runs that `lfd` starts itself and i
 
 5. **Parity tests.** Add tests proving that the same `lf <flow-or-step>` command can run with and without `lfd`, with the daemon-aware path adding observability rather than changing execution semantics.
 
+## Design guidance from tmux study
+
+### Event framing: learn from control mode, don't copy it
+
+tmux control mode uses `%begin`/`%end` framing with command numbers for request-response correlation, and `%`-prefixed async notifications that never interleave with response blocks. The principle is right: structured framing with clear boundaries between request-response and async events.
+
+But tmux's line-oriented text protocol is optimized for terminal-to-terminal bridging. `lf` → `lfd` should use a richer format (JSON-over-HTTP or JSON-over-socket) since both sides are programs.
+
+Key control mode lessons to keep:
+- **Command numbers / correlation IDs.** Every event from `lf` should carry a run ID that correlates back to the `lfd`-started or `lfd`-observed execution. tmux uses monotonic integers; loopflow should use the existing `LfdId` scheme.
+- **Async notifications are separate from request-response.** Lifecycle events (step started, wait point hit, completion) are fire-and-forget notifications, not request-response. Don't force `lf` to wait for `lfd` acknowledgment before proceeding.
+- **Flow control matters.** tmux added `pause-after` because high-output panes could overwhelm control clients. Agent sessions can produce massive output. The event protocol should be resilient to `lfd` being slow — either fire-and-forget with best-effort delivery, or bounded queue with drop-oldest semantics. Never block `lf` execution on event delivery.
+
+### Identity: pre-assign, don't discover
+
+tmux's identity model works because the server assigns all IDs — clients never create sessions/windows/panes independently. For daemon-started runs, `lfd` should pre-assign run ID, session ID, and wave association before spawning `lf`. For CLI-started runs observed by a running `lfd`, the detection handshake should let `lf` register and receive an ID immediately rather than self-assigning.
+
+This follows tmux's principle: one authority for identity (the server), zero for identity conflicts.
+
+### Authentication: Unix permissions first, tokens later
+
+tmux uses pure filesystem permissions on the socket directory. No cryptographic auth. This works for local use. `lfd` should start the same way: the shared runtime store (SQLite file or Unix socket) uses filesystem permissions. Add token-based auth only when remote access arrives.
+
+### Transport: WezTerm's Domain abstraction is the model
+
+WezTerm proved that local, SSH, Unix socket, and TLS connections can all implement the same spawn/pane interface. The `lf` → `lfd` event contract should be transport-agnostic from day one: define events as typed messages, let the delivery mechanism vary (HTTP for now, socket later, remote transport eventually) without changing the event schema.
+
 ## Open questions
 
-- Should event delivery go over HTTP, a unix socket, stdio side channel, or some combination?
-- How much identity should `lfd` pre-assign versus letting `lf` create and report?
-- What is the minimum event set that keeps store reconciliation reliable without over-coupling `lf` and `lfd`?
+- Should event delivery go over HTTP, a unix socket, stdio side channel, or some combination? (Guidance: HTTP is simplest for v0 since `lfd` already has an HTTP server. Stdio side channel is worth considering for daemon-spawned processes where `lfd` owns the PTY.)
+- How much identity should `lfd` pre-assign versus letting `lf` create and report? (Guidance: pre-assign for daemon-started runs, register-on-detect for CLI-started runs.)
+- What is the minimum event set that keeps store reconciliation reliable without over-coupling `lf` and `lfd`? (Guidance: start with the tmux notification set as a reference — the ~20 control mode notifications cover lifecycle, not content. `lf` events should be fewer: start, step-resolved, wait, complete, fail, cancel.)
 
 ## Done when
 

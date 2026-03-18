@@ -118,7 +118,10 @@ pub fn router(state: HttpState) -> Router {
             "/sessions/{id}/usage",
             get(usage::get_session_usage_handler),
         )
-        .route("/attention", get(attention::list_attention_handler))
+        .route(
+            "/attention",
+            get(attention::list_attention_handler).post(attention::create_attention_handler),
+        )
         .route(
             "/attention/history",
             get(attention::list_attention_history_handler),
@@ -126,6 +129,10 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/attention/{attention_id}",
             get(attention::get_attention_handler).patch(attention::patch_attention_handler),
+        )
+        .route(
+            "/attention/{attention_id}/resolve",
+            post(attention::resolve_attention_handler),
         )
         .route(
             "/waves",

@@ -9,14 +9,14 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
 use crate::engine::worktrees::main_repo_root;
-use crate::lfd::attention::{attention_id, queue_block_attention_item_from_existing};
+use crate::lfd::attention::{attention_id_for_queue_block, queue_block_attention_item_from_existing};
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AttentionKind, AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock,
+    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock,
     QueueBlockReason, QueueMergeEvent, WaveRun, WaveRunStackStatus,
 };
 
@@ -583,11 +583,7 @@ async fn set_queue_block(
         conflict_files,
         error,
     };
-    let attention_id = attention_id(
-        AttentionKind::QueueFailure,
-        &block.wave_id,
-        Some(&block.run_id),
-    );
+    let attention_id = attention_id_for_queue_block(&block.run_id);
     let existing = store
         .get_attention_item(&attention_id)
         .await
@@ -621,11 +617,11 @@ async fn set_queue_block(
 
 async fn clear_queue_block(
     store: &SharedStore,
-    wave_id: &LfdId,
+    _wave_id: &LfdId,
     run_id: &LfdId,
     event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
-    let attention_id = attention_id(AttentionKind::QueueFailure, wave_id, Some(run_id));
+    let attention_id = attention_id_for_queue_block(run_id);
     let Some(mut item) = store
         .get_attention_item(&attention_id)
         .await

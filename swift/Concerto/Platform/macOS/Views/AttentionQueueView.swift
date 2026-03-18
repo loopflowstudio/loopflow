@@ -2,24 +2,24 @@ import SwiftUI
 import LoopflowCore
 
 struct AttentionQueueView: View {
-    enum Filter: String, CaseIterable, Identifiable {
+    enum QueueFilter: String, CaseIterable, Identifiable {
         case all
-        case reviews
-        case failures
+        case interactiveOnly = "interactive"
+        case escalationsOnly = "escalations"
 
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .reviews: return "Reviews"
-            case .failures: return "Failures"
+            case .interactiveOnly: return "Interactive"
+            case .escalationsOnly: return "Escalations"
             }
         }
     }
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
-    @State private var filter: Filter = .all
+    @State private var filter: QueueFilter = .all
     @State private var selectedAttentionId: String?
 
     private var filteredItems: [AttentionItem] {
@@ -27,10 +27,10 @@ struct AttentionQueueView: View {
             switch filter {
             case .all:
                 return true
-            case .reviews:
-                return item.kind == .designReview || item.kind == .codeReview || item.kind == .calibration
-            case .failures:
-                return item.kind == .queueFailure || item.kind == .stepFailure
+            case .interactiveOnly:
+                return item.kind == .interactive
+            case .escalationsOnly:
+                return item.kind == .algedonic
             }
         }
     }
@@ -96,7 +96,7 @@ struct AttentionQueueView: View {
                 Spacer()
             }
             Picker("Filter", selection: $filter) {
-                ForEach(Filter.allCases) { filter in
+                ForEach(QueueFilter.allCases) { filter in
                     Text(filter.label).tag(filter)
                 }
             }
@@ -161,9 +161,8 @@ private struct AttentionRow: View {
 
     private var color: Color {
         switch item.kind {
-        case .queueFailure, .stepFailure: return .statusError
-        case .designReview, .codeReview: return .statusSuccess
-        case .calibration: return .statusWarning
+        case .algedonic: return .statusError
+        case .interactive: return .statusSuccess
         }
     }
 
@@ -214,23 +213,18 @@ private struct AttentionDetailView: View {
     @ViewBuilder
     private func detailBody(_ item: AttentionItem) -> some View {
         switch item.context {
-        case .codeReview(let context):
+        case .interactive(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let prTitle = context.prTitle {
-                    detailLine("PR", prTitle)
+                if let step = context.step {
+                    detailLine("Step", step)
                 }
-                if let branch = context.branch {
-                    detailLine("Branch", branch)
-                }
-                if let number = context.prNumber {
-                    detailLine("PR #", String(number))
-                }
-                if let wave = repoState.waveStore.wave(for: item.waveId), let diffStat = wave.diffStat {
-                    detailLine("Diff", diffStat)
+                if let designPath = context.designPath {
+                    detailLine("Design", designPath)
                 }
             }
-        case .queueFailure(let context):
+        case .algedonic(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let step = context.step { detailLine("Step", step) }
                 if let reason = context.reason { detailLine("Reason", reason) }
                 if let error = context.error { detailLine("Error", error) }
                 if !context.conflictFiles.isEmpty {
@@ -244,25 +238,6 @@ private struct AttentionDetailView: View {
                     }
                 }
             }
-        case .stepFailure(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let step = context.step { detailLine("Step", step) }
-                if let error = context.error { detailLine("Error", error) }
-            }
-        case .designReview(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                detailLine("Step", context.step)
-                if let designPath = context.designPath {
-                    detailLine("Design", designPath)
-                }
-            }
-        case .calibration(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                detailLine("Step", context.step)
-                if let chordPath = context.chordPath {
-                    detailLine("Chord", chordPath)
-                }
-            }
         case .raw(let raw):
             Text(raw)
                 .font(Typography.code())
@@ -274,35 +249,21 @@ private struct AttentionDetailView: View {
     private func actionButtons(_ item: AttentionItem) -> some View {
         HStack(spacing: Spacing.sm) {
             switch item.context {
-            case .codeReview:
-                if let wave = repoState.waveStore.wave(for: item.waveId) {
-                    Button("Ship") {
-                        Task { try? await repoState.landWave(wave) }
+            case .interactive(let context):
+                if let sessionId = context.terminalSessionId {
+                    Button("Open Session") {
+                        repoState.openTerminalSession(sessionId)
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .stepFailure:
+            case .algedonic:
                 if let wave = repoState.waveStore.wave(for: item.waveId) {
                     Button("Retry") {
                         Task { try? await repoState.restartStep(wave) }
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .designReview(let context):
-                if let sessionId = context.terminalSessionId {
-                    Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                }
-            case .calibration(let context):
-                if let sessionId = context.terminalSessionId {
-                    Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                }
-            case .queueFailure, .raw:
+            case .raw:
                 EmptyView()
             }
         }

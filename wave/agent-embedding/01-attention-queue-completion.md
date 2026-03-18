@@ -4,190 +4,68 @@ linear_id: 0f0f48cb-741f-4746-8e75-76113f00b058
 ---
 # 01: Attention Queue Completion
 
-**Finish line:** Design review and chord review checkpoints surface as typed attention items with queue-specific detail and actions, so the attention queue covers every human decision in build and tend flows.
+**Finish line:** The attention system has two clean paths — interactive (human checkpoint) and algedonic (system escalation) — with an HTTP API that lets `lf` create and resolve attention items, so flow semantics stay in the CLI.
 
-## Context
+## What shipped
 
-The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen. The executor currently creates code-review and step-failure attention items, and terminal waiting work has its own `TerminalSession` flow. The wave workspace routing shipped — `WaveWorkspaceView` is the primary selected-wave container, with embedded terminal surfaces as an additive tab.
+### Kind collapse
 
-**Current state of attention kinds:** Rust and Swift now agree on the fine-grained enum cases `design_review`, `code_review`, `calibration`, `queue_failure`, and `step_failure`. That shipped because it made the queue render real backend data honestly. But production coverage is still partial: the executor creates code-review and failure items today, while design-review and chord-calibration checkpoints still never become first-class attention records.
+`AttentionKind` collapsed from 5 fine-grained variants to 2 urgency classes:
 
-**The remaining gap is twofold:**
+| Path | Meaning | Created by |
+|------|---------|------------|
+| `interactive` | `lf` at a step needing human input | `lf` via `POST /attention` |
+| `algedonic` | System escalation — failure, blockage | `lfd` (step failure, queue block) or `lf` via API |
 
-1. **Coverage.** `review-design` / `kickoff` and `tend/review-chord` still do not create durable attention items. Until those paths produce real queue records, the attention queue cannot fully replace drilling into individual waves.
+`context.step` is the semantic discriminator within each path. Legacy kind strings (`design_review`, `code_review`, `calibration`, `queue_failure`, `step_failure`) accepted during migration via `FromStr` (Rust) and `init?(rawValue:)` (Swift).
 
-2. **Naming model.** The 1:1 kind mapping is workable for the current queue, but it will drift as checkpoint types grow. We still need a durable contract that separates urgency class from checkpoint identity.
+### lf-owns-attention architecture
 
-The target contract is coarse:
+Attention creation removed from the executor. The daemon no longer has flow semantics for interactive checkpoints. Two creation paths remain:
 
-- `interactive_step` — a human needs to review, decide, or continue work
-- `algedonic` — the system is signaling pressure, breakage, or blocked progress
+1. **HTTP API** — `POST /attention` and `POST /attention/{id}/resolve` for `lf` to create/resolve items when hitting interactive steps
+2. **Daemon policy** — `create_step_failure_attention` (repair chain exhausted) and queue block attention (merge queue failed)
 
-The more specific meaning should come from a canonical step identifier in the attention payload (`context.step`), not from proliferating top-level kinds. Refactoring the existing 1:1 kinds into this model stays in scope, but the sequencing should follow learning: ship design-review and chord-review coverage first if that is the fastest way to make the queue complete, then collapse taxonomy once those flows are proven.
+Code review attention removed entirely — loopflow uses `land`, not PR review gates.
 
-## Spec: attention identity and step naming
+### Swift UI
 
-Use two axes:
+- `InteractiveAttentionContext` (step, terminalSessionId, designPath) and `AlgedonicAttentionContext` (step, error, reason, conflictFiles)
+- Queue filter: All / Interactive / Escalations
+- Detail views: "Open Session" action for interactive, "Retry" for algedonic
+- Kind-based context decoding via `AttentionItem.context(kind:json:)`
 
-1. **Kind** — urgency class
-2. **Step** — semantic checkpoint identity
+### Reconciliation
 
-### Kind stays coarse
+Context-field dispatch instead of kind-based. Queue blocks (reason + conflict_files) never auto-resolve. Step failures resolve when run superseded. Interactive items resolve when wave restarted (fallback).
 
-Keep:
+## What's next (not this PR)
 
-- `interactive_step`
-- `algedonic`
+### `lf` calling the attention API
 
-Do not add new top-level kinds for code review, design review, calibration, or future queue surfaces. Those are checkpoint types, not urgency classes.
+Requires the daemon-aware CLI contract (lfd wave 02). When `lf` hits `WaitInteractive` for a checkpoint step, it should `POST /attention` with the appropriate context. When the step completes, it should `POST /attention/{id}/resolve`.
 
-### Step becomes the semantic discriminator
+### Algedonic escalation routing
 
-Every attention item should carry a canonical step id in `context.step`. That step id is the stable contract for:
+The algedonic path should route through the wave hierarchy: child wave → parent wave → root wave → human. Only the root wave's escalation surfaces as a human attention item. This makes agent-to-agent escalation possible within a wave family before bothering a human.
 
-- Swift decoding and view selection
-- action button routing
-- lifecycle/reconciliation rules
-- future analytics
-- future built-in prompt naming
+### Built-in prompt reorg
 
-Use noun/verb-style ids with `/` separators and **no `.md` suffix**.
-
-Initial target ids:
-
-- `code/review` — code review / ship-ready checkpoint
-- `code/design` — design review / kickoff checkpoint
-- `chord/review` — chord review / calibration checkpoint
-
-Queue failures and step failures can also carry `context.step`, but they remain `kind: algedonic`.
-
-Examples:
-
-```json
-{
-  "kind": "interactive_step",
-  "context": {
-    "step": "code/review",
-    "pr_url": "https://github.com/org/repo/pull/42"
-  }
-}
-```
-
-```json
-{
-  "kind": "interactive_step",
-  "context": {
-    "step": "code/design",
-    "design_path": "scratch/agent-embedding.md"
-  }
-}
-```
-
-```json
-{
-  "kind": "interactive_step",
-  "context": {
-    "step": "chord/review",
-    "summary": "Three member waves need retargeting"
-  }
-}
-```
-
-### Why step ids instead of a new enum
-
-Do not add a second backend taxonomy like:
-
-```rust
-enum InteractiveAttentionType {
-    CodeReview,
-    DesignReview,
-    Calibration,
-}
-```
-
-That would create three vocabularies that drift:
-
-- prompt step names
-- attention subtype enums
-- Swift detail view routing
-
-One stable step id is enough.
-
-### Relationship to built-in prompts
-
-The long-term direction is to reorganize built-in prompts around the same noun/verb ids:
-
-- `code/review.md`
-- `code/design.md`
-- `chord/review.md`
-
-That rename is **not required to finish this item**. For now:
-
-- attention payloads should adopt the canonical ids immediately
-- built-in prompt files can keep their current names temporarily
-- routing code may map current step names like `review`, `review-design`, and `tend/review-chord` to canonical ids
-
-Follow-up roadmap item after this work lands: rename built-ins and flows so the filesystem, flow references, and attention payloads all use the same ids.
-
-### Swift modeling guidance
-
-Swift should continue to expose typed contexts for rendering, but the discriminator should come from `context.step` plus payload shape, not from new top-level attention kinds.
-
-Expected queue detail groupings:
-
-- `interactive_step + code/review` → review/ship UI
-- `interactive_step + code/design` → design review UI
-- `interactive_step + chord/review` → chord review / calibration UI
-- `algedonic + queue/*` → queue failure UI
-- `algedonic + code/*` with error payload → step failure UI
-
-The `.raw` fallback should remain only as a defensive last resort, not a normal path for modeled checkpoints.
-
-## What to build
-
-1. **Design review attention creation.** Wire `review-design` / `kickoff` outputs into durable attention items with stable IDs, typed context, and resolution rules tied to the wave advancing or being redirected.
-
-2. **Chord review attention creation.** Wire `tend/draft-chord` / `tend/review-chord` into durable attention items that capture assessment summary, proposed mutations, and any human notes that should feed later tend cycles.
-
-3. **Step-id driven queue detail and actions.** Replace the current raw JSON fallback for design review and chord review with dedicated Swift decoding, filters, detail layouts, and action buttons keyed off canonical `context.step` values.
-
-4. **Taxonomy convergence.** Once coverage exists, collapse the fine-grained top-level kinds to coarse urgency classes plus canonical step ids, and make sure queue failures / step failures keep their own algedonic routing.
-
-5. **Lifecycle and urgency polish.** Ensure the new checkpoint types participate in urgency sorting, viewed/resolved transitions, history, and websocket updates the same way code reviews and failures do.
-
-6. **Proof through tests.** Add Rust and Swift coverage that shows these items are created, rendered, and resolved end to end, including canonical `context.step` routing.
-
-7. **Roadmap the built-in rename explicitly.** Capture the follow-up built-in prompt reorganization so we do not leave attention payload ids permanently out of sync with built-in step paths.
-
-## Built-in prompt reorg follow-up
-
-This item should leave behind a concrete rename plan, but not perform the full migration unless it becomes necessary for shipping.
-
-Target structure:
-
-- `rust/loopflow/src/engine/builtins/steps/code/review.md`
-- `rust/loopflow/src/engine/builtins/steps/code/design.md`
-- `rust/loopflow/src/engine/builtins/steps/chord/review.md`
-
-Likely mappings from current built-ins:
+Rename step files so filesystem path, flow YAML reference, and `context.step` all use the same `noun/verb` canonical identifiers:
 
 - `interactive/review.md` → `code/review.md`
 - `interactive/review-design.md` → `code/design.md`
 - `tend/review-chord.md` → `chord/review.md`
 
-Questions for the follow-up migration:
+### Tend remote branch awareness
 
-- whether `kickoff` remains a planning step or becomes part of `code/design`
-- whether `tend/draft-chord` and `tend/review-chord` collapse into one canonical review surface with different phases
-- whether flow YAML should reference canonical ids directly before or after file moves
-
-Done well, the attention payload, built-in prompt path, and queue UI all switch on the same identifier.
+Surface unlanded sibling branches in calibration context so conductors can see integration pressure.
 
 ## Done when
 
-- `review-design` or `kickoff` produces attention items with `context.step = "code/design"` and actionable queue detail
-- `tend/draft-chord` or `tend/review-chord` produces attention items with `context.step = "chord/review"` and mutation review actions
-- The queue UI exposes code review, design review, and chord review distinctly and no modeled checkpoint falls back to `.raw` JSON in normal use
-- Reconciliation resolves design-review and chord-review items when the human action clears the underlying condition
-- The roadmap explicitly records the future built-in prompt reorg to noun/verb-style canonical ids
-- A conductor can handle build and tend checkpoints from the queue without opening a wave detail first
+- `AttentionKind` has exactly two variants: `Interactive` and `Algedonic`
+- `POST /attention` and `POST /attention/{id}/resolve` exist and work
+- Executor does not create interactive attention items
+- Swift queue UI renders interactive and algedonic with typed contexts (no `.raw` fallback for modeled items)
+- Legacy kind strings decode correctly in both Rust and Swift
+- All Rust and Swift tests pass

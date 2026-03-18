@@ -424,28 +424,6 @@ fn update_wave_pm_yaml(
     Ok(())
 }
 
-pub(crate) fn write_pm_roles_to_wave_yaml(
-    repo: &Path,
-    wave: &str,
-    rw_provider: PmProviderKind,
-    export_providers: &[PmProviderKind],
-) -> OpsResult<()> {
-    update_wave_pm_yaml(repo, wave, |pm_map| {
-        pm_map.insert(
-            yaml_string("rw_provider"),
-            serde_yaml_ng::to_value(rw_provider)
-                .map_err(|err| OpsError::Message(format!("failed to encode pm rw provider: {err}")))?,
-        );
-        pm_map.insert(
-            yaml_string("export_providers"),
-            serde_yaml_ng::to_value(export_providers.to_vec()).map_err(|err| {
-                OpsError::Message(format!("failed to encode pm export providers: {err}"))
-            })?,
-        );
-        Ok(())
-    })
-}
-
 pub(crate) fn write_pm_provider_to_wave_yaml(
     repo: &Path,
     wave: &str,
@@ -456,6 +434,29 @@ pub(crate) fn write_pm_provider_to_wave_yaml(
             yaml_string("rw_provider"),
             serde_yaml_ng::to_value(provider)
                 .map_err(|err| OpsError::Message(format!("failed to encode pm provider: {err}")))?,
+        );
+        Ok(())
+    })
+}
+
+pub(crate) fn write_pm_roles_to_wave_yaml(
+    repo: &Path,
+    wave: &str,
+    rw_provider: PmProviderKind,
+    export_providers: &[PmProviderKind],
+) -> OpsResult<()> {
+    update_wave_pm_yaml(repo, wave, |pm_map| {
+        pm_map.insert(
+            yaml_string("rw_provider"),
+            serde_yaml_ng::to_value(rw_provider).map_err(|err| {
+                OpsError::Message(format!("failed to encode pm rw provider: {err}"))
+            })?,
+        );
+        pm_map.insert(
+            yaml_string("export_providers"),
+            serde_yaml_ng::to_value(export_providers.to_vec()).map_err(|err| {
+                OpsError::Message(format!("failed to encode pm export providers: {err}"))
+            })?,
         );
         Ok(())
     })
@@ -586,17 +587,15 @@ async fn pm_status_async(
                 .list_items(&ctx.project)
                 .await
                 .map_err(pm_to_ops)?;
-            let linked = local_items
+            let linked_ids = local_items
                 .iter()
-                .filter(|item| item.doc.frontmatter.id_for(provider).is_some())
-                .count();
+                .filter_map(|item| item.doc.frontmatter.id_for(provider))
+                .collect::<HashSet<_>>();
             let remote_only = remote_items
                 .iter()
                 .filter(|item| {
                     !local_titles.contains(&normalize_title(&item.name))
-                        && !local_items.iter().any(|local| {
-                            local.doc.frontmatter.id_for(provider) == Some(item.id.as_str())
-                        })
+                        && !linked_ids.contains(item.id.as_str())
                 })
                 .count();
             providers.push(PmProviderStatus {
@@ -608,7 +607,7 @@ async fn pm_status_async(
                 },
                 project_id: ctx.project,
                 local_total: local_items.len(),
-                linked,
+                linked: linked_ids.len(),
                 remote_total: remote_items.len(),
                 remote_only,
             });
@@ -744,28 +743,12 @@ async fn bootstrap_export_provider(
         }
 
         if let Some(remote_item) = remote_by_title.remove(&normalize_title(&local_title)) {
-            local_item
-                .doc
-                .frontmatter
-                .set_id(ctx.provider, remote_item.id.clone());
-            write_local_item(args.wave_dir, local_item)?;
+            apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
             continue;
         }
 
-        let pm_id = ctx
-            .client
-            .create_item(
-                &project_id,
-                &PmItemCreate {
-                    name: local_title,
-                    description: local_item.description(),
-                    rank: local_item.item.rank(),
-                },
-            )
-            .await
-            .map_err(pm_to_ops)?;
-        local_item.doc.frontmatter.set_id(ctx.provider, pm_id);
-        write_local_item(args.wave_dir, local_item)?;
+        create_remote_for_local_item(args.wave_dir, local_item, &ctx, &project_id, &local_title)
+            .await?;
         created_remote.push(local_item.item.filename.clone());
     }
 

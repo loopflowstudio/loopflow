@@ -72,6 +72,25 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
+    // Secrets provider
+    #[serde(rename = "secrets.connected")]
+    SecretsConnected {
+        provider: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "secrets.synced")]
+    SecretsSynced {
+        provider: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "secrets.disconnected")]
+    SecretsDisconnected {
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+
     // Wave lifecycle
     WaveCreated {
         wave_id: LfdId,
@@ -234,6 +253,26 @@ impl Event {
     pub fn attention_resolved(item: AttentionItem) -> Self {
         Self::AttentionResolved {
             item,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn secrets_connected(provider: String) -> Self {
+        Self::SecretsConnected {
+            provider,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn secrets_synced(provider: String) -> Self {
+        Self::SecretsSynced {
+            provider,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn secrets_disconnected() -> Self {
+        Self::SecretsDisconnected {
             timestamp: Self::now(),
         }
     }

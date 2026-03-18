@@ -17,26 +17,15 @@ struct ReplyDraftTray: View {
     @State private var editingReplyDraft = ""
 
     var body: some View {
-#if os(iOS)
         trayContent
             .modifier(ReplyDraftEditPresentation(
                 editingEntry: editingEntry,
                 editingReplyDraft: $editingReplyDraft,
                 isPresented: editComposerIsPresented,
-                isCompact: horizontalSizeClass == .compact,
+                isCompact: isCompactEditPresentation,
                 onSubmitText: saveEdit,
                 onEmoji: saveEmojiEdit
             ))
-#else
-        trayContent
-            .modifier(ReplyDraftEditPresentation(
-                editingEntry: editingEntry,
-                editingReplyDraft: $editingReplyDraft,
-                isPresented: editComposerIsPresented,
-                onSubmitText: saveEdit,
-                onEmoji: saveEmojiEdit
-            ))
-#endif
     }
 
     private var trayContent: some View {
@@ -116,6 +105,14 @@ struct ReplyDraftTray: View {
         CGFloat(min(max(queue.count, 1), 4)) * 84
     }
 
+    private var isCompactEditPresentation: Bool {
+#if os(iOS)
+        horizontalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
     private func beginEditing(_ entry: ReplyEntry) {
         editingEntryID = entry.id
         editingReplyDraft = entry.responseText
@@ -156,9 +153,7 @@ struct ReplyDraftTray: View {
         if let editingEntryID, idsToDelete.contains(editingEntryID) {
             closeEditor()
         }
-        for id in idsToDelete {
-            queue.remove(id: id)
-        }
+        queue.remove(atOffsets: offsets)
     }
 
     private func closeEditor() {
@@ -234,6 +229,22 @@ struct ReplyComposerContent: View {
     let onSubmitText: () -> Void
     let onEmoji: ((String) -> Void)?
 
+    init(
+        title: String = "Reply to selection",
+        quoted: String?,
+        replyDraft: Binding<String>,
+        submitLabel: String = "Queue",
+        onSubmitText: @escaping () -> Void,
+        onEmoji: ((String) -> Void)? = nil
+    ) {
+        self.title = title
+        self.quoted = quoted
+        _replyDraft = replyDraft
+        self.submitLabel = submitLabel
+        self.onSubmitText = onSubmitText
+        self.onEmoji = onEmoji
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(title)
@@ -287,6 +298,22 @@ struct ReplyComposerPopover: View {
     let onSubmitText: () -> Void
     let onEmoji: ((String) -> Void)?
 
+    init(
+        title: String = "Reply to selection",
+        quoted: String?,
+        replyDraft: Binding<String>,
+        submitLabel: String = "Queue",
+        onSubmitText: @escaping () -> Void,
+        onEmoji: ((String) -> Void)? = nil
+    ) {
+        self.title = title
+        self.quoted = quoted
+        _replyDraft = replyDraft
+        self.submitLabel = submitLabel
+        self.onSubmitText = onSubmitText
+        self.onEmoji = onEmoji
+    }
+
     var body: some View {
         ReplyComposerContent(
             title: title,
@@ -304,9 +331,7 @@ private struct ReplyDraftEditPresentation: ViewModifier {
     let editingEntry: ReplyEntry?
     @Binding var editingReplyDraft: String
     @Binding var isPresented: Bool
-#if os(iOS)
     let isCompact: Bool
-#endif
     let onSubmitText: () -> Void
     let onEmoji: (String) -> Void
 
@@ -315,28 +340,14 @@ private struct ReplyDraftEditPresentation: ViewModifier {
         if isCompact {
             content.sheet(isPresented: $isPresented) {
                 if let editingEntry {
-                    ReplyComposerContent(
-                        title: "Edit queued reply",
-                        quoted: editingEntry.quotedText,
-                        replyDraft: $editingReplyDraft,
-                        submitLabel: "Save",
-                        onSubmitText: onSubmitText,
-                        onEmoji: editingEntry.quotedText == nil ? nil : onEmoji
-                    )
+                    editComposer(for: editingEntry)
                     .presentationDetents([.medium])
                 }
             }
         } else {
             content.popover(isPresented: $isPresented, arrowEdge: .top) {
                 if let editingEntry {
-                    ReplyComposerContent(
-                        title: "Edit queued reply",
-                        quoted: editingEntry.quotedText,
-                        replyDraft: $editingReplyDraft,
-                        submitLabel: "Save",
-                        onSubmitText: onSubmitText,
-                        onEmoji: editingEntry.quotedText == nil ? nil : onEmoji
-                    )
+                    editComposer(for: editingEntry)
                     .frame(width: 320)
                 }
             }
@@ -355,6 +366,17 @@ private struct ReplyDraftEditPresentation: ViewModifier {
             }
         }
 #endif
+    }
+
+    private func editComposer(for entry: ReplyEntry) -> ReplyComposerContent {
+        ReplyComposerContent(
+            title: "Edit queued reply",
+            quoted: entry.quotedText,
+            replyDraft: $editingReplyDraft,
+            submitLabel: "Save",
+            onSubmitText: onSubmitText,
+            onEmoji: entry.quotedText == nil ? nil : onEmoji
+        )
     }
 }
 
@@ -377,10 +399,8 @@ private struct ReplyComposerPopoverPreviewHarness: View {
 
     var body: some View {
         ReplyComposerPopover(
-            title: "Reply to selection",
             quoted: "we should add an index on created_at",
             replyDraft: $draft,
-            submitLabel: "Queue",
             onSubmitText: {},
             onEmoji: { _ in }
         )

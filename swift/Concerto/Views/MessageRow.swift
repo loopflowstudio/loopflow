@@ -77,10 +77,8 @@ struct MessageRow: View {
             ) {
                 if let selectedQuote {
                     ReplyComposerPopover(
-                        title: "Reply to selection",
                         quoted: selectedQuote,
                         replyDraft: $replyDraft,
-                        submitLabel: "Queue",
                         onSubmitText: queueDraftReply,
                         onEmoji: queueEmojiReply
                     )
@@ -289,32 +287,27 @@ private struct ReplyComposerPresentation: ViewModifier {
         if isCompact {
             content.sheet(isPresented: isPresented) {
                 if let quoted = composerQuote {
-                    ReplyComposerContent(
-                        title: "Reply to selection",
-                        quoted: quoted,
-                        replyDraft: $replyDraft,
-                        submitLabel: "Queue",
-                        onSubmitText: onSubmitText,
-                        onEmoji: onEmoji
-                    )
+                    composer(for: quoted)
                     .presentationDetents([.medium])
                 }
             }
         } else {
             content.popover(isPresented: isPresented, arrowEdge: .top) {
                 if let quoted = composerQuote {
-                    ReplyComposerContent(
-                        title: "Reply to selection",
-                        quoted: quoted,
-                        replyDraft: $replyDraft,
-                        submitLabel: "Queue",
-                        onSubmitText: onSubmitText,
-                        onEmoji: onEmoji
-                    )
+                    composer(for: quoted)
                     .frame(width: 320)
                 }
             }
         }
+    }
+
+    private func composer(for quoted: String) -> ReplyComposerContent {
+        ReplyComposerContent(
+            quoted: quoted,
+            replyDraft: $replyDraft,
+            onSubmitText: onSubmitText,
+            onEmoji: onEmoji
+        )
     }
 }
 

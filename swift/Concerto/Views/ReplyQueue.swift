@@ -117,6 +117,10 @@ final class ReplyQueue {
         entries.removeAll { $0.id == id }
     }
 
+    func remove(atOffsets offsets: IndexSet) {
+        entries.remove(atOffsets: offsets)
+    }
+
     func move(fromOffsets source: IndexSet, toOffset destination: Int) {
         entries.move(fromOffsets: source, toOffset: destination)
     }

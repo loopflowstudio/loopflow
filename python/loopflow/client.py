@@ -184,11 +184,12 @@ class Client:
         flow: Optional[str] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
+        status: Optional[str] = None,
     ) -> Wave:
         body = {
             "repo": repo,
             "name": name,
-            **_compact_dict(flow=flow, direction=direction, area=area),
+            **_compact_dict(flow=flow, direction=direction, area=area, status=status),
         }
         payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)

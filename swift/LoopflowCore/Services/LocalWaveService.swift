@@ -835,21 +835,34 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func createWave(name: String, repo: RepoTarget) async throws -> Wave {
-        try await createWave(name: name, repo: repo, flow: "ship-roadmap", run: false)
+        try await createWave(name: name, repo: repo, flow: "ship-roadmap", run: false, status: nil)
     }
 
     public func createWave(name: String, repo: RepoTarget, flow: String, run: Bool) async throws -> Wave {
+        try await createWave(name: name, repo: repo, flow: flow, run: run, status: nil)
+    }
+
+    public func createWave(
+        name: String,
+        repo: RepoTarget,
+        flow: String,
+        run: Bool,
+        status: WaveStatus?
+    ) async throws -> Wave {
         LoggingService.lfd(
-            "createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path) flow=\(flow) run=\(run)"
+            "createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path) flow=\(flow) run=\(run) status=\(status?.rawValue ?? "default")"
         )
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
             "flow": flow,
             "direction": [],
             "run": run,
         ]
+        if let status {
+            body["status"] = status.rawValue
+        }
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves"),
             method: "POST",

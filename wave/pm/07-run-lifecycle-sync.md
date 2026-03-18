@@ -2,53 +2,55 @@
 asana_id: '1213718325464924'
 linear_id: 0c9f7553-07ad-4580-961c-1b49b9f6b052
 ---
-# 07: Run lifecycle → PM sync
+# 07: Item lifecycle comments and completion
 
-**Finish line:** PR creation and merge automatically update the corresponding PM item. Best-effort, non-blocking.
+**Finish line:** PR open, run failure, and merge can comment on or complete the specific ingested PM item because the run retains stable roadmap-item identity after `ingest`.
+
+Wave-level PM import/export now happens automatically at PR-oriented run start/end. The missing piece is item identity: `ingest` moves a numbered roadmap file into `scratch/`, and the run currently loses the durable link needed to look up `id_for(provider)` later.
+
+Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
 
 ## What to build
 
-Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into executor lifecycle transitions.
+### Persist the ingested item link
 
-### Sync points
+- When `ingest` picks an item, record stable metadata on the run or run snapshot: the original numbered item filename/slug/path and any provider IDs known at ingest time.
+- Keep that metadata valid after the item moves into `scratch/`, after branch rotation, and after export writes additional provider IDs.
+- Completion must fire from the event that proves the work landed (merge/land), not merely from "run reached the end of its local steps."
 
-Add sync points to the wave run lifecycle in the executor:
+### Lifecycle actions
 
-| Run state transition | Action |
-|---------------------|--------|
+| Lifecycle event | Action |
+|-----------------|--------|
 | PR created | `provider.comment(id_for(provider), "PR opened: {url}")` |
-| PR merged (run complete) | `provider.complete_item(id_for(provider))` |
 | Run failed | `provider.comment(id_for(provider), "Run failed: {error}")` |
+| PR merged / landed | `provider.complete_item(id_for(provider))` |
+
+Apply those actions to every configured provider role that has a linked item ID. Skip providers with no `id_for(provider)` instead of re-matching by title.
 
 ### Resolution
 
-The run already knows its wave and roadmap item. Resolve PM context through the existing files and helpers:
-
-1. Run → wave → wave YAML → `pm` block (`rw_provider`, `export_providers`, per-provider project IDs)
-2. Run → roadmap item file → `RoadmapItemDocument` → `id_for(provider)`
-3. Construct provider client from stored credentials + config
-4. Call the appropriate method
-
-Skip the sync entirely when the wave has no `pm` block or the item has no provider ID (`id_for(provider)` returns None).
+1. Run metadata → the ingested roadmap item identity
+2. Wave YAML / repo config → provider roles and project IDs
+3. `RoadmapItemDocument` or stored provider IDs → `id_for(provider)`
+4. Construct provider client from stored credentials + config
+5. Call `comment` / `complete_item`
 
 ### Error handling
 
-Best-effort: if the PM API call fails, log a warning and continue. Never block wave execution on external sync. Both providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
-
-### Implementation
-
-Synchronous dispatch initially — call the provider directly from the run lifecycle transition handler. No event bus, no queue, no subscriber layer unless real latency proves that necessary.
+Best-effort: if a PM API call fails, log a warning and continue. Never block wave execution, PR creation, or merge handling on external sync. Both providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
 
 ## Constraints
 
 - PM sync failures must not affect wave execution.
-- No new infrastructure: direct function call, not an event system.
-- Only fires when the wave has a `pm` block and the item has a provider ID.
+- Stable item identity must survive `ingest` moving files into `scratch/`.
+- No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter/run metadata.
+- Reuse the existing provider client methods; do not create a second PM transport path for lifecycle events.
 
 ## Done when
 
-- Merging a PR for a wave run marks the corresponding PM item complete
-- Creating a PR adds a comment on the PM item with the PR URL
-- A failed run adds an error comment on the PM item
-- PM API failure logs a warning but doesn't affect the run
-- Waves without `pm` configuration are completely unaffected
+- Creating a PR adds a comment on the linked PM item with the PR URL
+- A failed run adds an error comment on the linked PM item
+- Merging or landing the PR completes the linked PM item
+- PM API failures log warnings but do not affect the run or merge path
+- Waves without `pm` configuration, or items without provider IDs, are completely unaffected

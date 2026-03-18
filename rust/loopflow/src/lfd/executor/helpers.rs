@@ -90,6 +90,7 @@ pub async fn create_parallel_wave_run(
         stack_status: WaveRunStackStatus::Active,
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
+        repair_of: None,
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
@@ -174,6 +175,7 @@ pub async fn create_wave_run_with_id(
         stack_status: WaveRunStackStatus::Active,
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
+        repair_of: None,
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {

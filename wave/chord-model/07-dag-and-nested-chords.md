@@ -1,6 +1,6 @@
-# 07: DAG and Default Chord-Wave
+# 07: DAG and Nested Chords
 
-**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced, and the default chord-wave concept is ready to absorb existing waves.
+**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced. A VSM chord (five waves, one per system) is representable as a nested structure.
 
 ## Context
 

@@ -351,6 +351,10 @@ pub struct WaveRun {
     /// PR). Any other value means check out that branch and push to it (no PR).
     #[serde(default = "default_target_branch")]
     pub target_branch: String,
+    /// When set, this run is a repair attempt for the referenced failed run.
+    /// The executor uses this to decide whether to escalate (algedonic signal)
+    /// or attempt another repair on failure.
+    pub repair_of: Option<LfdId>,
 }
 
 fn default_target_branch() -> String {
@@ -419,6 +423,7 @@ impl WaveRun {
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
+            repair_of: None,
         }
     }
 }

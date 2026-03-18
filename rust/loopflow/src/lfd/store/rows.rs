@@ -158,7 +158,7 @@ pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
 ///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
 ///        activation_log_id, parent_run_id, parent_pr_number,
 ///        stack_position, stack_group_id, stack_status,
-///        lineage_inferred
+///        lineage_inferred, target_branch, repair_of
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let started_at = unix_to_datetime(row.bigint(7)?);
     let ended_at = row.opt_bigint(8)?;
@@ -174,6 +174,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let stack_status = WaveRunStackStatus::from_i32(row.int(21)?);
     let lineage_inferred = row.int(22)? != 0;
     let target_branch = row.text(23)?;
+    let repair_of = row.opt_text(24)?.map(LfdId::from_raw);
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -204,6 +205,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         stack_status,
         lineage_inferred,
         target_branch,
+        repair_of,
     })
 }
 

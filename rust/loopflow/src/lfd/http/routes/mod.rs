@@ -446,6 +446,7 @@ mod tests {
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
+            repair_of: None,
         }
     }
 
@@ -511,6 +512,7 @@ mod tests {
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
+            repair_of: None,
         }
     }
 

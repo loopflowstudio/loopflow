@@ -382,6 +382,7 @@ async fn create_running_wave_and_run(
         stack_status: crate::lfd::types::WaveRunStackStatus::Active,
         lineage_inferred: false,
         target_branch: "main".to_string(),
+        repair_of: None,
     };
     store
         .create_wave_run(&run)
@@ -625,6 +626,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         stack_status: crate::lfd::types::WaveRunStackStatus::Active,
         lineage_inferred: false,
         target_branch: "main".to_string(),
+        repair_of: None,
     };
     store
         .create_wave_run(&run)

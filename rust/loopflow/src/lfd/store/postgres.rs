@@ -1001,6 +1001,7 @@ impl PostgresStore {
                         &run.stack_status.as_i32(),
                         &(if run.lineage_inferred { 1i32 } else { 0i32 }),
                         &run.target_branch,
+                        &run.repair_of,
                     ],
                 )
                 .await?;
@@ -1038,6 +1039,7 @@ impl PostgresStore {
                         &run.stack_status.as_i32(),
                         &(if run.lineage_inferred { 1i32 } else { 0i32 }),
                         &run.target_branch,
+                        &run.repair_of,
                         &run.id,
                     ],
                 )

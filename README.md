@@ -289,6 +289,21 @@ lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens
 ```
 
+PM provider roles:
+
+```yaml
+# .lf/config.yaml
+pm:
+  rw_provider: linear
+  export_providers:
+    - asana
+```
+
+```bash
+lf ops pm init --wave pm   # connect/create projects, link items, write IDs
+lf ops pm status           # show linked waves and local/remote counts
+```
+
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.
 

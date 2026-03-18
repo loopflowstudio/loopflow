@@ -24,7 +24,7 @@ Add sync points to the wave run lifecycle in the executor:
 
 The run already knows its wave and roadmap item. Resolve PM context through the existing files and helpers:
 
-1. Run → wave → wave YAML → `pm` block (`provider`, `project`)
+1. Run → wave → wave YAML → `pm` block (`rw_provider`, `export_providers`, per-provider project IDs)
 2. Run → roadmap item file → `RoadmapItemDocument` → `id_for(provider)`
 3. Construct provider client from stored credentials + config
 4. Call the appropriate method

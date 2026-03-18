@@ -2246,6 +2246,11 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
+        let loopable = store
+            .list_loopable_waves()
+            .await
+            .expect("list loopable waves");
+        assert!(loopable.iter().all(|candidate| candidate.id() != wave.id()));
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),

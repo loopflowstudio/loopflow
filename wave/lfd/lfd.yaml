@@ -1,0 +1,10 @@
+flow: ship-wave
+mode: manual
+area:
+  - rust/loopflow/src/lfd/
+  - rust/loopflow/src/lf/
+  - python/loopflow/
+  - wave/lfd/
+direction:
+  - clarity
+  - simplicity

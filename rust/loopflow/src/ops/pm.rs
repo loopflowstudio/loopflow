@@ -597,14 +597,14 @@ async fn bootstrap_read_write_provider(
         if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
             if let Some(remote_item) = remote_by_id.get(pm_id) {
                 matched_remote_ids.insert(remote_item.id.clone());
-                apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, true)?;
+                apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
                 continue;
             }
         }
 
         if let Some(remote_item) = remote_by_title.remove(&local_key) {
             matched_remote_ids.insert(remote_item.id.clone());
-            apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, true)?;
+            apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
             continue;
         }
 
@@ -617,7 +617,7 @@ async fn bootstrap_read_write_provider(
         if matched_remote_ids.contains(&remote_item.id) {
             continue;
         }
-        let filename = next_remote_filename(args.wave_dir, remote_item.rank + 1, &remote_item.name);
+        let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
         let rendered = remote_item_to_document(remote_item, ctx.provider)
             .render()
             .map_err(pm_to_ops)?;
@@ -1304,121 +1304,40 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use async_trait::async_trait;
+    use crate::lfd::pm::PmResult;
     use tempfile::TempDir;
 
-    use crate::engine::config::NotionConfig;
-    use crate::lfd::pm::PmResult;
-    use crate::ops::progress::NullProgress;
-
     #[derive(Debug)]
-    struct FakePmProvider {
-        create_team_calls: AtomicUsize,
-        existing_team_id: Option<String>,
-        created_team_id: String,
-    }
-
-    impl FakePmProvider {
-        fn new(existing_team_id: Option<&str>, created_team_id: &str) -> Self {
-            Self {
-                create_team_calls: AtomicUsize::new(0),
-                existing_team_id: existing_team_id.map(str::to_string),
-                created_team_id: created_team_id.to_string(),
-            }
-        }
+    struct StaticProvider {
+        items: Vec<PmItem>,
     }
 
     #[async_trait]
-    impl PmProvider for FakePmProvider {
-        async fn create_team(&self, _name: &str) -> PmResult<String> {
-            self.create_team_calls.fetch_add(1, Ordering::Relaxed);
-            Ok(self.created_team_id.clone())
-        }
-
-        async fn find_team(&self, _name: &str) -> PmResult<Option<String>> {
-            Ok(self.existing_team_id.clone())
-        }
-
+    impl PmProvider for StaticProvider {
         async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("unused in test")
-        }
-
-        async fn create_project_in_team(
-            &self,
-            _team_id: &str,
-            _name: &str,
-            _description: &str,
-        ) -> PmResult<String> {
-            panic!("unused in test")
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("unused in test")
+            panic!("create_project should not be called in this test");
         }
 
         async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            panic!("unused in test")
+            Ok(self.items.clone())
         }
 
         async fn create_item(&self, _project_id: &str, _item: &PmItemCreate) -> PmResult<String> {
-            panic!("unused in test")
+            panic!("create_item should not be called in this test");
         }
 
         async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
-            panic!("unused in test")
+            panic!("update_item should not be called in this test");
         }
 
         async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("unused in test")
+            panic!("complete_item should not be called in this test");
         }
 
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("unused in test")
+            panic!("comment should not be called in this test");
         }
-    }
-
-    #[tokio::test]
-    async fn resolve_project_parent_id_uses_configured_notion_parent_page() {
-        let progress = NullProgress;
-        let client = FakePmProvider::new(None, "created-team");
-        let config = Config {
-            notion: NotionConfig {
-                parent_page: Some("page-123".to_string()),
-                ..NotionConfig::default()
-            },
-            ..Config::default()
-        };
-
-        let team_id =
-            resolve_project_parent_id(&client, PmProviderKind::Notion, &config, &progress)
-                .await
-                .expect("resolve notion parent");
-
-        assert_eq!(team_id, "page-123");
-        assert_eq!(client.create_team_calls.load(Ordering::Relaxed), 0);
-    }
-
-    #[tokio::test]
-    async fn resolve_project_parent_id_creates_fresh_team_for_non_notion_providers() {
-        let progress = NullProgress;
-        let client = FakePmProvider::new(None, "created-team");
-        let config = Config {
-            notion: NotionConfig {
-                parent_page: Some("page-123".to_string()),
-                ..NotionConfig::default()
-            },
-            ..Config::default()
-        };
-
-        let team_id =
-            resolve_project_parent_id(&client, PmProviderKind::Linear, &config, &progress)
-                .await
-                .expect("create fresh team");
-
-        assert_eq!(team_id, "created-team");
-        assert_eq!(client.create_team_calls.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -1552,5 +1471,68 @@ mod tests {
         )
         .expect("rewrite wave config");
         assert!(wave_pm_is_enabled(repo, "pm"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_read_write_provider_preserves_local_body_and_uses_remote_rank() {
+        let dir = TempDir::new().expect("temp dir");
+        let wave_dir = dir.path().join("wave").join("pm");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(
+            wave_dir.join("01-existing.md"),
+            "# Existing task\n\nLocal body stays put.\n",
+        )
+        .expect("write local item");
+
+        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
+        let progress = crate::ops::NullProgress;
+        let args = BootstrapArgs {
+            repo: dir.path(),
+            wave: "pm",
+            wave_dir: &wave_dir,
+            project_name: "PM",
+            description: "",
+            progress: &progress,
+        };
+        let ctx = PmContext {
+            client: Box::new(StaticProvider {
+                items: vec![
+                    PmItem {
+                        id: "lin-1".to_string(),
+                        name: "Existing task".to_string(),
+                        description: "Remote body should not replace local.".to_string(),
+                        rank: 0,
+                        completed: false,
+                    },
+                    PmItem {
+                        id: "lin-2".to_string(),
+                        name: "Second task".to_string(),
+                        description: "Imported from remote.".to_string(),
+                        rank: 1,
+                        completed: false,
+                    },
+                ],
+            }),
+            provider: PmProviderKind::Linear,
+            project: "proj-1".to_string(),
+        };
+
+        let result = bootstrap_read_write_provider(&args, &mut local_items, ctx)
+            .await
+            .expect("bootstrap succeeds");
+
+        assert_eq!(result.created_local, vec!["02-second-task.md"]);
+        assert_eq!(result.created_remote, Vec::<String>::new());
+
+        let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
+        assert!(existing.contains("linear_id: lin-1"));
+        assert!(existing.contains("Local body stays put."));
+        assert!(!existing.contains("Remote body should not replace local."));
+
+        let imported =
+            std::fs::read_to_string(wave_dir.join("02-second-task.md")).expect("read imported");
+        assert!(imported.contains("linear_id: lin-2"));
+        assert!(imported.contains("# Second task"));
+        assert!(imported.contains("Imported from remote."));
     }
 }

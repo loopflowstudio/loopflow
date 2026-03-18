@@ -8,22 +8,22 @@ linear_id: 0f0f48cb-741f-4746-8e75-76113f00b058
 
 ## Context
 
-The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen. Terminal waiting work has its own `TerminalSession` flow. The wave workspace routing shipped — `WaveWorkspaceView` is the primary selected-wave container, embedded terminal surfaces as an additive tab.
+The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen. The executor currently creates code-review and step-failure attention items, and terminal waiting work has its own `TerminalSession` flow. The wave workspace routing shipped — `WaveWorkspaceView` is the primary selected-wave container, with embedded terminal surfaces as an additive tab.
 
-**Current state of attention kinds:** The branch shipped a 1:1 fine-grained mapping — Rust emits `design_review`, `code_review`, `calibration`, `queue_failure`, `step_failure` and Swift decodes those directly as `AttentionKind` enum cases. This was the pragmatic choice to get real backend data rendering in the queue.
+**Current state of attention kinds:** Rust and Swift now agree on the fine-grained enum cases `design_review`, `code_review`, `calibration`, `queue_failure`, and `step_failure`. That shipped because it made the queue render real backend data honestly. But production coverage is still partial: the executor creates code-review and failure items today, while design-review and chord-calibration checkpoints still never become first-class attention records.
 
 **The remaining gap is twofold:**
 
-1. **Coverage.** Design review and chord review checkpoints still fall back to raw context and never get created by the executor or tend flow. Until those two paths produce real attention items, the queue cannot fully replace drilling into individual waves.
+1. **Coverage.** `review-design` / `kickoff` and `tend/review-chord` still do not create durable attention items. Until those paths produce real queue records, the attention queue cannot fully replace drilling into individual waves.
 
-2. **Naming model.** The 1:1 kind mapping creates a taxonomy that will drift as checkpoint types grow. This item proposes collapsing to coarse kinds with canonical step ids as the discriminator — a more durable contract.
+2. **Naming model.** The 1:1 kind mapping is workable for the current queue, but it will drift as checkpoint types grow. We still need a durable contract that separates urgency class from checkpoint identity.
 
 The target contract is coarse:
 
 - `interactive_step` — a human needs to review, decide, or continue work
 - `algedonic` — the system is signaling pressure, breakage, or blocked progress
 
-The more specific meaning should come from a canonical step identifier in the attention payload (`context.step`), not from proliferating top-level kinds. Refactoring the existing 1:1 kinds into this model is part of this item's scope.
+The more specific meaning should come from a canonical step identifier in the attention payload (`context.step`), not from proliferating top-level kinds. Refactoring the existing 1:1 kinds into this model stays in scope, but the sequencing should follow learning: ship design-review and chord-review coverage first if that is the fastest way to make the queue complete, then collapse taxonomy once those flows are proven.
 
 ## Spec: attention identity and step naming
 
@@ -145,17 +145,19 @@ The `.raw` fallback should remain only as a defensive last resort, not a normal 
 
 ## What to build
 
-1. **Design review attention creation.** Wire `review-design` / `kickoff` outputs into `kind: interactive_step` attention items with `context.step = "code/design"`, stable IDs, typed context, and resolution rules tied to the wave advancing or being redirected.
+1. **Design review attention creation.** Wire `review-design` / `kickoff` outputs into durable attention items with stable IDs, typed context, and resolution rules tied to the wave advancing or being redirected.
 
-2. **Chord review attention creation.** Wire `tend/draft-chord` / `tend/review-chord` into `kind: interactive_step` attention items with `context.step = "chord/review"` that capture assessment summary, proposed mutations, and any human notes that should feed later tend cycles.
+2. **Chord review attention creation.** Wire `tend/draft-chord` / `tend/review-chord` into durable attention items that capture assessment summary, proposed mutations, and any human notes that should feed later tend cycles.
 
 3. **Step-id driven queue detail and actions.** Replace the current raw JSON fallback for design review and chord review with dedicated Swift decoding, filters, detail layouts, and action buttons keyed off canonical `context.step` values.
 
-4. **Lifecycle and urgency polish.** Ensure the new checkpoint types participate in urgency sorting, viewed/resolved transitions, history, and websocket updates the same way queue failures and code reviews do, without introducing new top-level attention kinds.
+4. **Taxonomy convergence.** Once coverage exists, collapse the fine-grained top-level kinds to coarse urgency classes plus canonical step ids, and make sure queue failures / step failures keep their own algedonic routing.
 
-5. **Proof through tests.** Add Rust and Swift coverage that shows these items are created, rendered, and resolved end to end, including canonical `context.step` routing.
+5. **Lifecycle and urgency polish.** Ensure the new checkpoint types participate in urgency sorting, viewed/resolved transitions, history, and websocket updates the same way code reviews and failures do.
 
-6. **Roadmap the built-in rename explicitly.** Capture the follow-up built-in prompt reorganization so we do not leave attention payload ids permanently out of sync with built-in step paths.
+6. **Proof through tests.** Add Rust and Swift coverage that shows these items are created, rendered, and resolved end to end, including canonical `context.step` routing.
+
+7. **Roadmap the built-in rename explicitly.** Capture the follow-up built-in prompt reorganization so we do not leave attention payload ids permanently out of sync with built-in step paths.
 
 ## Built-in prompt reorg follow-up
 
@@ -183,8 +185,8 @@ Done well, the attention payload, built-in prompt path, and queue UI all switch 
 
 ## Done when
 
-- `review-design` or `kickoff` produces `kind: interactive_step` attention items with `context.step = "code/design"` and actionable queue detail
-- `tend/draft-chord` or `tend/review-chord` produces `kind: interactive_step` attention items with `context.step = "chord/review"` and mutation review actions
+- `review-design` or `kickoff` produces attention items with `context.step = "code/design"` and actionable queue detail
+- `tend/draft-chord` or `tend/review-chord` produces attention items with `context.step = "chord/review"` and mutation review actions
 - The queue UI exposes code review, design review, and chord review distinctly and no modeled checkpoint falls back to `.raw` JSON in normal use
 - Reconciliation resolves design-review and chord-review items when the human action clears the underlying condition
 - The roadmap explicitly records the future built-in prompt reorg to noun/verb-style canonical ids

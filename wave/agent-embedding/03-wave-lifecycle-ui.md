@@ -8,9 +8,9 @@ linear_id: 2c9c7c0b-7b1e-4855-bbc8-18592d1c8f49
 
 ## Context
 
-Queue triage and terminal workspaces now cover “I saw a wave” and “I am acting inside this wave.” The missing piece is the control plane around them: creating waves, editing configs, starting and stopping runs, and seeing run history without dropping to `lfq` or raw YAML.
+The workspace and queue surfaces now cover “I saw a wave” and “I am acting inside this wave.” `WaveWorkspaceView` composes native session + optional terminal tab; `AttentionQueueView` handles repo-level triage. The missing piece is the control plane: creating waves, editing configs, starting and stopping runs, and seeing run history without dropping to `lfq` or raw YAML.
 
-Concerto should make wave management visual — especially for the conductor who's managing multiple waves and wants to adjust configuration without context-switching. It also needs to stay honest about product boundaries: local repos can hand interactive steps off into embedded terminals; remote repos may only show queue and run state until remote PTY support exists.
+Concerto should make wave management visual — especially for the conductor managing multiple waves. It also needs to stay honest about product boundaries: local repos hand interactive steps off into embedded terminals or native sessions; remote repos may only show queue and run state until remote PTY support exists.
 
 ## What to build
 

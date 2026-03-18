@@ -8,7 +8,7 @@ linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 
 ## Context
 
-The terminal-embedding milestone already shipped the first concrete workspace: repo-scoped Ghostty tabs backed by stable `TerminalSession` ids, with wave context living beside the terminal instead of inside a chat transcript. Window composition should grow from that seam, not restart the workspace model from scratch.
+The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch.
 
 Tmux solves a real problem: manage multiple panes of work in one screen, persist layouts across sessions, switch contexts fast. Developers live in it because nothing else gives that level of control over window composition.
 

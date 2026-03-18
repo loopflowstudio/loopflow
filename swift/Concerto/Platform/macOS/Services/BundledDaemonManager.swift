@@ -379,7 +379,6 @@ final class BundledDaemonManager {
     ) -> [String] {
         let portMapping = connectWithPhone ? "\(port):2486" : "127.0.0.1:\(port):2486"
         let authMode = connectWithPhone ? "studio" : "local"
-        let authMode = connectWithPhone ? "studio" : "local"
         var args = [
             "run", "-d",
             "--name", containerName,

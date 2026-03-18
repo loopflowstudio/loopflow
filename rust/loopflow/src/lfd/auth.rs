@@ -241,7 +241,6 @@ fn token_matches(expected: &SecretString, provided: &str) -> bool {
 fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'static str) {
     match auth {
         AuthProvider::Local { .. } => (StatusCode::UNAUTHORIZED, "malformed token"),
-        AuthProvider::Local { .. } => (StatusCode::UNAUTHORIZED, "malformed token"),
         AuthProvider::Studio { .. } => {
             if source.is_loopback() {
                 (StatusCode::UNAUTHORIZED, "malformed token")

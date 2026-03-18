@@ -387,8 +387,6 @@ impl RawLfdConfig {
         let mut auth = self.auth;
         if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
             auth.mode = AuthMode::Studio;
-        if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
-            auth.mode = AuthMode::Studio;
         }
 
         Ok(LfdConfig {

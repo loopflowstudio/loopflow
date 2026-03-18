@@ -1,3 +1,7 @@
+---
+asana_id: '1213717741074343'
+linear_id: 549b8142-0a7d-4588-aa28-4f245ffaa72b
+---
 # 06: Team Auth Mode
 
 **Finish line:** `auth.mode: team` lets a self-hosted `lfd` run login, callback, token refresh, and request validation without the separate studio auth service.

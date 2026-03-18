@@ -198,6 +198,11 @@ pub struct LinearConfig {
     pub team: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PmDefaultConfig {
+    pub provider: crate::lfd::pm::PmProviderKind,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -305,6 +310,10 @@ pub struct Config {
     #[serde(default)]
     pub linear: LinearConfig,
 
+    /// Default PM provider for waves without an explicit `pm.provider` in their wave config.
+    #[serde(default)]
+    pub pm: Option<PmDefaultConfig>,
+
     /// Max concurrent RLM sub-agents
     #[serde(default = "default_rlm_max_parallel")]
     pub rlm_max_parallel: usize,
@@ -359,6 +368,7 @@ impl Default for Config {
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
             linear: LinearConfig::default(),
+            pm: None,
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
         }

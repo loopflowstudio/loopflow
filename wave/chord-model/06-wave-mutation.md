@@ -1,3 +1,7 @@
+---
+asana_id: '1213718558900002'
+linear_id: 605b5e61-eb18-4a03-a5db-1f7616734c30
+---
 # 06: Wave Mutation
 
 **Finish line:** The chord-wave's `apply` step can modify wave configuration through a structured mutation API. Direction, area, flow, agent, work items, triggers, and lifecycle are all mutable. Mutations are logged and reversible.

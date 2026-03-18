@@ -9,7 +9,7 @@ use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptI
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
-use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
+use crate::lf::{OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, export, ingest, land, next_branch,
@@ -88,6 +88,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         },
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
         OpsCommand::Export { wave, dry_run } => export_cmd(wave, *dry_run, &progress),
+        OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
     }
 }
@@ -295,6 +296,106 @@ fn export_cmd(wave: &str, dry_run: bool, progress: &impl Progress) -> Result<()>
             result.created.len(),
             result.updated.len()
         );
+    }
+    Ok(())
+}
+
+fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let resolve_waves = |explicit: Option<&String>| -> Result<Vec<String>> {
+        if let Some(name) = explicit {
+            return Ok(vec![name.clone()]);
+        }
+        // List all wave directories
+        let wave_dir = repo_root.join("wave");
+        if !wave_dir.is_dir() {
+            return Err(anyhow!("no wave/ directory found"));
+        }
+        let mut waves = Vec::new();
+        for entry in std::fs::read_dir(&wave_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                if let Some(name) = entry.file_name().to_str() {
+                    waves.push(name.to_string());
+                }
+            }
+        }
+        waves.sort();
+        if waves.is_empty() {
+            return Err(anyhow!("no waves found in wave/"));
+        }
+        Ok(waves)
+    };
+
+    match cmd {
+        PmCommand::Import { wave } => {
+            let waves = resolve_waves(wave.as_ref())?;
+            for wave in &waves {
+                let result = crate::ops::pm::pm_import(
+                    &repo_root,
+                    &crate::ops::pm::PmImportOptions { wave: wave.clone() },
+                    progress,
+                )?;
+                let total = result.created.len() + result.updated.len() + result.deleted.len();
+                if total == 0 {
+                    println!("{wave}: nothing to import");
+                } else {
+                    println!(
+                        "{wave}: imported {} items ({} created, {} updated, {} deleted)",
+                        total,
+                        result.created.len(),
+                        result.updated.len(),
+                        result.deleted.len()
+                    );
+                }
+            }
+        }
+        PmCommand::Export { wave, dry_run } => {
+            let waves = resolve_waves(wave.as_ref())?;
+            for wave in &waves {
+                let result = export(
+                    &repo_root,
+                    &ExportOptions {
+                        wave: wave.clone(),
+                        dry_run: *dry_run,
+                    },
+                    progress,
+                )?;
+                let total = result.created.len() + result.updated.len();
+                if total == 0 {
+                    println!("{wave}: nothing to export");
+                } else {
+                    println!(
+                        "{wave}: exported {} items ({} created, {} updated)",
+                        total,
+                        result.created.len(),
+                        result.updated.len()
+                    );
+                }
+            }
+        }
+        PmCommand::Sync { wave } => {
+            let waves = resolve_waves(wave.as_ref())?;
+            for wave in &waves {
+                let result = crate::ops::pm::pm_sync(
+                    &repo_root,
+                    &crate::ops::pm::PmSyncOptions { wave: wave.clone() },
+                    progress,
+                )?;
+                let total = result.pushed.len() + result.pulled.len();
+                if total == 0 && result.conflicts.is_empty() {
+                    println!("{wave}: in sync");
+                } else {
+                    println!(
+                        "{wave}: synced {} items ({} pushed, {} pulled, {} conflicts)",
+                        total,
+                        result.pushed.len(),
+                        result.pulled.len(),
+                        result.conflicts.len()
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

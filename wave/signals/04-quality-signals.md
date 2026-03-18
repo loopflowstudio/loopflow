@@ -1,3 +1,7 @@
+---
+asana_id: '1213718347076286'
+linear_id: f0f17e91-809b-400a-9ba1-3a116f2cc859
+---
 # 04: Quality Signals
 
 **Finish line:** The system detects shallow work, capability gaps, and human-system drift. These are the subtle signals — not failures, but degradation that compounds if unnoticed.

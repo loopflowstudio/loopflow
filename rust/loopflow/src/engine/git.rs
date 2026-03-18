@@ -387,6 +387,37 @@ pub fn worktree_add(
     Ok(())
 }
 
+/// Read a file's contents at a given revision.
+/// Returns `None` if the path does not exist at that revision.
+pub fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+    let output = run_git(repo, &["show", &format!("{rev}:{path}")])?;
+    if output.status.success() {
+        Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// List files in a directory at a given revision.
+/// Returns file names (not full paths) for blobs directly under the tree.
+pub fn list_tree(repo: &Path, rev: &str, dir: &str) -> Result<Vec<String>, GitError> {
+    let tree_path = if dir.is_empty() {
+        rev.to_string()
+    } else {
+        format!("{rev}:{dir}")
+    };
+    let output = run_git(repo, &["ls-tree", "--name-only", &tree_path])?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect())
+}
+
 /// Get the SHA for a ref (branch, tag, HEAD, etc.).
 pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
     let sha = git_stdout(repo, &["rev-parse", refspec])?

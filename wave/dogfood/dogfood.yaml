@@ -8,3 +8,5 @@ area:
 direction:
   - care
   - reliability
+pm:
+  asana_project: '1213718081100756'

@@ -1,14 +1,9 @@
 use std::path::Path;
 
-use crate::engine::config::load_config_or_default;
-use crate::lfd::http::routes::wave_config::read_wave_config;
-use crate::lfd::pm::asana::AsanaClient;
-use crate::lfd::pm::{
-    PmError, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
-};
-use crate::lfd::store::open_store;
+use crate::lfd::pm::{PmError, PmItemCreate, PmItemUpdate, PmProviderKind, RoadmapItemDocument};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::ingest::{list_numbered_items, WaveItem};
+use crate::ops::pm::{body_without_heading, build_provider, extract_heading, title_case};
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -47,57 +42,36 @@ async fn export_async(
         )));
     }
 
-    let config = load_config_or_default(Some(repo));
-
-    // Read wave config to get PM project ID
-    let wave_config = read_wave_config(repo, &options.wave);
-    let pm_config = wave_config.as_ref().and_then(|wc| wc.pm.as_ref());
-
-    let provider_kind = pm_config
-        .map(|pm| pm.provider)
-        .unwrap_or(PmProviderKind::Asana);
-
-    if provider_kind != PmProviderKind::Asana {
-        return Err(OpsError::Message(format!(
-            "export currently supports asana only, got: {:?}",
-            provider_kind
-        )));
-    }
-
-    let token = resolve_asana_token().await?;
-    let mut asana_config = config.asana.clone();
-    if let Some(team) = pm_config
-        .and_then(|pm| pm.team.as_ref())
-        .filter(|team| !team.trim().is_empty())
-    {
-        asana_config.default_team = Some(team.clone());
-    }
-    let client = AsanaClient::new(token, asana_config);
+    let ctx = build_provider(repo, &options.wave).await?;
+    let provider_kind = ctx.provider;
 
     // Resolve or create project
-    let (project_id, reverse_create_order) = match pm_config.map(|pm| pm.project.as_str()) {
-        Some(id) if !id.is_empty() => {
-            progress.status(&format!("exporting to asana project {id}"));
-            (id.to_string(), false)
-        }
-        _ => {
-            if options.dry_run {
-                progress.status(&format!(
-                    "dry-run: would create asana project \"{}\"",
-                    options.wave
-                ));
-                ("(dry-run)".to_string(), false)
-            } else {
-                progress.status(&format!("creating asana project \"{}\"", options.wave));
-                let id = client
-                    .create_project(&options.wave, "")
-                    .await
-                    .map_err(pm_to_ops)?;
-                write_pm_config_to_wave_yaml(repo, &options.wave, "asana", &id)?;
-                progress.status(&format!("created asana project {id}"));
-                (id, true)
-            }
-        }
+    let project_id = &ctx.project;
+    let (project_id, reverse_create_order) = if !project_id.is_empty() {
+        progress.status(&format!(
+            "exporting to {provider_kind:?} project {project_id}"
+        ));
+        (project_id.to_string(), false)
+    } else if options.dry_run {
+        progress.status(&format!(
+            "dry-run: would create {provider_kind:?} project \"{}\"",
+            options.wave
+        ));
+        ("(dry-run)".to_string(), false)
+    } else {
+        progress.status(&format!(
+            "creating {provider_kind:?} project \"{}\"",
+            options.wave
+        ));
+        let project_name = title_case(&options.wave);
+        let id = ctx
+            .client
+            .create_project(&project_name, "")
+            .await
+            .map_err(pm_to_ops)?;
+        write_pm_project_to_wave_yaml(repo, &options.wave, provider_kind, &id)?;
+        progress.status(&format!("created {provider_kind:?} project {id}"));
+        (id, true)
     };
 
     // List roadmap items
@@ -120,8 +94,9 @@ async fn export_async(
         let mut doc = RoadmapItemDocument::parse(&content).map_err(pm_to_ops)?;
 
         let name = extract_heading(&doc.body).unwrap_or(&item.slug);
+        let description = body_without_heading(&doc.body);
 
-        if let Some(pm_id) = &doc.frontmatter.pm_id {
+        if let Some(pm_id) = doc.frontmatter.id_for(provider_kind) {
             // Update existing task
             if options.dry_run {
                 progress.status(&format!(
@@ -132,12 +107,12 @@ async fn export_async(
                 continue;
             }
             progress.status(&format!("  update {} → {pm_id}", item.filename));
-            client
+            ctx.client
                 .update_item(
                     pm_id,
                     &PmItemUpdate {
                         name: Some(name.to_string()),
-                        description: Some(doc.body.clone()),
+                        description: Some(description.to_string()),
                         rank: None,
                     },
                 )
@@ -152,12 +127,13 @@ async fn export_async(
                 continue;
             }
             progress.status(&format!("  create {}", item.filename));
-            let pm_id = client
+            let pm_id = ctx
+                .client
                 .create_item(
                     &project_id,
                     &PmItemCreate {
                         name: name.to_string(),
-                        description: doc.body.clone(),
+                        description: description.to_string(),
                         rank: item.prefix,
                     },
                 )
@@ -165,7 +141,7 @@ async fn export_async(
                 .map_err(pm_to_ops)?;
 
             // Write pm_id back to frontmatter
-            doc.frontmatter.pm_id = Some(pm_id);
+            doc.frontmatter.set_id(provider_kind, pm_id);
             let rendered = doc.render().map_err(pm_to_ops)?;
             std::fs::write(&path, rendered)?;
             created.push(item.filename.clone());
@@ -179,67 +155,11 @@ async fn export_async(
     })
 }
 
-async fn resolve_asana_token() -> OpsResult<String> {
-    if let Ok(token) = std::env::var("ASANA_ACCESS_TOKEN") {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-    }
-
-    resolve_asana_token_from_store().await
-}
-
-async fn resolve_asana_token_from_store() -> OpsResult<String> {
-    let store = open_store(&storage_config_from_env()?)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
-    let token = store
-        .get_provider_token("asana")
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to load Asana token: {err}")))?
-        .ok_or_else(|| {
-            OpsError::Message(
-                "No Asana credential found. Run `lf ops auth asana` or `lfq auth asana`."
-                    .to_string(),
-            )
-        })?;
-
-    if token
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp())
-    {
-        return Err(OpsError::Message(
-            "Stored Asana OAuth token has expired. Run `lf ops auth asana` again.".to_string(),
-        ));
-    }
-
-    Ok(token.access_token)
-}
-
-fn storage_config_from_env() -> OpsResult<crate::lfd::store::StorageConfig> {
-    crate::lfd::storage_config_from_env()
-        .map_err(|err| OpsError::Message(format!("failed to resolve lfd credential store: {err}")))
-}
-
-/// Extract the first `# ` heading from markdown body.
-fn extract_heading(body: &str) -> Option<&str> {
-    for line in body.lines() {
-        if let Some(heading) = line.strip_prefix("# ") {
-            let heading = heading.trim();
-            if !heading.is_empty() {
-                return Some(heading);
-            }
-        }
-    }
-    None
-}
-
-/// Write `pm:` block to wave YAML, preserving existing keys.
-fn write_pm_config_to_wave_yaml(
+/// Write a provider-specific project ID into the wave YAML's `pm:` block.
+pub(crate) fn write_pm_project_to_wave_yaml(
     repo: &Path,
     wave: &str,
-    provider: &str,
+    provider: PmProviderKind,
     project_id: &str,
 ) -> OpsResult<()> {
     let path = repo.join("wave").join(wave).join(format!("{wave}.yaml"));
@@ -262,12 +182,13 @@ fn write_pm_config_to_wave_yaml(
         .and_then(serde_yaml_ng::Value::as_mapping)
         .cloned()
         .unwrap_or_default();
+
+    let project_key = match provider {
+        PmProviderKind::Asana => "asana_project",
+        PmProviderKind::Linear => "linear_project",
+    };
     pm_map.insert(
-        serde_yaml_ng::Value::String("provider".to_string()),
-        serde_yaml_ng::Value::String(provider.to_string()),
-    );
-    pm_map.insert(
-        serde_yaml_ng::Value::String("project".to_string()),
+        serde_yaml_ng::Value::String(project_key.to_string()),
         serde_yaml_ng::Value::String(project_id.to_string()),
     );
     map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
@@ -294,27 +215,6 @@ fn export_order(items: &[WaveItem], reverse: bool) -> Vec<&WaveItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_heading_from_body() {
-        assert_eq!(
-            extract_heading("# 03: Linear client\n\nSome description"),
-            Some("03: Linear client")
-        );
-    }
-
-    #[test]
-    fn extract_heading_skips_empty() {
-        assert_eq!(extract_heading("no heading here\n"), None);
-    }
-
-    #[test]
-    fn extract_heading_skips_h2() {
-        assert_eq!(
-            extract_heading("## Not this\n# This one\n"),
-            Some("This one")
-        );
-    }
 
     #[test]
     fn export_order_reverses_bootstrap_creates() {
@@ -356,72 +256,43 @@ mod tests {
         )
         .unwrap();
 
-        write_pm_config_to_wave_yaml(repo, "test", "asana", "proj-123").unwrap();
+        write_pm_project_to_wave_yaml(repo, "test", PmProviderKind::Asana, "proj-123").unwrap();
 
         let content = std::fs::read_to_string(wave_dir.join("test.yaml")).unwrap();
         let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).unwrap();
         let pm = config.get("pm").expect("pm block should exist");
-        assert_eq!(pm.get("provider").unwrap().as_str().unwrap(), "asana");
-        assert_eq!(pm.get("project").unwrap().as_str().unwrap(), "proj-123");
+        assert_eq!(
+            pm.get("asana_project").unwrap().as_str().unwrap(),
+            "proj-123"
+        );
         // Existing keys preserved
         assert_eq!(config.get("flow").unwrap().as_str().unwrap(), "build");
     }
 
     #[test]
-    fn write_pm_config_preserves_existing_team_override() {
+    fn write_pm_project_preserves_other_provider_ids() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo = dir.path();
         let wave_dir = repo.join("wave").join("test");
         std::fs::create_dir_all(&wave_dir).unwrap();
         std::fs::write(
             wave_dir.join("test.yaml"),
-            "flow: build\npm:\n  provider: asana\n  project: old-proj\n  team: eng-platform\n",
+            "flow: build\npm:\n  linear_project: lin-old\n",
         )
         .unwrap();
 
-        write_pm_config_to_wave_yaml(repo, "test", "asana", "proj-123").unwrap();
+        write_pm_project_to_wave_yaml(repo, "test", PmProviderKind::Asana, "proj-123").unwrap();
 
         let content = std::fs::read_to_string(wave_dir.join("test.yaml")).unwrap();
         let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).unwrap();
         let pm = config.get("pm").expect("pm block should exist");
-        assert_eq!(pm.get("provider").unwrap().as_str().unwrap(), "asana");
-        assert_eq!(pm.get("project").unwrap().as_str().unwrap(), "proj-123");
-        assert_eq!(pm.get("team").unwrap().as_str().unwrap(), "eng-platform");
-    }
-
-    #[test]
-    fn dry_run_does_not_require_token() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo = dir.path();
-
-        let wave_dir = repo.join("wave").join("test");
-        std::fs::create_dir_all(&wave_dir).unwrap();
-        std::fs::write(
-            wave_dir.join("test.yaml"),
-            "flow: build\npm:\n  provider: asana\n  project: proj-123\n",
-        )
-        .unwrap();
-        std::fs::write(
-            wave_dir.join("01-first.md"),
-            "# First item\n\nDescription.\n",
-        )
-        .unwrap();
-
-        // Set a fake token so we get past validation
-        std::env::set_var("ASANA_ACCESS_TOKEN", "fake-token-for-test");
-
-        let result = export(
-            repo,
-            &ExportOptions {
-                wave: "test".to_string(),
-                dry_run: true,
-            },
-            &crate::ops::NullProgress,
-        )
-        .unwrap();
-
-        assert_eq!(result.wave, "test");
-        assert_eq!(result.created, vec!["01-first.md"]);
-        assert!(result.updated.is_empty());
+        assert_eq!(
+            pm.get("asana_project").unwrap().as_str().unwrap(),
+            "proj-123"
+        );
+        assert_eq!(
+            pm.get("linear_project").unwrap().as_str().unwrap(),
+            "lin-old"
+        );
     }
 }

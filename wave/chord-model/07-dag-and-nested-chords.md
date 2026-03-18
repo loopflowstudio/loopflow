@@ -1,3 +1,7 @@
+---
+asana_id: '1213718347017619'
+linear_id: 5e385e85-8d25-4ca0-9435-76d826d57ab7
+---
 # 07: DAG and Nested Chords
 
 **Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced. A VSM chord (five waves, one per system) is representable as a nested structure.

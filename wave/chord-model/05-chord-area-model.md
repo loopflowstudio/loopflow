@@ -1,3 +1,7 @@
+---
+asana_id: '1213718558913209'
+linear_id: 827d8256-377a-4419-a1fd-f74fc67d92e7
+---
 # 05: Chord-Wave Area Model
 
 **Finish line:** The `area over waves` contract is defined and implemented. A chord-wave's tend flow sees wave configs, run history, PR outcomes, block history, and human decisions — everything it needs to tend effectively — without a separate chord data model.

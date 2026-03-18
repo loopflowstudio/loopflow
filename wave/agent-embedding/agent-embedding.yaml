@@ -1,8 +1,10 @@
 flow: ship-wave
 mode: manual
 area:
-  - swift/Concerto/
-  - swift/LoopflowCore/
+- swift/Concerto/
+- swift/LoopflowCore/
 direction:
-  - care
-  - clarity
+- care
+- clarity
+pm:
+  asana_project: '1213718081058007'

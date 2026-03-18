@@ -1,3 +1,7 @@
+---
+asana_id: '1213717740994855'
+linear_id: 1d45948a-f5b1-4ae0-8499-7ceede13dec9
+---
 # 04: Letta Integration
 
 **Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord-wave remembers across runs.

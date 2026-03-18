@@ -1,9 +1,11 @@
 flow: ship-wave
 mode: manual
 area:
-  - rust/loopflow/src/lfd/
-  - rust/loopflow/src/engine/
-  - python/loopflow/
+- rust/loopflow/src/lfd/
+- rust/loopflow/src/engine/
+- python/loopflow/
 direction:
-  - clarity
-  - simplicity
+- clarity
+- simplicity
+pm:
+  asana_project: '1213718347081195'

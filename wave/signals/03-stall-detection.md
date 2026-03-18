@@ -1,3 +1,7 @@
+---
+asana_id: '1213718347081585'
+linear_id: 9d191830-e2ad-470b-b692-5c796fb0f318
+---
 # 03: Stall Detection
 
 **Finish line:** The system detects when a wave is nominally running but not producing meaningful output. "Running" and "progressing" are distinguished.

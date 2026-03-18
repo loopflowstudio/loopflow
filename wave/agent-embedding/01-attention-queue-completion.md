@@ -8,18 +8,22 @@ linear_id: 0f0f48cb-741f-4746-8e75-76113f00b058
 
 ## Context
 
-The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen that already handles code review, queue failures, and step failures. Terminal waiting work now has its own `TerminalSession` flow, so the remaining queue gap is specifically about the human review checkpoints that still lack durable attention items.
+The attention queue foundation now exists: `AttentionItem` storage and APIs in `lfd`, websocket updates, and a macOS queue home screen. Terminal waiting work has its own `TerminalSession` flow. The wave workspace routing shipped — `WaveWorkspaceView` is the primary selected-wave container, embedded terminal surfaces as an additive tab.
 
-The remaining gap is coverage. Design review and chord review checkpoints still fall back to raw context and never get created by the executor or tend flow. Until those two paths are real, the queue cannot fully replace drilling into individual waves.
+**Current state of attention kinds:** The branch shipped a 1:1 fine-grained mapping — Rust emits `design_review`, `code_review`, `calibration`, `queue_failure`, `step_failure` and Swift decodes those directly as `AttentionKind` enum cases. This was the pragmatic choice to get real backend data rendering in the queue.
 
-The naming model also needs to stay clean while we finish coverage. Today the code-review path still leans on legacy payload shape and `step: code_review`; this item should normalize the queue onto canonical step ids instead of adding more top-level enums or one-off Swift cases.
+**The remaining gap is twofold:**
 
-The contract should stay coarse:
+1. **Coverage.** Design review and chord review checkpoints still fall back to raw context and never get created by the executor or tend flow. Until those two paths produce real attention items, the queue cannot fully replace drilling into individual waves.
+
+2. **Naming model.** The 1:1 kind mapping creates a taxonomy that will drift as checkpoint types grow. This item proposes collapsing to coarse kinds with canonical step ids as the discriminator — a more durable contract.
+
+The target contract is coarse:
 
 - `interactive_step` — a human needs to review, decide, or continue work
 - `algedonic` — the system is signaling pressure, breakage, or blocked progress
 
-The more specific meaning should come from a canonical step identifier in the attention payload, not from proliferating kinds like `design_review` or `calibration`.
+The more specific meaning should come from a canonical step identifier in the attention payload (`context.step`), not from proliferating top-level kinds. Refactoring the existing 1:1 kinds into this model is part of this item's scope.
 
 ## Spec: attention identity and step naming
 

@@ -32,6 +32,8 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 - Local-only terminal embedding creates a temporary product split; remote repos need explicit queue/detail states until a remote PTY transport exists
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
+- Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
+- Terminal session cleanup relies on `onSessionClosed` callback; processes killed via SIGKILL can leave sessions stuck in `running` state
 
 ## Metrics
 

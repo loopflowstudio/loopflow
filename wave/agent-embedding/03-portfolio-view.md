@@ -10,7 +10,7 @@ linear_id: f055918b-3e00-4f1f-ad40-9aa25b72f1a1
 
 The conductor needs a panoramic view. Not drill-in-to-see-details — glance-and-know-what-matters. This serves the tend flow's calibration moment: the human looks at the portfolio, the chord surfaces its assessment, the human calibrates.
 
-The single-repo home screen now exists: an attention queue plus a wave-bound terminal workspace. Portfolio is the next scale step — the same signals, but summarized across many waves and repos instead of one selected terminal tab.
+The single-repo home screen now exists: `WaveWorkspaceView` routes selected waves to a work surface (native session by default, terminal tab when a session exists), and `AttentionQueueView` is the no-selection home. Portfolio is the next scale step — the same signals, but summarized across many waves and repos.
 
 Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the conductor framing.
 

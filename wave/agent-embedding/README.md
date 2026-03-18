@@ -44,6 +44,7 @@ The local-first terminal workspace is now in place: `lfd` persists `terminal_ses
 
 But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
 
+<<<<<<< HEAD
 The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `06-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
 - Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
 - Treat Ghostty embedding as a rendering surface, not a session owner
@@ -53,6 +54,14 @@ The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items
 The multiplexer is now in place: a recursive binary split tree per wave, persisted via `MultiplexerStore`, with four pane types (terminal, markdown, diff, launchpad). The terminal pane is backed by tmux (`TmuxSession`), and focus-aware keyboard routing dispatches to SwiftUI or tmux based on first-responder detection. `TerminalWorkspaceStore` manages session ordering and selection per repo; the multiplexer extends that model with spatial layout. Remaining composition work (richer pane content, directional focus, named layouts) should deepen these surfaces rather than introducing parallel state.
 
 =======
+=======
+The tmux architecture study (item 01 of `wave/lfd/`, full research in `wave/lfd/01-tmux-architecture-study.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
+- Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
+- Treat Ghostty embedding as a rendering surface, not a session owner
+- Prepare for layout serialization (tmux encodes split trees as compact strings; Concerto should similarly persist layout as data)
+- Expect multi-client size negotiation to be a daemon concern — Concerto sends its viewport size, `lfd` decides
+
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
 Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities. In particular, session ordering and selection already persist per repo; compositor work needs to either extend that repo-scoped state deliberately or replace it with a richer layout model in one move.
 
 >>>>>>> 1566a2ad (wave: fold shipped workspace context into agent-embedding roadmap)

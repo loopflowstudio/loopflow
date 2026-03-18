@@ -164,9 +164,7 @@ pub async fn resolve_attention_handler(
         .await
         .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, ApiMessage::Safe(err)))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "attention item not found"))?;
-    state
-        .event_hub
-        .send(Event::attention_resolved(item.clone()));
+    state.event_hub.send(Event::attention_resolved(item.clone()));
     Ok(Json(attention_item_dto(item)))
 }
 
@@ -241,11 +239,8 @@ fn status_weight(status: AttentionStatus) -> u8 {
 
 fn kind_weight(kind: AttentionKind) -> u8 {
     match kind {
-        AttentionKind::Calibration => 0,
-        AttentionKind::CodeReview => 1,
-        AttentionKind::DesignReview => 2,
-        AttentionKind::StepFailure => 3,
-        AttentionKind::QueueFailure => 4,
+        AttentionKind::Algedonic => 0,
+        AttentionKind::Interactive => 1,
     }
 }
 
@@ -266,7 +261,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::CodeReview,
+            kind: AttentionKind::Interactive,
             status: AttentionStatus::Surfaced,
             title: "code".to_string(),
             summary: "code".to_string(),
@@ -279,7 +274,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::Calibration,
+            kind: AttentionKind::Interactive,
             status: AttentionStatus::Viewed,
             title: "viewed".to_string(),
             summary: "viewed".to_string(),
@@ -292,7 +287,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
-            kind: AttentionKind::QueueFailure,
+            kind: AttentionKind::Algedonic,
             status: AttentionStatus::Resolved,
             title: "resolved".to_string(),
             summary: "resolved".to_string(),

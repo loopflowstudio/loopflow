@@ -47,12 +47,16 @@ public struct InteractiveAttentionContext: Sendable, Hashable {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
 /// Context for algedonic attention items (system escalation).
 public struct AlgedonicAttentionContext: Sendable, Hashable {
     public let step: String?
     public let error: String?
     public let reason: String?
     public let conflictFiles: [String]
+<<<<<<< HEAD
 }
 
 public enum AttentionContext: Sendable, Hashable {
@@ -69,14 +73,13 @@ public struct CalibrationAttentionContext: Sendable, Hashable {
     public let step: String
     public let chordPath: String?
     public let terminalSessionId: String?
+=======
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
 }
 
 public enum AttentionContext: Sendable, Hashable {
-    case codeReview(CodeReviewAttentionContext)
-    case queueFailure(QueueFailureAttentionContext)
-    case stepFailure(StepFailureAttentionContext)
-    case designReview(DesignReviewAttentionContext)
-    case calibration(CalibrationAttentionContext)
+    case interactive(InteractiveAttentionContext)
+    case algedonic(AlgedonicAttentionContext)
     case raw(String)
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
 }
@@ -125,12 +128,16 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 
 public extension AttentionItem {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
     /// Parse typed context from JSON based on kind.
     static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
         switch kind {
         case .interactive:
             return .interactive(
                 InteractiveAttentionContext(
+<<<<<<< HEAD
 =======
     /// Parse typed context from JSON based on discriminator fields.
     /// Context type is determined by the `step` field first, then payload shape.
@@ -185,6 +192,8 @@ public extension AttentionItem {
             return .stepFailure(
                 StepFailureAttentionContext(
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
+=======
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
                     step: json["step"] as? String,
                     terminalSessionId: json["terminal_session_id"] as? String,
                     designPath: json["design_path"] as? String

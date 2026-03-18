@@ -2,7 +2,7 @@ import SwiftUI
 import LoopflowCore
 
 struct AttentionQueueView: View {
-    enum Filter: String, CaseIterable, Identifiable {
+    enum QueueFilter: String, CaseIterable, Identifiable {
         case all
         case interactiveOnly = "interactive"
         case escalationsOnly = "escalations"
@@ -19,7 +19,7 @@ struct AttentionQueueView: View {
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
-    @State private var filter: Filter = .all
+    @State private var filter: QueueFilter = .all
     @State private var selectedAttentionId: String?
 
     private var filteredItems: [AttentionItem] {
@@ -96,7 +96,7 @@ struct AttentionQueueView: View {
                 Spacer()
             }
             Picker("Filter", selection: $filter) {
-                ForEach(Filter.allCases) { filter in
+                ForEach(QueueFilter.allCases) { filter in
                     Text(filter.label).tag(filter)
                 }
             }
@@ -213,23 +213,18 @@ private struct AttentionDetailView: View {
     @ViewBuilder
     private func detailBody(_ item: AttentionItem) -> some View {
         switch item.context {
-        case .codeReview(let context):
+        case .interactive(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let prTitle = context.prTitle {
-                    detailLine("PR", prTitle)
+                if let step = context.step {
+                    detailLine("Step", step)
                 }
-                if let branch = context.branch {
-                    detailLine("Branch", branch)
-                }
-                if let number = context.prNumber {
-                    detailLine("PR #", String(number))
-                }
-                if let wave = repoState.waveStore.wave(for: item.waveId), let diffStat = wave.diffStat {
-                    detailLine("Diff", diffStat)
+                if let designPath = context.designPath {
+                    detailLine("Design", designPath)
                 }
             }
-        case .queueFailure(let context):
+        case .algedonic(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let step = context.step { detailLine("Step", step) }
                 if let reason = context.reason { detailLine("Reason", reason) }
                 if let error = context.error { detailLine("Error", error) }
                 if !context.conflictFiles.isEmpty {
@@ -243,6 +238,7 @@ private struct AttentionDetailView: View {
                     }
                 }
             }
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
         case .stepFailure(let context):
@@ -264,6 +260,8 @@ private struct AttentionDetailView: View {
                     detailLine("Chord", chordPath)
                 }
             }
+=======
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
         case .raw(let raw):
             Text(raw)
                 .font(Typography.code())
@@ -283,13 +281,14 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .stepFailure:
+            case .algedonic:
                 if let wave = repoState.waveStore.wave(for: item.waveId) {
                     Button("Retry") {
                         Task { try? await repoState.restartStep(wave) }
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
             case .designReview(let context):
@@ -307,6 +306,9 @@ private struct AttentionDetailView: View {
                     .buttonStyle(DarkButtonStyle())
                 }
             case .queueFailure, .raw:
+=======
+            case .raw:
+>>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
                 EmptyView()
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
             }

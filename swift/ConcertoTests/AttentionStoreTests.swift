@@ -14,7 +14,7 @@ struct AttentionStoreTests {
                 id: "1",
                 waveId: "wave",
                 runId: nil,
-                kind: .codeReview,
+                kind: .interactive,
                 status: .viewed,
                 title: "viewed",
                 summary: "",
@@ -25,9 +25,9 @@ struct AttentionStoreTests {
                 id: "2",
                 waveId: "wave",
                 runId: nil,
-                kind: .designReview,
+                kind: .algedonic,
                 status: .surfaced,
-                title: "older review",
+                title: "older escalation",
                 summary: "",
                 context: .algedonic(
                     AlgedonicAttentionContext(step: nil, error: nil, reason: nil, conflictFiles: [])
@@ -38,9 +38,9 @@ struct AttentionStoreTests {
                 id: "3",
                 waveId: "wave",
                 runId: nil,
-                kind: .designReview,
+                kind: .algedonic,
                 status: .surfaced,
-                title: "newer review",
+                title: "newer escalation",
                 summary: "",
                 context: .algedonic(
                     AlgedonicAttentionContext(step: nil, error: nil, reason: nil, conflictFiles: [])
@@ -52,13 +52,13 @@ struct AttentionStoreTests {
         #expect(store.ordered.map(\.id) == ["2", "3", "1"])
     }
 
-    @Test("parseAttentionFromJSON decodes typed contexts by payload shape")
+    @Test("parseAttentionFromJSON decodes algedonic context")
     func parsesAttention() throws {
         let json: [String: Any] = [
             "id": "attn-1",
             "wave_id": "wave-1",
             "run_id": "run-1",
-            "kind": "queue_failure",
+            "kind": "algedonic",
             "status": "surfaced",
             "title": "Queue blocked",
             "summary": "Needs help",
@@ -70,92 +70,72 @@ struct AttentionStoreTests {
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .queueFailure)
-        if case .queueFailure(let context) = item?.context {
+        #expect(item?.kind == .algedonic)
+        if case .algedonic(let context) = item?.context {
             #expect(context.conflictFiles == ["src/lib.rs"])
             #expect(context.error == "merge failed")
         } else {
-            Issue.record("Expected queue failure context")
+            Issue.record("Expected algedonic context")
         }
     }
 
-    @Test("context decodes design review from step field")
-    func parsesDesignReviewContext() {
+    @Test("context decodes interactive from kind")
+    func parsesInteractiveContext() {
         let context: [String: Any] = [
             "step": "code/design",
             "terminal_session_id": "ts-123",
             "design_path": "scratch/my-branch.md",
         ]
-        let parsed = AttentionItem.context(json: context)
-        if case .designReview(let ctx) = parsed {
+        let parsed = AttentionItem.context(kind: .interactive, json: context)
+        if case .interactive(let ctx) = parsed {
             #expect(ctx.step == "code/design")
             #expect(ctx.terminalSessionId == "ts-123")
             #expect(ctx.designPath == "scratch/my-branch.md")
         } else {
-            Issue.record("Expected design review context, got \(parsed)")
+            Issue.record("Expected interactive context, got \(parsed)")
         }
     }
 
-    @Test("context decodes calibration from chord step field")
-    func parsesCalibrationContext() {
+    @Test("context decodes algedonic from kind")
+    func parsesAlgedonicContext() {
         let context: [String: Any] = [
-            "step": "chord/review",
-            "terminal_session_id": "ts-456",
-            "design_path": "scratch/chord.md",
+            "step": "implement",
+            "error": "agent crashed",
         ]
-        let parsed = AttentionItem.context(json: context)
-        if case .calibration(let ctx) = parsed {
-            #expect(ctx.step == "chord/review")
-            #expect(ctx.terminalSessionId == "ts-456")
-            #expect(ctx.chordPath == "scratch/chord.md")
+        let parsed = AttentionItem.context(kind: .algedonic, json: context)
+        if case .algedonic(let ctx) = parsed {
+            #expect(ctx.step == "implement")
+            #expect(ctx.error == "agent crashed")
         } else {
-            Issue.record("Expected calibration context, got \(parsed)")
+            Issue.record("Expected algedonic context, got \(parsed)")
         }
     }
 
-    @Test("context decodes code review with step field present")
-    func parsesCodeReviewWithStep() {
-        let context: [String: Any] = [
-            "step": "code/review",
-            "pr_url": "https://github.com/org/repo/pull/1",
-            "pr_number": 1,
-            "pr_title": "Test PR",
-            "branch": "main",
-        ]
-        let parsed = AttentionItem.context(json: context)
-        if case .codeReview(let ctx) = parsed {
-            #expect(ctx.prNumber == 1)
-            #expect(ctx.prTitle == "Test PR")
-        } else {
-            Issue.record("Expected code review context, got \(parsed)")
-        }
+    @Test("legacy kind strings map to collapsed kinds")
+    func legacyKindMapping() {
+        #expect(AttentionKind(rawValue: "design_review") == .interactive)
+        #expect(AttentionKind(rawValue: "code_review") == .interactive)
+        #expect(AttentionKind(rawValue: "calibration") == .interactive)
+        #expect(AttentionKind(rawValue: "queue_failure") == .algedonic)
+        #expect(AttentionKind(rawValue: "step_failure") == .algedonic)
+        #expect(AttentionKind(rawValue: "interactive") == .interactive)
+        #expect(AttentionKind(rawValue: "algedonic") == .algedonic)
     }
 
-    @Test("parseAttentionFromJSON decodes design review kind and context")
-    func parsesDesignReviewAttention() {
+    @Test("parseAttentionFromJSON handles legacy kind strings")
+    func parsesLegacyKinds() {
         let json: [String: Any] = [
-            "id": "attn-dr",
+            "id": "attn-legacy",
             "wave_id": "wave-1",
-            "run_id": "run-1",
-            "kind": "design_review",
+            "kind": "step_failure",
             "status": "surfaced",
-            "title": "test-wave needs design review",
-            "summary": "Waiting for design review.",
-            "context": [
-                "step": "code/design",
-                "terminal_session_id": "ts-789",
-                "design_path": "scratch/test.md",
-            ] as [String: Any],
+            "title": "Step failed",
+            "summary": "error",
+            "context": ["error": "boom"] as [String: Any],
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .designReview)
-        if case .designReview(let ctx) = item?.context {
-            #expect(ctx.step == "code/design")
-            #expect(ctx.terminalSessionId == "ts-789")
-        } else {
-            Issue.record("Expected design review context")
-        }
+        #expect(item?.kind == .algedonic)
     }
 
     private var now: Date { Date(timeIntervalSince1970: 1_700_000_000) }

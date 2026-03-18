@@ -16,6 +16,42 @@ use crate::lfd::types::{
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 
+fn activation_requires_manual_resolution(error: &anyhow::Error) -> bool {
+    error
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("manual resolution required")
+}
+
+async fn pause_wave_after_activation_conflict(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    wave: &Wave,
+    error: &anyhow::Error,
+) {
+    let Some(mut paused_wave) = store.get_wave(wave.id()).await.ok().flatten() else {
+        return;
+    };
+    if paused_wave.status == WaveStatus::Paused {
+        return;
+    }
+    paused_wave.status = WaveStatus::Paused;
+    if let Err(update_error) = store.update_wave(&paused_wave).await {
+        tracing::warn!(
+            wave_id = %wave.id(),
+            error = %update_error,
+            "failed to pause wave after activation conflict"
+        );
+        return;
+    }
+    tracing::warn!(
+        wave_id = %wave.id(),
+        error = %error,
+        "paused wave after activation conflict to stop retry loop"
+    );
+    event_hub.send(Event::wave_updated(wave.id().clone()));
+}
+
 #[derive(Debug, Clone)]
 pub struct ActivationEnvelope {
     pub wave_id: LfdId,
@@ -248,6 +284,9 @@ pub async fn spawn_immediate_activation(
                 error = %err,
                 "failed to create parallel wave run for immediate activation"
             );
+            if activation_requires_manual_resolution(&err) {
+                pause_wave_after_activation_conflict(store, event_hub, wave, &err).await;
+            }
             return None;
         }
     };
@@ -373,6 +412,9 @@ pub async fn dispatch_wave_if_ready(
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");
+            if activation_requires_manual_resolution(&err) {
+                pause_wave_after_activation_conflict(store, event_hub, wave, &err).await;
+            }
             return None;
         }
     };

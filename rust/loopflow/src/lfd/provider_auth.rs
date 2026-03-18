@@ -20,7 +20,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
-use tracing::warn;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::lfd::credential_socket::{
@@ -67,6 +67,7 @@ pub enum Provider {
     OpenCodeZen,
     Asana,
     Linear,
+    Doppler,
 }
 
 impl Provider {
@@ -78,10 +79,11 @@ impl Provider {
             Self::OpenCodeZen => "opencodezen",
             Self::Asana => "asana",
             Self::Linear => "linear",
+            Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::GitHub,
             Self::Claude,
@@ -89,6 +91,7 @@ impl Provider {
             Self::OpenCodeZen,
             Self::Asana,
             Self::Linear,
+            Self::Doppler,
         ]
     }
 
@@ -100,6 +103,7 @@ impl Provider {
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Asana => "Asana",
             Self::Linear => "Linear",
+            Self::Doppler => "Doppler",
         }
     }
 
@@ -110,7 +114,7 @@ impl Provider {
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
             Self::Asana => Some("ASANA_ACCESS_TOKEN"),
             Self::Linear => Some("LINEAR_API_KEY"),
-            Self::GitHub => None,
+            Self::GitHub | Self::Doppler => None,
         }
     }
 
@@ -144,6 +148,7 @@ impl FromStr for Provider {
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "asana" => Ok(Self::Asana),
             "linear" | "lin" => Ok(Self::Linear),
+            "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
             }),
@@ -826,7 +831,32 @@ impl ProviderAuthService {
             }
         }
 
-        let status = self.broker(provider)?.check_status().await?;
+        let broker = self.broker(provider)?;
+        let status = broker.check_status().await?;
+        debug!(provider = %provider, ?status, "broker check_status result (no stored token)");
+
+        // If the CLI reports Active but we have no stored token, auto-persist it.
+        // This handles providers where the user logged in outside of lfd
+        // (e.g., `doppler login` in a terminal).
+        if matches!(&status, AuthStatus::Active { .. }) {
+            if let Some(store) = &self.store {
+                if let Some(token) = broker.extract_token().await {
+                    info!(provider = %provider, "auto-persisting CLI token");
+                    if let Err(err) = store.upsert_provider_token(&token).await {
+                        warn!(provider = %provider, error = %err, "failed to auto-persist provider token");
+                    }
+                    return Ok(ProviderAuthSnapshot {
+                        provider,
+                        status,
+                        expires_at: token.expires_at,
+                        next_refresh_at: None,
+                        credential_type: Some(token.credential_type),
+                    });
+                }
+                debug!(provider = %provider, "broker reported Active but extract_token returned None");
+            }
+        }
+
         Ok(ProviderAuthSnapshot {
             provider,
             status,
@@ -980,6 +1010,7 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
         ],
     };
     brokers.push(Arc::new(OpenCodeZenBroker::default()));
+    brokers.push(Arc::new(DopplerAuthBroker));
     brokers.extend(pm_auth_brokers());
     brokers
 }
@@ -1264,6 +1295,101 @@ impl AuthBroker for CodexAuthBroker {
     async fn extract_token(&self) -> Option<ProviderToken> {
         extract_codex_token(&self.home_dir)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DopplerAuthBroker;
+
+#[async_trait]
+impl AuthBroker for DopplerAuthBroker {
+    fn provider(&self) -> Provider {
+        Provider::Doppler
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        // If already logged in, short-circuit: extract the token and return
+        // a pre-completed handle so the lifecycle task picks it up immediately.
+        if let Ok(AuthStatus::Active { .. }) = self.check_status().await {
+            let response = AuthFlowResponse {
+                provider: Provider::Doppler,
+                verification_uri: String::new(),
+                verification_uri_complete: None,
+                user_code: None,
+                expires_in: None,
+            };
+            let monitor = tokio::spawn(async { Ok(()) });
+            return Ok(AuthFlowHandle::new(response, monitor));
+        }
+
+        let mut command = Command::new("doppler");
+        command.args(["login", "--yes", "--scope", "/"]);
+        command.env("BROWSER", "echo");
+
+        start_auth_command(
+            Provider::Doppler,
+            "doppler",
+            command,
+            parse_generic_auth_line,
+        )
+        .await
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        let mut command = Command::new("doppler");
+        command.args(["configure", "get", "token", "--plain"]);
+
+        match command.output().await {
+            Ok(output) if output.status.success() => {
+                let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if token.is_empty() {
+                    Ok(AuthStatus::None)
+                } else {
+                    Ok(AuthStatus::Active { login: None })
+                }
+            }
+            Ok(_) => Ok(AuthStatus::None),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AuthStatus::None),
+            Err(err) => Err(AuthError::CommandIo {
+                provider: Provider::Doppler,
+                source: err,
+            }),
+        }
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        let mut command = Command::new("doppler");
+        command.arg("logout");
+        let _ = command.output().await;
+        Ok(())
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        extract_doppler_token().await
+    }
+}
+
+async fn extract_doppler_token() -> Option<ProviderToken> {
+    let output = Command::new("doppler")
+        .args(["configure", "get", "token", "--plain"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return None;
+    }
+    Some(ProviderToken {
+        provider: Provider::Doppler.as_str().to_string(),
+        access_token: token,
+        refresh_token: None,
+        expires_at: None,
+        login: None,
+        updated_at: crate::lfd::store::rows::now_unix(),
+        credential_type: CredentialType::OAuth,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1941,7 +2067,9 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Linear => Err(TokenRefreshError::MissingToken { provider }),
+        Provider::Asana | Provider::Linear | Provider::Doppler => {
+            Err(TokenRefreshError::MissingToken { provider })
+        }
     }
 }
 

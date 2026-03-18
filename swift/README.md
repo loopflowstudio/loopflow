@@ -84,7 +84,7 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
 - `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
 - `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
-- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
 - `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
@@ -137,15 +137,6 @@ Concerto launches into a portfolio window instead of a single welcome panel:
 - Click a wave to open that repo window and focus the selected wave
 - Use the `+` card to scan `~/src` and add another main git worktree
 - Added repos persist between launches
-
-## Attention Queue
-
-Repo windows now open into a queue view when no wave is selected:
-
-- Review-ready, failed, and queue-blocked waves are listed in urgency order
-- Click an item to open its detail without drilling into the wave first
-- Code review items offer `Ship`; step failures offer `Retry`
-- Empty queues show `Nothing needs you. Waves are running.`
 
 ## Wave Detail: Current + Runs
 
@@ -200,9 +191,19 @@ Two patterns, intentionally different:
 
 2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
    - Connects to active server (`ws://.../ws` or `wss://.../ws`)
-   - Uses the current connection credential (local session token or remote connection token)
+   - Uses configured auth mode (none or static token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
+
+## Connections Panel
+
+Providers are grouped by role (Agents, Source Control, Project Management, Secrets). Each group renders as a `ProviderGroupSection` containing `ProviderRow` items with status dot, auth action, and optional enable/disable toggle.
+
+The Secrets group (Doppler) expands inline when connected to show project/config selection, key status, and sync controls. Smart defaults pick `dev > prd > prod` when loading configs.
+
+`ConnectionsPanel` is shared between repo-level settings (`ConnectionSettingsView`) and the portfolio toolbar sheet (`PortfolioConnectionsSheet`).
+
+## Communication with lfd
 
 Connection settings support two modes:
 

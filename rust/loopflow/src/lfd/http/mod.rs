@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    attention, auth as auth_routes, flows, hooks, providers, repos, sessions, system, tokens,
-    usage, wave_runs, waves, worktrees, ws,
+    attention, auth as auth_routes, flows, hooks, providers, repos, secrets, sessions, system,
+    tokens, usage, wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -56,6 +56,14 @@ pub fn router(state: HttpState) -> Router {
             "/auth/{provider}/credential",
             put(auth_routes::configure_credential_handler),
         )
+        .route(
+            "/secrets",
+            get(secrets::secrets_status_handler).delete(secrets::disconnect_secrets_handler),
+        )
+        .route("/secrets/projects", get(secrets::list_projects_handler))
+        .route("/secrets/configs", get(secrets::list_configs_handler))
+        .route("/secrets/select", post(secrets::select_secrets_handler))
+        .route("/secrets/sync", post(secrets::sync_secrets_handler))
         .route("/providers", get(providers::list_providers_handler))
         .route("/flows", get(flows::list_flows_handler))
         .route(

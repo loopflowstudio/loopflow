@@ -135,6 +135,15 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
     })
 }
 
+fn read_secrets_config_row(row: &rusqlite::Row) -> StoreResult<super::SecretsProviderConfig> {
+    Ok(super::SecretsProviderConfig {
+        provider: row.get(0)?,
+        project: row.get(1)?,
+        config: row.get(2)?,
+        updated_at: row.get(3)?,
+    })
+}
+
 impl SqliteStore {
     fn sql(query: Query) -> &'static str {
         sql(query, SqlDialect::Sqlite)
@@ -324,6 +333,53 @@ impl SqliteStore {
             tokens.push(decrypt_token_row(row?)?);
         }
         Ok(tokens)
+    }
+
+    // -- Secrets provider config -----------------------------------------------
+
+    pub fn upsert_secrets_provider_config(
+        &self,
+        config: &super::SecretsProviderConfig,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO secrets_provider_config (provider, project, config, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider) DO UPDATE SET
+                project = excluded.project,
+                config = excluded.config,
+                updated_at = excluded.updated_at",
+            params![
+                config.provider,
+                config.project,
+                config.config,
+                config.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_secrets_provider_config(&self, provider: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM secrets_provider_config WHERE provider = ?1",
+            params![provider],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_secrets_provider_configs(&self) -> StoreResult<Vec<super::SecretsProviderConfig>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider, project, config, updated_at
+             FROM secrets_provider_config ORDER BY provider",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(read_secrets_config_row(row)))?;
+        let mut configs = Vec::new();
+        for row in rows {
+            configs.push(row??);
+        }
+        Ok(configs)
     }
 
     // -- Repos -----------------------------------------------------------------

@@ -191,7 +191,6 @@ impl RawLfdConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.mode = AuthMode::parse(trimmed)?;
-                self.auth.mode = AuthMode::parse(trimmed)?;
             }
         }
 
@@ -1091,7 +1090,6 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(
             resolved

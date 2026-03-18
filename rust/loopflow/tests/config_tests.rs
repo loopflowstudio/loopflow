@@ -1,42 +1,11 @@
-use std::ffi::OsString;
-use std::ffi::OsString;
+mod support;
+
 use std::fs;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
 
 use loopflow::engine::{load_config, load_config_or_default};
+use support::with_clean_home;
 use tempfile::TempDir;
-
-static HOME_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-struct HomeOverride {
-    original: Option<OsString>,
-}
-
-impl HomeOverride {
-    fn new(path: &Path) -> Self {
-        let original = std::env::var_os("HOME");
-        std::env::set_var("HOME", path);
-        Self { original }
-    }
-}
-
-impl Drop for HomeOverride {
-    fn drop(&mut self) {
-        match self.original.as_ref() {
-            Some(home) => std::env::set_var("HOME", home),
-            None => std::env::remove_var("HOME"),
-        }
-    }
-}
-
-fn with_clean_home<T>(f: impl FnOnce() -> T) -> T {
-    let _lock = HOME_LOCK.lock().unwrap();
-    let home = TempDir::new().unwrap();
-    let _override = HomeOverride::new(home.path());
-    f()
-}
-
 fn write_config(dir: &Path, content: &str) {
     let lf_dir = dir.join(".lf");
     fs::create_dir_all(&lf_dir).unwrap();

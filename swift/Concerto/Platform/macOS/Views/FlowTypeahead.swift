@@ -13,7 +13,6 @@ struct FlowTypeahead: View {
     let wave: WaveViewModel
     var initialSelection: String? = nil
     var style: Style = .form
-    var onSubmitSelection: ((String) -> Void)? = nil
     let onSelect: (String) -> Void
 
     @Environment(RepoState.self) private var repoState
@@ -220,15 +219,8 @@ struct FlowTypeahead: View {
 
     private func commitToken() {
         let name = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty {
-            selectFlow(name)
-            onSubmitSelection?(name)
-            return
-        }
-
-        let existingSelection = selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !existingSelection.isEmpty else { return }
-        onSubmitSelection?(existingSelection)
+        guard !name.isEmpty else { return }
+        selectFlow(name)
     }
 
     private func removeSelection() {

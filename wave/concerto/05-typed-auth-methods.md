@@ -48,7 +48,7 @@ Each provider declares supported methods:
 
 - Device-code stepper: open browser button, large copyable code, progress/timeout, prerequisite message, "Continue in Terminal" fallback
 - Terminal-assisted flow: "Sign in with Claude Code" opens terminal, card shows "Waiting for login...", daemon watches auth files, card flips on detection
-- API key entry: SecureField, masked display, billing warning, "Switch to OAuth" (overlaps with 02-api-key-entry — coordinate)
+- API key entry: SecureField, masked display, billing warning, "Switch to OAuth"
 
 ### Provider provenance display
 

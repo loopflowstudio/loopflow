@@ -40,7 +40,7 @@ Future items should deepen that path instead of creating a second one.
 
 - **Asana rich text vs markdown.** Import/export still needs a crisp normalization story so descriptions do not thrash on every sync.
 - **Ordering semantics differ.** Asana needs relative move operations; Linear may need a documented limitation or a separate ordering strategy.
-- **Today's export path is Asana-only.** `ops/export.rs` already writes `pm_id` and can create a project, but the remaining work must generalize that code instead of leaving an Asana-only branch beside new PM commands.
+- **Export dispatch is Asana-only.** `ops/export.rs` works end-to-end for Asana (project creation, item create/update, `pm_id` writeback). Linear's `PmProvider` is fully implemented but the export dispatcher hasn't been wired to call it yet — a mechanical gap, not a design gap.
 - **Lifecycle sync depends on reliable lookup.** Run → wave → roadmap item → `pm_id` must resolve cleanly, and failures must stay non-blocking.
 - **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set.
 

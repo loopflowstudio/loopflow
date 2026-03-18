@@ -5,7 +5,7 @@ pm_id: '1213718325451034'
 
 **Finish line:** `ingest` refreshes from PM before picking the next item when the wave has a `pm` block.
 
-Today `rust/loopflow/src/ops/ingest.rs` is still a pure local fast-path: it lists numbered files, picks the lowest prefix, copies it to `scratch/`, and deletes the source file. That stays the fallback. Once item 05 lands, linked waves should run the exact PM import helper before selection so remote reprioritization or new items show up without a manual sync step.
+`rust/loopflow/src/ops/ingest.rs` is still a pure local fast-path: it lists numbered files, picks the lowest prefix, copies it to `scratch/`, and deletes the source file. That stays the fallback. Both provider clients (`lfd/pm/asana.rs`, `lfd/pm/linear.rs`) implement `list_items` with pagination, so the import data source is ready. Once item 05 lands the import path, linked waves should run the exact PM import helper before selection so remote reprioritization or new items show up without a manual sync step.
 
 ## What to build
 

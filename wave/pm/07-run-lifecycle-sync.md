@@ -5,7 +5,7 @@ pm_id: '1213718325464924'
 
 **Finish line:** PR creation, merge, and failure events comment on or complete the corresponding PM item without affecting wave execution.
 
-Both providers now expose the verbs this needs (`comment`, `complete_item`), and the daemon already has patterns for best-effort side effects: queue/attention updates log warnings instead of breaking the run. The missing work is wiring run + PR lifecycle data back to the roadmap item's `pm_id` and calling the provider at the right transition points.
+Both providers expose the verbs this needs (`comment`, `complete_item`) with full error handling and rate-limit retry. Linear's `complete_item` looks up workflow states via GraphQL to find the "Done" state. The daemon already has patterns for best-effort side effects: queue/attention updates log warnings instead of breaking the run. The missing work is wiring run + PR lifecycle data back to the roadmap item's `pm_id` and calling the provider at the right transition points.
 
 ## What to build
 

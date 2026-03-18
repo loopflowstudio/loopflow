@@ -5,7 +5,7 @@ pm_id: '1213718537307877'
 
 **Finish line:** `lf ops pm init|link|status --provider <asana|linear>` can create or connect a wave and project in either direction, with actionable auth/config errors.
 
-The groundwork is already in the codebase: Asana and Linear both implement `PmProvider`, `lf ops auth` / `lfq auth` persist the needed credentials, `read_wave_config` parses `pm.provider` / `pm.project` / optional `pm.team`, and `ops/export.rs` already knows how to create an Asana project on first export and write `pm` + `pm_id` state back through `RoadmapItemDocument`. The remaining gap is an explicit bootstrap/link/status UX with Linear parity.
+Both providers implement `PmProvider` (`lfd/pm/asana.rs`, `lfd/pm/linear.rs`) with full CRUD, pagination, rate-limit retry, and completion-state semantics. `lf ops auth configure linear` and `lfq auth linear` persist credentials. `read_wave_config` parses `pm.provider` / `pm.project` / optional `pm.team`. `ops/export.rs` creates an Asana project on first export and writes `pm` + `pm_id` state back through `RoadmapItemDocument` (Linear export currently returns an error — the provider client is ready but the export path only dispatches to Asana). The remaining gap is an explicit bootstrap/link/status UX with Linear export parity.
 
 ## What to build
 

@@ -5,7 +5,7 @@ pm_id: '1213718054761190'
 
 **Finish line:** `lf ops pm import` and `lf ops pm export` sync a linked wave with either Asana or Linear, and `pm-sync` wraps import → build → export.
 
-`rust/loopflow/src/ops/export.rs` already proves the core export path: it reads numbered roadmap items, uses `RoadmapItemDocument` for `pm_id`, creates a missing Asana project on first export, and updates or creates remote items. The missing pieces are provider-generalization, an import path, step/flow entry points, and honest ordering behavior.
+`rust/loopflow/src/ops/export.rs` already proves the core export path for Asana: it reads numbered roadmap items, uses `RoadmapItemDocument` for `pm_id`, creates a missing project on first export, and updates or creates remote items. Linear's `PmProvider` is fully implemented (CRUD, pagination, completion-state lookup) but the export dispatcher currently returns an error for Linear — the generalization is mechanical. The missing pieces are Linear export dispatch, an import path, step/flow entry points, and honest ordering behavior.
 
 ## What to build
 

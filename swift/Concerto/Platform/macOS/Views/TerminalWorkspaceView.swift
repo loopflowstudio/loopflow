@@ -95,7 +95,7 @@ private struct SessionTerminalSurface: View {
     let session: TerminalSession
 
     @Environment(RepoState.self) private var repoState
-    @StateObject private var ghosttyManager = GhosttyManager.shared
+    @ObservedObject private var ghosttyManager = GhosttyManager.shared
     @State private var launchSpec: TerminalLaunchSpec?
     @State private var errorMessage: String?
 

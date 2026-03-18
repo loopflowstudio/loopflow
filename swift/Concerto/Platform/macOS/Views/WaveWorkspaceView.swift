@@ -33,9 +33,13 @@ struct WaveWorkspaceView: View {
                 Divider()
             }
 
-            if selectedTab == .terminal,
-               repoState.terminalWorkspaceStore.selectedSession != nil {
-                TerminalWorkspaceView()
+            if selectedTab == .terminal {
+                if repoState.terminalWorkspaceStore.selectedSession != nil {
+                    TerminalWorkspaceView()
+                } else {
+                    ProgressView("Loading terminal session…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 WaveDetailPanel(wave: wave)
                     .id(wave.id)

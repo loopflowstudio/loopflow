@@ -4,7 +4,15 @@
 
 ## Carried context
 
-Secrets provider (01) shipped Doppler integration with a `login: "via doppler"` prefix as ownership marker for provider-supplied credentials. The provenance display in this item should unify with that pattern — secrets-supplied keys already have provenance via the "via " prefix; OAuth and file-detected credentials need equivalent tagging. `SecretsProviderService` protocol is already extended by `WaveService` in Swift.
+Secrets provider shipped Doppler integration with a `login: "via doppler"` prefix as ownership marker for provider-supplied credentials. The provenance display in this item should unify with that pattern — secrets-supplied keys already have provenance via the "via " prefix; OAuth and file-detected credentials need equivalent tagging. `SecretsProviderService` protocol is already extended by `WaveService` in Swift.
+
+Connections panel redesign shipped alongside secrets:
+
+- `AuthProviderCard` deleted and replaced by `ProviderRow` — simpler, role-grouped, with connect/disconnect and status dot.
+- `ProviderGroupSection` groups providers under role headers. `ConnectionsPanel` assembles groups.
+- `AuthProvider` enum now includes all 7 providers (claude, codex, opencode, github, asana, linear, doppler) with a `role: ProviderRole` property driving grouping.
+- Portfolio window has a Connections sheet using the same `ConnectionsPanel`.
+- Per-repo enable/disable infrastructure is wired (`enabledProviders` param) but not persisted yet.
 
 Phase 1 shipped credential detection and eager daemon startup:
 
@@ -12,9 +20,8 @@ Phase 1 shipped credential detection and eager daemon startup:
 - `CredentialSocketServer` serves detected credentials to the containerized daemon.
 - Bundled daemon starts eagerly at app launch; `RepoState` joins the in-flight start task.
 - Connection handshake skips TLS and repo discovery for bundled mode.
-- Orphan worktree sidebar section removed.
 
-What Phase 1 did NOT ship:
+What remains unshipped:
 
 - Terminal-assisted auth flows (open terminal running `claude auth login`, monitor for completion)
 - Typed `AuthStep` model replacing `AuthFlow`
@@ -33,7 +40,7 @@ Replace the current `AuthFlow` (which only models browser/device-code fields) wi
 - `ApiKeyStep { placeholder, help_url, validate_on_submit }` — all providers
 - `PrerequisiteStep { title, body, action_url?, continue_action }` — gates
 
-Update both Swift and Rust sides. `AuthProviderStore` manages `PendingAuthStep` instead of browser-only pending flows.
+Update both Swift and Rust sides. `AuthProviderStore` manages `PendingAuthStep` instead of browser-only pending flows. `ProviderRow` (which replaced `AuthProviderCard`) renders the appropriate UI per step type.
 
 ### Provider capability declarations
 

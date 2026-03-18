@@ -1,4 +1,4 @@
-- fork:
+- and:
     step: reduce
     drafts:
       - direction: infra

@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::engine::agent::build_agent_command;
-use crate::engine::flow::{expand_direction_names, ConcreteFork, ConcreteItem, ConcreteStep, Step};
+use crate::engine::flow::{expand_direction_names, ConcreteAnd, ConcreteItem, ConcreteStep, Step};
 use crate::engine::fork::{
     plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
@@ -36,7 +36,7 @@ impl WaveExecutor {
         wave: &Wave,
         run: &mut WaveRun,
         plan: &[ConcreteItem],
-        fork: &ConcreteFork,
+        fork: &ConcreteAnd,
     ) -> Result<()> {
         let expanded_snapshot_directions =
             expand_direction_names(&run.snapshot.direction, Path::new(&run.snapshot.repo));

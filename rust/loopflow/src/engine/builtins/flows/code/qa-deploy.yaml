@@ -1,6 +1,6 @@
 - qa
 - triage
-- branch:
+- or:
     paths:
       fix:
         flow: qa-fix

@@ -16,8 +16,8 @@ use crate::engine::agent::build_agent_command;
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
-    expand_flow, load_flow, load_step, next_action, BranchPath, ConcreteBranch, ConcreteItem,
-    ConcreteStep, FlowAction, Step,
+    build_or_routing_suffix, expand_flow, load_flow, load_or_path_items, load_step, next_action,
+    read_or_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::attention::{create_code_review_attention, create_step_failure_attention};
@@ -538,89 +538,100 @@ impl WaveExecutor {
                     ));
                     return Ok(());
                 }
-                FlowAction::Fork { fork } => {
-                    // Pre-fork sync: pick up sibling pushes.
+                FlowAction::And { fork } => {
+                    // Pre-and sync: pick up sibling pushes.
                     if let Err(err) = pre_step_sync(
                         Path::new(&run.snapshot.repo),
                         Path::new(&run.worktree),
                         &run.branch,
                     ) {
-                        warn!(run_id = %run.id, error = %err, "pre-fork sync failed, continuing");
+                        warn!(run_id = %run.id, error = %err, "pre-and sync failed, continuing");
                     }
                     info!(
                         run_id = %run.id,
                         branches = fork.branches.len(),
                         step_index = run.step_index,
-                        "running fork (all branches)"
+                        "running and (all branches)"
                     );
                     self.run_fork(&wave, &mut run, &plan, &fork).await?;
                     if run.status == WaveRunStatus::Failed {
                         return Ok(());
                     }
-                    // Post-fork sync: commit and push changes.
-                    if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, "fork")
-                    {
-                        self.fail_run(&mut run, &wave, format!("post-fork sync failed: {err}"))
+                    // Post-and sync: commit and push changes.
+                    if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, "and") {
+                        self.fail_run(&mut run, &wave, format!("post-and sync failed: {err}"))
                             .await?;
                         return Ok(());
                     }
                 }
-                FlowAction::Branch { branch } => {
-                    // Pre-branch sync: pick up sibling pushes.
+                FlowAction::Or { branch } => {
+                    // Pre-or sync: pick up sibling pushes.
                     if let Err(err) = pre_step_sync(
                         Path::new(&run.snapshot.repo),
                         Path::new(&run.worktree),
                         &run.branch,
                     ) {
-                        warn!(run_id = %run.id, error = %err, "pre-branch sync failed, continuing");
+                        warn!(run_id = %run.id, error = %err, "pre-or sync failed, continuing");
                     }
+
+                    let router_name = branch.router.as_deref().unwrap_or("or-route");
 
                     info!(
                         run_id = %run.id,
+                        router = router_name,
                         paths = branch.paths.len(),
                         step_index = run.step_index,
-                        "running branch routing"
+                        "running or router"
                     );
 
-                    // Build routing prompt and run as a synthetic step.
-                    let routing_prompt = build_branch_routing_prompt(&branch);
-                    let routing_step = ConcreteStep {
+                    // Build routing instructions to append to the router step.
+                    let routing_suffix = build_or_routing_suffix(&branch);
+
+                    let routing_content = if let Some(ref router_name) = branch.router {
+                        let router = load_step(router_name, Path::new(&run.snapshot.repo))?;
+                        let base = router.content.as_deref().unwrap_or("");
+                        format!("{base}\n\n{routing_suffix}")
+                    } else {
+                        format!(
+                            "Previous steps have analyzed the current state and written their \
+                             findings to scratch/.\nRead scratch/ to understand what's been \
+                             decided, then choose the right path forward.\n\n{routing_suffix}"
+                        )
+                    };
+
+                    let router = ConcreteStep {
                         step: Step {
-                            name: "branch-route".to_string(),
+                            name: router_name.to_string(),
                             agent: None,
                             default_agent: Some("claude:sonnet".to_string()),
                             directions: Vec::new(),
                             action_style: None,
                             interactive: None,
-                            content: Some(routing_prompt),
+                            content: Some(routing_content),
                             fast_path: None,
                         },
                         flow_parents: branch.flow_parents.clone(),
                     };
 
-                    let exit_code = self.run_step(&wave, &mut run, &routing_step).await?;
+                    let exit_code = self.run_step(&wave, &mut run, &router).await?;
                     if exit_code != 0 {
-                        self.fail_run(&mut run, &wave, "branch routing step failed".to_string())
+                        self.fail_run(&mut run, &wave, "or router step failed".to_string())
                             .await?;
                         return Ok(());
                     }
 
                     // Post-routing sync: commit the verdict.
                     if let Err(err) =
-                        post_step_sync(Path::new(&run.worktree), &run.branch, "branch-route")
+                        post_step_sync(Path::new(&run.worktree), &run.branch, router_name)
                     {
-                        self.fail_run(
-                            &mut run,
-                            &wave,
-                            format!("post-branch-route sync failed: {err}"),
-                        )
-                        .await?;
+                        self.fail_run(&mut run, &wave, format!("post-or-route sync failed: {err}"))
+                            .await?;
                         return Ok(());
                     }
 
-                    // Read the verdict from scratch/route-branch.md.
-                    let verdict_path = Path::new(&run.worktree).join("scratch/route-branch.md");
-                    let selected_path = match read_branch_verdict(&verdict_path, &branch) {
+                    // Read the verdict.
+                    let verdict_path = Path::new(&run.worktree).join("scratch/route-or.md");
+                    let selected_path = match read_or_verdict(&verdict_path, &branch) {
                         Ok(path) => path,
                         Err(err) => {
                             self.fail_run(&mut run, &wave, err).await?;
@@ -631,17 +642,16 @@ impl WaveExecutor {
                     info!(
                         run_id = %run.id,
                         selected = %selected_path,
-                        "branch routed"
+                        "or routed"
                     );
 
                     // Load and execute the selected sub-flow inline.
-                    let branch_path = branch
+                    let or_path = branch
                         .paths
                         .get(&selected_path)
-                        .expect("selected path validated by read_branch_verdict");
+                        .expect("selected path validated by read_or_verdict");
 
-                    let sub_items =
-                        load_branch_path_items(branch_path, Path::new(&run.snapshot.repo))?;
+                    let sub_items = load_or_path_items(or_path, Path::new(&run.snapshot.repo))?;
 
                     for sub_item in &sub_items {
                         let sub_step = match sub_item {
@@ -650,7 +660,7 @@ impl WaveExecutor {
                                 warn!(
                                     run_id = %run.id,
                                     item = ?other,
-                                    "branch sub-flow contains non-step item, skipping"
+                                    "or sub-flow contains non-step item, skipping"
                                 );
                                 continue;
                             }
@@ -662,7 +672,7 @@ impl WaveExecutor {
                             Path::new(&run.worktree),
                             &run.branch,
                         ) {
-                            warn!(run_id = %run.id, error = %err, "pre-step sync failed in branch sub-step, continuing");
+                            warn!(run_id = %run.id, error = %err, "pre-step sync failed in or sub-step, continuing");
                         }
 
                         if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
@@ -672,7 +682,7 @@ impl WaveExecutor {
                         info!(
                             run_id = %run.id,
                             step = %sub_step.step.name,
-                            "running branch sub-step"
+                            "running or sub-step"
                         );
 
                         let exit_code = self.run_step(&wave, &mut run, sub_step).await?;
@@ -680,7 +690,7 @@ impl WaveExecutor {
                             self.fail_run(
                                 &mut run,
                                 &wave,
-                                format!("branch sub-step {} failed", sub_step.step.name),
+                                format!("or sub-step {} failed", sub_step.step.name),
                             )
                             .await?;
                             return Ok(());
@@ -695,7 +705,7 @@ impl WaveExecutor {
                                 &mut run,
                                 &wave,
                                 format!(
-                                    "post-step sync failed for branch sub-step {}: {err}",
+                                    "post-step sync failed for or sub-step {}: {err}",
                                     sub_step.step.name
                                 ),
                             )
@@ -1266,76 +1276,8 @@ fn interactive_session_config(
 }
 
 // -----------------------------------------------------------------------------
-// Branch helpers
+// Or-routing helpers
 // -----------------------------------------------------------------------------
-
-fn build_branch_routing_prompt(branch: &ConcreteBranch) -> String {
-    let mut prompt = String::from(
-        "Read the current state of this branch: scratch/ contents, recent commits, \
-         and PR status. Choose which path to take next.\n\n\
-         Available paths:\n\n",
-    );
-    let mut keys: Vec<&String> = branch.paths.keys().collect();
-    keys.sort();
-    for key in &keys {
-        let path = &branch.paths[*key];
-        prompt.push_str(&format!("- {key}: {}\n", path.description));
-    }
-    prompt.push_str(
-        "\nWrite your choice to scratch/route-branch.md.\n\
-         First line must be: path: <key>\n\
-         Then explain your reasoning.\n",
-    );
-    prompt
-}
-
-fn read_branch_verdict(verdict_path: &Path, branch: &ConcreteBranch) -> Result<String, String> {
-    let content = std::fs::read_to_string(verdict_path).map_err(|err| {
-        format!(
-            "branch verdict not found at {}: {err}",
-            verdict_path.display()
-        )
-    })?;
-
-    let first_line = content
-        .lines()
-        .next()
-        .ok_or_else(|| "branch verdict file is empty".to_string())?;
-
-    let selected = first_line
-        .strip_prefix("path:")
-        .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            format!("branch verdict first line must start with 'path:', got: {first_line}")
-        })?;
-
-    if !branch.paths.contains_key(&selected) {
-        let valid_keys: Vec<&String> = branch.paths.keys().collect();
-        return Err(format!(
-            "unknown branch path: {selected}, expected one of: {valid_keys:?}"
-        ));
-    }
-
-    Ok(selected)
-}
-
-fn load_branch_path_items(branch_path: &BranchPath, repo: &Path) -> Result<Vec<ConcreteItem>> {
-    if let Some(ref flow_name) = branch_path.flow {
-        let flow = load_flow(flow_name, repo)?;
-        let items = expand_flow(&flow, repo)?;
-        return Ok(items);
-    }
-
-    if let Some(ref step_name) = branch_path.step {
-        let step = load_step(step_name, repo)?;
-        return Ok(vec![ConcreteItem::Step(ConcreteStep {
-            step,
-            flow_parents: Vec::new(),
-        })]);
-    }
-
-    Err(anyhow!("branch path has neither flow nor step"))
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct OrphanedForkCleanup {
@@ -2052,7 +1994,7 @@ mod tests {
         create_fork_flow_repo(
             &repo,
             r#"
-- fork:
+- and:
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
@@ -2104,7 +2046,7 @@ mod tests {
         create_fork_flow_repo(
             &repo,
             r#"
-- fork:
+- and:
     branches: []
 "#,
         );
@@ -2146,7 +2088,7 @@ mod tests {
         create_fork_flow_repo(
             &repo,
             r#"
-- fork:
+- and:
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
@@ -2200,7 +2142,7 @@ mod tests {
         create_fork_flow_repo(
             &repo,
             r#"
-- fork:
+- and:
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
@@ -2262,7 +2204,7 @@ mod tests {
         create_fork_flow_repo(
             &repo,
             r#"
-- fork:
+- and:
     branches:
       - step:
           name: step-a

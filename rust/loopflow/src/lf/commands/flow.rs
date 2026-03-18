@@ -1,11 +1,16 @@
 use crate::engine::flow::expand_direction_names;
+use crate::engine::flow::{
+    build_or_routing_suffix, load_or_path_items, load_step, read_or_verdict,
+};
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
-use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
+use crate::engine::{
+    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteOr, Flow, FlowAction,
+};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::lfd::executor::{
@@ -16,6 +21,8 @@ use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+const TEMP_OR_ROUTE_STEP_NAME: &str = "or-route";
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -31,8 +38,8 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
         .map(|item| match item {
             ConcreteItem::Step(s) => s.step.name.as_str(),
             ConcreteItem::Op(_) => "[op]",
-            ConcreteItem::Fork(_) => "[fork]",
-            ConcreteItem::Branch(_) => "[branch]",
+            ConcreteItem::And(_) => "[and]",
+            ConcreteItem::Or(_) => "[or]",
         })
         .collect();
 
@@ -86,21 +93,13 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 );
                 crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
             }
-            FlowAction::Fork { fork } => {
-                run_fork(&fork, message, cli, repo)?;
-                commit_step_work(repo, "fork")?;
+            FlowAction::And { fork } => {
+                run_and(&fork, message, cli, repo)?;
+                commit_step_work(repo, "and")?;
             }
-            FlowAction::Branch { .. } => {
-                // Branch routing requires the daemon executor; skip in CLI flow runner.
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}[branch]{reset} (requires lfd)",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                );
+            FlowAction::Or { branch } => {
+                run_or(&branch, message, cli, repo)?;
+                commit_step_work(repo, "or")?;
             }
             FlowAction::Complete => break,
         }
@@ -120,6 +119,127 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Run or-routing: execute a routing step, read the verdict, then run the
+/// selected sub-flow inline.
+fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+    let colors = Colors::new();
+    let verdict_path = repo.join("scratch/route-or.md");
+
+    let router_name = or_def.router.as_deref().unwrap_or(TEMP_OR_ROUTE_STEP_NAME);
+
+    eprintln!(
+        "{dim}[or]{reset} {bold}{step}{reset} choosing between {n} paths",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+        step = router_name,
+        n = or_def.paths.len(),
+    );
+
+    // Build routing instructions that get appended to the step's prompt.
+    let routing_suffix = build_or_routing_suffix(or_def);
+
+    // Write the routing step — either a wrapper around the router step's
+    // content + routing instructions, or a standalone generic routing prompt.
+    let prompt = if let Some(ref router_name) = or_def.router {
+        let router = load_step(router_name, repo)?;
+        let base = router.content.as_deref().unwrap_or("");
+        format!("{base}\n\n{routing_suffix}")
+    } else {
+        format!(
+            "---\nagent: claude:sonnet\n---\n\
+             Previous steps have analyzed the current state and written their findings to scratch/.\n\
+             Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
+             {routing_suffix}"
+        )
+    };
+
+    let temp_step = write_or_route_step(repo, &prompt)?;
+    let result = crate::lf::commands::run::run(Some(TEMP_OR_ROUTE_STEP_NAME), message, cli);
+    drop(temp_step);
+
+    result?;
+    commit_step_work(repo, router_name)?;
+
+    let selected = read_or_verdict(&verdict_path, or_def).map_err(anyhow::Error::msg)?;
+
+    eprintln!(
+        "{dim}[or]{reset} {bold}{selected}{reset} selected",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+    );
+
+    // Load and execute the selected sub-flow.
+    let or_path = or_def
+        .paths
+        .get(&selected)
+        .expect("selected path validated by read_or_verdict");
+
+    let sub_items = load_or_path_items(or_path, repo)?;
+
+    for sub_item in &sub_items {
+        let sub_step = match sub_item {
+            ConcreteItem::Step(step) => step,
+            ConcreteItem::Op(ops) => {
+                crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
+                continue;
+            }
+            _ => continue,
+        };
+
+        let step_name = sub_step.step.name.clone();
+        eprintln!(
+            "{dim}[or/{selected}]{reset} {bold}{step_name}{reset}",
+            dim = colors.dim,
+            reset = colors.reset,
+            bold = colors.bold,
+        );
+        crate::lf::commands::run::run(Some(&step_name), message, cli)?;
+        commit_step_work(repo, &step_name)?;
+    }
+
+    Ok(())
+}
+
+fn write_or_route_step(repo: &Path, prompt: &str) -> Result<OrRouteStepGuard> {
+    let tmp_step_dir = repo.join(".lf/steps");
+    std::fs::create_dir_all(&tmp_step_dir)?;
+    let path = tmp_step_dir.join(format!("{TEMP_OR_ROUTE_STEP_NAME}.md"));
+    let original_content = std::fs::read_to_string(&path).ok();
+    std::fs::write(&path, prompt)?;
+    Ok(OrRouteStepGuard {
+        path,
+        original_content,
+    })
+}
+
+struct OrRouteStepGuard {
+    path: PathBuf,
+    original_content: Option<String>,
+}
+
+impl Drop for OrRouteStepGuard {
+    fn drop(&mut self) {
+        let result = match &self.original_content {
+            Some(content) => std::fs::write(&self.path, content),
+            None => match std::fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err),
+            },
+        };
+
+        if let Err(err) = result {
+            eprintln!(
+                "failed to restore temporary or-route step {}: {}",
+                self.path.display(),
+                err
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ForkBranchTask {
     index: usize,
@@ -129,7 +249,7 @@ struct ForkBranchTask {
     branch_name: String,
 }
 
-fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let expanded_cli_directions = expand_direction_names(&cli.direction, repo);
     let planned = plan_fork_execution(&fork.branches, &expanded_cli_directions)
         .map_err(|err| anyhow!(err))?;
@@ -355,5 +475,53 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
         } else {
             println!("[{branch_label}] {line}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_or_route_step;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn write_or_route_step_removes_temp_file_when_none_existed() {
+        let temp = TempDir::new().unwrap();
+        let step_path = temp.path().join(".lf/steps/or-route.md");
+
+        {
+            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            assert_eq!(
+                fs::read_to_string(&step_path).unwrap(),
+                "temporary route prompt"
+            );
+        }
+
+        assert!(
+            !step_path.exists(),
+            "temporary or-route step should be removed after use"
+        );
+    }
+
+    #[test]
+    fn write_or_route_step_restores_existing_file() {
+        let temp = TempDir::new().unwrap();
+        let steps_dir = temp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        let step_path = steps_dir.join("or-route.md");
+        fs::write(&step_path, "existing route prompt").unwrap();
+
+        {
+            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            assert_eq!(
+                fs::read_to_string(&step_path).unwrap(),
+                "temporary route prompt"
+            );
+        }
+
+        assert_eq!(
+            fs::read_to_string(&step_path).unwrap(),
+            "existing route prompt"
+        );
     }
 }

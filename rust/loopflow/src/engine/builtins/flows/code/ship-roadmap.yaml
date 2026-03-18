@@ -1,9 +1,8 @@
 - ingest
-- branch:
+- or:
     paths:
-      build:
-        flow: ship-roadmap-build
+      play:
+        flow: ship-roadmap-play
         description: "Compelling item found — design and build it"
-      reorg:
-        flow: reorg
-        description: "Nothing compelling — reorganize items and go silent"
+      silence:
+        description: "Nothing compelling to build right now — stay quiet this iteration"

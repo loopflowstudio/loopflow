@@ -22,16 +22,16 @@ Flows that produce wave items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `wave-reduce` | fork(reduce×3) → update-wave | Find simplification opportunities |
-| `wave-polish` | fork(polish×3) → update-wave | Find polish priorities |
-| `wave-expand` | fork(expand×3) → update-wave | Find expansion opportunities |
+| `wave-reduce` | and(reduce×3) → update-wave | Find simplification opportunities |
+| `wave-polish` | and(polish×3) → update-wave | Find polish priorities |
+| `wave-expand` | and(expand×3) → update-wave | Find expansion opportunities |
 
-## Fork pattern
+## And pattern
 
-Plan flows use forks to get multiple perspectives:
+Plan flows use `and` to get multiple perspectives:
 
 ```yaml
-- fork:
+- and:
     step: reduce
     drafts:
       - direction: infra
@@ -40,7 +40,7 @@ Plan flows use forks to get multiple perspectives:
 - update-wave
 ```
 
-The fork runs `reduce` three times with different directions, then reconciles results via `update-wave`.
+The `and` runs `reduce` three times with different directions, then reconciles results via `update-wave`.
 
 ## Adding a flow
 

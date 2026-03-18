@@ -2,9 +2,10 @@
 
 Build and tend. Two voices in counterpoint.
 
-A wave builds — code, tests, PRs. A chord tends — scan, assess,
-propose, apply. Same flow engine, same infrastructure. The difference
-is area: files vs waves.
+A wave builds — code, tests, PRs. A chord tends — `scan-waves`,
+`assess`, then routes to tune or silence. A wave build round
+routes to play or silence. Same flow engine, same infrastructure. The
+difference is area: files vs waves.
 
 The redesign is the first chord. Its first job is building itself.
 Its second job is tending the waves that build everything else. The
@@ -16,7 +17,7 @@ coordinate anything.
 chord: redesign
 │
 │  build: creates chord machinery, signals, Letta integration
-│  tend:  observes its own waves, surfaces blocks, remembers
+│  tend:  observes its own waves, routes to tune/silence, remembers
 │
 ├── wave: clear-the-deck        6 items — cuts, deletions, collapses, cleanup
 ├── wave: agent-embedding       8 items — Concerto as conductor
@@ -38,9 +39,14 @@ it built.
 
 Build enough to run the first tend cycle. Uses existing flows.
 
-- **chord-model/02** — tend flow steps (scan-waves, assess, draft-chord, review-chord, apply-chord)
-- **signals/01** — block taxonomy (types, data model, API)
-- **chord-model/03** — Letta integration (stand up, wire into tend)
+- **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
+- **signals/01** — block taxonomy (types, data model, API) in parallel with item 02
+- **chord-model/03** — Letta integration once live tend output exists to remember
+
+Current bootstrap pressure:
+- chord-model/02 still owns the live lfd proof; the structural tend work is not the finish line
+- signals/01 should start in parallel so block types exist before the queue UI hardens around placeholders
+- clear-the-deck waits until shared `lfd/` and `python/loopflow/` files stop moving under the bootstrap work
 
 First tend cycle runs. The chord observes its own bootstrap commits.
 Letta records its first memories. The recursive loop is live.
@@ -85,13 +91,13 @@ A chord's execution alternates between tending and building.
 ```
 tend (1 global update)
   scan-waves → assess → branch:
-    chord: draft-chord → review-chord → apply-chord
-    reorg: update-wave (coherence pass, no human review)
+    tune: draft-chord → review-chord → apply-chord
+    silence: exit cleanly
 
 build × N (parallel, one per active wave)
   ingest → branch:
-    build: kickoff → review-design → build → review → land
-    reorg: update-wave (coherence pass, no human review)
+    play: kickoff → review-design → build → review → land
+    silence: exit cleanly
 ```
 
 One tend cycle, then N parallel build cycles — one per member wave that
@@ -118,17 +124,16 @@ it sets direction and checks in.
 Not every cycle produces a PR. A beat is the smallest unit of wave
 activity:
 
-- **Build beat**: ingest finds a compelling item, full flow runs, PR lands
-- **Reorg beat**: ingest finds nothing compelling, or items are stale —
-  wave reorganizes its own plans, updates item coherence, possibly goes
-  silent. Single step, no human review.
-- **Tend beat**: scan + assess finds pressure points, chord is composed
-  and reviewed. Or: nothing to tend, waves reorganize internally.
+- **Play beat**: ingest finds a compelling item, full flow runs, PR lands
+- **Tune beat**: scan + assess finds adjustments — from small coherence
+  fixes to structural mutations — and the chord reviews them.
+- **Silence beat**: nothing compelling to build or tune right now.
 
-Reorg beats are how waves maintain their own coherence between tend
-cycles. The codebase evolves — other waves ship code, designs diverge,
-value diminishes. A wave that notices its items are stale and
-reorganizes itself is doing useful work, even though no code ships.
+Tuning carries the coherence work now. If a wave's items have gone stale,
+that shows up as something to tune rather than a separate beat. The
+codebase evolves — other waves ship code, designs diverge, value
+diminishes. A chord that notices and retunes the waves is doing useful
+work, even though no code ships.
 
 ### Silence
 

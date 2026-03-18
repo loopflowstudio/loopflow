@@ -27,9 +27,9 @@ pub use command::{run_command, CommandError};
 pub use config::{load_config, load_config_or_default, parse_agent, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{
-    expand_flow, load_direction, load_flow, load_step, next_action, BranchDef, BranchPath,
-    ConcreteBranch, ConcreteFork, ConcreteForkBranch, ConcreteItem, ConcreteOp, ConcreteStep,
-    Direction, Flow, FlowAction, FlowItem, Op, Step,
+    expand_flow, load_direction, load_flow, load_step, next_action, ConcreteAnd, ConcreteAndBranch,
+    ConcreteItem, ConcreteOp, ConcreteOr, ConcreteStep, Direction, Flow, FlowAction, FlowItem, Op,
+    OrDef, OrPath, Step,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

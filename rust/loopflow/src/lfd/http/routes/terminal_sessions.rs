@@ -3,7 +3,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
-use time::OffsetDateTime;
 
 use crate::lfd::auth::AuthProvider;
 use crate::lfd::http::dto::{
@@ -12,6 +11,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
+use crate::lfd::id::LfdId;
 use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
@@ -118,10 +118,8 @@ pub async fn attach_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalLaunchSpecDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let mut session = load_terminal_session(&state, &session_id).await?;
-
-    let changed = attach_session(&mut session);
-    store_terminal_session_update_if_changed(&state, &session, changed).await?;
+    let session =
+        update_terminal_session(&state, &session_id, |session| Ok(session.attach())).await?;
 
     let completion_token = session.completion_token.clone().ok_or_else(|| {
         api_error(
@@ -149,9 +147,8 @@ pub async fn start_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let mut session = load_terminal_session(&state, &session_id).await?;
-    let changed = start_session(&mut session);
-    store_terminal_session_update_if_changed(&state, &session, changed).await?;
+    let session =
+        update_terminal_session(&state, &session_id, |session| Ok(session.start())).await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -162,12 +159,11 @@ pub async fn complete_terminal_session_handler(
     Json(payload): Json<CompleteTerminalSessionRequest>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let mut session = load_terminal_session(&state, &session_id).await?;
-
-    verify_completion_token(&headers, &session)?;
-
-    let changed = complete_session(&mut session, payload.exit_code);
-    store_terminal_session_update_if_changed(&state, &session, changed).await?;
+    let session = update_terminal_session(&state, &session_id, |session| {
+        verify_completion_token(&headers, session)?;
+        Ok(session.complete(payload.exit_code))
+    })
+    .await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -176,15 +172,14 @@ pub async fn cancel_terminal_session_handler(
     Path(session_id): Path<String>,
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let mut session = load_terminal_session(&state, &session_id).await?;
-    let changed = cancel_session(&mut session);
-    store_terminal_session_update_if_changed(&state, &session, changed).await?;
+    let session =
+        update_terminal_session(&state, &session_id, |session| Ok(session.cancel())).await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
 async fn load_terminal_session(
     state: &HttpState,
-    session_id: &crate::lfd::id::LfdId,
+    session_id: &LfdId,
 ) -> Result<TerminalSession, ApiError> {
     state
         .store
@@ -220,43 +215,18 @@ async fn store_terminal_session_update_if_changed(
     Ok(())
 }
 
-fn attach_session(session: &mut TerminalSession) -> bool {
-    if session.status != TerminalSessionStatus::Pending {
-        return false;
-    }
-    session.status = TerminalSessionStatus::Attached;
-    session.attached_at = Some(OffsetDateTime::now_utc());
-    true
-}
-
-fn start_session(session: &mut TerminalSession) -> bool {
-    if session.status.is_terminal() {
-        return false;
-    }
-    if session.attached_at.is_none() {
-        session.attached_at = Some(OffsetDateTime::now_utc());
-    }
-    session.status = TerminalSessionStatus::Running;
-    session.started_at = Some(OffsetDateTime::now_utc());
-    true
-}
-
-fn complete_session(session: &mut TerminalSession, exit_code: i32) -> bool {
-    if session.status.is_terminal() {
-        return false;
-    }
-    session.status = TerminalSessionStatus::from_exit_code(exit_code);
-    session.completed_at = Some(OffsetDateTime::now_utc());
-    true
-}
-
-fn cancel_session(session: &mut TerminalSession) -> bool {
-    if session.status.is_terminal() {
-        return false;
-    }
-    session.status = TerminalSessionStatus::Canceled;
-    session.completed_at = Some(OffsetDateTime::now_utc());
-    true
+async fn update_terminal_session<F>(
+    state: &HttpState,
+    session_id: &LfdId,
+    update: F,
+) -> Result<TerminalSession, ApiError>
+where
+    F: FnOnce(&mut TerminalSession) -> Result<bool, ApiError>,
+{
+    let mut session = load_terminal_session(state, session_id).await?;
+    let changed = update(&mut session)?;
+    store_terminal_session_update_if_changed(state, &session, changed).await?;
+    Ok(session)
 }
 
 fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Result<(), ApiError> {

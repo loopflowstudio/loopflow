@@ -236,6 +236,7 @@ def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], 
     env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     env["GRPC_VERBOSITY"] = "ERROR"
     env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+    env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
     env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
     print("Building lfd...")
@@ -785,6 +786,7 @@ def _lfd_native() -> int:
     env["GRPC_VERBOSITY"] = "ERROR"
     # Isolate sqlite state per repo to avoid schema drift across sibling repos.
     env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+    env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
 
     print("Building lfd...")
     result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)

@@ -320,7 +320,10 @@ struct WaveDetailPanel: View {
                         FlowTypeahead(
                             wave: wave,
                             initialSelection: runTargetSelection.isEmpty ? wave.flow : runTargetSelection,
-                            style: .compact
+                            style: .compact,
+                            onSubmitSelection: { selection in
+                                runSelectedTarget(selection)
+                            }
                         ) { selection in
                             runTargetSelection = selection
                         }
@@ -437,14 +440,20 @@ struct WaveDetailPanel: View {
     }
 
     private func runSelectedTarget() {
-        guard !headerRunDisabled else { return }
+        runSelectedTarget(nil)
+    }
+
+    private func runSelectedTarget(_ explicitTarget: String?) {
+        let trimmedExplicitTarget = explicitTarget?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = trimmedExplicitTarget.flatMap { $0.isEmpty ? nil : $0 } ?? selectedRunTarget
+        guard !target.isEmpty, !isSendingHeaderRun, isRunnableWorkspace else { return }
 
         isSendingHeaderRun = true
         Task {
             do {
                 try await repoState.runWave(
                     wave: wave,
-                    flow: selectedRunTarget
+                    flow: target
                 )
             } catch {
                 await MainActor.run {

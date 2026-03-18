@@ -229,6 +229,7 @@ final class BundledDaemonManager {
         env["LFD_DB_PATH"] = dbPath.path
         env["LFD_AUTH_MODE"] = connectWithPhone ? "studio" : "local"
         env["LFD_AUTH_TOKEN"] = token
+        env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
         process.environment = env
 
         process.terminationHandler = { [weak self] process in
@@ -391,6 +392,7 @@ final class BundledDaemonManager {
             "-e", "LFD_AUTH_MODE=\(authMode)",
             "-e", "LFD_AUTH_TOKEN=\(token)",
             "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
+            "-e", "LFD_DISABLE_WORKTREE_JANITOR=1",
             "-e", "LFD_MODE=container",
         ]
 

@@ -20,6 +20,18 @@ use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
 
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loopflow::lfd::obs::init_tracing();
@@ -220,25 +232,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let repo_roots = store
-        .list_waves(None)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|wave| PathBuf::from(wave.repo()))
-        .collect::<Vec<_>>();
-    match executor.run_worktree_janitor(&repo_roots).await {
-        Ok(report) => {
-            if report.removed > 0 || report.errors > 0 {
-                tracing::info!(
-                    removed = report.removed,
-                    active = report.active,
-                    errors = report.errors,
-                    "startup worktree janitor finished"
-                );
+    if env_flag("LFD_DISABLE_WORKTREE_JANITOR") {
+        tracing::info!("startup worktree janitor disabled by LFD_DISABLE_WORKTREE_JANITOR");
+    } else {
+        let repo_roots = store
+            .list_waves(None)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|wave| PathBuf::from(wave.repo()))
+            .collect::<Vec<_>>();
+        match executor.run_worktree_janitor(&repo_roots).await {
+            Ok(report) => {
+                if report.removed > 0 || report.errors > 0 {
+                    tracing::info!(
+                        removed = report.removed,
+                        active = report.active,
+                        errors = report.errors,
+                        "startup worktree janitor finished"
+                    );
+                }
             }
+            Err(err) => tracing::warn!(error = %err, "startup worktree janitor failed"),
         }
-        Err(err) => tracing::warn!(error = %err, "startup worktree janitor failed"),
     }
 
     if let Some(token) = lfd_config.github.token.clone() {

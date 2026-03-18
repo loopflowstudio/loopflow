@@ -1,5 +1,12 @@
 - kickoff
 - review-design
 - build
-- review
+- or:
+    paths:
+      demo:
+        step: demo
+        description: "Change produces observable behavior — walk through the experience"
+      code-review:
+        step: code-review
+        description: "Internal/quality change — walk through the code design"
 - ops: land --create-pr

@@ -1,0 +1,11 @@
+name: builtin_demo
+repo: tests/parity/fixtures/basic
+step: demo
+surface: headless
+directions: []
+lfdocs: false
+diff_files: false
+diff: false
+clipboard: false
+area: null
+wave: null

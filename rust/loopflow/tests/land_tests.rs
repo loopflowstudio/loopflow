@@ -195,6 +195,61 @@ fn land_cleans_up_remote_branch() {
 }
 
 #[test]
+fn land_clears_scratch_and_preserves_gitkeep() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(scratch.join("nested")).expect("create nested scratch dir");
+    fs::write(scratch.join("notes.md"), "review notes").expect("write scratch note");
+    fs::write(scratch.join("nested").join("todo.md"), "todo").expect("write nested scratch note");
+    let status = Command::new("git")
+        .args(["add", "scratch"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git add scratch");
+    assert!(status.success(), "git add scratch should succeed");
+    let status = Command::new("git")
+        .args(["commit", "-m", "add scratch docs"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git commit scratch");
+    assert!(status.success(), "git commit scratch should succeed");
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: true,
+            create_pr: false,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+        },
+        &NullProgress,
+    )
+    .expect("land should clear scratch");
+
+    assert!(result.merged);
+    let scratch_entries = fs::read_dir(repo.path().join("scratch"))
+        .expect("read scratch after land")
+        .map(|entry| {
+            entry
+                .expect("scratch entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scratch_entries, vec![".gitkeep"]);
+}
+
+#[test]
 fn land_missing_pr_error_includes_branch_name() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(

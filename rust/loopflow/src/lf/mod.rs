@@ -243,15 +243,7 @@ pub enum OpsCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Export wave roadmap items to PM tool
-    Export {
-        /// Wave name
-        wave: String,
-        /// Show what would happen without calling the PM API
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// PM tool integration (import, export, sync)
+    /// PM tool integration (import, sync)
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -271,18 +263,11 @@ pub enum PmCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Import roadmap items from PM tool to wave files
+    /// Import projects from PM tool as waves
     Import {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-    },
-    /// Export wave files to PM tool
-    Export {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Show what would happen without calling the PM API
-        #[arg(long)]
-        dry_run: bool,
+        /// Team ID in the PM provider
+        #[arg(short = 't', long = "team")]
+        team_id: String,
     },
     /// Three-way sync between local wave files and PM tool
     Sync {

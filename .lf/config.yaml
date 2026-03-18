@@ -5,9 +5,7 @@ branch_names:
   schema: "{user}.{name}.{ts}"
 
 pm:
-  rw_provider: linear
-  export_providers:
-    - asana
+  provider: linear
 
 internal:
   use_rust: true

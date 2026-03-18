@@ -384,9 +384,9 @@ impl WaveExecutor {
             let worktree = run.worktree.clone();
             let wave_name = wave.name().clone();
             match tokio::task::spawn_blocking(move || {
-                crate::ops::pm::pm_import(
+                crate::ops::pm::pm_sync(
                     Path::new(&worktree),
-                    &crate::ops::pm::PmImportOptions { wave: wave_name },
+                    &crate::ops::pm::PmSyncOptions { wave: wave_name },
                     &crate::ops::NullProgress,
                 )
             })
@@ -395,17 +395,16 @@ impl WaveExecutor {
                 Ok(Ok(result)) => {
                     info!(
                         run_id = %run.id,
-                        created = result.created.len(),
-                        updated = result.updated.len(),
-                        deleted = result.deleted.len(),
-                        "synced roadmap from read/write PM provider"
+                        pushed = result.pushed.len(),
+                        pulled = result.pulled.len(),
+                        "synced roadmap with PM provider at run start"
                     );
                 }
                 Ok(Err(err)) => {
-                    warn!(run_id = %run.id, error = %err, "PM import failed at run start; continuing");
+                    warn!(run_id = %run.id, error = %err, "PM sync failed at run start; continuing");
                 }
                 Err(err) => {
-                    warn!(run_id = %run.id, error = %err, "PM import task join failed; continuing");
+                    warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
                 }
             }
         }
@@ -795,28 +794,25 @@ impl WaveExecutor {
                         let branch = run.branch.clone();
                         let wave_name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || -> Result<()> {
-                            crate::ops::export(
+                            crate::ops::pm::pm_sync(
                                 Path::new(&worktree),
-                                &crate::ops::ExportOptions {
-                                    wave: wave_name,
-                                    dry_run: false,
-                                },
+                                &crate::ops::pm::PmSyncOptions { wave: wave_name },
                                 &crate::ops::NullProgress,
                             )
                             .map_err(|err| anyhow!(err.to_string()))?;
-                            post_step_sync(Path::new(&worktree), &branch, "ops pm export")?;
+                            post_step_sync(Path::new(&worktree), &branch, "ops pm sync")?;
                             Ok(())
                         })
                         .await
                         {
                             Ok(Ok(())) => {
-                                info!(run_id = %run.id, "exported roadmap to PM providers");
+                                info!(run_id = %run.id, "synced roadmap with PM provider at run end");
                             }
                             Ok(Err(err)) => {
-                                warn!(run_id = %run.id, error = %err, "PM export failed at run end; continuing");
+                                warn!(run_id = %run.id, error = %err, "PM sync failed at run end; continuing");
                             }
                             Err(err) => {
-                                warn!(run_id = %run.id, error = %err, "PM export task join failed; continuing");
+                                warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
                             }
                         }
                     }

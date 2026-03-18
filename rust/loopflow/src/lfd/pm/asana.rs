@@ -284,16 +284,6 @@ impl PmProvider for AsanaClient {
         self.create_project_for_team(&team, name, description).await
     }
 
-    async fn create_project_in_team(
-        &self,
-        team_id: &str,
-        name: &str,
-        description: &str,
-    ) -> PmResult<String> {
-        self.create_project_for_team(team_id, name, description)
-            .await
-    }
-
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
         let path = format!("/teams/{team_id}/projects");
         let response: AsanaResponse<Vec<AsanaProjectNode>> = self

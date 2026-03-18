@@ -74,9 +74,12 @@ public final class TerminalWorkspaceStore {
     }
 
     private func persist() {
-        guard let repoKey else { return }
-        userDefaults.set(orderedSessionIds, forKey: "terminalWorkspace.order.\(repoKey)")
-        userDefaults.set(selectedSessionId, forKey: "terminalWorkspace.selected.\(repoKey)")
+        guard let orderKey = storageKey("order"),
+              let selectedKey = storageKey("selected") else {
+            return
+        }
+        userDefaults.set(orderedSessionIds, forKey: orderKey)
+        userDefaults.set(selectedSessionId, forKey: selectedKey)
     }
 
     private func reconcileSelection() {
@@ -100,13 +103,19 @@ public final class TerminalWorkspaceStore {
     }
 
     private func restoreSelection() {
-        guard let repoKey else {
+        guard let orderKey = storageKey("order"),
+              let selectedKey = storageKey("selected") else {
             orderedSessionIds = []
             selectedSessionId = nil
             return
         }
-        orderedSessionIds = userDefaults.stringArray(forKey: "terminalWorkspace.order.\(repoKey)") ?? []
-        selectedSessionId = userDefaults.string(forKey: "terminalWorkspace.selected.\(repoKey)")
+        orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
+        selectedSessionId = userDefaults.string(forKey: selectedKey)
         reconcileSelection()
+    }
+
+    private func storageKey(_ suffix: String) -> String? {
+        guard let repoKey else { return nil }
+        return "terminalWorkspace.\(suffix).\(repoKey)"
     }
 }

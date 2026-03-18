@@ -120,11 +120,8 @@ pub async fn attach_terminal_session_handler(
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let mut session = load_terminal_session(&state, &session_id).await?;
 
-    if session.status == TerminalSessionStatus::Pending {
-        session.status = TerminalSessionStatus::Attached;
-        session.attached_at = Some(OffsetDateTime::now_utc());
-        store_terminal_session_update(&state, &session).await?;
-    }
+    let changed = attach_session(&mut session);
+    store_terminal_session_update_if_changed(&state, &session, changed).await?;
 
     let completion_token = session.completion_token.clone().ok_or_else(|| {
         api_error(
@@ -153,14 +150,8 @@ pub async fn start_terminal_session_handler(
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let mut session = load_terminal_session(&state, &session_id).await?;
-    if !session.status.is_terminal() {
-        if session.attached_at.is_none() {
-            session.attached_at = Some(OffsetDateTime::now_utc());
-        }
-        session.status = TerminalSessionStatus::Running;
-        session.started_at = Some(OffsetDateTime::now_utc());
-        store_terminal_session_update(&state, &session).await?;
-    }
+    let changed = start_session(&mut session);
+    store_terminal_session_update_if_changed(&state, &session, changed).await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -175,15 +166,8 @@ pub async fn complete_terminal_session_handler(
 
     verify_completion_token(&headers, &session)?;
 
-    if !session.status.is_terminal() {
-        session.status = if payload.exit_code == 0 {
-            TerminalSessionStatus::Succeeded
-        } else {
-            TerminalSessionStatus::Failed
-        };
-        session.completed_at = Some(OffsetDateTime::now_utc());
-        store_terminal_session_update(&state, &session).await?;
-    }
+    let changed = complete_session(&mut session, payload.exit_code);
+    store_terminal_session_update_if_changed(&state, &session, changed).await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -193,11 +177,8 @@ pub async fn cancel_terminal_session_handler(
 ) -> ApiResult<TerminalSessionDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let mut session = load_terminal_session(&state, &session_id).await?;
-    if !session.status.is_terminal() {
-        session.status = TerminalSessionStatus::Canceled;
-        session.completed_at = Some(OffsetDateTime::now_utc());
-        store_terminal_session_update(&state, &session).await?;
-    }
+    let changed = cancel_session(&mut session);
+    store_terminal_session_update_if_changed(&state, &session, changed).await?;
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -226,6 +207,56 @@ async fn store_terminal_session_update(
         .event_hub
         .send(Event::terminal_session_updated(session.clone()));
     Ok(())
+}
+
+async fn store_terminal_session_update_if_changed(
+    state: &HttpState,
+    session: &TerminalSession,
+    changed: bool,
+) -> Result<(), ApiError> {
+    if changed {
+        store_terminal_session_update(state, session).await?;
+    }
+    Ok(())
+}
+
+fn attach_session(session: &mut TerminalSession) -> bool {
+    if session.status != TerminalSessionStatus::Pending {
+        return false;
+    }
+    session.status = TerminalSessionStatus::Attached;
+    session.attached_at = Some(OffsetDateTime::now_utc());
+    true
+}
+
+fn start_session(session: &mut TerminalSession) -> bool {
+    if session.status.is_terminal() {
+        return false;
+    }
+    if session.attached_at.is_none() {
+        session.attached_at = Some(OffsetDateTime::now_utc());
+    }
+    session.status = TerminalSessionStatus::Running;
+    session.started_at = Some(OffsetDateTime::now_utc());
+    true
+}
+
+fn complete_session(session: &mut TerminalSession, exit_code: i32) -> bool {
+    if session.status.is_terminal() {
+        return false;
+    }
+    session.status = TerminalSessionStatus::from_exit_code(exit_code);
+    session.completed_at = Some(OffsetDateTime::now_utc());
+    true
+}
+
+fn cancel_session(session: &mut TerminalSession) -> bool {
+    if session.status.is_terminal() {
+        return false;
+    }
+    session.status = TerminalSessionStatus::Canceled;
+    session.completed_at = Some(OffsetDateTime::now_utc());
+    true
 }
 
 fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Result<(), ApiError> {

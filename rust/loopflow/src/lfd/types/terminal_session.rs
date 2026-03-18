@@ -52,6 +52,14 @@ impl TerminalSessionStatus {
         }
     }
 
+    pub fn from_exit_code(exit_code: i32) -> Self {
+        if exit_code == 0 {
+            Self::Succeeded
+        } else {
+            Self::Failed
+        }
+    }
+
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Succeeded | Self::Failed | Self::Canceled)
     }

@@ -8,7 +8,7 @@ linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 
 ## Context
 
-The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. `TerminalWorkspaceStore` now also persists tab ordering and selection per repo, and `lfd` exposes attach/start/cancel endpoints plus durable `terminal_sessions` rows. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch.
+The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. `TerminalWorkspaceStore` now also persists tab ordering and selection per repo, and `lfd` exposes attach/start/cancel endpoints plus durable `terminal_sessions` rows. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch. It also needs to stay compatible with item 02's transport upgrade: grow around session identity and workspace state, not around today's local launch-spec shim.
 
 Tmux solves a real problem: manage multiple panes of work in one screen, persist layouts across sessions, switch contexts fast. Developers live in it because nothing else gives that level of control over window composition.
 

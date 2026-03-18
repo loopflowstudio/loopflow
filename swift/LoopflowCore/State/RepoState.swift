@@ -92,6 +92,7 @@ public final class RepoState {
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
     public let authProviderStore = AuthProviderStore()
+    public let secretsProviderStore = SecretsProviderStore()
     private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
@@ -217,6 +218,7 @@ public final class RepoState {
             shellCommandRunner: shellCommandRunner
         )
         authProviderStore.bindService(waveService)
+        secretsProviderStore.bindService(waveService)
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
@@ -496,6 +498,8 @@ public final class RepoState {
                             )
                         case .auth(let authEvent):
                             self.authProviderStore.handleEvent(authEvent)
+                        case .secrets(let secretsEvent):
+                            self.secretsProviderStore.handleEvent(secretsEvent)
                         case .agentStarted, .agentEnded, .worktree:
                             break
                         }
@@ -1098,6 +1102,7 @@ public final class RepoState {
             shellCommandRunner: shellCommandRunner
         )
         authProviderStore.bindService(waveService)
+        secretsProviderStore.bindService(waveService)
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {

@@ -37,6 +37,7 @@ struct ConnectionSettingsView: View {
 
                     statusContent
                     providerConnectionsContent
+                    secretsProviderContent
                     supportedHarnessesContent
 
                     if let cliMessage, mode == .bundled {
@@ -288,6 +289,10 @@ struct ConnectionSettingsView: View {
         }
     }
 
+    private var secretsProviderContent: some View {
+        SecretsProviderSection(store: repoState.secretsProviderStore)
+    }
+
     private var supportedHarnessesContent: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Supported harnesses")
@@ -528,6 +533,7 @@ struct ConnectionSettingsView: View {
         Task {
             if repoState.isConnected {
                 await repoState.authProviderStore.refresh()
+                await repoState.secretsProviderStore.refresh()
                 return
             }
 

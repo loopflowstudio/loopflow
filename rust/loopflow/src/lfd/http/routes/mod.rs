@@ -4,6 +4,7 @@ pub mod flows;
 pub mod hooks;
 pub mod providers;
 pub mod repos;
+pub mod secrets;
 pub mod sessions;
 pub mod system;
 pub mod tokens;

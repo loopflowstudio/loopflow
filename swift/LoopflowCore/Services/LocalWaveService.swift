@@ -332,6 +332,65 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try decodeResponse(AuthProviderStatus.self, from: data)
     }
 
+    // MARK: - Secrets
+
+    public func secretsStatus() async throws -> SecretsProviderStatus {
+        let (data, response) = try await performGet(secretsURL())
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(SecretsProviderStatus.self, from: data)
+    }
+
+    public func connectSecrets(
+        provider: String, token: String, project: String, config: String
+    ) async throws -> SecretsProviderStatus {
+        var request = try makeRequest(secretsURL("connect"), method: "POST")
+        let body = [
+            "provider": provider,
+            "token": token,
+            "project": project,
+            "config": config,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(SecretsProviderStatus.self, from: data)
+    }
+
+    public func syncSecrets() async throws -> SecretsProviderStatus {
+        let request = try makeRequest(secretsURL("sync"), method: "POST")
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(SecretsProviderStatus.self, from: data)
+    }
+
+    public func updateSecretsConfig(
+        project: String?, config: String?
+    ) async throws -> SecretsProviderStatus {
+        var request = try makeRequest(secretsURL("config"), method: "PUT")
+        var body: [String: String] = [:]
+        if let project { body["project"] = project }
+        if let config { body["config"] = config }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(SecretsProviderStatus.self, from: data)
+    }
+
+    public func disconnectSecrets() async throws -> SecretsProviderStatus {
+        let request = try makeRequest(secretsURL(), method: "DELETE")
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(SecretsProviderStatus.self, from: data)
+    }
+
+    private func secretsURL(_ component: String? = nil) -> URL {
+        var url = apiBaseURL.appendingPathComponent("secrets")
+        if let component {
+            url = url.appendingPathComponent(component)
+        }
+        return url
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.

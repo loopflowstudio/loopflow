@@ -39,12 +39,12 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 ## Risks
 
 - Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
-- The current launch-spec shim diverges from the eventual daemon-owned PTY design; remote repos and true `lf <step-or-flow>` parity stay blocked until transport is upgraded
+- The current launch-spec shim diverges from the eventual daemon-owned PTY design (tracked in `wave/lfd/`); remote repos stay blocked until transport is upgraded
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
 - Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state
-- This branch does **not** close out interactive sessions end-to-end inside the Swift app yet. Flow override visibility, bundled-`lfd` lifecycle, and terminal auto-presentation moved forward, but the in-app interactive session path still needs final stabilization before item 02 can be called done.
+- The product surface foregrounds one run per selected wave even though the runtime acknowledges many-run waves; portfolio and lifecycle work should not assume single-run exclusivity
 
 ## Metrics
 

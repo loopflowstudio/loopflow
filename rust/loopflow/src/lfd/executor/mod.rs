@@ -1,7 +1,7 @@
 pub(crate) mod docker;
 pub(crate) mod helpers;
 pub(crate) mod local;
-mod wave;
+pub(crate) mod wave;
 
 use std::path::Path;
 

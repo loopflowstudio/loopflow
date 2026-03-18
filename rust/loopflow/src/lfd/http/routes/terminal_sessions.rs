@@ -267,9 +267,6 @@ fn local_auth_header(auth: &AuthProvider) -> Option<String> {
             "Authorization: Bearer {}",
             session_token.expose_secret()
         )),
-        AuthProvider::Static { token } => {
-            Some(format!("Authorization: Bearer {}", token.expose_secret()))
-        }
         AuthProvider::Studio { local_token, .. } => Some(format!(
             "Authorization: Bearer {}",
             local_token.expose_secret()

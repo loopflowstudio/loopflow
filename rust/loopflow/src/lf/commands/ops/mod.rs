@@ -1,11 +1,9 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{
-    current_branch, delete_local_branch, get_default_branch, rev_parse, sync_main,
-};
+use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
 use crate::engine::worktrees::{
     create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
-    wave_name_from_worktree_and_main, worktree_path, worktree_path_with_config,
+    wave_name_from_worktree_and_main, worktree_path,
 };
 use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, Surface};
 use crate::lf::commands::util::find_repo_root;
@@ -562,8 +560,6 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
 fn wt_switch(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let config = load_config_or_default(Some(&main_repo));
-    let branch_config = config.branch_names.as_ref();
     let worktrees = list_worktrees(&main_repo)?;
 
     let path = if let Some(exact_branch_match) = worktrees
@@ -573,11 +569,7 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
-        let target = if branch_ref_exists(&main_repo, name) {
-            worktree_path_with_config(&main_repo, name, branch_config)
-        } else {
-            worktree_path(&main_repo, name)
-        };
+        let target = worktree_path(&main_repo, name);
         if target.exists() {
             target
         } else {
@@ -611,11 +603,6 @@ fn wt_switch(name: &str) -> Result<()> {
         println!("cd {}", path.display());
     }
     Ok(())
-}
-
-fn branch_ref_exists(repo: &Path, branch: &str) -> bool {
-    rev_parse(repo, &format!("refs/heads/{branch}")).is_ok()
-        || rev_parse(repo, &format!("refs/remotes/origin/{branch}")).is_ok()
 }
 
 fn wt_list(format: Option<&str>) -> Result<()> {

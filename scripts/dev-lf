@@ -1,29 +1,72 @@
 #!/bin/bash
 # Build and run lf from the current repo's source tree.
-# Usage: scripts/dev-lf [args...]   e.g.  scripts/dev-lf design
+# Usage: scripts/dev-lf [args...]             e.g.  scripts/dev-lf design
+#        source scripts/dev-lf [args...]      applies shell directives like `cd`
 #
 # Run directly — do NOT use `uv run scripts/dev-lf` (uv mangles args
 # and breaks TTY passthrough for interactive agents).
-set -e
-set -o pipefail
 
-REPO="$(git rev-parse --show-toplevel)"
-export RUST_LOG="${RUST_LOG:-lf=debug,loopflow=debug}"
-cargo build -p loopflow --bin lf --manifest-path "$REPO/Cargo.toml" </dev/null 2>&1 | grep -E '^   Compiling|^    Finished|^error' >&2
-echo "running: $REPO/target/debug/lf $*" >&2
+is_sourced() {
+    if [[ -n "${ZSH_EVAL_CONTEXT:-}" ]]; then
+        [[ "$ZSH_EVAL_CONTEXT" != "toplevel" ]]
+    else
+        [[ "${BASH_SOURCE[0]}" != "$0" ]]
+    fi
+}
 
-# Mirror the lf() shell function so directives (cd after land, wt create) work.
-# dev-lf runs as a child process so it can't change the parent shell's cwd,
-# but it prints the directive so the user can copy-paste.
-directive_file="$(mktemp)"
-exit_code=0
-LOOPFLOW_DIRECTIVE_FILE="$directive_file" "$REPO/target/debug/lf" "$@" || exit_code=$?
+return_or_exit() {
+    local code="$1"
+    if is_sourced; then
+        return "$code"
+    fi
+    exit "$code"
+}
 
-if [[ -s "$directive_file" ]]; then
-    while IFS= read -r line; do
-        echo "$line" >&2
-    done < "$directive_file"
-fi
+run_dev_lf() {
+    local repo directive_file status_file exit_code run_status
 
-rm -f "$directive_file"
-exit "$exit_code"
+    repo="$(git rev-parse --show-toplevel)" || return "$?"
+    directive_file="$(mktemp)"
+    status_file="$(mktemp)"
+
+    (
+        set -e
+        set -o pipefail
+
+        export RUST_LOG="${RUST_LOG:-lf=debug,loopflow=debug}"
+        cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null 2>&1 |
+            grep -E '^   Compiling|^    Finished|^error' >&2
+        echo "running: $repo/target/debug/lf $*" >&2
+
+        exit_code=0
+        LOOPFLOW_DIRECTIVE_FILE="$directive_file" "$repo/target/debug/lf" "$@" || exit_code=$?
+        printf '%s\n' "$exit_code" >"$status_file"
+    )
+    run_status=$?
+
+    if [[ -s "$status_file" ]]; then
+        exit_code="$(cat "$status_file")"
+    else
+        exit_code="$run_status"
+    fi
+
+    if [[ -s "$directive_file" ]]; then
+        if is_sourced; then
+            source "$directive_file"
+            if [[ "$exit_code" -eq 0 ]]; then
+                exit_code=$?
+            fi
+        else
+            while IFS= read -r line; do
+                echo "$line" >&2
+            done <"$directive_file"
+            echo "Tip: source scripts/dev-lf ... to apply shell directives in this shell." >&2
+        fi
+    fi
+
+    rm -f "$directive_file" "$status_file"
+    return "$exit_code"
+}
+
+run_dev_lf "$@"
+return_or_exit $?

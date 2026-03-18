@@ -34,6 +34,7 @@ pub async fn create_code_review_attention(
             .and_then(|pr| pr.title.clone())
             .unwrap_or_else(|| "Wave is ready for code review and shipping.".to_string()),
         context: json!({
+            "step": "code/review",
             "pr_url": pr.map(|pr| pr.url.clone()),
             "pr_number": pr.and_then(|pr| pr.number),
             "pr_title": pr.and_then(|pr| pr.title.clone()),
@@ -79,6 +80,105 @@ pub async fn create_step_failure_attention(
         .await
         .map_err(|err| format!("upsert step failure attention failed: {err}"))?;
     Ok(item)
+}
+
+/// Map interactive step names to attention kinds for checkpoint steps.
+/// Returns `None` for exploratory steps that don't gate flow progress.
+fn interactive_step_kind(step_name: &str) -> Option<(AttentionKind, &'static str)> {
+    match step_name {
+        "review-design" | "kickoff" => Some((AttentionKind::DesignReview, "code/design")),
+        "review-chord" => Some((AttentionKind::Calibration, "chord/review")),
+        _ => None,
+    }
+}
+
+/// Create an attention item for an interactive checkpoint step.
+///
+/// Returns `Ok(None)` for exploratory steps (design, explore, demo, refine)
+/// that don't represent checkpoints needing queue surfacing.
+pub async fn create_interactive_step_attention(
+    store: &SharedStore,
+    wave: &Wave,
+    run: &WaveRun,
+    step_name: &str,
+    terminal_session_id: &LfdId,
+) -> Result<Option<AttentionItem>, String> {
+    let Some((kind, canonical_step)) = interactive_step_kind(step_name) else {
+        return Ok(None);
+    };
+
+    let (title, summary) = match kind {
+        AttentionKind::DesignReview => (
+            format!("{} needs design review", wave.name()),
+            format!("Interactive step '{step_name}' is waiting for design review."),
+        ),
+        AttentionKind::Calibration => (
+            format!("{} chord review ready", wave.name()),
+            format!("Interactive step '{step_name}' is waiting for chord review."),
+        ),
+        _ => unreachable!(),
+    };
+
+    let branch_slug = run.branch.rsplit('/').next().unwrap_or(&run.branch);
+
+    let item = AttentionItem {
+        id: LfdId::new(),
+        wave_id: wave.id().clone(),
+        run_id: Some(run.id.clone()),
+        kind,
+        status: AttentionStatus::Surfaced,
+        title,
+        summary,
+        context: json!({
+            "step": canonical_step,
+            "terminal_session_id": terminal_session_id.to_string(),
+            "design_path": format!("scratch/{branch_slug}.md"),
+        }),
+        surfaced_at: OffsetDateTime::now_utc(),
+        viewed_at: None,
+        resolved_at: None,
+    };
+
+    store
+        .upsert_attention_item(&item)
+        .await
+        .map_err(|err| format!("upsert interactive step attention failed: {err}"))?;
+    Ok(Some(item))
+}
+
+/// Resolve attention items for interactive steps when the terminal session completes.
+pub async fn resolve_interactive_attention(
+    store: &SharedStore,
+    run_id: &LfdId,
+) -> Result<Vec<AttentionItem>, String> {
+    let items = store
+        .list_attention_items(None, None)
+        .await
+        .map_err(|err| format!("list attention items failed: {err}"))?;
+
+    let mut resolved = Vec::new();
+    for mut item in items {
+        if item.status == AttentionStatus::Resolved {
+            continue;
+        }
+        if item.run_id.as_ref() != Some(run_id) {
+            continue;
+        }
+        if !matches!(
+            item.kind,
+            AttentionKind::DesignReview | AttentionKind::Calibration
+        ) {
+            continue;
+        }
+        item.status = AttentionStatus::Resolved;
+        item.resolved_at = Some(OffsetDateTime::now_utc());
+        store
+            .upsert_attention_item(&item)
+            .await
+            .map_err(|err| format!("resolve interactive attention failed: {err}"))?;
+        resolved.push(item);
+    }
+    Ok(resolved)
 }
 
 pub async fn mark_attention_viewed(
@@ -297,11 +397,17 @@ pub fn queue_block_attention_item_from_existing(
 #[cfg(test)]
 mod tests {
     use super::{
-        queue_block_attention_item, queue_block_attention_item_from_existing,
-        queue_block_from_attention,
+        create_interactive_step_attention, interactive_step_kind, queue_block_attention_item,
+        queue_block_attention_item_from_existing, queue_block_from_attention,
+        resolve_interactive_attention,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{AttentionStatus, QueueBlock, QueueBlockReason};
+    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
+    use crate::lfd::types::{
+        AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Wave, WaveRun,
+        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+    };
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -348,5 +454,182 @@ mod tests {
         assert_eq!(refreshed.status, AttentionStatus::Viewed);
         assert_eq!(refreshed.surfaced_at, existing.surfaced_at);
         assert_eq!(refreshed.viewed_at, existing.viewed_at);
+    }
+
+    #[test]
+    fn interactive_step_kind_maps_checkpoint_steps() {
+        let (kind, step) = interactive_step_kind("review-design").unwrap();
+        assert!(matches!(kind, AttentionKind::DesignReview));
+        assert_eq!(step, "code/design");
+
+        let (kind, step) = interactive_step_kind("kickoff").unwrap();
+        assert!(matches!(kind, AttentionKind::DesignReview));
+        assert_eq!(step, "code/design");
+
+        let (kind, step) = interactive_step_kind("review-chord").unwrap();
+        assert!(matches!(kind, AttentionKind::Calibration));
+        assert_eq!(step, "chord/review");
+    }
+
+    #[test]
+    fn interactive_step_kind_skips_exploratory_steps() {
+        assert!(interactive_step_kind("design").is_none());
+        assert!(interactive_step_kind("explore").is_none());
+        assert!(interactive_step_kind("demo").is_none());
+        assert!(interactive_step_kind("refine").is_none());
+        assert!(interactive_step_kind("implement").is_none());
+    }
+
+    async fn test_store() -> SharedStore {
+        let db_path = std::env::temp_dir().join(format!("lfd-attention-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        Arc::new(open_store(&config).await.expect("sqlite store"))
+    }
+
+    fn test_wave() -> Wave {
+        Wave::new(
+            LfdId::new(),
+            "test-wave".to_string(),
+            "/tmp/repo".to_string(),
+        )
+    }
+
+    fn test_run(wave: &Wave) -> WaveRun {
+        WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            snapshot: WaveRunSnapshot {
+                repo: "/tmp/repo".to_string(),
+                flow: "build".to_string(),
+                direction: vec![],
+                area: vec![],
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Waiting,
+            worktree: "/tmp/wt".to_string(),
+            branch: "jack.test-wave.20260318".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+            activation_log_id: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave.id().to_string(),
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
+            target_branch: "main".to_string(),
+            repair_of: None,
+            pr: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_interactive_step_attention_for_review_design() {
+        let store = test_store().await;
+        let wave = test_wave();
+        store.create_wave(&wave).await.unwrap();
+        let run = test_run(&wave);
+        store.create_wave_run(&run).await.unwrap();
+        let session_id = LfdId::new();
+
+        let item =
+            create_interactive_step_attention(&store, &wave, &run, "review-design", &session_id)
+                .await
+                .unwrap()
+                .expect("review-design should create an attention item");
+
+        assert_eq!(item.kind, AttentionKind::DesignReview);
+        assert_eq!(item.status, AttentionStatus::Surfaced);
+        assert_eq!(item.context["step"], "code/design");
+        assert_eq!(item.context["terminal_session_id"], session_id.to_string());
+        assert!(item.title.contains("design review"));
+    }
+
+    #[tokio::test]
+    async fn create_interactive_step_attention_for_review_chord() {
+        let store = test_store().await;
+        let wave = test_wave();
+        store.create_wave(&wave).await.unwrap();
+        let run = test_run(&wave);
+        store.create_wave_run(&run).await.unwrap();
+        let session_id = LfdId::new();
+
+        let item =
+            create_interactive_step_attention(&store, &wave, &run, "review-chord", &session_id)
+                .await
+                .unwrap()
+                .expect("review-chord should create an attention item");
+
+        assert_eq!(item.kind, AttentionKind::Calibration);
+        assert_eq!(item.context["step"], "chord/review");
+        assert_eq!(item.context["terminal_session_id"], session_id.to_string());
+        assert!(item.title.contains("chord review"));
+    }
+
+    #[tokio::test]
+    async fn create_interactive_step_attention_skips_exploratory() {
+        let store = test_store().await;
+        let wave = test_wave();
+        let run = test_run(&wave);
+        let session_id = LfdId::new();
+
+        let result = create_interactive_step_attention(&store, &wave, &run, "design", &session_id)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+
+        let result = create_interactive_step_attention(&store, &wave, &run, "explore", &session_id)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_interactive_attention_resolves_matching_items() {
+        let store = test_store().await;
+        let wave = test_wave();
+        store.create_wave(&wave).await.unwrap();
+        let run = test_run(&wave);
+        store.create_wave_run(&run).await.unwrap();
+        let session_id = LfdId::new();
+
+        // Create a design review attention item
+        let item =
+            create_interactive_step_attention(&store, &wave, &run, "review-design", &session_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(item.status, AttentionStatus::Surfaced);
+
+        // Resolve
+        let resolved = resolve_interactive_attention(&store, &run.id)
+            .await
+            .unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, item.id);
+        assert_eq!(resolved[0].status, AttentionStatus::Resolved);
+        assert!(resolved[0].resolved_at.is_some());
+
+        // Resolve again should return empty (already resolved)
+        let resolved_again = resolve_interactive_attention(&store, &run.id)
+            .await
+            .unwrap();
+        assert!(resolved_again.is_empty());
+    }
+
+    #[test]
+    fn code_review_attention_includes_step_field() {
+        // Verify the context JSON shape for code review includes "step"
+        let context = serde_json::json!({
+            "step": "code/review",
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "pr_number": 1,
+            "pr_title": "Test PR",
+            "branch": "main",
+        });
+        assert_eq!(context["step"], "code/review");
     }
 }

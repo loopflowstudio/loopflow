@@ -249,6 +249,20 @@ private struct AttentionDetailView: View {
                 if let step = context.step { detailLine("Step", step) }
                 if let error = context.error { detailLine("Error", error) }
             }
+        case .designReview(let context):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                detailLine("Step", context.step)
+                if let designPath = context.designPath {
+                    detailLine("Design", designPath)
+                }
+            }
+        case .calibration(let context):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                detailLine("Step", context.step)
+                if let chordPath = context.chordPath {
+                    detailLine("Chord", chordPath)
+                }
+            }
         case .raw(let raw):
             Text(raw)
                 .font(Typography.code())
@@ -271,6 +285,20 @@ private struct AttentionDetailView: View {
                 if let wave = repoState.waveStore.wave(for: item.waveId) {
                     Button("Retry") {
                         Task { try? await repoState.restartStep(wave) }
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                }
+            case .designReview(let context):
+                if let sessionId = context.terminalSessionId {
+                    Button("Open Session") {
+                        repoState.openTerminalSession(sessionId)
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                }
+            case .calibration(let context):
+                if let sessionId = context.terminalSessionId {
+                    Button("Open Session") {
+                        repoState.openTerminalSession(sessionId)
                     }
                     .buttonStyle(DarkButtonStyle())
                 }

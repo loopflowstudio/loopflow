@@ -153,11 +153,12 @@ Repo windows now open into a queue view when no wave is selected:
 
 ## Terminal Workspace
 
-Selecting a waiting wave now opens a terminal workspace instead of a chat transcript:
+Selected waves now open a workspace-first detail view. Embedded terminals are additive, not a takeover:
 
-- Each interactive wave gets its own Ghostty-backed tab
-- The active tab keeps wave context, queue pressure, recent runs, and quick actions in a sidebar
-- Switching tabs keeps other terminal surfaces alive
+- The work view stays the default surface for the selected wave
+- A Ghostty-backed Terminal tab appears only when that wave has an active terminal session
+- The terminal tab keeps wave context, queue pressure, recent runs, and quick actions in a sidebar
+- Switching back to Work returns to the native wave detail/session path without destroying the terminal surface
 - Remote repos stay on the queue/detail path until terminal embedding grows a remote transport
 
 

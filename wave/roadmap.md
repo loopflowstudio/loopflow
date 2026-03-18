@@ -18,10 +18,12 @@ chord: redesign
 │  build: creates chord machinery, signals, Letta integration
 │  tend:  observes its own waves, surfaces blocks, remembers
 │
-├── wave: clear-the-deck        2 items — deploy collapse and sandbox pruning
-├── wave: agent-embedding       6 items — Concerto as conductor
-├── wave: chord-model           6 items — tend flow, Letta, mutations
+├── wave: clear-the-deck        6 items — cuts, deletions, collapses, cleanup
+├── wave: agent-embedding       8 items — Concerto as conductor
+├── wave: chord-model           7 items — tend flow, Letta, mutations, APIs
 └── wave: signals               5 items — block taxonomy, cascade, memory
+
+wave: dogfood                   3 items — Mac Mini server, phone deploy, team workflow
 ```
 
 All four waves use existing `build` / `ship-wave` flows until the
@@ -194,21 +196,36 @@ When the chord (or human) needs to change how a wave operates:
 
 ---
 
-## Existing Waves
+## Triage
 
-The five existing waves (foundation, trust, context, concerto,
-scale) keep running as-is. They aren't manually reshuffled into
-the new structure. When the default chord is ready (chord-model/07),
-it absorbs them and proposes restructuring through tend cycles.
+The five old waves (foundation, trust, context, concerto, scale)
+have been triaged. Useful items integrated into redesign waves,
+the rest dropped or saved in `wave/backlog.md`.
 
-Some existing work items are already covered by the new waves:
-- scale/04 (chord UI) → agent-embedding/01 + 03
-- scale/05 (cross-repo UI) → agent-embedding/03
-- trust/04-05 (sandbox) → clear-the-deck/02
-- foundation/01 (code cleanup) → clear-the-deck energy
+**Integrated:**
+- foundation/01 (code cleanup) → clear-the-deck/05
+- foundation/03 (API expansion) → chord-model/08
+- concerto/01 (queue management) → agent-embedding/08
+- concerto/02 (API key entry) → clear-the-deck/06
+- foundation/02 (Mac Mini dogfood) → dogfood/01
 
-These overlaps resolve naturally when the default chord runs its
-first tend cycle and proposes consolidation.
+**Dropped** (built on things not yet solid):
+- trust/04-05 (sandbox) — paused pending Daytona eval
+- scale/02-03, 05 (cross-repo) — needs single-repo foundations first
+- foundation/04 (container hardening) — no container to harden
+- context/02 (UI polish) — context system shape may change
+
+**Saved for later** (see `wave/backlog.md`):
+- scale/01 (FlowRun container), scale/04 (chords UI)
+- concerto/03 (release UI), concerto/04 (auto-send)
+- context/01 (direction aliases)
+
+## Dogfood
+
+The dogfood wave runs alongside the redesign — not as a member,
+but as the proving ground. Mac Mini server, phone deploy, team
+workflow. Features only count when they work in the real
+environment.
 
 ---
 

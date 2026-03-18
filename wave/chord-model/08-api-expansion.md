@@ -1,6 +1,10 @@
-# 03: API Expansion
+# 08: API Expansion
 
 **Finish line:** Concerto can inspect remote worktrees and drive typeahead/config UX through lfd HTTP APIs, without local filesystem assumptions.
+
+## Context
+
+The tend flow (scan-waves, assess) needs to read wave state — files, diffs, step/flow/direction metadata. Remote setups (Mac Mini dogfooding, team mode) can't assume local disk access. These endpoints also power Concerto's area picker and config editing UX.
 
 ## Scope
 

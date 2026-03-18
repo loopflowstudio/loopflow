@@ -59,7 +59,14 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
     (
         "Quality",
         &[
-            "demo", "code-review", "research", "polish", "lint", "debug", "ci-fix", "gate",
+            "demo",
+            "code-review",
+            "research",
+            "polish",
+            "lint",
+            "debug",
+            "ci-fix",
+            "gate",
         ],
     ),
     ("Scan", &["scan/scan-report", "scan/scan-plan"]),
@@ -88,7 +95,10 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("expand", "Explore ambitious extensions"),
         ("reduce", "Simplify while preserving behavior"),
         ("demo", "Experience-first walkthrough of changes"),
-        ("code-review", "Walk through structural and architectural decisions"),
+        (
+            "code-review",
+            "Walk through structural and architectural decisions",
+        ),
         ("research", "Map the territory, understand what exists"),
         ("polish", "Fix issues, run tests"),
         ("lint", "Run linter, fix issues"),

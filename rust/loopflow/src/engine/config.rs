@@ -215,7 +215,9 @@ pub struct NotionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PmRolesConfig {
-    pub provider: crate::lfd::pm::PmProviderKind,
+    pub rw_provider: crate::lfd::pm::PmProviderKind,
+    #[serde(default)]
+    pub export_providers: Vec<crate::lfd::pm::PmProviderKind>,
 }
 
 /// Main configuration struct.
@@ -592,7 +594,9 @@ notion:
   done_value: "Shipped"
   priority_property: "Severity"
 pm:
-  provider: notion
+  rw_provider: linear
+  export_providers:
+    - asana
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
@@ -622,7 +626,8 @@ pm:
         assert_eq!(
             config.pm,
             Some(PmRolesConfig {
-                provider: crate::lfd::pm::PmProviderKind::Notion,
+                rw_provider: crate::lfd::pm::PmProviderKind::Linear,
+                export_providers: vec![crate::lfd::pm::PmProviderKind::Asana],
             })
         );
     }

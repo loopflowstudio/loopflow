@@ -9,83 +9,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PriorityBucket {
-    Urgent,
-    High,
-    Medium,
-    Low,
-}
-
-impl PriorityBucket {
-    pub fn filename_prefix(self) -> &'static str {
-        match self {
-            Self::Urgent => "1",
-            Self::High => "2",
-            Self::Medium => "3",
-            Self::Low => "4",
-        }
-    }
-
-    pub fn order(self) -> u8 {
-        match self {
-            Self::Urgent => 0,
-            Self::High => 1,
-            Self::Medium => 2,
-            Self::Low => 3,
-        }
-    }
-
-    pub fn semantic_label(self) -> &'static str {
-        match self {
-            Self::Urgent => "Urgent",
-            Self::High => "High",
-            Self::Medium => "Medium",
-            Self::Low => "Low",
-        }
-    }
-
-    pub fn from_filename_prefix(value: &str) -> Option<Self> {
-        match value.trim() {
-            "1" => Some(Self::Urgent),
-            "2" => Some(Self::High),
-            "3" => Some(Self::Medium),
-            "4" => Some(Self::Low),
-            _ => None,
-        }
-    }
-
-    pub fn from_semantic_label(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "urgent" => Some(Self::Urgent),
-            "high" => Some(Self::High),
-            "medium" | "med" => Some(Self::Medium),
-            "low" => Some(Self::Low),
-            _ => None,
-        }
-    }
-
-    pub fn from_linear_value(value: i64) -> Self {
-        match value {
-            1 => Self::Urgent,
-            2 => Self::High,
-            3 => Self::Medium,
-            _ => Self::Low,
-        }
-    }
-
-    pub fn linear_value(self) -> i64 {
-        match self {
-            Self::Urgent => 1,
-            Self::High => 2,
-            Self::Medium => 3,
-            Self::Low => 4,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -97,19 +20,15 @@ pub enum PmProviderKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmConfig {
-    pub provider: PmProviderKind,
+    pub rw_provider: PmProviderKind,
+    #[serde(default)]
+    pub export_providers: Vec<PmProviderKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asana_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notion_project: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProject {
-    pub id: String,
-    pub name: String,
 }
 
 impl PmConfig {
@@ -127,7 +46,7 @@ pub struct PmItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub priority: PriorityBucket,
+    pub rank: u32,
     pub completed: bool,
 }
 
@@ -135,7 +54,7 @@ pub struct PmItem {
 pub struct PmItemCreate {
     pub name: String,
     pub description: String,
-    pub priority: PriorityBucket,
+    pub rank: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -145,12 +64,25 @@ pub struct PmItemUpdate {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub priority: Option<PriorityBucket>,
+    pub rank: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PmTextUpdate<'a> {
+    name: Option<&'a str>,
+    description: Option<&'a str>,
 }
 
 impl PmItemUpdate {
-    pub(crate) fn is_noop(&self) -> bool {
-        self.name.is_none() && self.description.is_none() && self.priority.is_none()
+    fn text_update(&self) -> Option<PmTextUpdate<'_>> {
+        if self.name.is_none() && self.description.is_none() {
+            return None;
+        }
+
+        Some(PmTextUpdate {
+            name: self.name.as_deref(),
+            description: self.description.as_deref(),
+        })
     }
 }
 
@@ -164,19 +96,7 @@ pub type PmResult<T> = Result<T, PmError>;
 
 #[async_trait]
 pub trait PmProvider: Send + Sync {
-    /// Create a new team/workspace. Returns the team ID.
-    async fn create_team(&self, name: &str) -> PmResult<String>;
-    /// Check whether a team named `name` already exists. Returns its ID if so.
-    async fn find_team(&self, name: &str) -> PmResult<Option<String>>;
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
-    /// Create a project inside a specific team. Used by init to target a freshly created team.
-    async fn create_project_in_team(
-        &self,
-        team_id: &str,
-        name: &str,
-        description: &str,
-    ) -> PmResult<String>;
-    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;
@@ -214,6 +134,7 @@ impl RoadmapItemFrontmatter {
             PmProviderKind::Notion => self.notion_id = Some(id),
         }
     }
+
 
     pub fn clear_id(&mut self, provider: PmProviderKind) {
         match provider {
@@ -444,13 +365,13 @@ mod tests {
     }
 
     #[test]
-    fn pm_item_update_is_noop_skips_priority_only_changes() {
+    fn pm_item_update_text_update_skips_rank_only_changes() {
         let update = PmItemUpdate {
-            priority: Some(PriorityBucket::High),
+            rank: Some(1),
             ..PmItemUpdate::default()
         };
 
-        assert!(!update.is_noop());
+        assert_eq!(update.text_update(), None);
     }
 
     #[test]
@@ -461,6 +382,23 @@ mod tests {
             ..PmItemUpdate::default()
         }
         .is_noop());
+    }
+
+    #[test]
+    fn pm_item_update_text_update_preserves_name_and_description() {
+        let update = PmItemUpdate {
+            name: Some("Ship Linear".to_string()),
+            description: Some("Build the GraphQL client".to_string()),
+            rank: Some(1),
+        };
+
+        assert_eq!(
+            update.text_update(),
+            Some(PmTextUpdate {
+                name: Some("Ship Linear"),
+                description: Some("Build the GraphQL client"),
+            })
+        );
     }
 
     #[test]

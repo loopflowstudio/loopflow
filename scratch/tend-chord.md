@@ -34,7 +34,7 @@ The assessment says the redesign chord is still in Phase 1, but attention is spl
 **Lever**: `items`
 **Before**: The roadmap and assessment both say the attention queue should complete before terminal embedding broadens the shell, but `01-attention-queue-completion.md` and `02-terminal-embedding.md` are effectively active at the same time.
 **After**: Update the item docs so `01-attention-queue-completion.md` explicitly owns any queue-related plumbing needed for the current PR, and `02-terminal-embedding.md` becomes a queued follow-on that starts only after queue coverage lands cleanly.
-**Rationale**: This wave already has momentum and a green PR. The smallest useful intervention is not to reshape it, but to restore the promised sequence so the queue becomes the stable home screen before Ghostty work opens another front.
+**Rationale**: This wave already has momentum and the only open PR in the chord, even though that PR is currently blocked by a failing Rust check. The smallest useful intervention is not to reshape it, but to restore the promised sequence so the queue becomes the stable home screen before Ghostty work opens another front.
 **Risk**: Terminal embedding loses some immediacy, and a small amount of backend prep may need to be revisited later once item 01 is fully landed.
 
 ## Coherence
@@ -46,4 +46,4 @@ The intended effect is deliberate imbalance: only `chord-model` and `signals` ac
 - No redesign-wave mutation yet. The root chord already has the right `flow: tend`; the problem is member-wave focus, not chord structure.
 - No area or direction changes yet for `chord-model` or `signals`. The current pressure is sequencing and scope inside the items, not a demonstrated mismatch in the wave identities.
 - No lifecycle split or deletion for `clear-the-deck`. A `reorg` pass should decide whether that stronger intervention is actually needed.
-- No additional mutation for `agent-embedding` beyond sequencing. The current PR is green, so the goal is to avoid widening, not to disrupt a wave that is already producing value.
+- No additional mutation for `agent-embedding` beyond sequencing. The current PR is active but blocked, so the goal is to avoid widening further while that existing slice gets unstuck and landed.

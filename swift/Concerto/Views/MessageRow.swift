@@ -77,8 +77,10 @@ struct MessageRow: View {
             ) {
                 if let selectedQuote {
                     ReplyComposerPopover(
+                        title: "Reply to selection",
                         quoted: selectedQuote,
                         replyDraft: $replyDraft,
+                        submitLabel: "Queue",
                         onSubmitText: queueDraftReply,
                         onEmoji: queueEmojiReply
                     )
@@ -288,8 +290,10 @@ private struct ReplyComposerPresentation: ViewModifier {
             content.sheet(isPresented: isPresented) {
                 if let quoted = composerQuote {
                     ReplyComposerContent(
+                        title: "Reply to selection",
                         quoted: quoted,
                         replyDraft: $replyDraft,
+                        submitLabel: "Queue",
                         onSubmitText: onSubmitText,
                         onEmoji: onEmoji
                     )
@@ -300,8 +304,10 @@ private struct ReplyComposerPresentation: ViewModifier {
             content.popover(isPresented: isPresented, arrowEdge: .top) {
                 if let quoted = composerQuote {
                     ReplyComposerContent(
+                        title: "Reply to selection",
                         quoted: quoted,
                         replyDraft: $replyDraft,
+                        submitLabel: "Queue",
                         onSubmitText: onSubmitText,
                         onEmoji: onEmoji
                     )

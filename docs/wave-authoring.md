@@ -125,17 +125,17 @@ direction:
   - reliability
 triggers:
   - signal: wave
-    source_wave_id: backend
+    source: backend
     flow: build
 ```
 
 | Field | What it does |
 |-------|-------------|
 | `flow` | Which flow to run (`build`, `ship-wave`, `grind`, etc.) |
-| `mode` | Execution pattern: `manual`, `loop`, or `cron` |
+| `mode` | Execution pattern: `manual`, `loop`, `cron`, or `managed` |
 | `area` | Paths in scope for this wave |
 | `direction` | Quality lenses applied to every step |
-| `triggers` | Signal + flow pairs (repo, wave, ci_failure). Defaults don't need declaring |
+| `triggers` | Signal + flow pairs (repo, wave, block, ci_failure). Defaults don't need declaring |
 
 If omitted, the wave uses whatever was set via `lfq create` or the Python API.
 
@@ -218,11 +218,13 @@ Mode controls execution pattern. Triggers fire flows in response to signals.
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped or backlog empty |
 | **cron** | On schedule (`0 9 * * *`) |
+| **managed** | Triggered by another wave's tend/build cycle |
 
 | Signal | What changed | Default flow |
 |--------|--------------|--------------|
 | **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
+| **wave** | Another wave completed. Omit `source` to derive members from `area: [wave/<name>/]` | `build` |
+| **block** | A member wave hit a persistent queue block | listener flow |
 | **ci_failure** | CI failed on the wave's PR | `ci-fix` |
 
 ```python

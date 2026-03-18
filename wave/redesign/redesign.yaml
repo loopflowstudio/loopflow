@@ -1,5 +1,6 @@
 flow: tend
-mode: manual
+mode: cron
+cron: "0 9 * * *"
 area:
   - wave/chord-model/
   - wave/clear-the-deck/
@@ -8,3 +9,8 @@ area:
 direction:
   - care
   - clarity
+triggers:
+  - signal: wave
+    flow: tend
+  - signal: block
+    flow: tend

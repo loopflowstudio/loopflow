@@ -175,6 +175,7 @@ impl QueueOps for RealQueueOps {
 
 pub async fn reconcile_wave_queue(
     store: &SharedStore,
+    event_hub: &EventHub,
     github_config: &GitHubConfig,
     wave_id: &LfdId,
     trigger: QueueTrigger,
@@ -408,6 +409,7 @@ async fn reconcile_wave_queue_with_ops(
 
 pub async fn handle_pr_merged(
     store: &SharedStore,
+    event_hub: &EventHub,
     github_config: &GitHubConfig,
     wave_id: &LfdId,
     merged_pr_number: u32,
@@ -861,12 +863,27 @@ mod tests {
         set_live_open(&store, &run2, true).await;
 
         let merged_at = OffsetDateTime::now_utc();
-        let first = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
-            .await
-            .expect("first merge");
-        let second = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
-            .await
-            .expect("second merge");
+        let event_hub = EventHub::new(16);
+        let first = handle_pr_merged(
+            &store,
+            &event_hub,
+            &GitHubConfig::default(),
+            wave.id(),
+            21,
+            merged_at,
+        )
+        .await
+        .expect("first merge");
+        let second = handle_pr_merged(
+            &store,
+            &event_hub,
+            &GitHubConfig::default(),
+            wave.id(),
+            21,
+            merged_at,
+        )
+        .await
+        .expect("second merge");
         assert!(first);
         assert!(!second);
     }

@@ -31,6 +31,7 @@ Not all blocks escalate. `MissingPr` and `WaveRunning` are transient — they re
 ```yaml
 # wave/redesign/redesign.yaml
 flow: tend
+mode: cron
 cron: "0 9 * * *"
 area:
   - wave/chord-model/
@@ -47,13 +48,30 @@ triggers:
     flow: tend
 ```
 
+### `mode: managed` for member waves
+
+A new wave mode. A managed wave doesn't have its own heartbeat — its chord-wave dispatches it. The cron poller ignores it, the loop ticker ignores it, but trigger activations (from the chord-wave's tend decisions) work normally.
+
+`manual` means "a human runs this." `managed` means "my chord runs this." The difference matters for display (`lfq list` shows managed waves as part of their chord's rhythm, not idle), stall detection (a managed wave that hasn't run means its chord isn't tending, not that nobody remembered to type a command), and future beatgrids (managed waves are the natural children in beat subdivision).
+
+Member waves (`chord-model`, `signals`, etc.) become `mode: managed`. The redesign chord-wave stays `mode: cron` — it's the heartbeat source.
+
+```yaml
+# wave/chord-model/chord-model.yaml
+flow: ship-wave
+mode: managed
+# ...
+```
+
 ### Cron
 
-Already works. Set `cron: "0 9 * * *"` on the chord-wave. The cron poller evaluates the expression and fires the wave's primary flow. No new code needed — just configure the redesign wave.
+Set `mode: cron` and `cron: "0 9 * * *"` on the chord-wave. The cron poller already evaluates expressions and fires the wave's primary flow. Cron waves already receive event-driven triggers (e.g. `ci_failure` fires regardless of mode), so `mode: cron` is the base rhythm and wave/block triggers layer on top. No new code needed — just configure the redesign wave.
 
-### `lf ops land` emits completion
+### Webhook merge fires completion
 
-Today `lf ops land` is a CLI operation that doesn't notify lfd. After a successful merge-queue submission, `land` calls `POST /api/waves/{name}/complete` — a new lightweight endpoint that fires `trigger_listeners_on_completion` for the named wave. This closes the gap between CLI-driven lands and lfd-managed runs.
+When a member wave's PR merges, lfd's webhook handler already processes the event via `QueueTrigger::WebhookMerged` in `reconcile_wave_queue`. This path gains a call to `trigger_listeners_on_completion` for the merged wave, which fires area-derived wave triggers on chord-waves.
+
+No new API endpoint. No CLI coupling. `lf ops` stays freeform — it doesn't call lfd. The webhook merge path is more accurate (fires after actual merge, not merge-queue submission) and more reliable (doesn't depend on CLI behavior).
 
 ### Debounce via coalescing
 
@@ -88,7 +106,9 @@ Every `ActivationLog` already stores a `reason` string. Area-derived triggers in
 
 **Persistent blocks only.** `MissingPr` and `WaveRunning` are queue states that self-resolve. Escalating them would flood tend with noise. Only `RebaseConflict`, `ScratchDirty`, and `PromotionFailed` fire `Signal::Block`.
 
-**`lf ops land` notifies lfd.** The CLI and the runtime must agree on when work lands. A one-line POST after merge-queue submission closes this gap.
+**Webhook merge fires completion.** When a member wave's PR merges, lfd's existing webhook handler calls `trigger_listeners_on_completion`. No new endpoint, no CLI-to-daemon coupling. `lf ops` stays freeform.
+
+**Managed mode for member waves.** `mode: managed` means "my chord runs this." Distinguishes from `manual` (human-initiated) for display, stall detection, and future beatgrids. Cron/loop pollers ignore managed waves, same as manual — the difference is semantic, not mechanical (yet).
 
 **Breaking YAML change for `triggers`.** Singular → list. No backwards compatibility shim. Any existing wave configs with `triggers:` as a single object get a migration note in the PR.
 
@@ -96,12 +116,13 @@ Every `ActivationLog` already stores a `reason` string. Area-derived triggers in
 
 **In scope:**
 - `Signal::Block` variant (value 4) in trigger types
+- `mode: managed` variant in wave modes
 - Area-derived source resolution in `trigger_listeners_on_completion`
 - `spawn_block_handler` listener for block escalation
 - `WaveConfig.triggers` → `Vec<TriggerDef>`
-- `POST /api/waves/{name}/complete` endpoint
-- `lf ops land` calls completion endpoint after merge-queue submission
-- Redesign wave config update (cron + triggers)
+- `trigger_listeners_on_completion` called from webhook merge handler
+- Redesign wave config update (mode: cron + triggers)
+- Member wave config updates (mode: managed)
 - Activation reason formatting for area-derived triggers
 
 **Out of scope:**
@@ -129,8 +150,11 @@ cargo test -p loopflow area_derived_coalesces_member_completions
 # Activation reasons visible in logs
 cargo test -p loopflow activation_log_includes_source_wave_name
 
-# lf ops land notifies lfd
-cargo test -p loopflow land_fires_completion_signal
+# Webhook merge fires area-derived triggers
+cargo test -p loopflow webhook_merge_fires_area_derived_triggers
+
+# Managed mode ignored by cron/loop pollers
+cargo test -p loopflow managed_mode_not_polled
 ```
 
 Advances chord-model wave goals:

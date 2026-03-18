@@ -800,7 +800,7 @@ impl WaveExecutor {
 
                     self.store.update_wave_run(&run).await?;
                     self.output.close_writer(&run.id.to_string());
-                    self.trigger_listeners_on_completion(wave.id(), &run.branch)
+                    self.trigger_listeners_on_completion(wave.id(), &run.branch, false)
                         .await;
                     if should_manage_pr && run.snapshot.pr.is_some() {
                         match create_code_review_attention(&self.store, &wave, &run).await {
@@ -811,6 +811,7 @@ impl WaveExecutor {
                         }
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
+                            &self.event_hub,
                             &self.github_config,
                             wave.id(),
                             crate::lfd::queue::QueueTrigger::RunCompleted,
@@ -845,7 +846,24 @@ impl WaveExecutor {
         }
     }
 
-    async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId, source_branch: &str) {
+    pub(crate) async fn trigger_listeners_on_completion(
+        &self,
+        source_wave_id: &LfdId,
+        source_branch: &str,
+        area_derived_only: bool,
+    ) {
+        let source_wave = match self.store.get_wave(source_wave_id).await {
+            Ok(Some(wave)) => wave,
+            Ok(None) => return,
+            Err(err) => {
+                warn!(
+                    wave_id = %source_wave_id,
+                    error = %err,
+                    "failed to load source wave for completion trigger"
+                );
+                return;
+            }
+        };
         let triggers = match self
             .store
             .list_triggers_by_signal(Signal::Wave.as_i32())
@@ -863,7 +881,7 @@ impl WaveExecutor {
         };
 
         for mut trigger in triggers {
-            if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
+            if !trigger.enabled {
                 continue;
             }
 
@@ -880,17 +898,26 @@ impl WaveExecutor {
                 continue;
             }
 
-            let reason = format!(
-                "wave trigger {} triggered by source wave {}",
-                trigger.id, source_wave_id
-            );
+            let explicit_match = trigger.source_wave_id.as_ref() == Some(source_wave_id);
+            let area_match = trigger.source_wave_id.is_none()
+                && listener_wave.repo() == source_wave.repo()
+                && listener_wave.area().iter().any(|entry| {
+                    let expected = format!("wave/{}/", source_wave.name());
+                    let trimmed = entry.trim();
+                    trimmed == expected || trimmed == expected.trim_end_matches('/')
+                });
+            if !area_match && (area_derived_only || !explicit_match) {
+                continue;
+            }
+
+            let reason = format!("member wave {} completed", source_wave.name());
             let envelope = ActivationEnvelope::new(
                 listener_wave.id(),
                 Some(&trigger.id),
                 reason,
                 "",
                 "",
-                source_branch,
+                if area_match { "main" } else { source_branch },
             );
             let activated = if listener_wave.serialized {
                 let enqueued = matches!(
@@ -1508,6 +1535,21 @@ mod tests {
             id: LfdId::new(),
             wave_id: listener_wave_id.clone(),
             source_wave_id: Some(source_wave_id.clone()),
+            signal: Signal::Wave,
+            flow: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+            max_iterations: None,
+        }
+    }
+
+    fn make_area_derived_wave_trigger(listener_wave_id: &LfdId) -> Trigger {
+        Trigger {
+            id: LfdId::new(),
+            wave_id: listener_wave_id.clone(),
+            source_wave_id: None,
             signal: Signal::Wave,
             flow: None,
             last_main_sha: None,
@@ -2325,6 +2367,180 @@ mod tests {
                 .expect("fork runs should load")
                 .len(),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn trigger_listeners_area_derived() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step a");
+        repo.stage_all();
+        repo.commit("add flow fixtures");
+
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (_source_wave_id, source_run_id) =
+            create_wave_and_run(&store, repo.path(), "test-flow").await;
+        let mut listener_wave = make_wave("redesign", repo.path(), "test-flow", WaveStatus::Idle);
+        listener_wave.area = vec!["wave/fork-wave/".to_string()];
+        listener_wave.serialized = true;
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("create listener wave");
+        let trigger = make_area_derived_wave_trigger(listener_wave.id());
+        store
+            .create_trigger(&trigger)
+            .await
+            .expect("create trigger");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run_id)
+            .await
+            .expect("execute source run");
+
+        let updated_trigger = store
+            .get_trigger(&trigger.id)
+            .await
+            .expect("trigger lookup should succeed")
+            .expect("trigger should exist");
+        assert!(updated_trigger.last_triggered_at.is_some());
+
+        let runs = store
+            .list_wave_runs(Some(listener_wave.id()), None)
+            .await
+            .expect("listener runs");
+        assert!(
+            runs.iter().any(|run| run.wave_id == listener_wave.id),
+            "listener should receive a run"
+        );
+    }
+
+    #[tokio::test]
+    async fn area_derived_coalesces_member_completions() {
+        let repo = TestRepo::new();
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_a = make_wave("chord-model", repo.path(), "test-flow", WaveStatus::Idle);
+        let source_b = make_wave("signals", repo.path(), "test-flow", WaveStatus::Idle);
+        let mut listener_wave =
+            make_wave("redesign", repo.path(), "test-flow", WaveStatus::Running);
+        listener_wave.area = vec!["wave/chord-model/".to_string(), "wave/signals/".to_string()];
+        listener_wave.serialized = true;
+        store.create_wave(&source_a).await.expect("source a");
+        store.create_wave(&source_b).await.expect("source b");
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("listener wave");
+        let _listener_active_run =
+            create_main_run(&store, &listener_wave, WaveRunStatus::Running).await;
+        let trigger = make_area_derived_wave_trigger(listener_wave.id());
+        store
+            .create_trigger(&trigger)
+            .await
+            .expect("create trigger");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .trigger_listeners_on_completion(source_a.id(), "main", false)
+            .await;
+        executor
+            .trigger_listeners_on_completion(source_b.id(), "main", false)
+            .await;
+
+        let pending = store
+            .get_pending_for_trigger(listener_wave.id(), Some(&trigger.id))
+            .await
+            .expect("pending activation lookup")
+            .expect("pending activation");
+        assert_eq!(
+            pending.reason,
+            "member waves chord-model, signals completed"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_log_includes_source_wave_name() {
+        let repo = TestRepo::new();
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source = make_wave("signals", repo.path(), "test-flow", WaveStatus::Idle);
+        let mut listener = make_wave("redesign", repo.path(), "test-flow", WaveStatus::Running);
+        listener.area = vec!["wave/signals/".to_string()];
+        listener.serialized = true;
+        store.create_wave(&source).await.expect("source");
+        store.create_wave(&listener).await.expect("listener");
+        let _listener_active_run = create_main_run(&store, &listener, WaveRunStatus::Running).await;
+        let trigger = make_area_derived_wave_trigger(listener.id());
+        store
+            .create_trigger(&trigger)
+            .await
+            .expect("create trigger");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .trigger_listeners_on_completion(source.id(), "main", false)
+            .await;
+
+        let logs = store
+            .list_activation_log(listener.id(), 10)
+            .await
+            .expect("activation logs");
+        assert!(
+            logs.iter()
+                .any(|log| log.reason == "member wave signals completed"),
+            "activation log should include the source wave name"
         );
     }
 }

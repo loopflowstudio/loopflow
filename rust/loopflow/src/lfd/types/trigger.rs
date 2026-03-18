@@ -15,6 +15,7 @@ pub enum Signal {
     Repo = 1,
     Wave = 2,
     CiFailure = 3,
+    Block = 4,
 }
 
 impl Signal {
@@ -23,6 +24,7 @@ impl Signal {
             1 => Some(Self::Repo),
             2 => Some(Self::Wave),
             3 => Some(Self::CiFailure),
+            4 => Some(Self::Block),
             _ => None,
         }
     }
@@ -36,6 +38,7 @@ impl Signal {
             Self::Repo => "repo",
             Self::Wave => "wave",
             Self::CiFailure => "ci_failure",
+            Self::Block => "block",
         }
     }
 }
@@ -167,6 +170,7 @@ mod tests {
         assert_eq!(Signal::from_i32(1), Some(Signal::Repo));
         assert_eq!(Signal::from_i32(2), Some(Signal::Wave));
         assert_eq!(Signal::from_i32(3), Some(Signal::CiFailure));
+        assert_eq!(Signal::from_i32(4), Some(Signal::Block));
         assert_eq!(Signal::from_i32(0), None);
         assert_eq!(Signal::from_i32(99), None);
     }

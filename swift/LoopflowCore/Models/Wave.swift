@@ -8,12 +8,14 @@ public struct Trigger: Sendable, Hashable, Codable, Identifiable {
     public enum Signal: String, Sendable, Codable, CaseIterable {
         case repo
         case wave
+        case block
         case ciFailure = "ci_failure"
 
         public var icon: String {
             switch self {
             case .repo: return "arrow.triangle.branch"
             case .wave: return "waveform"
+            case .block: return "exclamationmark.circle"
             case .ciFailure: return "exclamationmark.triangle"
             }
         }
@@ -22,6 +24,7 @@ public struct Trigger: Sendable, Hashable, Codable, Identifiable {
             switch self {
             case .repo: return "Repo"
             case .wave: return "Wave"
+            case .block: return "Block"
             case .ciFailure: return "CI Fix"
             }
         }

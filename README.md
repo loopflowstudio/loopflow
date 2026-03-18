@@ -26,7 +26,7 @@ area:
   - designs/
 triggers:
   - signal: wave
-    source_wave_id: infra
+    source: infra
     flow: build
 ```
 
@@ -39,6 +39,7 @@ The wave's `mode` controls its execution pattern.
 | **manual** | Single run | Ship one feature, run one audit |
 | **loop** | Continuous until stopped | Work through a backlog, grind PRs |
 | **cron** | On a schedule | Daily QA pass, weekly dependency scan |
+| **managed** | Run by another wave | Member waves in a chord |
 
 ### Triggers
 
@@ -48,6 +49,7 @@ A trigger pairs a signal (what changed) with a flow (what to run). Triggers are 
 |--------|--------------|--------------|
 | **repo** | Paths changed on main | `integrate` |
 | **wave** | Another wave completed | `build` |
+| **block** | A member wave hit a persistent queue block | listener flow |
 | **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
 Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`. These don't need to be declared in the YAML.

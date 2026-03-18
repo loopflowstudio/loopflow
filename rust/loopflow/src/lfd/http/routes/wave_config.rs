@@ -21,7 +21,7 @@ pub(crate) struct WaveConfig {
     pub primary_flow: Option<String>,
     pub cron: Option<String>,
     pub area: Option<Vec<String>>,
-    pub triggers: Option<TriggerDef>,
+    pub triggers: Option<Vec<TriggerDef>>,
     pub direction: Option<Vec<String>>,
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
@@ -169,10 +169,33 @@ mod tests {
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let trigger = config.triggers.expect("trigger should exist");
+        let trigger = config
+            .triggers
+            .expect("trigger should exist")
+            .into_iter()
+            .next()
+            .expect("first trigger");
         assert_eq!(trigger.signal, "wave");
         assert_eq!(trigger.source.as_deref(), Some("infra"));
         assert_eq!(trigger.source_repo.as_deref(), Some("/tmp/source"));
+    }
+
+    #[test]
+    fn read_wave_config_parses_multiple_triggers() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("scan.yaml"),
+            "flow: build\narea: ['.']\ntriggers:\n  - signal: wave\n    flow: build\n  - signal: block\n    flow: tend\n",
+        )
+        .expect("write");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        let triggers = config.triggers.expect("triggers should exist");
+        assert_eq!(triggers.len(), 2);
+        assert_eq!(triggers[0].signal, "wave");
+        assert_eq!(triggers[1].signal, "block");
     }
 
     #[test]

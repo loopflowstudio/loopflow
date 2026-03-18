@@ -86,7 +86,7 @@ pub async fn enqueue_pending_activation(
         .await
     {
         Ok(Some(mut existing)) => {
-            existing.reason = envelope.reason.clone();
+            existing.reason = merge_activation_reason(&existing.reason, &envelope.reason);
             if !envelope.from_sha.is_empty() && existing.from_sha.is_empty() {
                 existing.from_sha = envelope.from_sha.clone();
             }
@@ -459,6 +459,54 @@ async fn record_activation_log(
     }
 }
 
+fn merge_activation_reason(existing: &str, incoming: &str) -> String {
+    match (
+        parse_member_completion_reason(existing),
+        parse_member_completion_reason(incoming),
+    ) {
+        (Some(mut existing_members), Some(incoming_members)) => {
+            for incoming_member in incoming_members {
+                if !existing_members
+                    .iter()
+                    .any(|member| member == &incoming_member)
+                {
+                    existing_members.push(incoming_member);
+                }
+            }
+            if existing_members.len() == 1 {
+                format!("member wave {} completed", existing_members[0])
+            } else {
+                format!("member waves {} completed", existing_members.join(", "))
+            }
+        }
+        _ => incoming.to_string(),
+    }
+}
+
+fn parse_member_completion_reason(reason: &str) -> Option<Vec<String>> {
+    if let Some(name) = reason
+        .strip_prefix("member wave ")
+        .and_then(|value| value.strip_suffix(" completed"))
+    {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return Some(vec![trimmed.to_string()]);
+        }
+    }
+    reason
+        .strip_prefix("member waves ")
+        .and_then(|value| value.strip_suffix(" completed"))
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|members| !members.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +611,24 @@ mod tests {
         let coalesced = events.try_recv().expect("coalesced event");
         assert!(matches!(queued, Event::ActivationQueued { .. }));
         assert!(matches!(coalesced, Event::ActivationCoalesced { .. }));
+    }
+
+    #[test]
+    fn merge_activation_reason_accumulates_member_wave_names() {
+        assert_eq!(
+            merge_activation_reason(
+                "member wave chord-model completed",
+                "member wave signals completed"
+            ),
+            "member waves chord-model, signals completed"
+        );
+        assert_eq!(
+            merge_activation_reason(
+                "member waves chord-model, signals completed",
+                "member wave signals completed"
+            ),
+            "member waves chord-model, signals completed"
+        );
     }
 
     #[tokio::test]

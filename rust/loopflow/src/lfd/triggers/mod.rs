@@ -1,4 +1,5 @@
 mod activation;
+mod block;
 mod ci_failure;
 mod common;
 mod cron;
@@ -13,6 +14,7 @@ pub use activation::{
     dispatch_wave_if_ready, enqueue_pending_activation, spawn_activation_dispatcher,
     spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome, DEFAULT_ACTIVATION_QUEUE_LIMIT,
 };
+pub use block::spawn_block_handler;
 pub use ci_failure::spawn_ci_failure_handler;
 pub use common::spawn_run_task_with_slot;
 pub use cron::spawn_cron_poller;

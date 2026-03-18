@@ -7,6 +7,24 @@ on:
   merge_group:
 
 jobs:
+  scratch-clear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify scratch/ is clear
+        run: |
+          if [ ! -d scratch ]; then
+            echo "scratch/ is missing"
+            exit 1
+          fi
+
+          EXTRA=$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)
+          if [ -n "$EXTRA" ]; then
+            echo "scratch/ must be clear before landing"
+            echo "$EXTRA"
+            exit 1
+          fi
+
   rust-test:
     runs-on: ubuntu-latest
     steps:
@@ -75,3 +93,54 @@ jobs:
       - name: Run Concerto UI tests
         run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
         working-directory: swift
+
+  tests-result:
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - scratch-clear
+      - rust-test
+      - python-test
+      - e2e-smoke
+      - docker-smoke
+      - swift-test
+      - concerto-ui-test
+    steps:
+      - name: Aggregate test results
+        env:
+          SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
+          RUST_TEST: ${{ needs.rust-test.result }}
+          PYTHON_TEST: ${{ needs.python-test.result }}
+          E2E_SMOKE: ${{ needs.e2e-smoke.result }}
+          DOCKER_SMOKE: ${{ needs.docker-smoke.result }}
+          SWIFT_TEST: ${{ needs.swift-test.result }}
+          CONCERTO_UI_TEST: ${{ needs.concerto-ui-test.result }}
+        run: |
+          failures=0
+
+          check_result() {
+            local name="$1"
+            local result="$2"
+            case "$result" in
+              success)
+                echo "PASS  $name"
+                ;;
+              skipped)
+                echo "SKIP  $name"
+                ;;
+              *)
+                echo "FAIL  $name ($result)"
+                failures=1
+                ;;
+            esac
+          }
+
+          check_result "scratch-clear" "$SCRATCH_CLEAR"
+          check_result "rust-test" "$RUST_TEST"
+          check_result "python-test" "$PYTHON_TEST"
+          check_result "e2e-smoke" "$E2E_SMOKE"
+          check_result "docker-smoke" "$DOCKER_SMOKE"
+          check_result "swift-test" "$SWIFT_TEST"
+          check_result "concerto-ui-test" "$CONCERTO_UI_TEST"
+
+          exit "$failures"

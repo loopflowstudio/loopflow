@@ -238,12 +238,13 @@ impl PmProvider for AsanaClient {
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let request = UpdateTaskRequest::from(update);
-        if request.is_empty() {
+        let Some(update) = update.text_update() else {
             return Ok(());
-        }
+        };
 
-        let body = AsanaRequest { data: request };
+        let body = AsanaRequest {
+            data: UpdateTaskRequest::from(update),
+        };
         let path = task_path(item_id);
         let _: AsanaResponse<Value> = self
             .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
@@ -316,17 +317,13 @@ impl<'a> UpdateTaskRequest<'a> {
             completed: Some(true),
         }
     }
-
-    fn is_empty(&self) -> bool {
-        self.name.is_none() && self.notes.is_none() && self.completed.is_none()
-    }
 }
 
-impl<'a> From<&'a PmItemUpdate> for UpdateTaskRequest<'a> {
-    fn from(update: &'a PmItemUpdate) -> Self {
+impl<'a> From<super::PmTextUpdate<'a>> for UpdateTaskRequest<'a> {
+    fn from(update: super::PmTextUpdate<'a>) -> Self {
         Self {
-            name: update.name.as_deref(),
-            notes: update.description.as_deref(),
+            name: update.name,
+            notes: update.description,
             completed: None,
         }
     }

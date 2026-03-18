@@ -47,6 +47,25 @@ pub struct PmItemUpdate {
     pub rank: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PmTextUpdate<'a> {
+    name: Option<&'a str>,
+    description: Option<&'a str>,
+}
+
+impl PmItemUpdate {
+    fn text_update(&self) -> Option<PmTextUpdate<'_>> {
+        if self.name.is_none() && self.description.is_none() {
+            return None;
+        }
+
+        Some(PmTextUpdate {
+            name: self.name.as_deref(),
+            description: self.description.as_deref(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PmError {
     #[error("{0}")]
@@ -166,5 +185,32 @@ mod tests {
 
         let rendered = doc.render().expect("document should render");
         assert_eq!(rendered, "# 01: Ship offline sync\n");
+    }
+
+    #[test]
+    fn pm_item_update_text_update_skips_rank_only_changes() {
+        let update = PmItemUpdate {
+            rank: Some(1),
+            ..PmItemUpdate::default()
+        };
+
+        assert_eq!(update.text_update(), None);
+    }
+
+    #[test]
+    fn pm_item_update_text_update_preserves_name_and_description() {
+        let update = PmItemUpdate {
+            name: Some("Ship Linear".to_string()),
+            description: Some("Build the GraphQL client".to_string()),
+            rank: Some(1),
+        };
+
+        assert_eq!(
+            update.text_update(),
+            Some(PmTextUpdate {
+                name: Some("Ship Linear"),
+                description: Some("Build the GraphQL client"),
+            })
+        );
     }
 }

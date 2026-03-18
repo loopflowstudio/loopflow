@@ -236,18 +236,17 @@ impl PmProvider for LinearClient {
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let request = IssueUpdateInput::from(update);
-        if request.is_empty() {
+        let Some(update) = update.text_update() else {
             return Ok(());
-        }
+        };
 
         let _: Value = self
             .graphql(
                 UPDATE_ITEM_MUTATION,
                 json!({
                     "id": item_id,
-                    "title": request.title,
-                    "description": request.description,
+                    "title": update.name,
+                    "description": update.description,
                 }),
             )
             .await?;
@@ -405,27 +404,6 @@ struct WorkflowStatesConnection {
 #[derive(Deserialize)]
 struct WorkflowStateNode {
     id: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct IssueUpdateInput<'a> {
-    title: Option<&'a str>,
-    description: Option<&'a str>,
-}
-
-impl<'a> IssueUpdateInput<'a> {
-    fn is_empty(&self) -> bool {
-        self.title.is_none() && self.description.is_none()
-    }
-}
-
-impl<'a> From<&'a PmItemUpdate> for IssueUpdateInput<'a> {
-    fn from(update: &'a PmItemUpdate) -> Self {
-        Self {
-            title: update.name.as_deref(),
-            description: update.description.as_deref(),
-        }
-    }
 }
 
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {

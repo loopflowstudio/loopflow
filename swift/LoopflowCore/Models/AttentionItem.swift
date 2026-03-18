@@ -1,20 +1,29 @@
 import Foundation
 
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
-    case interactiveStep = "interactive_step"
-    case algedonic
+    case designReview = "design_review"
+    case codeReview = "code_review"
+    case calibration
+    case queueFailure = "queue_failure"
+    case stepFailure = "step_failure"
 
     public var icon: String {
         switch self {
-        case .interactiveStep: return "hand.raised"
-        case .algedonic: return "exclamationmark.triangle"
+        case .designReview: return "doc.text.magnifyingglass"
+        case .codeReview: return "arrow.up.right.square"
+        case .calibration: return "slider.horizontal.3"
+        case .queueFailure: return "exclamationmark.triangle"
+        case .stepFailure: return "xmark.octagon"
         }
     }
 
     public var label: String {
         switch self {
-        case .interactiveStep: return "Step"
-        case .algedonic: return "Alert"
+        case .designReview: return "Design Review"
+        case .codeReview: return "Code Review"
+        case .calibration: return "Calibration"
+        case .queueFailure: return "Queue Failure"
+        case .stepFailure: return "Step Failure"
         }
     }
 }

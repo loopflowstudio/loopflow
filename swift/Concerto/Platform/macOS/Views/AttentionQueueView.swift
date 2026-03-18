@@ -4,15 +4,15 @@ import LoopflowCore
 struct AttentionQueueView: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all
-        case steps
-        case alerts
+        case reviews
+        case failures
 
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .steps: return "Steps"
-            case .alerts: return "Alerts"
+            case .reviews: return "Reviews"
+            case .failures: return "Failures"
             }
         }
     }
@@ -27,10 +27,10 @@ struct AttentionQueueView: View {
             switch filter {
             case .all:
                 return true
-            case .steps:
-                return item.kind == .interactiveStep
-            case .alerts:
-                return item.kind == .algedonic
+            case .reviews:
+                return item.kind == .designReview || item.kind == .codeReview || item.kind == .calibration
+            case .failures:
+                return item.kind == .queueFailure || item.kind == .stepFailure
             }
         }
     }
@@ -161,8 +161,9 @@ private struct AttentionRow: View {
 
     private var color: Color {
         switch item.kind {
-        case .algedonic: return .statusError
-        case .interactiveStep: return .statusSuccess
+        case .queueFailure, .stepFailure: return .statusError
+        case .designReview, .codeReview: return .statusSuccess
+        case .calibration: return .statusWarning
         }
     }
 

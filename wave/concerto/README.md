@@ -2,7 +2,7 @@
 
 ## Vision
 
-The app humans use to steer agents. Mobile experience, voice input, interaction patterns, app-level polish, and getting the app onto real devices. Not every screen in the app — vertical feature UI (chords viz, cross-repo portfolio, context breakdown) lives with its domain wave.
+The app humans use to steer agents. Mobile experience, voice input, interaction patterns, and app-level polish live here. Vertical feature UI (chords viz, cross-repo portfolio, context breakdown) stays with its domain wave.
 
 Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-in surface, not a shrunken desktop.
 
@@ -14,24 +14,30 @@ Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-
 
 ## Strategy
 
-Two items, increasing scope. Secrets provider introduces cross-cutting infrastructure (Rust trait, OAuth flow, sync, CLI, UI). Release UI builds on existing ops commands with a focused Concerto surface.
+Finish the remaining user-facing gaps in the order that teaches the most with the least churn.
 
-## Roadmap
+Secrets provider comes first because it changes the auth model across lfd, CLI, and both Concerto shells. Release UI comes next because the underlying release commands already exist; the missing work is a clear operator surface, not new release mechanics. Auto-send comes last because the voice stack already records, transcribes, and resumes listening — the hard part left is making silence-based sending trustworthy without surprising people.
 
-1. **Secrets provider** — Abstract secrets provider trait, Doppler as first implementation. OAuth into Doppler, lfd syncs API keys to harness providers automatically.
-2. **Release UI** — Per-repo release config and "Release Now" button with version picker.
+Keep shared SwiftUI and LoopflowCore surfaces dominant. If a feature forces large macOS/iOS forks, the design is probably wrong.
 
 ## Goals
 
-- API key management works through secrets providers, not manual paste
-- Release config and "Release Now" accessible from the app
+- API-key-backed providers connect through secrets sync instead of manual key paste
+- Release workflows are visible and runnable from Concerto
+- Voice input can progress from speech to send to resumed listening without a keyboard
+- Shared multiplatform code stays the default path for new Concerto features
 
 ## Risks
 
-- Doppler OAuth device flow may have quirks not covered by our existing auth pattern
-- iOS and macOS view divergence increases per-feature surface area
-- SwiftUI multiplatform behavior still differs in navigation and selection APIs
+- Doppler device-flow auth and project/config selection may not fit the current broker model cleanly
+- SwiftUI interaction and accessibility behavior still diverge across iPhone, iPad, and macOS
+- Auto-send can destroy trust quickly if silence detection or cancel affordances are wrong
+- Release UI could couple itself too tightly to unstable CLI contracts instead of thin backend primitives
 
 ## Metrics
 
-- % of LoopflowCore code shared between macOS and iOS (target: >80%)
+- Shared LoopflowCore coverage for Concerto-facing features: >80%
+- Manual API key pastes in supported setup flows: 0
+- Release workflow launch from repo detail: <=2 interactions
+- Time from speech stop to message send in continuous mode: <3s
+- Voice correction rate during dogfood sessions: <20%

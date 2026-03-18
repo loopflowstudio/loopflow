@@ -306,19 +306,28 @@ struct WaveSidebar: View {
                 .frame(maxHeight: .infinity)
 
             VStack(spacing: Spacing.sm) {
-                Text("No waves yet")
-                    .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(0.5))
+                if repoState.isBootstrappingRoadmapWaves {
+                    ProgressView()
+                        .tint(.white)
 
-                Button {
-                    openDesignEntry()
-                } label: {
-                    Label("Start designing", systemImage: "sparkles")
+                    Text("Connecting roadmap waves…")
                         .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.72))
+                } else {
+                    Text("No waves yet")
+                        .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.5))
+
+                    Button {
+                        openDesignEntry()
+                    } label: {
+                        Label("Start designing", systemImage: "sparkles")
+                            .font(Typography.caption())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("wave-empty-create")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()

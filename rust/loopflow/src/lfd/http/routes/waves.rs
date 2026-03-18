@@ -102,6 +102,7 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    status: Option<String>,
     #[serde(default)]
     run: bool,
     #[serde(default)]
@@ -189,6 +190,7 @@ pub async fn create_wave_handler(
         flow,
         direction,
         area,
+        status,
         run,
         serialized,
     } = payload;
@@ -245,6 +247,10 @@ pub async fn create_wave_handler(
         created_at: Some(OffsetDateTime::now_utc()),
         serialized,
     };
+    if let Some(status) = status {
+        wave.status = WaveStatus::from_str(&status)
+            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+    }
     state
         .store
         .create_wave(&wave)
@@ -1645,6 +1651,7 @@ mod tests {
                 flow: Some("build".to_string()),
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1690,6 +1697,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1701,6 +1709,32 @@ mod tests {
         assert_eq!(created.primary_flow, "build");
         assert_eq!(created.direction, vec!["clarity".to_string()]);
         assert_eq!(created.area, vec!["src/".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn create_wave_accepts_initial_paused_status() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("designer".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                status: Some("paused".to_string()),
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        assert_eq!(created.status, "paused");
     }
 
     #[tokio::test]
@@ -1721,6 +1755,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1735,6 +1770,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1775,6 +1811,7 @@ mod tests {
                 flow: Some("ship-roadmap".to_string()),
                 direction: Some(vec!["infra".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1829,6 +1866,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),

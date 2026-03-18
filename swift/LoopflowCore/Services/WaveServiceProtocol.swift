@@ -18,6 +18,13 @@ public protocol WaveServiceProtocol: Sendable {
     func listWaves(repo: RepoTarget) async throws -> [Wave]
     func getWave(_ id: String) async throws -> Wave
     func createWave(name: String, repo: RepoTarget) async throws -> Wave
+    func createWave(
+        name: String,
+        repo: RepoTarget,
+        flow: String,
+        run: Bool,
+        status: WaveStatus?
+    ) async throws -> Wave
     func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave

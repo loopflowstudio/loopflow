@@ -109,7 +109,7 @@ def stream_with_log(
         return process.wait()
 
 
-def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
+def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | None = None) -> int:
     """Launch app bundle through LaunchServices and stream redirected stdout/stderr."""
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -123,6 +123,8 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
         str(log_path),
         str(app_path),
     ]
+    if args:
+        open_cmd.extend(["--args", *args])
     with log_path.open("a", encoding="utf-8") as log_file:
         log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         log_file.write(f"$ {' '.join(open_cmd)}\n\n")
@@ -330,8 +332,29 @@ def _list_worktree_paths(repo_root: Path) -> list[Path]:
     return worktrees
 
 
+def _worktree_wave_name(repo_root: Path, worktree: Path) -> str | None:
+    """Infer the wave name from a sibling worktree path."""
+    try:
+        repo_resolved = repo_root.resolve()
+        worktree_resolved = worktree.resolve()
+    except OSError:
+        return None
+
+    if worktree_resolved == repo_resolved:
+        return None
+    if worktree_resolved.parent != repo_resolved.parent:
+        return None
+
+    prefix = f"{repo_resolved.name}."
+    if not worktree_resolved.name.startswith(prefix):
+        return None
+
+    suffix = worktree_resolved.name[len(prefix) :].strip()
+    return suffix or None
+
+
 def _seed_waves_from_wave_dir() -> None:
-    """Create idle waves in lfd for each subdirectory in wave/."""
+    """Bootstrap paused waves from wave/ and connect matching sibling worktrees."""
     wave_dir = REPO_ROOT / "wave"
     if not wave_dir.is_dir():
         return
@@ -345,40 +368,60 @@ def _seed_waves_from_wave_dir() -> None:
     import loopflow.api as loopflow
 
     try:
-        existing = {w.name for w in loopflow.waves(repo=str(REPO_ROOT))}
+        existing = {w.name: w for w in loopflow.waves(repo=str(REPO_ROOT))}
     except Exception:
         print("Warning: could not list waves from lfd, skipping wave seed")
         return
 
-    seeded = 0
+    worktree_by_wave = {
+        wave_name: path
+        for path in _list_worktree_paths(REPO_ROOT)
+        if (wave_name := _worktree_wave_name(REPO_ROOT, path)) is not None
+    }
+
+    created = 0
+    paused = 0
     for wave_name in wave_names:
-        if wave_name in existing:
-            continue
+        matched_worktree = worktree_by_wave.get(wave_name)
         try:
-            loopflow.create_wave(wave_name, repo=str(REPO_ROOT))
-            print(f"  Seeded wave: {wave_name}")
-            seeded += 1
+            if wave_name not in existing:
+                loopflow.create_wave(
+                    wave_name,
+                    repo=str(REPO_ROOT),
+                    status="paused",
+                )
+                created += 1
+                if matched_worktree is not None:
+                    print(f"  Bootstrapped paused wave: {wave_name} (connected {matched_worktree})")
+                else:
+                    print(f"  Bootstrapped paused wave: {wave_name}")
+                continue
+
+            if existing[wave_name].status != "paused":
+                loopflow.update_wave(wave_name, status="paused")
+                paused += 1
+
+            if matched_worktree is not None:
+                print(f"  Connected roadmap wave: {wave_name} -> {matched_worktree}")
         except Exception as exc:
             print(f"  Wave {wave_name}: {exc}")
 
-    if seeded:
-        print(f"Seeded {seeded} wave(s) from wave/")
+    if created or paused:
+        print(
+            "Bootstrapped roadmap waves: "
+            f"{created} created, {paused} paused, {len(worktree_by_wave)} sibling worktrees discovered"
+        )
 
 
-def _seed_worktrees_background() -> None:
-    """Wait for bundled lfd to start, then seed worktree waves."""
-    import threading
-
-    def _seed():
-        if not _wait_for_lfd_ready(timeout_seconds=30.0):
-            return
-        try:
-            _seed_waves_from_wave_dir()
-        except Exception as exc:
-            print(f"Warning: worktree seeding failed: {exc}")
-
-    thread = threading.Thread(target=_seed, daemon=True)
-    thread.start()
+def _print_run_debug_checklist() -> None:
+    """Print the manual review path for terminal embedding and workspace routing."""
+    print("Review checklist:")
+    print("  1. Select a waiting wave: default view should stay on Work, not terminal takeover.")
+    print("  2. Open Terminal tab only when that wave has an active terminal session.")
+    print("  3. Switch between two waiting waves: each terminal tab should keep its own surface.")
+    print("  4. Exit terminal with status 0: wave should resume in lfd.")
+    print("  5. Exit terminal non-zero or stop session: wave should fail and surface should disappear.")
+    print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
 
 
 def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
@@ -422,14 +465,16 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
         return result.returncode
 
     _install_dev_app()
-    # Seed worktree waves after bundled lfd starts (background thread waits for ready)
-    if not with_lfd:
-        _seed_worktrees_background()
     print("Logs: ~/Library/Logs/Concerto/")
     print(f"Stream log: {CONCERTO_STREAM_LOG}")
+    _print_run_debug_checklist()
     print("Press Ctrl+C to quit")
     print("---")
-    app_exit = run_app_bundle_with_log(DEV_APP, CONCERTO_STREAM_LOG)
+    app_exit = run_app_bundle_with_log(
+        DEV_APP,
+        CONCERTO_STREAM_LOG,
+        args=["--repo", str(REPO_ROOT)],
+    )
 
     if lfd_process is not None:
         _stop_process(lfd_process, "lfd")

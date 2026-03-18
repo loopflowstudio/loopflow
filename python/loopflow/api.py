@@ -112,8 +112,16 @@ def create_wave(
     flow: Optional[str] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
+    status: Optional[str] = None,
 ) -> Wave:
-    return _client().create_wave(name, repo, flow=flow, direction=direction, area=area)
+    return _client().create_wave(
+        name,
+        repo,
+        flow=flow,
+        direction=direction,
+        area=area,
+        status=status,
+    )
 
 
 def update_wave(

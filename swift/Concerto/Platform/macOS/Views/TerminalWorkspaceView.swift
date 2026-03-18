@@ -110,17 +110,26 @@ private struct SessionTerminalSurface: View {
                     manager: ghosttyManager
                 )
             } else if session.status == .running {
-                ContentUnavailableView(
-                    "Session already running",
-                    systemImage: "terminal",
-                    description: Text("Restart Concerto in the same app process to keep the embedded terminal attached.")
-                )
+                if ghosttyManager.hasSession(session.id) {
+                    ContentUnavailableView(
+                        "Session already attached",
+                        systemImage: "terminal",
+                        description: Text("This terminal is already open in the current app process.")
+                    )
+                } else {
+                    detachedSessionView
+                }
             } else if let errorMessage {
                 ContentUnavailableView("Terminal unavailable", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
                 ProgressView("Preparing terminal…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .onChange(of: session.status) { _, newStatus in
+            guard newStatus.isTerminal else { return }
+            launchSpec = nil
+            ghosttyManager.destroySession(session.id)
         }
         .task(id: session.id) {
             guard launchSpec == nil, !session.status.isTerminal else { return }
@@ -133,6 +142,25 @@ private struct SessionTerminalSurface: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private var detachedSessionView: some View {
+        VStack(spacing: Spacing.lg) {
+            ContentUnavailableView(
+                "Session lost its terminal surface",
+                systemImage: "terminal",
+                description: Text("The shell is still marked running, but this window no longer owns the embedded terminal.")
+            )
+
+            Button("Cancel stale session", role: .destructive) {
+                Task {
+                    _ = try? await repoState.cancelTerminalSession(session.id)
+                    ghosttyManager.destroySession(session.id)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

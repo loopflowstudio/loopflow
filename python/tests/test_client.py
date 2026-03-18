@@ -285,9 +285,16 @@ class TestClientResponses:
             return httpx.Response(200, json=WAVE_MINIMAL)
 
         client = _mock_client(handler)
-        client.create_wave("reduce", "/tmp/repo", flow="reduce", direction=["ceo"])
+        client.create_wave(
+            "reduce",
+            "/tmp/repo",
+            flow="reduce",
+            direction=["ceo"],
+            status="paused",
+        )
         assert received["name"] == "reduce"
         assert received["direction"] == ["ceo"]
+        assert received["status"] == "paused"
         assert "area" not in received
         client.close()
 

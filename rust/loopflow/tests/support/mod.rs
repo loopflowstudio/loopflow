@@ -46,6 +46,7 @@ pub fn with_clean_home<T>(f: impl FnOnce() -> T) -> T {
 pub struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
+    previous_home: Option<String>,
     _temp: TempDir,
     _home: Option<HomeOverride>,
 }
@@ -53,15 +54,11 @@ pub struct EnvGuard {
 impl EnvGuard {
     #[allow(dead_code)] // Shared helper compiled into multiple test crates.
     pub fn new(entries: &[(&str, &str)]) -> Self {
-        Self::new_internal(entries, false)
+        Self::with_home(entries, None)
     }
 
     #[allow(dead_code)] // Shared helper used only by tests that need HOME isolation.
-    pub fn new_with_clean_home(entries: &[(&str, &str)]) -> Self {
-        Self::new_internal(entries, true)
-    }
-
-    fn new_internal(entries: &[(&str, &str)], clean_home: bool) -> Self {
+    pub fn with_home(entries: &[(&str, &str)], home: Option<&Path>) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let temp = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
@@ -73,16 +70,16 @@ impl EnvGuard {
             None => temp.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
-        let home = if clean_home {
-            Some(HomeOverride::new_temp())
-        } else {
-            None
-        };
+        let previous_home = env::var("HOME").ok();
+        if let Some(home) = home {
+            env::set_var("HOME", home);
+        }
         Self {
             _lock: lock,
             previous_path,
+            previous_home,
             _temp: temp,
-            _home: home,
+            _home: None,
         }
     }
 }
@@ -93,6 +90,11 @@ impl Drop for EnvGuard {
             env::set_var("PATH", prev);
         } else {
             env::remove_var("PATH");
+        }
+        if let Some(prev) = &self.previous_home {
+            env::set_var("HOME", prev);
+        } else {
+            env::remove_var("HOME");
         }
     }
 }

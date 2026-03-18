@@ -133,11 +133,15 @@ fn current_pr_surfaces_gh_list_errors() {
 #[test]
 fn pr_auto_generates_title_when_missing() {
     let gh_script = write_gh_script("[]", None);
-    let _env = EnvGuard::new_with_clean_home(&[
-        ("gh", gh_script.as_str()),
-        ("open", noop_script()),
-        ("claude", claude_script()),
-    ]);
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", noop_script()),
+            ("claude", claude_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");

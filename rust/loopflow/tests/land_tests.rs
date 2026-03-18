@@ -196,11 +196,15 @@ fn land_cleans_up_remote_branch() {
 
 #[test]
 fn land_missing_pr_error_includes_branch_name() {
-    let _env = EnvGuard::new_with_clean_home(&[
-        ("gh", gh_no_pr_script()),
-        ("claude", claude_script()),
-        ("open", noop_open_script()),
-    ]);
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_no_pr_script()),
+            ("claude", claude_script()),
+            ("open", noop_open_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -270,11 +274,15 @@ fn land_uses_cached_pr_copy_when_available() {
 
 #[test]
 fn land_generates_copy_when_cached_pr_copy_is_stale() {
-    let _env = EnvGuard::new_with_clean_home(&[
-        ("gh", gh_no_pr_script()),
-        ("claude", claude_script()),
-        ("open", noop_open_script()),
-    ]);
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_no_pr_script()),
+            ("claude", claude_script()),
+            ("open", noop_open_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");

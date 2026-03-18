@@ -202,6 +202,7 @@ Auth connects your providers:
 
 ```bash
 lf ops auth asana    # connect Asana for local `lf` commands like `lf ops export`
+lf ops auth configure linear  # store Linear API key for local `lf` PM commands
 lf ops auth status   # check local lf credentials
 
 lfq auth github      # connect GitHub

@@ -276,6 +276,7 @@ lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf ops auth status   # local provider auth for lf steps and ops
 lf ops auth asana    # connect Asana locally for `lf ops` / step integrations
+lf ops auth configure linear  # store Linear API key locally for `lf ops` / step integrations
 lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser

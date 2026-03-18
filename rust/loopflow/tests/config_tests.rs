@@ -6,6 +6,7 @@ use std::path::Path;
 use loopflow::engine::{load_config, load_config_or_default};
 use support::with_clean_home;
 use tempfile::TempDir;
+
 fn write_config(dir: &Path, content: &str) {
     let lf_dir = dir.join(".lf");
     fs::create_dir_all(&lf_dir).unwrap();

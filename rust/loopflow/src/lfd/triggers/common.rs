@@ -77,77 +77,97 @@ async fn execute_run_inner(
         _ => return,
     };
 
-    let depth = count_repair_chain(store, &run).await;
-    if depth >= REPAIR_DELAYS.len() {
-        // Exhausted all repair attempts — escalate to algedonic signal.
-        let step_name = run.error.as_deref().unwrap_or("unknown");
+    // Loop: check depth → backoff → repair → re-check. Exits on success,
+    // escalation (depth >= limit), or unrecoverable error.
+    let mut failed_run = run;
+    loop {
+        let depth = count_repair_chain(store, &failed_run).await;
+        if depth >= REPAIR_DELAYS.len() {
+            let step_name = failed_run.error.as_deref().unwrap_or("unknown");
+            tracing::info!(
+                run_id = %failed_run.id,
+                wave_id = %wave.id(),
+                depth,
+                "repair limit reached, creating algedonic signal"
+            );
+            match create_step_failure_attention(
+                store,
+                &wave,
+                &failed_run,
+                "repair",
+                &format!("repair failed after {depth} attempts: {step_name}"),
+            )
+            .await
+            {
+                Ok(item) => event_hub.send(Event::attention_created(item)),
+                Err(err) => {
+                    tracing::warn!(
+                        wave_id = %wave.id(),
+                        error = %err,
+                        "failed to create algedonic signal after repair limit"
+                    );
+                }
+            }
+            return;
+        }
+
+        let delay = REPAIR_DELAYS[depth];
         tracing::info!(
-            run_id = %run.id,
+            run_id = %failed_run.id,
             wave_id = %wave.id(),
             depth,
-            "repair limit reached, creating algedonic signal"
+            delay_secs = delay.as_secs(),
+            "waiting before dispatching repair attempt"
         );
-        match create_step_failure_attention(
-            store,
-            &wave,
-            &run,
-            "repair",
-            &format!("repair failed after {depth} attempts: {step_name}"),
-        )
-        .await
+        tokio::time::sleep(delay).await;
+
+        let repair_flow = classify_repair_flow(&failed_run);
+        tracing::info!(
+            run_id = %failed_run.id,
+            wave_id = %wave.id(),
+            repair_flow = %repair_flow,
+            depth = depth + 1,
+            "dispatching headless repair attempt"
+        );
+        let repair_run = match executor
+            .create_repair_run(&wave, &failed_run, &repair_flow)
+            .await
         {
-            Ok(item) => event_hub.send(Event::attention_created(item)),
+            Ok(r) => r,
             Err(err) => {
-                tracing::warn!(
-                    wave_id = %wave.id(),
-                    error = %err,
-                    "failed to create algedonic signal after repair limit"
-                );
-            }
-        }
-        return;
-    }
-
-    // Apply backoff delay before dispatching repair.
-    let delay = REPAIR_DELAYS[depth];
-    tracing::info!(
-        run_id = %run.id,
-        wave_id = %wave.id(),
-        depth,
-        delay_secs = delay.as_secs(),
-        "waiting before dispatching repair attempt"
-    );
-    tokio::time::sleep(delay).await;
-
-    let repair_flow = classify_repair_flow(&run);
-    tracing::info!(
-        run_id = %run.id,
-        wave_id = %wave.id(),
-        repair_flow = %repair_flow,
-        depth = depth + 1,
-        "dispatching headless repair attempt"
-    );
-    match executor.create_repair_run(&wave, &run, &repair_flow).await {
-        Ok(repair_run) => {
-            event_hub.send(Event::wave_started(
-                repair_run.wave_id.clone(),
-                repair_run.id.clone(),
-            ));
-            if let Err(err) = executor.execute(&repair_run.id).await {
                 tracing::error!(
-                    repair_run_id = %repair_run.id,
+                    run_id = %failed_run.id,
                     error = %err,
-                    "repair run execution failed"
+                    "failed to create repair run"
                 );
+                return;
             }
-        }
-        Err(err) => {
+        };
+
+        event_hub.send(Event::wave_started(
+            repair_run.wave_id.clone(),
+            repair_run.id.clone(),
+        ));
+        if let Err(err) = executor.execute(&repair_run.id).await {
             tracing::error!(
-                run_id = %run.id,
+                repair_run_id = %repair_run.id,
                 error = %err,
-                "failed to create repair run"
+                "repair run execution failed"
             );
+            return;
         }
+
+        // Re-read the repair run to check its outcome.
+        let repair_run = match store.get_wave_run(&repair_run.id).await {
+            Ok(Some(r)) => r,
+            _ => return,
+        };
+        if repair_run.status != WaveRunStatus::Failed {
+            return; // Repair succeeded (or is in a non-failed terminal state).
+        }
+
+        // Repair failed — loop back to check depth and try again.
+        failed_run = repair_run;
     }
 }
 

@@ -115,12 +115,17 @@ public final class TerminalWorkspaceStore {
 
     private func persist() {
         guard let orderKey = storageKey("order"),
+<<<<<<< HEAD
               let selectedKey = storageKey("selected"),
               let waveSelectionKey = storageKey("selectedByWave") else {
+=======
+              let selectedKey = storageKey("selected") else {
+>>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
             return
         }
         userDefaults.set(orderedSessionIds, forKey: orderKey)
         userDefaults.set(selectedSessionId, forKey: selectedKey)
+<<<<<<< HEAD
         userDefaults.set(selectedSessionIdsByWave, forKey: waveSelectionKey)
     }
 
@@ -173,6 +178,8 @@ public final class TerminalWorkspaceStore {
             }
             selectedSessionIdsByWave[waveId] = session.id
         }
+=======
+>>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
     }
 
     private func reconcileSelection() {
@@ -197,13 +204,18 @@ public final class TerminalWorkspaceStore {
 
     private func restoreSelection() {
         guard let orderKey = storageKey("order"),
+<<<<<<< HEAD
               let selectedKey = storageKey("selected"),
               let waveSelectionKey = storageKey("selectedByWave") else {
+=======
+              let selectedKey = storageKey("selected") else {
+>>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
             orderedSessionIds = []
             selectedSessionIdsByWave = [:]
             selectedSessionId = nil
             return
         }
+<<<<<<< HEAD
 <<<<<<< HEAD
         orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
         selectedSessionId = userDefaults.string(forKey: selectedKey)
@@ -231,7 +243,16 @@ public final class TerminalWorkspaceStore {
 =======
         orderedSessionIds = userDefaults.stringArray(forKey: "terminalWorkspace.order.\(repoKey)") ?? []
         selectedSessionId = userDefaults.string(forKey: "terminalWorkspace.selected.\(repoKey)")
+=======
+        orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
+        selectedSessionId = userDefaults.string(forKey: selectedKey)
+>>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
         reconcileSelection()
 >>>>>>> caddde45 (lf commit: compress)
+    }
+
+    private func storageKey(_ suffix: String) -> String? {
+        guard let repoKey else { return nil }
+        return "terminalWorkspace.\(suffix).\(repoKey)"
     }
 }

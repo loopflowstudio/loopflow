@@ -617,10 +617,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         repo: RepoTarget,
         activeOnly: Bool = true
     ) async throws -> [TerminalSession] {
-        var components = URLComponents(
-            url: apiBaseURL.appendingPathComponent("terminal-sessions"),
-            resolvingAgainstBaseURL: false
-        )!
+        var components = URLComponents(url: terminalSessionURL(), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "repo", value: repo.path),
             URLQueryItem(name: "active_only", value: activeOnly ? "true" : "false"),
@@ -663,12 +660,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    private func terminalSessionURL(_ id: String, action: String? = nil) -> URL {
-        let baseURL = apiBaseURL
-            .appendingPathComponent("terminal-sessions")
-            .appendingPathComponent(id)
-        guard let action else { return baseURL }
-        return baseURL.appendingPathComponent(action)
+    private func terminalSessionURL(_ id: String? = nil, components: String...) -> URL {
+        var url = apiBaseURL.appendingPathComponent("terminal-sessions")
+        if let id {
+            url = url.appendingPathComponent(id)
+        }
+        return components.reduce(url) { current, component in
+            current.appendingPathComponent(component)
+        }
     }
 
     private func performTerminalSessionAction<T>(
@@ -677,7 +676,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         parse: ([String: Any]) -> T?
     ) async throws -> T {
         let request = try makeRequest(
-            terminalSessionURL(id, action: action),
+            terminalSessionURL(id, components: action),
             method: "POST",
             body: [:],
             contentType: "application/json"

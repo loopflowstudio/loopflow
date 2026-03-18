@@ -133,12 +133,7 @@ pub async fn attach_terminal_session_handler(
         )
     })?;
     let complete_url = completion_url(&headers, &session_id);
-    let auth_header = local_auth_header(&state.auth).ok_or_else(|| {
-        api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "terminal embedding unavailable",
-        )
-    })?;
+    let auth_header = local_auth_header(&state.auth);
     let launch_argv = vec![
         "/bin/zsh".to_string(),
         "-lc".to_string(),
@@ -261,17 +256,12 @@ fn completion_url(headers: &HeaderMap, session_id: &crate::lfd::id::LfdId) -> St
     format!("http://{host}/v0/terminal-sessions/{session_id}/complete")
 }
 
-fn local_auth_header(auth: &AuthProvider) -> Option<String> {
-    match auth {
-        AuthProvider::Local { session_token } => Some(format!(
-            "Authorization: Bearer {}",
-            session_token.expose_secret()
-        )),
-        AuthProvider::Studio { local_token, .. } => Some(format!(
-            "Authorization: Bearer {}",
-            local_token.expose_secret()
-        )),
-    }
+fn local_auth_header(auth: &AuthProvider) -> String {
+    let token = match auth {
+        AuthProvider::Local { session_token } => session_token,
+        AuthProvider::Studio { local_token, .. } => local_token,
+    };
+    format!("Authorization: Bearer {}", token.expose_secret())
 }
 
 fn build_wrapped_command(

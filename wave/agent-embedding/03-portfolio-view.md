@@ -10,9 +10,13 @@ linear_id: f055918b-3e00-4f1f-ad40-9aa25b72f1a1
 
 The conductor needs a panoramic view. Not drill-in-to-see-details — glance-and-know-what-matters. This serves the garden flow's calibration moment: the human looks at the portfolio, the chord surfaces its assessment, the human calibrates.
 
+<<<<<<< HEAD:wave/agent-embedding/03-portfolio-view.md
 The single-repo home screen now exists: `WaveWorkspaceView` routes selected waves to a work surface (native session by default, terminal tab when a session exists), and `AttentionQueueView` is the no-selection home. There is also already a repo-card portfolio shell in `PortfolioWindow`: it lists repos, shows wave counts / blocked counts / diff totals, and lets the conductor jump straight into a repo or wave. Portfolio is the next scale step — deepen that existing surface with the same queue, run, and terminal signals instead of replacing it.
 
 The measurement groundwork also exists now. `lfd` records local interactive runs in `terminal_sessions`, so portfolio trend work already has one source of truth for in-app completion rate and resume latency. Before the shipped workspace milestone, that in-app rate was effectively 0% because every interactive step escaped to chat UI or an external terminal. Keep deriving the trend view from those persisted session rows instead of adding a second analytics cache.
+=======
+The single-repo home screen now exists: `WaveWorkspaceView` routes selected waves to a work surface (native session by default, terminal tab when a session exists), and `AttentionQueueView` is the no-selection home. Portfolio is the next scale step — the same signals, but summarized across many waves and repos.
+>>>>>>> a08749ac (wave: update agent-embedding after terminal embedding ships):wave/agent-embedding/04-portfolio-view.md
 
 Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the conductor framing.
 

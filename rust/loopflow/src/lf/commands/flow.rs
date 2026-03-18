@@ -36,7 +36,13 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -
     let lines = render_pipeline_lines(items, repo)?;
     let pipeline = lines
         .into_iter()
-        .map(|line| format!("  {dim}{line}{reset}", dim = colors.dim, reset = colors.reset))
+        .map(|line| {
+            format!(
+                "  {dim}{line}{reset}",
+                dim = colors.dim,
+                reset = colors.reset
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -110,7 +116,11 @@ fn render_or_pipeline(or_def: &ConcreteOr, repo: &Path) -> Result<Vec<String>> {
 }
 
 fn tree_prefix(index: usize, total: usize) -> &'static str {
-    if index + 1 == total { "└─" } else { "├─" }
+    if index + 1 == total {
+        "└─"
+    } else {
+        "├─"
+    }
 }
 
 fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {

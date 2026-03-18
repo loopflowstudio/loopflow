@@ -352,12 +352,18 @@ mod tests {
         };
         store.upsert_attention_item(&item).await.unwrap();
 
-        let resolved = resolve_attention_item(&store, &item.id).await.unwrap().unwrap();
+        let resolved = resolve_attention_item(&store, &item.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(resolved.status, AttentionStatus::Resolved);
         assert!(resolved.resolved_at.is_some());
 
         // Resolving again returns the already-resolved item
-        let again = resolve_attention_item(&store, &item.id).await.unwrap().unwrap();
+        let again = resolve_attention_item(&store, &item.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(again.status, AttentionStatus::Resolved);
     }
 }

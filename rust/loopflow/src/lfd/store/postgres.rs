@@ -1436,8 +1436,7 @@ impl PostgresStore {
     }
 
     pub async fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let attention_id =
-            crate::lfd::attention::attention_id_for_queue_block(run_id);
+        let attention_id = crate::lfd::attention::attention_id_for_queue_block(run_id);
         let Some(mut item) = self.get_attention_item(&attention_id).await? else {
             return Ok(0);
         };

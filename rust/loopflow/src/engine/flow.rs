@@ -744,32 +744,14 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::Or(OrDef { router, paths }))
 }
 
-/// Validate that flows referenced by or paths contain only steps and ops.
-/// And constructs and nested or constructs inside or sub-flows are not supported.
-fn validate_or_paths(branch_def: &OrDef, repo: &Path) -> Result<(), LoadError> {
-    for (key, path) in &branch_def.paths {
+/// Validate that flows referenced by or paths can be loaded and expanded.
+fn validate_or_paths(or_def: &OrDef, repo: &Path) -> Result<(), LoadError> {
+    for path in or_def.paths.values() {
         let Some(ref flow_name) = path.flow else {
             continue;
         };
         let flow = load_flow(flow_name, repo)?;
-        let items = expand_flow(&flow, repo)?;
-        for item in &items {
-            match item {
-                ConcreteItem::Step(_) | ConcreteItem::Op(_) => {}
-                ConcreteItem::And(_) => {
-                    return Err(LoadError::InvalidFlow(format!(
-                        "or path '{key}' references flow '{flow_name}' which contains an and construct; \
-                         or sub-flows must contain only steps and ops"
-                    )));
-                }
-                ConcreteItem::Or(_) => {
-                    return Err(LoadError::InvalidFlow(format!(
-                        "or path '{key}' references flow '{flow_name}' which contains a nested or construct; \
-                         or sub-flows must contain only steps and ops"
-                    )));
-                }
-            }
-        }
+        expand_flow(&flow, repo)?;
     }
     Ok(())
 }

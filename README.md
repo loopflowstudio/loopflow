@@ -94,8 +94,9 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 |------|--------------|
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
-| `review` | Walk through the diff, evaluate model and decisions |
-| `review-design` | Walk through the design doc, evaluate before implementation |
+| `demo` | Experience-first walkthrough of observable changes |
+| `code-review` | Walk through structural and architectural decisions |
+| `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 
 ### Tend steps (`tend/`)
@@ -150,15 +151,15 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `build` | implement → compress → lint → gate → update-wave |
 | `design-and-ship` | design → implement → reduce → polish |
-| `ship` | design → build → review → land |
+| `ship` | design → build → demo/code-review → land |
 | `pair` | design → build |
 | `grind` | research → iterate → build → gate |
 | `integrate` | rebase → integrate-upstream |
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → or(play, silence) |
-| `ship-roadmap-play` | kickoff → review-design → build → review → land |
+| `ship-roadmap` | ingest → or(play: ship-roadmap-play, silence) |
+| `ship-roadmap-play` | kickoff → review-design → build → demo/code-review → land |
 | `reorg` | update-wave (coherence pass) |
 | `qa-deploy` | qa → triage → or(fix, deploy) |
 | `qa-fix` | implement → compress → lint → gate |

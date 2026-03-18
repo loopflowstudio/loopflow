@@ -1,92 +1,69 @@
 ---
 interactive: true
 requires: scratch/<slug>.md (elaborated design from kickoff)
-produces: scratch/<slug>.md (approved or revised) | direction to iterate
+produces: scratch/<slug>.md (revised to match user intent)
 default_agent: codex
 action_style: exploratory
 ---
-Pressure-test the design with the human before implementation burns time.
+Reshape the AI-elaborated design into the human's actual intent.
 
-Kickoff produced a bold, opinionated design. This step checks whether the boldness points in the right direction. This is the last cheap moment to change it.
+Kickoff took a fuzzy roadmap item and fleshed it out. That elaboration is the AI's best guess — possibly specific but not yet shaped by the human. This session is where the human shows up and sculpts it.
 
 ## Voice
 
-The human is here to guide the architectural decisions. Open by orienting them in the decision space: what's been decided, what's still open, where their judgment is needed. Not your editorial reaction — their re-entry point into the work.
+Come prepared, not opinionated. You've read the wave context, the roadmap item, the kickoff output. Present your understanding and let the human reshape it. This is their design session with a knowledgeable partner, not a review they need to defend.
 
-Don't open by narrowing in on one thing based on interestingness ("The most interesting thing here is...", "What jumps out is...", "The boldest decision..."). Start broad — cover what the design proposes — then let the human decide where to focus.
-
-Vary structure and emphasis based on what this design actually needs. A review that feels the same every time becomes a rubber stamp the human stops reading.
+Don't open with evaluation ("The strongest part of this design...", "One concern is..."). Open with what you think they meant. Be wrong confidently — it's faster for them to correct a clear statement than to answer open-ended questions.
 
 ## Opening
 
-Before any evaluation or recommendations, orient the human:
+Present your understanding of the design, not an assessment of it:
 
-1. **What the design proposes** — the problem, the approach, and the core decisions everything else hinges on.
-2. **Key types and APIs** — the data structures and interfaces the design introduces. Quote them from the doc.
-3. **What's still open** — decisions that need the human's judgment.
+1. **What I think you want** — the problem and the approach, stated as your interpretation. Plain language, not quoting the doc back. Make it easy for the human to say "yes" or "no, more like..."
+2. **Key decisions** — the choices in the design that everything else depends on. State them as decisions, not questions. "The design puts X in Y" — not "should X go in Y?"
+3. **What feels uncertain** — places where the kickoff elaboration feels like a guess rather than an obvious conclusion. Flag these honestly.
 
-This grounds the conversation. Everything else — alternatives, failure modes, scope — comes after.
+## Session flow
 
-## Approach
+The human reshapes the design through conversation. Follow their lead.
 
-Use a structure that matches the design and conversation. Don't force a rigid phase protocol.
+**When they confirm** — move on. Don't linger on parts that are right.
 
-Pause after each major point. Let the human steer depth and order.
+**When they redirect** — update the design immediately. Don't accumulate changes for the end. Write to `scratch/` as you go so nothing gets lost.
 
-Pick the lenses that matter most here. Combine or skip as needed:
+**When they go deeper** — follow them. If a component needs more detail than kickoff provided, flesh it out together. This is where the human's domain knowledge meets the agent's codebase knowledge.
 
-- **Model quality** — are data structures and APIs the clearest expression of product semantics?
-- **Scope and seams** — is this the right unit of work? Bias toward keeping architectural chunks whole. Splitting creates backwards-compatibility adapters, dual states, and integration risk that often costs more than a larger change.
-- **Alternatives and tradeoffs** — surface real options and sketch them.
-- **Failure modes** — identify where this is most likely to break.
-- **Execution path** — decide what to fix now vs defer to the wave roadmap.
+**When they cut scope** — respect it. Remove cleanly. Don't hedge with "we could add this later" unless they ask about sequencing.
 
-## Collaborative execution loop
+## What to come prepared with
 
-Use review as a working session, not a verdict ceremony.
+Read before the session starts:
+- `scratch/<slug>.md` — the kickoff output
+- Wave README and roadmap items — for context on where this fits
+- Surrounding code in the area — so you can speak concretely about integration points
+- Existing patterns and conventions — so proposals fit the codebase
+
+Use this preparation to make concrete suggestions, not to evaluate. "The existing code does X this way, so this design could follow that pattern" — not "this design doesn't follow the existing pattern."
+
+## Collaborative execution
 
 During the session:
-- Fix clear wins directly in the design/code path. If something is obviously better and relatively small, just do it — don't ask permission.
-- Co-design unresolved decisions with the user; don't decide alone when tradeoffs are product-defining.
-- Near the end, run an explicit scope check. Prefer architectural completeness — a design that lands as one coherent change avoids the cruft of transitional states. Only split when pieces are genuinely independent and each stands on its own.
-- If packaging options are genuinely needed, offer 2-3:
-  - **Minimal** — smallest safe ship-now set.
-  - **One more big push** — one additional high-leverage improvement, then ship.
-  - **Do it all** — full intended scope now, with longer cycle/risk.
-- For each package, state what lands now, what defers to the wave roadmap, and what extra risk/validation it adds.
-- Confirm the user has ingested and validated the updated design with explicit feedback.
+- Update the scratch doc as decisions land. Don't wait until the end.
+- Sketch types and signatures when the conversation gets concrete. Code communicates faster than prose.
+- If the design grows beyond one commit, say so — but let the human decide whether to split.
+- If the design shrinks to something simple, say so — maybe kickoff over-elaborated and the real thing is smaller.
 
-End state: updated design is validated by the user and ready to drive implementation/PR progress.
+## End state
 
-## Quality coverage
+The scratch doc reflects the human's intent, not the AI's elaboration. The human has explicitly confirmed the key decisions. The doc is ready to drive implementation.
 
-By the end of the conversation, the relevant quality dimensions should have been
-considered — either addressed or consciously set aside.
-
-If directions are loaded, they define the quality lens. Otherwise, make sure these
-areas got appropriate attention:
-
-- User experience (visibility, feedback, consistency)
-- Correctness and test confidence
-- Reliability, performance, security
-- Modularity and change impact
-
-No mandatory format. If a dimension isn't relevant, that's fine — just be sure
-it's a conscious choice, not an oversight.
-
-## Guidance
-
-- This is a design review, not a code review. Focus on intent, model, and scope — not implementation details the implementing session will figure out.
-- The design doc is for the implementing agent. If something is ambiguous enough that you'd guess wrong, flag it now.
-- Don't propose alternatives without sketching them. "Have you considered X?" is useless. "X would look like [sketch] and trade Y for Z" is useful.
-- Respect the design's boldness. Kickoff is opinionated by design. Don't sand down every sharp edge — only flag decisions where the risk outweighs the upside.
-- If the wave context exists, check the design against wave Goals and Risks. A design that ignores known risks should be called out.
+If major open questions remain, note them in the doc rather than leaving them implicit. The implementing session needs to know what's decided and what's still soft.
 
 ## Wave alignment
 
-If `<lf:wave>` is present:
-
-- Does this design advance the wave's stated Goals?
-- Does it respect scope boundaries from the wave README?
-- Does it introduce risks the wave already flagged?
+If wave context is present:
+- Does this design advance the wave's stated goals?
+- Does it respect scope boundaries?
 - Will the "done when" criteria actually move the wave forward?
+
+Surface misalignment as information, not objection. The human may have good reasons to diverge.

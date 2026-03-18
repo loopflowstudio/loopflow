@@ -504,10 +504,15 @@ fn summarize_tool(name: &str, input: &serde_json::Value) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        let end = s
+            .char_indices()
+            .nth(max)
+            .map(|(idx, _)| idx)
+            .unwrap_or(s.len());
+        format!("{}...", &s[..end])
     }
 }
 
@@ -966,8 +971,16 @@ mod tests {
         let long_cmd = "x".repeat(100);
         let input = serde_json::json!({"command": long_cmd});
         let summary = summarize_tool("Bash", &input);
-        assert!(summary.len() <= 63); // 60 + "..."
+        assert!(summary.chars().count() <= 63); // 60 + "..."
         assert!(summary.ends_with("..."));
+    }
+
+    #[test]
+    fn summarize_tool_bash_truncates_on_char_boundary() {
+        let long_cmd = format!("{}{}{}", "x".repeat(58), "—", "y".repeat(10));
+        let input = serde_json::json!({"command": long_cmd});
+        let summary = summarize_tool("Bash", &input);
+        assert_eq!(summary, format!("{}...", "x".repeat(58) + "—" + "y"));
     }
 
     #[test]

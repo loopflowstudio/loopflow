@@ -4,13 +4,15 @@ linear_id: 1d45948a-f5b1-4ae0-8499-7ceede13dec9
 ---
 # 04: Letta Integration
 
-**Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord-wave remembers across runs.
+**Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord-wave remembers across runs, including which algedonic and calibration interventions actually helped.
 
 ## Context
 
 Letta (formerly MemGPT) provides layered memory: core, recall, archival. The architectural boundary stays the same after bootstrap: Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The redesign chord-wave is the only place where durable qualitative memory belongs.
 
 Item 02 now covers the first live tend cycle. Finish that first so Letta has a real stream of scan observations, routed decisions, and human calibration events to remember instead of a purely structural test run.
+
+The old `signals/05` idea folds here rather than living in a separate wave. Resolution history, calibration notes, and repeated stall/algedonic patterns belong in chord memory, not in a parallel block system.
 
 ## What to build
 
@@ -29,6 +31,7 @@ Run a self-hosted Letta instance alongside lfd. Keep the setup reproducible and 
 **Recall memories** (searchable, medium-term):
 - Recent wave activity summaries
 - Conflict resolutions and their outcomes
+- Algedonic repair attempts and whether they worked
 - Human calibration decisions and reasoning
 - Tend-cycle observations and proposals
 
@@ -58,6 +61,13 @@ tend cycle ends
 
 Core memories need a size budget. When core fills, demote lower-value entries to recall. The chord-wave should be able to promote, demote, or retire memories as part of ordinary tending instead of letting the store bloat.
 
+### Pattern use
+
+Memory should feed back into real decisions:
+- when a wave stalls in a familiar way, surface the last intervention that helped
+- when an algedonic incident repeats, reuse prior repair or escalation context
+- when calibration keeps flagging the same drift, propose the narrower mutation first
+
 ## Done when
 
 - Letta runs alongside lfd via repo-local tooling
@@ -65,3 +75,4 @@ Core memories need a size budget. When core fills, demote lower-value entries to
 - Tend loads and writes memories on each cycle
 - After 3+ tend cycles, recall contains useful history
 - Memory search returns relevant context for new tend cycles
+- At least one repeated algedonic or calibration pattern is recalled and used in a later tend decision

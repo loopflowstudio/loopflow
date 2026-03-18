@@ -27,36 +27,100 @@ const TEMP_OR_ROUTE_STEP_NAME: &str = "or-route";
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
-    print_pipeline_header(&flow.name, &items);
+    print_pipeline_header(&flow.name, &items, repo)?;
     run_steps(&items, message, cli, repo)
 }
 
-fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
+fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -> Result<()> {
     let colors = Colors::new();
-    let step_names: Vec<&str> = items
-        .iter()
-        .map(|item| match item {
-            ConcreteItem::Step(s) => s.step.name.as_str(),
-            ConcreteItem::Op(_) => "[op]",
-            ConcreteItem::And(_) => "[and]",
-            ConcreteItem::Or(_) => "[or]",
+    let lines = render_pipeline_lines(items, repo)?;
+    let pipeline = lines
+        .into_iter()
+        .map(|line| {
+            format!(
+                "  {dim}{line}{reset}",
+                dim = colors.dim,
+                reset = colors.reset
+            )
         })
-        .collect();
-
-    let pipeline = step_names.join(&format!(
-        " {dim}\u{2192}{reset} ",
-        dim = colors.dim,
-        reset = colors.reset,
-    ));
+        .collect::<Vec<_>>()
+        .join("\n");
 
     eprintln!(
-        "\n{dim}\u{2500}\u{2500} flow {reset}{bold}{name}{reset} {dim}{pipeline}{reset}\n",
+        "\n{dim}\u{2500}\u{2500} flow {reset}{bold}{name}{reset}\n{pipeline}\n",
         dim = colors.dim,
         reset = colors.reset,
         bold = colors.bold,
         name = flow_name,
         pipeline = pipeline,
     );
+    Ok(())
+}
+
+fn render_pipeline_lines(items: &[ConcreteItem], repo: &Path) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    for item in items {
+        lines.extend(render_pipeline_item(item, repo)?);
+    }
+    Ok(lines)
+}
+
+fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>> {
+    match item {
+        ConcreteItem::Step(step) => Ok(vec![step.step.name.clone()]),
+        ConcreteItem::Op(ops) => Ok(vec![format!("ops: {}", ops.item.display_name())]),
+        ConcreteItem::And(and) => {
+            let mut lines = vec!["[and]".to_string()];
+            for (index, branch) in and.branches.iter().enumerate() {
+                let branch_chain = branch
+                    .steps
+                    .iter()
+                    .map(|step| step.step.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → ");
+                let branch_prefix = tree_prefix(index, and.branches.len());
+                lines.push(format!("{branch_prefix} {} → {branch_chain}", branch.label));
+            }
+            Ok(lines)
+        }
+        ConcreteItem::Or(or_def) => render_or_pipeline(or_def, repo),
+    }
+}
+
+fn render_or_pipeline(or_def: &ConcreteOr, repo: &Path) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    let router = or_def.router.as_deref().unwrap_or(TEMP_OR_ROUTE_STEP_NAME);
+    lines.push(format!("[or via {router}]"));
+
+    let mut keys: Vec<&String> = or_def.paths.keys().collect();
+    keys.sort();
+
+    for (index, key) in keys.into_iter().enumerate() {
+        let path = or_def
+            .paths
+            .get(key)
+            .expect("or path key collected from map should exist");
+        let nested_items = load_or_path_items(path, repo)?;
+        let nested = render_pipeline_lines(&nested_items, repo)?;
+        let branch_prefix = tree_prefix(index, or_def.paths.len());
+        if nested.is_empty() {
+            lines.push(format!("{branch_prefix} {key}"));
+            continue;
+        }
+
+        let nested_chain = nested.join(" → ");
+        lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
+    }
+
+    Ok(lines)
+}
+
+fn tree_prefix(index: usize, total: usize) -> &'static str {
+    if index + 1 == total {
+        "└─"
+    } else {
+        "├─"
+    }
 }
 
 fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -480,8 +544,10 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
 
 #[cfg(test)]
 mod tests {
-    use super::write_or_route_step;
+    use super::{render_pipeline_lines, write_or_route_step};
+    use crate::engine::{ConcreteItem, Flow};
     use std::fs;
+    use tempfile::tempdir;
     use tempfile::TempDir;
 
     #[test]
@@ -523,5 +589,66 @@ mod tests {
             fs::read_to_string(&step_path).unwrap(),
             "existing route prompt"
         );
+    }
+
+    #[test]
+    fn render_pipeline_lines_expands_or_paths_on_separate_lines() {
+        let temp = tempdir().unwrap();
+        let flows_dir = temp.path().join(".lf/flows/tend");
+        fs::create_dir_all(&flows_dir).unwrap();
+        fs::write(
+            flows_dir.join("tune.yaml"),
+            "- tend/draft-chord\n- tend/review-chord\n- tend/apply-chord\n",
+        )
+        .unwrap();
+
+        let flow = Flow {
+            name: "tend".to_string(),
+            items: vec![
+                crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                    "tend/scan-waves",
+                )),
+                crate::engine::flow::FlowItem::Or(crate::engine::flow::OrDef {
+                    router: Some("tend/assess".to_string()),
+                    paths: [
+                        (
+                            "tune".to_string(),
+                            crate::engine::flow::OrPath {
+                                flow: Some("tend/tune".to_string()),
+                                step: None,
+                                description: "Adjust the chord".to_string(),
+                                direction: Vec::new(),
+                            },
+                        ),
+                        (
+                            "silence".to_string(),
+                            crate::engine::flow::OrPath {
+                                flow: None,
+                                step: None,
+                                description: "No-op".to_string(),
+                                direction: Vec::new(),
+                            },
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+            ],
+        };
+
+        let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
+        let lines = render_pipeline_lines(&items, temp.path()).unwrap();
+
+        assert_eq!(
+            lines,
+            vec![
+                "tend/scan-waves".to_string(),
+                "[or via tend/assess]".to_string(),
+                "├─ silence".to_string(),
+                "└─ tune → tend/draft-chord → tend/review-chord → tend/apply-chord".to_string(),
+            ]
+        );
+
+        assert!(matches!(items[1], ConcreteItem::Or(_)));
     }
 }

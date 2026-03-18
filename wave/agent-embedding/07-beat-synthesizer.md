@@ -53,9 +53,8 @@ A rhythm like `4:1` means 4 build beats per tend beat — a 5-beat grid.
 beat:     1      2      3      4      5
           tend   all    all    all    all
                  ───    ───    ───    ───
-                 deck   deck   deck   deck
                  chord  chord  chord  chord
-                 signal signal signal signal
+                 embed  embed  embed  embed
 ```
 
 The default fill is all active waves on every build beat. Edit from
@@ -71,10 +70,10 @@ mode: loop
 beats: 5
 grid:
   1: [tend]
-  2: [clear-the-deck, chord-model, signals]
-  3: [clear-the-deck, chord-model, signals]
-  4: [clear-the-deck, chord-model, signals]
-  5: [clear-the-deck, chord-model, signals]
+  2: [chord-model, agent-embedding]
+  3: [chord-model, agent-embedding]
+  4: [chord-model, agent-embedding]
+  5: [chord-model, agent-embedding]
 ```
 
 `beats:` and `grid:` are the raw data model. A rhythm like `4:1` is a

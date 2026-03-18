@@ -21,6 +21,8 @@ The levers stay the same:
 - **Triggers** — adjust cadence or sources
 - **Lifecycle** — pause, resume, split, combine, or prune
 
+The folded `signals` work changes the pressure behind these levers. Stall detection, repeated algedonic incidents, and recurring calibration notes do not need their own wave anymore; they should culminate in ordinary mutations here.
+
 ## What to build
 
 1. **Mutation API.** A wave-scoped mutation endpoint or loader accepts a list of structured mutations and applies them to ordinary waves.
@@ -31,6 +33,11 @@ The levers stay the same:
 
 4. **Apply-step integration.** `apply-chord` uses the mutation API for both auto-applied changes and human-gated proposals. Human-review items keep the proposed mutation attached so approval can execute the same payload.
 
+5. **Pressure-to-mutation mapping.** Capture how common chord signals turn into mutation candidates:
+   - repeated algedonic incidents → flow or scope change
+   - stall pattern → work-item rewrite or lifecycle pause
+   - coordination conflicts → resequence, split, or combine
+
 ## Done when
 
 - The mutation API accepts and executes all planned lever types
@@ -38,3 +45,4 @@ The levers stay the same:
 - Mutations are individually revertible
 - `apply-chord` uses the API for both auto and human-gated changes
 - At least one real mutation has been applied by the redesign chord-wave's tend flow
+- Repeated stall or algedonic pressure can be expressed as structured mutation proposals without a separate signal subsystem

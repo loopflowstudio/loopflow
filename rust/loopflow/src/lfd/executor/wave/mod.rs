@@ -41,7 +41,6 @@ use crate::lfd::types::{
     WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
-use super::adaptive::AdaptiveContainerExecutor;
 use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
@@ -114,9 +113,6 @@ impl WaveExecutor {
         let executor_type = config.r#type;
         let runner: Arc<dyn AgentExecutor> = match executor_type {
             ExecutorType::Docker => Arc::new(DockerExecutor::new(store.clone(), &config)?),
-            ExecutorType::Sandbox => {
-                Arc::new(AdaptiveContainerExecutor::new(store.clone(), &config)?)
-            }
             ExecutorType::Local => Arc::new(LocalProcessExecutor::new(
                 store.clone(),
                 config.agent_timeout,

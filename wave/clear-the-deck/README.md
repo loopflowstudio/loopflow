@@ -8,9 +8,9 @@ Keep `lfd`'s deployment surface honest and small. This wave now owns the last ex
 
 The deployment and auth collapse is now the baseline: docs, compose defaults, and config resolution teach two shapes (`native` and `container`) and two auth modes (`local` and `studio`). Do not reopen that matrix while finishing this wave.
 
-The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` and `executor.sandbox` are tuning knobs inside that shape. If sandbox cannot show a concrete win over Docker—or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area—cut it from the blessed story and shrink the code around Docker.
+The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` remains a tuning knob inside that shape, but `executor.sandbox` does not survive this wave. Container mode resolves to Docker. If sandbox cannot show a concrete win over Docker—or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area—remove it from the supported surface and shrink the code around Docker.
 
-Escape hatches are still allowed, but only as clearly experimental overrides. User-facing docs, compose defaults, and installed-service guidance should keep telling one Docker-backed container story.
+Do not preserve a hidden or experimental sandbox escape hatch in mainline config, runtime, docs, or compose generation. If internal experiments continue, they move off the blessed path and out of the default support story. User-facing docs, compose defaults, and installed-service guidance should tell one Docker-backed container story.
 
 ## Goals
 
@@ -22,7 +22,7 @@ Escape hatches are still allowed, but only as clearly experimental overrides. Us
 
 - A vague “keep both for now” outcome preserves maintenance cost without enough user value.
 - A Daytona spike could look good on startup latency while still missing worktree, credential, or harness requirements.
-- Cutting sandbox too aggressively could break internal experiments if escape hatches and tests do not move together.
+- Partial deletion could leave stale config keys, dead executor branches, or test/doc contradictions that keep the maintenance cost alive under a smaller label.
 
 ## Metrics
 

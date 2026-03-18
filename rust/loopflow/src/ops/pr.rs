@@ -472,6 +472,30 @@ fn extract_json_candidates(raw: &str) -> impl Iterator<Item = &str> {
     candidates.into_iter()
 }
 
+fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
+    let output = Command::new("git").args(args).current_dir(repo).output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("git {}", args.join(" ")),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut iter = text.char_indices();
+    if iter.nth(max_chars).is_none() {
+        return text.to_string();
+    }
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    format!("{}\n\n[diff truncated]", &text[..end])
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_generated_pr_copy, PrCopy};
@@ -515,28 +539,4 @@ trailer"###;
             })
         );
     }
-}
-
-fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = Command::new("git").args(args).current_dir(repo).output()?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: stderr_from_output(&output),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut iter = text.char_indices();
-    if iter.nth(max_chars).is_none() {
-        return text.to_string();
-    }
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    format!("{}\n\n[diff truncated]", &text[..end])
 }

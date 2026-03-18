@@ -45,7 +45,7 @@ lfd install
 
 `LFD_MODE=container` is still available as a process override, but `~/.lf/lfd.yaml` is the real mode-selection path for installed services.
 
-The blessed container path is Docker. `executor.sandbox` remains an experimental override documented in the configuration reference below, not part of the main deployment story.
+Container mode is Docker-only. If you still have `executor.sandbox` in `~/.lf/lfd.yaml`, delete it and rerun `lfd install`.
 
 ## Run the daemon
 
@@ -153,7 +153,6 @@ auth:
   base_url: https://auth.loopflow.studio # used by studio mode
 
 executor:
-  sandbox: false # experimental override; blessed container executor is Docker
   image: loopflow/agent:latest
   agent_timeout: 45m
   limits:
@@ -186,6 +185,8 @@ http_security:
 `mode` selects a strict profile. `service_manager`, `runtime_backend`, `storage`, and `executor.type` are derived from the mode and rejected if set directly.
 
 `auth.*`, `executor.*`, and `http_security.*` tune the selected shape. They are not separate deployment profiles.
+
+`executor.sandbox` was removed. If that key is still present in old config, `lfd` fails fast and tells you to delete it.
 
 In container mode, `auth.mode=local` without an explicit `auth.token` is promoted to `studio` so the blessed remote shape stays coherent.
 

@@ -181,11 +181,8 @@ fn render_compose_file(config: &LfdConfig) -> Result<String> {
     if config.storage != StorageType::Postgres {
         bail!("container mode requires postgres storage")
     }
-    if !matches!(
-        config.executor.r#type,
-        ExecutorType::Docker | ExecutorType::Sandbox
-    ) {
-        bail!("container mode requires docker or sandbox executor")
+    if config.executor.r#type != ExecutorType::Docker {
+        bail!("container mode requires docker executor")
     }
 
     let mut credential_mounts = Vec::new();
@@ -323,10 +320,10 @@ mod tests {
     }
 
     #[test]
-    fn compose_accepts_sandbox_executor_type() {
+    fn compose_rejects_non_docker_executor_type() {
         let mut config = container_config();
-        config.executor.r#type = ExecutorType::Sandbox;
-        let content = render_compose_file(&config).expect("render compose file");
-        assert!(content.contains("services:"));
+        config.executor.r#type = ExecutorType::Local;
+        let err = render_compose_file(&config).expect_err("local executor should fail");
+        assert_eq!(err.to_string(), "container mode requires docker executor");
     }
 }

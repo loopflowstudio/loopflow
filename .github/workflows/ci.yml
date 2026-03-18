@@ -51,40 +51,6 @@ jobs:
       - name: Run Docker executor smoke tests
         run: cargo test -p loopflow docker_ -- --nocapture
 
-  sandbox-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check sandbox availability
-        id: probe
-        run: |
-          if ! docker sandbox version >/dev/null 2>&1; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          help_output="$(docker sandbox --help 2>/dev/null || true)"
-          for cmd in create exec rm ls; do
-            if ! printf '%s\n' "$help_output" | grep -Eq "(^|[[:space:]])${cmd}([[:space:]]|$)"; then
-              echo "available=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
-
-          if docker sandbox create --help 2>/dev/null | grep -Eq "(^|[[:space:]])claude([[:space:]]|$)"; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.probe.outputs.available == 'true'
-      - name: Run sandbox tests
-        if: steps.probe.outputs.available == 'true'
-        run: cargo test -p loopflow sandbox -- --nocapture
-      - name: Platform validation
-        if: steps.probe.outputs.available == 'true'
-        run: scripts/test_sandbox_platforms.sh
-
   swift-test:
     runs-on: macos-15
     steps:

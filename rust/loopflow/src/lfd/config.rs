@@ -381,7 +381,13 @@ impl RawLfdConfig {
             bail!("`executor.type` is managed by `mode`; remove this key");
         }
 
-        let profile = ModeProfile::for_mode(self.mode, self.executor.sandbox);
+        if self.executor.sandbox.is_some() {
+            bail!(
+                "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
+            );
+        }
+
+        let profile = ModeProfile::for_mode(self.mode);
         self.executor.limits.validate()?;
 
         let mut auth = self.auth;
@@ -419,7 +425,7 @@ struct ModeProfile {
 }
 
 impl ModeProfile {
-    fn for_mode(mode: Mode, sandbox_enabled: bool) -> Self {
+    fn for_mode(mode: Mode) -> Self {
         match mode {
             Mode::Native => Self {
                 service_manager: ServiceManager::default_for_os(),
@@ -431,11 +437,7 @@ impl ModeProfile {
                 service_manager: ServiceManager::default_for_os(),
                 runtime_backend: RuntimeBackend::Compose,
                 storage: StorageType::Postgres,
-                executor_type: if sandbox_enabled {
-                    ExecutorType::Sandbox
-                } else {
-                    ExecutorType::Docker
-                },
+                executor_type: ExecutorType::Docker,
             },
         }
     }
@@ -657,7 +659,6 @@ pub enum ExecutorType {
     #[default]
     Local,
     Docker,
-    Sandbox,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -753,8 +754,8 @@ impl Default for ExecutorLimitsConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct RawExecutorConfig {
     r#type: Option<ExecutorType>,
-    #[serde(default = "default_executor_sandbox_enabled")]
-    sandbox: bool,
+    #[serde(default)]
+    sandbox: Option<serde_yaml_ng::Value>,
     #[serde(default = "default_executor_image")]
     image: String,
     #[serde(default)]
@@ -772,7 +773,7 @@ impl Default for RawExecutorConfig {
     fn default() -> Self {
         Self {
             r#type: None,
-            sandbox: default_executor_sandbox_enabled(),
+            sandbox: None,
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
@@ -783,10 +784,6 @@ impl Default for RawExecutorConfig {
 
 fn default_executor_image() -> String {
     DEFAULT_EXECUTOR_IMAGE.to_string()
-}
-
-fn default_executor_sandbox_enabled() -> bool {
-    false
 }
 
 fn default_agent_timeout() -> Duration {
@@ -963,27 +960,18 @@ mod tests {
     }
 
     #[test]
-    fn mode_container_with_sandbox_enabled_uses_sandbox_executor() {
+    fn executor_sandbox_key_is_rejected() {
         let raw = r#"
 mode: container
 executor:
   sandbox: true
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.executor.r#type, ExecutorType::Sandbox);
-    }
-
-    #[test]
-    fn mode_container_with_sandbox_disabled_uses_docker_executor() {
-        let raw = r#"
-mode: container
-executor:
-  sandbox: false
-"#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        let err = config.resolve().expect_err("sandbox key should fail");
+        assert_eq!(
+            err.to_string(),
+            "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
+        );
     }
 
     #[test]

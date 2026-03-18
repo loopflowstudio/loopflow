@@ -2,33 +2,32 @@
 
 ## Vision
 
-Remove product and deployment choices that create maintenance surface without teaching us anything. This wave is for cuts that simplify how `lfd` is configured, deployed, and executed. It does not own auth expansion or iOS distribution work; those live in `wave/trust/` and `wave/concerto/`.
+Keep Loopflow's post-collapse codebase small and internally coherent. This wave now owns the cleanup passes still crossing Rust CLI/daemon boundaries, Python client contracts, and Concerto's shipped macOS surface. It does not reopen container-executor experiments or add new deployment shapes.
 
 ## Strategy
 
-Finish the remaining collapse in two passes.
+The deployment and auth collapses are now baseline constraints, not active roadmap items. Docker is the only blessed container executor now; the sandbox branch is gone, local worktree git metadata did not survive the old mount shape cleanly, local create/remove timings stayed in the double-digit-second range, and Daytona stays out of tree until its production story changes. Use this wave to remove the leftover seams those cuts exposed: shared helpers should live in shared layers, `lfd` should have one real command parser, config knobs should expose env overrides consistently, release safety should have isolated tests, and shipped client/app surfaces should match supported platforms instead of leaking demos or stale minimum versions.
 
-First, collapse the public deployment story to the shapes that already exist in code: native/local and container/studio. `LFD_MODE=native|container` already centralizes several downstream decisions; build on that instead of inventing profile names the product cannot yet explain.
-
-Second, decide whether sandbox stays at all. The current adaptive path only earns its keep if it clearly beats Docker on latency or isolation. If it cannot, demote it to an explicit experiment or delete it.
-
-Hidden overrides are acceptable as escape hatches. Documented defaults are not allowed to sprawl.
+Sequence by blast radius. Fix Rust boundary debt and missing release/config coverage first, because those paths shape daily maintenance work. Then clean the Python and Swift surfaces that still advertise or ship the wrong thing. Do not add abstractions to "prepare" for later cleanup. Move code to the layer that already owns the concept, delete duplicates, and tighten tests around the simpler shape.
 
 ## Goals
 
-- Users choose from a small, honest deployment surface instead of a bag of orthogonal config knobs.
-- The default container execution path is obvious in both code and docs.
-- Deploy and operator docs describe only blessed paths.
+- Shared worktree and execution behavior has one home instead of cross-layer imports or duplicate helpers.
+- `lfd` entrypoints and config behave consistently whether invoked from CLI flags, env vars, or release automation.
+- Python and Concerto ship only supported surfaces.
 
 ## Risks
 
-- New deployment nouns could drift from the current `native|container` machinery and accidentally fork behavior.
-- Simplifying sandbox too aggressively could remove a useful path before a replacement is ready.
-- Escape hatches can quietly become the real product if the blessed paths stay incomplete.
+- Cleanup can sprawl into opportunistic refactors that make the roadmap fuzzy again.
+- Moving helpers across layers can fork behavior unless the existing worktree and release tests move with the code.
+- Docker-only container mode could quietly widen again through docs or parser/config churn unless it stays an explicit invariant.
+- Demo-only UI and stale package metadata can linger because they look harmless even though they widen the support surface.
 
 ## Metrics
 
-- Documented deployment shapes: 2
-- Documented deploy-selection knobs outside those shapes: 0
-- User-visible executor backends in blessed docs: 1
-- Remote deploy setup steps before first healthy `lfd`: 10 or fewer
+- Cross-layer imports from `lf` into `lfd::executor`: 0
+- Duplicated branch-existence helpers in Rust ops/engine code: 0
+- Manual subcommand dispatch blocks in `rust/loopflow/src/bin/lfd.rs`: 0
+- `lfd` config fields missing env overrides for persisted settings in scope here: 0
+- Shipped macOS windows that exist only for demos or tests: 0
+- Python minimum-version mismatches between package metadata and lint target: 0

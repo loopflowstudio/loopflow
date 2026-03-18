@@ -1,24 +1,68 @@
 use std::env;
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use tempfile::TempDir;
 
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct HomeOverride {
+    original: Option<OsString>,
+    _temp: Option<TempDir>,
+}
+
+impl HomeOverride {
+    fn new_temp() -> Self {
+        let temp = TempDir::new().expect("temp home dir");
+        let original = env::var_os("HOME");
+        env::set_var("HOME", temp.path());
+        Self {
+            original,
+            _temp: Some(temp),
+        }
+    }
+}
+
+impl Drop for HomeOverride {
+    fn drop(&mut self) {
+        match &self.original {
+            Some(prev) => env::set_var("HOME", prev),
+            None => env::remove_var("HOME"),
+        }
+    }
+}
+
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+pub fn with_clean_home<T>(f: impl FnOnce() -> T) -> T {
+    let _lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _home = HomeOverride::new_temp();
+    f()
+}
 
 pub struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
-    previous_home: Option<String>,
     _temp: TempDir,
+    _home: Option<HomeOverride>,
 }
 
 impl EnvGuard {
+    #[allow(dead_code)] // Shared helper compiled into multiple test crates.
     pub fn new(entries: &[(&str, &str)]) -> Self {
-        let lock = ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        Self::new_internal(entries, false)
+    }
+
+    #[allow(dead_code)] // Shared helper used only by tests that need HOME isolation.
+    pub fn new_with_clean_home(entries: &[(&str, &str)]) -> Self {
+        Self::new_internal(entries, true)
+    }
+
+    fn new_internal(entries: &[(&str, &str)], clean_home: bool) -> Self {
+        let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let temp = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(temp.path(), name, content);
@@ -29,13 +73,16 @@ impl EnvGuard {
             None => temp.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
-        let previous_home = env::var("HOME").ok();
-        env::set_var("HOME", temp.path());
+        let home = if clean_home {
+            Some(HomeOverride::new_temp())
+        } else {
+            None
+        };
         Self {
             _lock: lock,
             previous_path,
-            previous_home,
             _temp: temp,
+            _home: home,
         }
     }
 }
@@ -46,11 +93,6 @@ impl Drop for EnvGuard {
             env::set_var("PATH", prev);
         } else {
             env::remove_var("PATH");
-        }
-        if let Some(prev) = &self.previous_home {
-            env::set_var("HOME", prev);
-        } else {
-            env::remove_var("HOME");
         }
     }
 }

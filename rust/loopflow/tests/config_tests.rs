@@ -1,36 +1,15 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
 
 use loopflow::engine::{load_config, load_config_or_default};
+use support::with_clean_home;
 use tempfile::TempDir;
-
-static HOME_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
 fn write_config(dir: &Path, content: &str) {
     let lf_dir = dir.join(".lf");
     fs::create_dir_all(&lf_dir).unwrap();
     fs::write(lf_dir.join("config.yaml"), content).unwrap();
-}
-
-fn with_temp_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
-    let _lock = HOME_LOCK.lock().unwrap();
-    let previous_home = std::env::var("HOME").ok();
-    std::env::set_var("HOME", home);
-
-    struct HomeGuard(Option<String>);
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(home) => std::env::set_var("HOME", home),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-    }
-
-    let _guard = HomeGuard(previous_home);
-    f()
 }
 
 // =============================================================================
@@ -40,7 +19,7 @@ fn with_temp_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
 #[test]
 fn load_config_or_default_handles_missing_file() {
     let temp = TempDir::new().unwrap();
-    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
+    let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -48,7 +27,7 @@ fn load_config_or_default_handles_missing_file() {
 fn load_config_or_default_handles_empty_file() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "");
-    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
+    let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -56,7 +35,7 @@ fn load_config_or_default_handles_empty_file() {
 fn load_config_or_default_handles_whitespace_only() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "   \n\n  ");
-    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
+    let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -71,7 +50,7 @@ yolo: true
 "#,
     );
 
-    let config = load_config(Some(temp.path()))
+    let config = with_clean_home(|| load_config(Some(temp.path())))
         .expect("config should load")
         .expect("config should exist");
     assert_eq!(config.agent.as_deref(), Some("claude:sonnet"));
@@ -81,7 +60,7 @@ yolo: true
 #[test]
 fn load_config_or_default_returns_defaults() {
     let temp = TempDir::new().unwrap();
-    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
+    let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);
@@ -97,7 +76,9 @@ fn config_model_with_variant() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "agent: gemini:2.5-pro");
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.agent.as_deref(), Some("gemini:2.5-pro"));
 }
 
@@ -106,7 +87,9 @@ fn config_model_without_variant() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "agent: codex");
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.agent.as_deref(), Some("codex"));
 }
 
@@ -126,7 +109,9 @@ pr: true
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.yolo);
     assert!(config.chrome);
     assert!(config.pr);
@@ -148,7 +133,9 @@ context:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.context, vec!["src/", "lib/"]);
 }
 
@@ -164,7 +151,9 @@ exclude:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.exclude, vec!["*.log", "node_modules/"]);
 }
 
@@ -184,7 +173,9 @@ direction:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(
         config.direction,
         Some(vec!["concise".to_string(), "security".to_string()])
@@ -202,7 +193,9 @@ direction:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.direction, Some(vec!["architect".to_string()]));
 }
 
@@ -222,7 +215,9 @@ interactive:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.interactive.contains(&"design".to_string()));
     assert!(config.interactive.contains(&"review".to_string()));
 }
@@ -243,7 +238,9 @@ ide:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.ide.cursor);
     assert!(!config.ide.warp);
 }
@@ -259,7 +256,9 @@ ide:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(
         config.ide.workspace,
         Some("project.code-workspace".to_string())
@@ -283,7 +282,9 @@ budgets:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.budgets.area, 50000);
     assert_eq!(config.budgets.docs, 20000);
     assert_eq!(config.budgets.diff, 30000);
@@ -307,7 +308,9 @@ summaries:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.summaries.len(), 2);
 }
 
@@ -326,7 +329,9 @@ branch_names:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.branch_names.is_some());
 }
 
@@ -339,7 +344,9 @@ fn config_land_strategy() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "land: local");
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.land, "local");
 }
 
@@ -348,7 +355,9 @@ fn config_land_defaults_to_gh() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "yolo: false");
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.land, "gh");
 }
 
@@ -361,7 +370,9 @@ fn config_autoprune_bool() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "autoprune: true");
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.autoprune.enabled);
 }
 
@@ -377,7 +388,9 @@ autoprune:
 "#,
     );
 
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
+    let config = with_clean_home(|| load_config(Some(temp.path())))
+        .unwrap()
+        .unwrap();
     assert!(config.autoprune.enabled);
     assert_eq!(config.autoprune.poll_interval_seconds, 120);
 }

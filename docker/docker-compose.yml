@@ -10,18 +10,13 @@ services:
       LFD_MODE: container
       LFD_DATABASE_URL: "postgres://lfd:lfd@postgres:5432/lfd"
       LFD_EXECUTOR_IMAGE: "${LFD_EXECUTOR_IMAGE:-loopflow/agent:latest}"
-      LFD_AUTH_MODE: "${LFD_AUTH_MODE:-local}"
+      LFD_AUTH_MODE: "${LFD_AUTH_MODE:-studio}"
     env_file:
       - path: .env
         required: false
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - lfd-data:/root/.lf
-      # Uncomment to mount subscription credentials:
-      # - ${HOME}/.claude:/root/.claude:ro
-      # - ${HOME}/.codex:/root/.codex:ro
-      # - ${HOME}/.ssh:/root/.ssh:ro
-      # - ${HOME}/.gitconfig:/root/.gitconfig:ro
     depends_on:
       postgres:
         condition: service_healthy

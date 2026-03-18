@@ -7,7 +7,6 @@ use loopflow::engine::{load_config, load_config_or_default};
 use support::with_clean_home;
 use tempfile::TempDir;
 
-
 fn write_config(dir: &Path, content: &str) {
     let lf_dir = dir.join(".lf");
     fs::create_dir_all(&lf_dir).unwrap();
@@ -62,12 +61,7 @@ yolo: true
 #[test]
 fn load_config_or_default_returns_defaults() {
     let temp = TempDir::new().unwrap();
-<<<<<<< HEAD
     let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
-=======
-    let _home = HomeGuard::set(temp.path());
-    let config = load_config_or_default(Some(temp.path()));
->>>>>>> fa57b396 (lf ops pr: prepare branch)
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);

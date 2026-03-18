@@ -328,6 +328,24 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     };
 
     match cmd {
+        PmCommand::Init { wave } => {
+            let result = crate::ops::pm::pm_init(
+                &repo_root,
+                &crate::ops::pm::PmInitOptions { wave: wave.clone() },
+                progress,
+            )?;
+            println!("{}: PM bootstrapped", result.wave);
+            for provider in result.providers {
+                println!(
+                    "  {:?}: project {} ({} linked, {} local created, {} remote created)",
+                    provider.provider,
+                    provider.project_id,
+                    provider.linked,
+                    provider.created_local.len(),
+                    provider.created_remote.len()
+                );
+            }
+        }
         PmCommand::Import { wave } => {
             let waves = resolve_waves(wave.as_ref())?;
             for wave in &waves {
@@ -393,6 +411,35 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                         result.pulled.len(),
                         result.conflicts.len()
                     );
+                }
+            }
+        }
+        PmCommand::Status { wave } => {
+            let result = crate::ops::pm::pm_status(
+                &repo_root,
+                &crate::ops::pm::PmStatusOptions { wave: wave.clone() },
+                progress,
+            )?;
+            if result.waves.is_empty() {
+                println!("no PM-linked waves");
+            } else {
+                for wave in result.waves {
+                    println!("{}:", wave.wave);
+                    for provider in wave.providers {
+                        let role = match provider.role {
+                            crate::ops::pm::PmProviderRole::ReadWrite => "rw",
+                            crate::ops::pm::PmProviderRole::Export => "export",
+                        };
+                        println!(
+                            "  {:?} ({role}) project {} — local {}, linked {}, remote {}, remote-only {}",
+                            provider.provider,
+                            provider.project_id,
+                            provider.local_total,
+                            provider.linked,
+                            provider.remote_total,
+                            provider.remote_only
+                        );
+                    }
                 }
             }
         }

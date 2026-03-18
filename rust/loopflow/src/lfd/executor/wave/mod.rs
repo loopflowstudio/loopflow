@@ -370,10 +370,43 @@ impl WaveExecutor {
             wave.name().clone(),
             run.worktree.clone(),
         );
+        let run_is_pr_oriented = run.target_branch == "main" || run.target_branch.is_empty();
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
         debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
+
+        if run_is_pr_oriented
+            && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
+        {
+            let worktree = run.worktree.clone();
+            let wave_name = wave.name().clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::ops::pm::pm_import(
+                    Path::new(&worktree),
+                    &crate::ops::pm::PmImportOptions { wave: wave_name },
+                    &crate::ops::NullProgress,
+                )
+            })
+            .await
+            {
+                Ok(Ok(result)) => {
+                    info!(
+                        run_id = %run.id,
+                        created = result.created.len(),
+                        updated = result.updated.len(),
+                        deleted = result.deleted.len(),
+                        "synced roadmap from read/write PM provider"
+                    );
+                }
+                Ok(Err(err)) => {
+                    warn!(run_id = %run.id, error = %err, "PM import failed at run start; continuing");
+                }
+                Err(err) => {
+                    warn!(run_id = %run.id, error = %err, "PM import task join failed; continuing");
+                }
+            }
+        }
 
         loop {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
@@ -713,14 +746,44 @@ impl WaveExecutor {
                     run.ended_at = Some(OffsetDateTime::now_utc());
 
                     let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
+                    if run_is_pr_oriented
+                        && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
+                    {
+                        let worktree = run.worktree.clone();
+                        let branch = run.branch.clone();
+                        let wave_name = wave.name().clone();
+                        match tokio::task::spawn_blocking(move || -> Result<()> {
+                            crate::ops::export(
+                                Path::new(&worktree),
+                                &crate::ops::ExportOptions {
+                                    wave: wave_name,
+                                    dry_run: false,
+                                },
+                                &crate::ops::NullProgress,
+                            )
+                            .map_err(|err| anyhow!(err.to_string()))?;
+                            post_step_sync(Path::new(&worktree), &branch, "ops pm export")?;
+                            Ok(())
+                        })
+                        .await
+                        {
+                            Ok(Ok(())) => {
+                                info!(run_id = %run.id, "exported roadmap to PM providers");
+                            }
+                            Ok(Err(err)) => {
+                                warn!(run_id = %run.id, error = %err, "PM export failed at run end; continuing");
+                            }
+                            Err(err) => {
+                                warn!(run_id = %run.id, error = %err, "PM export task join failed; continuing");
+                            }
+                        }
+                    }
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     // Activations targeting "main" produce new branches and PRs.
                     // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
                     // push directly to that branch — no new PR needed.
-                    let should_manage_pr =
-                        run.target_branch == "main" || run.target_branch.is_empty();
-                    if should_manage_pr {
+                    if run_is_pr_oriented {
                         let worktree = run.worktree.clone();
                         let wave_name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -768,7 +831,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if should_manage_pr && run.pr.is_some() && is_recurring {
+                    if run_is_pr_oriented && run.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -804,7 +867,7 @@ impl WaveExecutor {
                     self.output.close_writer(&run.id.to_string());
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
-                    if should_manage_pr && run.pr.is_some() {
+                    if run_is_pr_oriented && run.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,

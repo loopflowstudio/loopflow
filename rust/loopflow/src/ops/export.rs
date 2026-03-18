@@ -1,9 +1,13 @@
+use std::collections::HashSet;
 use std::path::Path;
 
-use crate::lfd::pm::{PmError, PmItemCreate, PmItemUpdate, PmProviderKind, RoadmapItemDocument};
+use crate::lfd::pm::{PmError, PmItemCreate, PmItemUpdate, RoadmapItemDocument};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::ingest::{list_numbered_items, WaveItem};
-use crate::ops::pm::{body_without_heading, build_provider, extract_heading, title_case};
+use crate::ops::pm::{
+    body_without_heading, build_export_contexts, extract_heading, title_case,
+    write_pm_project_to_wave_yaml, PmContext,
+};
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -42,16 +46,42 @@ async fn export_async(
         )));
     }
 
-    let ctx = build_provider(repo, &options.wave).await?;
-    let provider_kind = ctx.provider;
+    let contexts = build_export_contexts(repo, &options.wave).await?;
+    let mut created = HashSet::new();
+    let mut updated = HashSet::new();
 
-    // Resolve or create project
-    let project_id = &ctx.project;
-    let (project_id, reverse_create_order) = if !project_id.is_empty() {
+    for ctx in contexts {
+        let result = export_to_provider(repo, &wave_dir, options, ctx, progress).await?;
+        created.extend(result.created);
+        updated.extend(result.updated);
+    }
+
+    let mut created = created.into_iter().collect::<Vec<_>>();
+    let mut updated = updated.into_iter().collect::<Vec<_>>();
+    created.sort();
+    updated.sort();
+
+    Ok(ExportResult {
+        wave: options.wave.clone(),
+        created,
+        updated,
+    })
+}
+
+async fn export_to_provider(
+    repo: &Path,
+    wave_dir: &Path,
+    options: &ExportOptions,
+    ctx: PmContext,
+    progress: &impl Progress,
+) -> OpsResult<ExportResult> {
+    let provider_kind = ctx.provider;
+    let (project_id, reverse_create_order) = if !ctx.project.is_empty() {
         progress.status(&format!(
-            "exporting to {provider_kind:?} project {project_id}"
+            "exporting to {provider_kind:?} project {}",
+            ctx.project
         ));
-        (project_id.to_string(), false)
+        (ctx.project.clone(), false)
     } else if options.dry_run {
         progress.status(&format!(
             "dry-run: would create {provider_kind:?} project \"{}\"",
@@ -74,8 +104,7 @@ async fn export_async(
         (id, true)
     };
 
-    // List roadmap items
-    let items = list_numbered_items(&wave_dir)?;
+    let items = list_numbered_items(wave_dir)?;
     if items.is_empty() {
         progress.status(&format!("no numbered items in wave/{}/", options.wave));
         return Ok(ExportResult {
@@ -155,51 +184,6 @@ async fn export_async(
     })
 }
 
-/// Write a provider-specific project ID into the wave YAML's `pm:` block.
-pub(crate) fn write_pm_project_to_wave_yaml(
-    repo: &Path,
-    wave: &str,
-    provider: PmProviderKind,
-    project_id: &str,
-) -> OpsResult<()> {
-    let path = repo.join("wave").join(wave).join(format!("{wave}.yaml"));
-
-    let mut value = if path.exists() {
-        let content = std::fs::read_to_string(&path)?;
-        serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content)
-            .map_err(|err| OpsError::Message(format!("invalid wave yaml: {err}")))?
-    } else {
-        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
-    };
-
-    let map = value
-        .as_mapping_mut()
-        .ok_or_else(|| OpsError::Message("wave config must be a mapping".to_string()))?;
-
-    let pm_key = serde_yaml_ng::Value::String("pm".to_string());
-    let mut pm_map = map
-        .get(&pm_key)
-        .and_then(serde_yaml_ng::Value::as_mapping)
-        .cloned()
-        .unwrap_or_default();
-
-    let project_key = match provider {
-        PmProviderKind::Asana => "asana_project",
-        PmProviderKind::Linear => "linear_project",
-    };
-    pm_map.insert(
-        serde_yaml_ng::Value::String(project_key.to_string()),
-        serde_yaml_ng::Value::String(project_id.to_string()),
-    );
-    map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
-
-    let output = serde_yaml_ng::to_string(&value)
-        .map_err(|err| OpsError::Message(format!("failed to encode wave yaml: {err}")))?;
-    std::fs::write(&path, output)?;
-
-    Ok(())
-}
-
 fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
 }
@@ -215,6 +199,7 @@ fn export_order(items: &[WaveItem], reverse: bool) -> Vec<&WaveItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::pm::PmProviderKind;
 
     #[test]
     fn export_order_reverses_bootstrap_creates() {

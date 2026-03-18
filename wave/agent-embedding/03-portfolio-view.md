@@ -24,7 +24,7 @@ Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the cond
 
 4. **Repo scope.** Toggle between single-repo and multi-repo view. Single repo shows all waves for this repo. Multi-repo shows the portfolio across related repos (parent/child). Promote repo/chord attention filtering into store queries instead of wave-by-wave HTTP filtering before this view goes broad.
 
-5. **Trend lines.** Per wave: velocity (PRs/week), attention frequency, time-to-resolve, and recent terminal-session success/failure trend. Not detailed charts — sparklines or directional indicators. “This wave is accelerating” vs “this wave is slowing down.”
+5. **Trend lines.** Per wave: velocity (PRs/week), attention frequency, time-to-resolve, and recent terminal-session success/failure trend. Derive the terminal metrics from persisted `terminal_sessions` rows so the same data can back both reviewer measurement and in-product trend lines. Not detailed charts — sparklines or directional indicators. “This wave is accelerating” vs “this wave is slowing down.”
 
 6. **Shared data model, not a dashboard fork.** Build the view from the same wave/run/attention/terminal-session stores already used by the queue and terminal sidebar. If the portfolio needs a new summary query, add it at the store/service layer rather than introducing a portfolio-only cache.
 

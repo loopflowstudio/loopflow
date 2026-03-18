@@ -9,11 +9,10 @@ Loopflow syncs with the planning tools teams already use. Asana, Linear, and Not
 - Jira or other providers beyond Asana, Linear, Notion
 - Board/kanban view sync (sections, statuses, columns)
 - Bidirectional real-time sync or webhook-driven merge logic
-- Exact total ordering across every provider; the shared model is moving toward priority buckets first
 
 ## Strategy
 
-The PM architecture still centers on provider roles, a shared seam, and a single set of file formats:
+The PM architecture now centers on provider roles, a shared seam, and a single set of file formats:
 
 - `rust/loopflow/src/lfd/pm/mod.rs` owns the provider-agnostic language (`PmProviderKind`, `PmConfig`, `PmItem*`, `PmProvider`, `PmTextUpdate`, `RoadmapItemDocument`), shared retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`), and the shared test server (`test_server` module)
 - `rust/loopflow/src/lfd/pm/asana.rs`, `rust/loopflow/src/lfd/pm/linear.rs`, and `rust/loopflow/src/lfd/pm/notion.rs` are the concrete transport adapters; all carry `PriorityBucket` through their native vocabularies (Asana custom-field labels, Linear native priorities, Notion select properties)
@@ -32,6 +31,9 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 - Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow only writes back on explicit push events with known local diffs or lifecycle payloads.
 - The shared roadmap model should be semantic first: broken/unblock-now, clear next step, committed later, speculative. Providers should speak their native vocabulary where possible.
 - Default day-to-day usage is pull. `lf op pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
+- Missing config (`asana.workspace`, `asana.default_team`, `linear.team`) should fail with actionable messages at the command boundary, not opaque provider errors.
+- `PmTextUpdate` filters rank-only updates at the trait boundary. Providers never see rank changes — rank is a local concern.
+- Item-level PR/merge/failure sync must survive `ingest` moving a roadmap item into `scratch/`. Stable item identity belongs on the run, not in a transient file lookup.
 
 ## Goals
 
@@ -52,6 +54,6 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 
 ## Metrics
 
-- Import/export round-trip fidelity for title, description, and priority bucket: 100%
+- Import/export round-trip fidelity for title, description, and order: 100%
 - Sync latency from merge to remote completion: <30s
 - Redundant API calls during steady-state sync: 0

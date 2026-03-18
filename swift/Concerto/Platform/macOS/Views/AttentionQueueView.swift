@@ -2,7 +2,7 @@ import SwiftUI
 import LoopflowCore
 
 struct AttentionQueueView: View {
-    enum QueueFilter: String, CaseIterable, Identifiable {
+    enum Filter: String, CaseIterable, Identifiable {
         case all
         case interactiveOnly = "interactive"
         case escalationsOnly = "escalations"
@@ -19,7 +19,7 @@ struct AttentionQueueView: View {
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
-    @State private var filter: QueueFilter = .all
+    @State private var filter: Filter = .all
     @State private var selectedAttentionId: String?
 
     private var filteredItems: [AttentionItem] {
@@ -96,7 +96,7 @@ struct AttentionQueueView: View {
                 Spacer()
             }
             Picker("Filter", selection: $filter) {
-                ForEach(QueueFilter.allCases) { filter in
+                ForEach(Filter.allCases) { filter in
                     Text(filter.label).tag(filter)
                 }
             }
@@ -213,18 +213,23 @@ private struct AttentionDetailView: View {
     @ViewBuilder
     private func detailBody(_ item: AttentionItem) -> some View {
         switch item.context {
-        case .interactive(let context):
+        case .codeReview(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let step = context.step {
-                    detailLine("Step", step)
+                if let prTitle = context.prTitle {
+                    detailLine("PR", prTitle)
                 }
-                if let designPath = context.designPath {
-                    detailLine("Design", designPath)
+                if let branch = context.branch {
+                    detailLine("Branch", branch)
+                }
+                if let number = context.prNumber {
+                    detailLine("PR #", String(number))
+                }
+                if let wave = repoState.waveStore.wave(for: item.waveId), let diffStat = wave.diffStat {
+                    detailLine("Diff", diffStat)
                 }
             }
-        case .algedonic(let context):
+        case .queueFailure(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let step = context.step { detailLine("Step", step) }
                 if let reason = context.reason { detailLine("Reason", reason) }
                 if let error = context.error { detailLine("Error", error) }
                 if !context.conflictFiles.isEmpty {
@@ -238,6 +243,32 @@ private struct AttentionDetailView: View {
                     }
                 }
             }
+<<<<<<< HEAD
+=======
+        case .stepFailure(let context):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let step = context.step { detailLine("Step", step) }
+                if let error = context.error { detailLine("Error", error) }
+            }
+        case .designReview(let context):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                detailLine("Step", context.step)
+                if let designPath = context.designPath {
+                    detailLine("Design", designPath)
+                }
+            }
+        case .calibration(let context):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                detailLine("Step", context.step)
+                if let chordPath = context.chordPath {
+                    detailLine("Chord", chordPath)
+                }
+            }
+        case .raw(let raw):
+            Text(raw)
+                .font(Typography.code())
+                .foregroundStyle(palette.text)
+>>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
         }
     }
 
@@ -252,13 +283,32 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .algedonic:
+            case .stepFailure:
                 if let wave = repoState.waveStore.wave(for: item.waveId) {
                     Button("Retry") {
                         Task { try? await repoState.restartStep(wave) }
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
+<<<<<<< HEAD
+=======
+            case .designReview(let context):
+                if let sessionId = context.terminalSessionId {
+                    Button("Open Session") {
+                        repoState.openTerminalSession(sessionId)
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                }
+            case .calibration(let context):
+                if let sessionId = context.terminalSessionId {
+                    Button("Open Session") {
+                        repoState.openTerminalSession(sessionId)
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                }
+            case .queueFailure, .raw:
+                EmptyView()
+>>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
             }
         }
     }

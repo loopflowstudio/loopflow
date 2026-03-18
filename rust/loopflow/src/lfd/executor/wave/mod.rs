@@ -23,6 +23,12 @@ use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::engine::worktree::remove_worktree;
+<<<<<<< HEAD
+=======
+use crate::lfd::attention::{
+    create_code_review_attention, create_interactive_step_attention, resolve_interactive_attention,
+};
+>>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
@@ -516,6 +522,33 @@ impl WaveExecutor {
                         terminal_session_id.clone(),
                     );
 
+<<<<<<< HEAD
+=======
+                    // Create attention item for checkpoint interactive steps.
+                    match create_interactive_step_attention(
+                        &self.store,
+                        &wave,
+                        &run,
+                        &step.step.name,
+                        &terminal_session_id,
+                    )
+                    .await
+                    {
+                        Ok(Some(item)) => {
+                            self.event_hub.send(Event::attention_created(item));
+                        }
+                        Ok(None) => {} // exploratory step, no attention item
+                        Err(err) => {
+                            warn!(
+                                run_id = %run.id,
+                                step = %step.step.name,
+                                error = %err,
+                                "failed to create interactive step attention"
+                            );
+                        }
+                    }
+
+>>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run).await?;
@@ -1451,6 +1484,18 @@ impl WaveExecutor {
         let Some(wave) = self.store.get_wave(&wave_id).await? else {
             return Ok(());
         };
+
+        // Resolve interactive attention items when the terminal session completes.
+        match resolve_interactive_attention(&self.store, &run_id).await {
+            Ok(resolved) => {
+                for item in resolved {
+                    self.event_hub.send(Event::attention_resolved(item));
+                }
+            }
+            Err(err) => {
+                warn!(run_id = %run_id, error = %err, "failed to resolve interactive attention");
+            }
+        }
 
         if matches!(
             session_status,

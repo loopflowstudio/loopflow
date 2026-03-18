@@ -1,6 +1,7 @@
 use time::OffsetDateTime;
 
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::wave::classify_repair_flow;
 use crate::lfd::executor::WaveExecutor;
 pub use crate::lfd::executor::{create_parallel_wave_run, create_wave_run_with_id};
 use crate::lfd::scheduler::SchedulerSlotGuard;
@@ -44,6 +45,53 @@ async fn execute_run_inner(
                 }
                 event_hub.send(Event::wave_updated(run.wave_id.clone()));
             }
+        }
+        return;
+    }
+
+    // executor.execute() returned Ok — check if the run ended in failure.
+    // fail_run sets the status but defers repair dispatch to us (avoids
+    // recursive-async Send issues with the sqlite mutex).
+    let run = match store.get_wave_run(&run.id).await {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+    if run.status != WaveRunStatus::Failed || run.repair_of.is_some() {
+        return;
+    }
+
+    // First failure, no prior repair attempt — try headless repair.
+    let wave = match store.get_wave(&run.wave_id).await {
+        Ok(Some(w)) => w,
+        _ => return,
+    };
+    let repair_flow = classify_repair_flow(&run);
+    tracing::info!(
+        run_id = %run.id,
+        wave_id = %wave.id(),
+        repair_flow = %repair_flow,
+        "dispatching headless repair attempt"
+    );
+    match executor.create_repair_run(&wave, &run, &repair_flow).await {
+        Ok(repair_run) => {
+            event_hub.send(Event::wave_started(
+                repair_run.wave_id.clone(),
+                repair_run.id.clone(),
+            ));
+            if let Err(err) = executor.execute(&repair_run.id).await {
+                tracing::error!(
+                    repair_run_id = %repair_run.id,
+                    error = %err,
+                    "repair run execution failed"
+                );
+            }
+        }
+        Err(err) => {
+            tracing::error!(
+                run_id = %run.id,
+                error = %err,
+                "failed to create repair run"
+            );
         }
     }
 }

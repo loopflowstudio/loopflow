@@ -902,6 +902,7 @@ impl SqliteStore {
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
                 run.target_branch,
+                run.repair_of.as_ref(),
             ],
         )?;
         Ok(())
@@ -935,6 +936,7 @@ impl SqliteStore {
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
                 run.target_branch,
+                run.repair_of.as_ref(),
                 run.id,
             ],
         )?;

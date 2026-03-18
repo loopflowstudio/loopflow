@@ -37,8 +37,8 @@ use crate::lfd::triggers::{
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun, WaveRunStatus,
-    WaveStatus,
+    Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun, WaveRunSnapshot,
+    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
 use super::adaptive::AdaptiveContainerExecutor;
@@ -949,23 +949,83 @@ impl WaveExecutor {
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error.clone());
         self.store.update_wave_run(run).await?;
-        match create_step_failure_attention(&self.store, wave, run, &step_name, &error).await {
-            Ok(item) => self.event_hub.send(Event::attention_created(item)),
-            Err(err) => {
-                warn!(wave_id = %wave.id(), error = %err, "failed to create step failure attention")
+
+        // Only create algedonic signal if this was a repair attempt or if
+        // we don't support auto-repair for this failure. The repair dispatch
+        // happens in `maybe_launch_repair` (called from the spawned task
+        // context where Send is satisfied).
+        if run.repair_of.is_some() {
+            // Repair attempt failed — escalate.
+            info!(
+                run_id = %run.id,
+                wave_id = %wave.id(),
+                "repair attempt failed, creating algedonic signal"
+            );
+            match create_step_failure_attention(&self.store, wave, run, &step_name, &error).await {
+                Ok(item) => self.event_hub.send(Event::attention_created(item)),
+                Err(err) => {
+                    warn!(wave_id = %wave.id(), error = %err, "failed to create algedonic signal")
+                }
             }
         }
+        // If repair_of is None, the caller (execute_run_inner / trigger common)
+        // will check and potentially launch a repair run. We don't create an
+        // attention item yet — give repair a chance first.
+
         self.output.close_writer(&run.id.to_string());
 
-        // Clean up run-scoped worktrees.
-        let wt = Path::new(&run.worktree);
-        if let Err(err) = cleanup_run_worktree(wt) {
-            warn!(run_id = %run.id, error = %err, "failed to clean up run worktree on failure");
+        // Clean up run-scoped worktrees if no repair will follow.
+        if run.repair_of.is_some() {
+            let wt = Path::new(&run.worktree);
+            if let Err(err) = cleanup_run_worktree(wt) {
+                warn!(run_id = %run.id, error = %err, "failed to clean up run worktree on failure");
+            }
         }
 
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
+    }
+
+    /// Create a repair run in the same worktree/branch as the failed run.
+    /// Returns the created run; the caller is responsible for executing it.
+    pub(crate) async fn create_repair_run(
+        &self,
+        wave: &Wave,
+        failed_run: &WaveRun,
+        repair_flow: &str,
+    ) -> Result<WaveRun> {
+        let repair_run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            snapshot: WaveRunSnapshot {
+                repo: failed_run.snapshot.repo.clone(),
+                flow: repair_flow.to_string(),
+                direction: failed_run.snapshot.direction.clone(),
+                area: failed_run.snapshot.area.clone(),
+                pr: failed_run.snapshot.pr.clone(),
+            },
+            iteration: failed_run.iteration,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: failed_run.worktree.clone(),
+            branch: failed_run.branch.clone(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            activation_log_id: None,
+            parent_run_id: failed_run.parent_run_id.clone(),
+            parent_pr_number: failed_run.parent_pr_number,
+            stack_position: failed_run.stack_position,
+            stack_group_id: failed_run.stack_group_id.clone(),
+            stack_status: failed_run.stack_status,
+            lineage_inferred: false,
+            target_branch: failed_run.target_branch.clone(),
+            repair_of: Some(failed_run.id.clone()),
+        };
+        self.store.create_wave_run(&repair_run).await?;
+        Ok(repair_run)
     }
 
     pub(super) async fn advance_run_step(
@@ -1283,6 +1343,22 @@ struct OrphanedForkCleanup {
     removed_worktrees: u32,
 }
 
+/// Determine which flow to use for a repair attempt based on the failed run.
+///
+/// CI-fix runs get `ci-fix`. Everything else gets `debug` — the universal
+/// fallback that takes error context as input.
+pub(crate) fn classify_repair_flow(failed_run: &WaveRun) -> String {
+    // If the original run was a CI-fix that failed, don't loop ci-fix → ci-fix.
+    // The debug step is the right fallback for a failed repair tool.
+    if failed_run.snapshot.flow == CI_FIX_FLOW {
+        return "debug".to_string();
+    }
+    // TODO: expand classification as we learn more error classes.
+    // For now, `debug` handles everything — it reads error context from the
+    // failed run and attempts a fix in the same worktree.
+    "debug".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1441,6 +1517,7 @@ mod tests {
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
+            repair_of: None,
         };
         store
             .create_wave_run(&run)
@@ -1495,6 +1572,7 @@ mod tests {
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
+            repair_of: None,
         };
         store
             .create_wave_run(&run)
@@ -2326,5 +2404,61 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn classify_repair_flow_returns_debug_for_ci_fix() {
+        let mut run = WaveRun::new(LfdId::new(), LfdId::new());
+        run.snapshot.flow = CI_FIX_FLOW.to_string();
+        assert_eq!(classify_repair_flow(&run), "debug");
+    }
+
+    #[test]
+    fn classify_repair_flow_returns_debug_for_regular_flow() {
+        let mut run = WaveRun::new(LfdId::new(), LfdId::new());
+        run.snapshot.flow = "build".to_string();
+        assert_eq!(classify_repair_flow(&run), "debug");
+    }
+
+    #[tokio::test]
+    async fn create_repair_run_links_to_failed_run() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let repo = TestRepo::new();
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        let wave = make_wave("test-wave", repo.path(), "build", WaveStatus::Failed);
+        store.create_wave(&wave).await.unwrap();
+        let failed_run = create_main_run(&store, &wave, WaveRunStatus::Failed).await;
+
+        let repair = executor
+            .create_repair_run(&wave, &failed_run, "debug")
+            .await
+            .unwrap();
+
+        assert_eq!(repair.repair_of.as_ref().unwrap(), &failed_run.id);
+        assert_eq!(repair.snapshot.flow, "debug");
+        assert_eq!(repair.worktree, failed_run.worktree);
+        assert_eq!(repair.branch, failed_run.branch);
+        assert_eq!(repair.status, WaveRunStatus::Running);
+
+        // Verify persisted
+        let loaded = store.get_wave_run(&repair.id).await.unwrap().unwrap();
+        assert_eq!(loaded.repair_of.unwrap(), failed_run.id);
     }
 }

@@ -8,6 +8,8 @@ The VSM flow is the default chord flow. It replaces `tend` as the general-purpos
 
 Prerequisite: algedonic signals (01) give the control step (s3) concrete operational data — which waves are healthy, which are struggling, what repair attempts have been tried.
 
+**Before starting:** re-evaluate the 01 live demo. The repair dispatch code (`execute_run_inner` → `create_repair_run` → algedonic escalation) is built and unit-tested but hasn't run end-to-end in lfd. Infra gaps (dev lfd token isolation, PR state sync for `check-ci` polling) blocked the demo. Try again — the gaps may have been fixed by other work, or may be quick to close now.
+
 ## Steps
 
 ### s5 — Identity and Policy

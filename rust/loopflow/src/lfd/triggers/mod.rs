@@ -11,8 +11,9 @@ mod token_refresh;
 mod watch;
 
 pub use activation::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_activation_dispatcher,
-    spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome, DEFAULT_ACTIVATION_QUEUE_LIMIT,
+    activate_listener_wave, dispatch_wave_if_ready, enqueue_pending_activation,
+    spawn_activation_dispatcher, spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome,
+    DEFAULT_ACTIVATION_QUEUE_LIMIT,
 };
 pub use block::spawn_block_handler;
 pub use ci_failure::spawn_ci_failure_handler;

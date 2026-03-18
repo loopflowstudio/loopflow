@@ -3,13 +3,12 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::activation::{enqueue_pending_activation, ActivationEnvelope, EnqueueOutcome};
-use super::spawn_immediate_activation;
+use super::activation::{activate_listener_wave, ActivationEnvelope};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{Event, Signal, Wave, WaveStatus};
+use crate::lfd::types::{Event, Signal, WaveStatus};
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -91,7 +90,7 @@ async fn handle_block_event(
             }
         };
 
-        if !matches_area_member(&listener_wave, &source_wave)
+        if !listener_wave.listens_to_member_wave(&source_wave)
             || listener_wave.status() == WaveStatus::Paused
         {
             continue;
@@ -111,37 +110,16 @@ async fn handle_block_event(
             "main",
         );
 
-        let activated = if listener_wave.serialized {
-            let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
-            if matches!(
-                outcome,
-                Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-            ) {
-                let _ = super::dispatch_wave_if_ready(
-                    store,
-                    executor,
-                    scheduler,
-                    event_hub,
-                    &listener_wave,
-                )
-                .await;
-                true
-            } else {
-                false
-            }
-        } else {
-            spawn_immediate_activation(
-                store,
-                executor,
-                scheduler,
-                event_hub,
-                &listener_wave,
-                trigger.flow.clone(),
-                envelope,
-            )
-            .await
-            .is_some()
-        };
+        let activated = activate_listener_wave(
+            store,
+            executor,
+            scheduler,
+            event_hub,
+            &listener_wave,
+            trigger.flow.clone(),
+            envelope,
+        )
+        .await;
 
         if activated {
             trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
@@ -157,18 +135,6 @@ async fn handle_block_event(
     Ok(())
 }
 
-fn matches_area_member(listener_wave: &Wave, source_wave: &Wave) -> bool {
-    if listener_wave.repo() != source_wave.repo() {
-        return false;
-    }
-    let expected = format!("wave/{}/", source_wave.name());
-    let without_slash = expected.trim_end_matches('/');
-    listener_wave.area().iter().any(|entry| {
-        let trimmed = entry.trim();
-        trimmed == expected || trimmed == without_slash
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,7 +143,7 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Trigger, WaveMode};
+    use crate::lfd::types::{Trigger, Wave, WaveMode};
     use std::sync::Arc;
 
     async fn create_store() -> SharedStore {

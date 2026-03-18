@@ -32,10 +32,7 @@ use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, SessionStatus};
 use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
-use crate::lfd::triggers::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
-    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
-};
+use crate::lfd::triggers::{activate_listener_wave, spawn_run_task_with_slot, ActivationEnvelope};
 use crate::lfd::types::{
     Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun, WaveRunStatus,
     WaveStatus,
@@ -900,13 +897,9 @@ impl WaveExecutor {
 
             let explicit_match = trigger.source_wave_id.as_ref() == Some(source_wave_id);
             let area_match = trigger.source_wave_id.is_none()
-                && listener_wave.repo() == source_wave.repo()
-                && listener_wave.area().iter().any(|entry| {
-                    let expected = format!("wave/{}/", source_wave.name());
-                    let trimmed = entry.trim();
-                    trimmed == expected || trimmed == expected.trim_end_matches('/')
-                });
-            if !area_match && (area_derived_only || !explicit_match) {
+                && listener_wave.listens_to_member_wave(&source_wave);
+            let listens = area_match || (!area_derived_only && explicit_match);
+            if !listens {
                 continue;
             }
 
@@ -919,35 +912,16 @@ impl WaveExecutor {
                 "",
                 if area_match { "main" } else { source_branch },
             );
-            let activated = if listener_wave.serialized {
-                let enqueued = matches!(
-                    enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
-                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-                );
-                if enqueued {
-                    let _ = dispatch_wave_if_ready(
-                        &self.store,
-                        self,
-                        &self.scheduler,
-                        &self.event_hub,
-                        &listener_wave,
-                    )
-                    .await;
-                }
-                enqueued
-            } else {
-                spawn_immediate_activation(
-                    &self.store,
-                    self,
-                    &self.scheduler,
-                    &self.event_hub,
-                    &listener_wave,
-                    trigger.flow.clone(),
-                    envelope,
-                )
-                .await
-                .is_some()
-            };
+            let activated = activate_listener_wave(
+                &self.store,
+                self,
+                &self.scheduler,
+                &self.event_hub,
+                &listener_wave,
+                trigger.flow.clone(),
+                envelope,
+            )
+            .await;
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {

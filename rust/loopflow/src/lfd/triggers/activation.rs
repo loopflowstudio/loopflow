@@ -275,6 +275,39 @@ pub async fn spawn_immediate_activation(
     Some(run)
 }
 
+pub async fn activate_listener_wave(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
+    event_hub: &EventHub,
+    wave: &Wave,
+    flow_override: Option<String>,
+    envelope: ActivationEnvelope,
+) -> bool {
+    if wave.serialized {
+        let enqueued = matches!(
+            enqueue_pending_activation(store, event_hub, envelope).await,
+            Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+        );
+        if enqueued {
+            let _ = dispatch_wave_if_ready(store, executor, scheduler, event_hub, wave).await;
+        }
+        return enqueued;
+    }
+
+    spawn_immediate_activation(
+        store,
+        executor,
+        scheduler,
+        event_hub,
+        wave,
+        flow_override,
+        envelope,
+    )
+    .await
+    .is_some()
+}
+
 pub async fn dispatch_pending_activations(
     store: &SharedStore,
     executor: &WaveExecutor,

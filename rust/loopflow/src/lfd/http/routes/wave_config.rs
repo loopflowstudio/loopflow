@@ -164,7 +164,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\narea: ['.']\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n",
+            "flow: build\narea: ['.']\ntriggers:\n  - signal: wave\n    source: infra\n    source_repo: /tmp/source\n",
         )
         .expect("write");
 

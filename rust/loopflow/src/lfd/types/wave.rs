@@ -297,6 +297,17 @@ impl Wave {
         &self.area
     }
 
+    pub fn listens_to_member_wave(&self, source_wave: &Wave) -> bool {
+        if self.repo != source_wave.repo {
+            return false;
+        }
+
+        let expected = format!("wave/{}", source_wave.name);
+        self.area
+            .iter()
+            .any(|entry| entry.trim().trim_end_matches('/') == expected)
+    }
+
     pub fn status(&self) -> WaveStatus {
         self.status
     }

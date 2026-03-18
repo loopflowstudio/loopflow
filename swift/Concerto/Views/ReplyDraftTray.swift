@@ -6,9 +6,6 @@ import LoopflowCore
 struct ReplyDraftTray: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-#if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
 
     @Bindable var queue: ReplyQueue
     @Binding var isExpanded: Bool
@@ -22,7 +19,6 @@ struct ReplyDraftTray: View {
                 editingEntry: editingEntry,
                 editingReplyDraft: $editingReplyDraft,
                 isPresented: editComposerIsPresented,
-                isCompact: isCompactEditPresentation,
                 onSubmitText: saveEdit,
                 onEmoji: saveEmojiEdit
             ))
@@ -103,14 +99,6 @@ struct ReplyDraftTray: View {
 
     private var listHeight: CGFloat {
         CGFloat(min(max(queue.count, 1), 4)) * 84
-    }
-
-    private var isCompactEditPresentation: Bool {
-#if os(iOS)
-        horizontalSizeClass == .compact
-#else
-        false
-#endif
     }
 
     private func beginEditing(_ entry: ReplyEntry) {
@@ -331,53 +319,8 @@ private struct ReplyDraftEditPresentation: ViewModifier {
     let editingEntry: ReplyEntry?
     @Binding var editingReplyDraft: String
     @Binding var isPresented: Bool
-    let isCompact: Bool
     let onSubmitText: () -> Void
     let onEmoji: (String) -> Void
-
-    func body(content: Content) -> some View {
-#if os(iOS)
-        if isCompact {
-            content.sheet(isPresented: $isPresented) {
-                if let editingEntry {
-                    editComposer(for: editingEntry)
-                    .presentationDetents([.medium])
-                }
-            }
-        } else {
-            content.popover(isPresented: $isPresented, arrowEdge: .top) {
-                if let editingEntry {
-                    editComposer(for: editingEntry)
-                    .frame(width: 320)
-                }
-            }
-        }
-#else
-        content.popover(isPresented: $isPresented, attachmentAnchor: .point(.top), arrowEdge: .top) {
-            if let editingEntry {
-                ReplyComposerPopover(
-                    title: "Edit queued reply",
-                    quoted: editingEntry.quotedText,
-                    replyDraft: $editingReplyDraft,
-                    submitLabel: "Save",
-                    onSubmitText: onSubmitText,
-                    onEmoji: editingEntry.quotedText == nil ? nil : onEmoji
-                )
-            }
-        }
-#endif
-    }
-
-    private func editComposer(for entry: ReplyEntry) -> ReplyComposerContent {
-        ReplyComposerContent(
-            title: "Edit queued reply",
-            quoted: entry.quotedText,
-            replyDraft: $editingReplyDraft,
-            submitLabel: "Save",
-            onSubmitText: onSubmitText,
-            onEmoji: entry.quotedText == nil ? nil : onEmoji
-        )
-    }
 }
 
 private struct ReplyDraftTrayPreviewHarness: View {

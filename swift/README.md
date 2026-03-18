@@ -23,7 +23,6 @@ Visual interface for loopflow. SwiftUI today on macOS, with iOS support staged i
 The `./dev` script is the primary build tool. It uses Swift Package Manager (`Package.swift`) for building and installs to `~/Applications/Concerto Dev.app` to preserve macOS permissions across rebuilds.
 
 Concerto bundles `lfd` and `lf` into the app bundle. By default, each opened repo starts a bundled `lfd` process with an ephemeral localhost port and token.
-Bundled macOS launches mark their child daemon/container processes so Concerto can reap stale instances on the next start and shut the bundled `lfd` down when the app exits.
 
 ### Commands
 
@@ -150,13 +149,11 @@ Repo windows now open into a queue view when no wave is selected:
 
 ## Terminal Workspace
 
-Selected waves now open a workspace-first detail view. Embedded terminals are additive, not a takeover:
+Selecting a waiting wave now opens a terminal workspace instead of a chat transcript:
 
-- The work view stays the default surface for the selected wave
-- A Ghostty-backed Terminal tab appears only when that wave has an active terminal session
-- Fresh terminal sessions auto-open that Terminal tab once for the selected wave
-- The terminal tab keeps wave context, queue pressure, recent runs, and quick actions in a sidebar
-- Switching back to Work returns to the native wave detail/session path without destroying the terminal surface
+- Each interactive wave gets its own Ghostty-backed tab
+- The active tab keeps wave context, queue pressure, recent runs, and quick actions in a sidebar
+- Switching tabs keeps other terminal surfaces alive
 - Remote repos stay on the queue/detail path until terminal embedding grows a remote transport
 
 

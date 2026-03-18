@@ -508,8 +508,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     @objc private func clearAction() {
         guard let surface else { return }
         // Send clear screen sequence
-        "clear\n".withCString { ptr in
-            ghostty_surface_text(surface, ptr, 6)
+        let clearCmd = "clear\n"
+        clearCmd.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(clearCmd.utf8.count))
         }
     }
 

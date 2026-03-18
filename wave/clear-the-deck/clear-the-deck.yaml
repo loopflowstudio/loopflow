@@ -1,11 +1,15 @@
 flow: ship-wave
 mode: manual
 area:
-  - deploy/
-  - docker/
-  - docs/
+  - pyproject.toml
+  - python/
+  - rust/loopflow/src/bin/lfd.rs
+  - rust/loopflow/src/engine/
+  - rust/loopflow/src/lf/
   - rust/loopflow/src/lfd/config.rs
   - rust/loopflow/src/lfd/executor/
-  - rust/loopflow/src/lfd/service/
+  - rust/loopflow/src/ops/
+  - swift/Concerto/
+  - swift/LoopflowCore/
 direction:
   - simplicity

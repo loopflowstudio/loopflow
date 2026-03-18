@@ -2,31 +2,31 @@
 
 ## Vision
 
-Keep `lfd`'s deployment surface honest and small. This wave now owns the last executor decision after the deployment/auth collapse: Docker stays the blessed container path unless a measured replacement proves worth carrying. It does not own team auth, install-time CLI sugar, or iOS distribution work.
+Keep Loopflow's post-collapse codebase small and internally coherent. This wave now owns the cleanup passes still crossing Rust CLI/daemon boundaries, Python client contracts, and Concerto's shipped macOS surface. It does not reopen container-executor experiments or add new deployment shapes.
 
 ## Strategy
 
-The deployment and auth collapse is now the baseline: docs, compose defaults, and config resolution teach two shapes (`native` and `container`) and two auth modes (`local` and `studio`). Do not reopen that matrix while finishing this wave.
+The deployment and auth collapses are now baseline constraints, not active roadmap items. Use this wave to remove the leftover seams those cuts exposed: shared helpers should live in shared layers, `lfd` should have one real command parser, config knobs should expose env overrides consistently, release safety should have isolated tests, and shipped client/app surfaces should match supported platforms instead of leaking demos or stale minimum versions.
 
-The remaining pass is executor selection inside container mode. `mode` stays the deployment selector; `auth.mode` remains a tuning knob inside that shape, but `executor.sandbox` does not survive this wave. Container mode resolves to Docker. If sandbox cannot show a concrete win over Docker—or if a replacement such as Daytona cannot prove an end-to-end wave run without adding new surface area—remove it from the supported surface and shrink the code around Docker.
-
-Do not preserve a hidden or experimental sandbox escape hatch in mainline config, runtime, docs, or compose generation. If internal experiments continue, they move off the blessed path and out of the default support story. User-facing docs, compose defaults, and installed-service guidance should tell one Docker-backed container story.
+Sequence by blast radius. Fix Rust boundary debt and missing release/config coverage first, because those paths shape daily maintenance work. Then clean the Python and Swift surfaces that still advertise or ship the wrong thing. Do not add abstractions to "prepare" for later cleanup. Move code to the layer that already owns the concept, delete duplicates, and tighten tests around the simpler shape.
 
 ## Goals
 
-- Docker is the only blessed container executor unless a measured replacement beats it.
-- Sandbox has one explicit status instead of an adaptive half-product.
-- Deploy docs, compose generation, and executor tests all describe the same support story.
+- Shared worktree and execution behavior has one home instead of cross-layer imports or duplicate helpers.
+- `lfd` entrypoints and config behave consistently whether invoked from CLI flags, env vars, or release automation.
+- Python and Concerto ship only supported surfaces.
 
 ## Risks
 
-- A vague “keep both for now” outcome preserves maintenance cost without enough user value.
-- A Daytona spike could look good on startup latency while still missing worktree, credential, or harness requirements.
-- Partial deletion could leave stale config keys, dead executor branches, or test/doc contradictions that keep the maintenance cost alive under a smaller label.
+- Cleanup can sprawl into opportunistic refactors that make the roadmap fuzzy again.
+- Moving helpers across layers can fork behavior unless the existing worktree and release tests move with the code.
+- Demo-only UI and stale package metadata can linger because they look harmless even though they widen the support surface.
 
 ## Metrics
 
-- Documented deployment shapes: 2
-- Blessed container executors in user-facing docs: 1
-- Experimental container executors carried past this wave: 0
-- Default execution paths the team supports end to end: 2
+- Cross-layer imports from `lf` into `lfd::executor`: 0
+- Duplicated branch-existence helpers in Rust ops/engine code: 0
+- Manual subcommand dispatch blocks in `rust/loopflow/src/bin/lfd.rs`: 0
+- `lfd` config fields missing env overrides for persisted settings in scope here: 0
+- Shipped macOS windows that exist only for demos or tests: 0
+- Python minimum-version mismatches between package metadata and lint target: 0

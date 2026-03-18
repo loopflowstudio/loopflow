@@ -18,7 +18,7 @@ Concerto should make wave management visual — especially for the conductor man
 
 2. **Wave configuration.** Edit any wave parameter from Concerto. Direction, area, flow, agent, triggers. Changes write back to YAML and update `lfd`. This is also where the chord's proposed mutations surface for human review.
 
-3. **Start/stop controls.** Run a wave, stop a running wave, restart. Starting a wave that later blocks on an interactive step should hand off into the existing terminal workspace / attention queue flow instead of opening a parallel session UI.
+3. **Start/stop controls.** Run a wave, stop a running wave, restart. Starting a wave that later blocks on an interactive step should hand off into the existing terminal workspace / attention queue flow instead of opening a parallel session UI, and the control plane should keep `lfd` as the owner of terminal-session lifecycle rather than inventing a second Swift-side completion path.
 
 4. **Worktree management.** Each wave's worktree visible and manageable. Create, switch, prune. Integrated with wave lifecycle — starting a wave ensures its worktree exists, and interactive waves surface the matching worktree in the terminal sidebar.
 

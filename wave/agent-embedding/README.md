@@ -14,7 +14,7 @@ The local-first terminal workspace is now in place: `lfd` owns terminal lifecycl
 
 Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities.
 
-Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. If a surface needs wave health, queue pressure, recent PRs, or terminal presence, it should come from the shared run/attention/session state rather than a second reporting pipeline.
+Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. If a surface needs wave health, queue pressure, recent PRs, or terminal presence, it should come from the shared run/attention/session state rather than a second reporting pipeline. The persisted `terminal_sessions` records in `lfd` are also the source of truth for adoption and latency measurement: portfolio trend lines, in-app completion rate, and resume-latency work should query those rows rather than inventing a second analytics cache.
 
 ## Goals
 

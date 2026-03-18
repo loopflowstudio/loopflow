@@ -16,7 +16,7 @@ Start two local waves that pause on interactive steps. In one repo window, verif
 
 ## Measure
 
-Add `terminal_sessions` telemetry in `lfd` so we can measure adoption and friction.
+Use `terminal_sessions` telemetry in `lfd` to measure adoption and friction.
 
 - Baseline before this work: **0%** of interactive coding sessions complete inside Concerto; all require chat UI or an external terminal.
 - Capture after launch:

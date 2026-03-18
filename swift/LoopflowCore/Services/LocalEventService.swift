@@ -629,14 +629,19 @@ public actor EventService {
         return nil
     }
 
+    private nonisolated(unsafe) static let fractionalFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private nonisolated(unsafe) static let plainFormatter = ISO8601DateFormatter()
+
     private nonisolated static func parseTimestamp(_ value: Any?) -> Date {
         guard let string = value as? String else { return Date() }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: string) {
-            return date
-        }
-        return ISO8601DateFormatter().date(from: string) ?? Date()
+        return fractionalFormatter.date(from: string)
+            ?? plainFormatter.date(from: string)
+            ?? Date()
     }
 
     public func disconnect() async {

@@ -10,7 +10,7 @@ struct InteractiveSessionView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
-    @StateObject private var ghosttyManager = GhosttyManager.shared
+    @ObservedObject private var ghosttyManager = GhosttyManager.shared
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: session.waveId)
@@ -135,7 +135,7 @@ struct InteractiveSessionView: View {
     // MARK: - Actions
 
     private func cancelSession() {
-        GhosttyManager.shared.destroySession(session.id)
+        ghosttyManager.destroySession(session.id)
         outputBuffer.endInteractiveSession()
     }
 
@@ -145,7 +145,7 @@ struct InteractiveSessionView: View {
         // which calls outputBuffer.endInteractiveSession()
         // Daemon sees exit code 0, advances flow
         let eof = "\u{04}"
-        GhosttyManager.shared.sendText(eof, sessionId: session.id)
+        ghosttyManager.sendText(eof, sessionId: session.id)
     }
 }
 

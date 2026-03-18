@@ -71,12 +71,39 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
    - Wave context maintained
    - Foreground-run selection is restored as product state, without collapsing multiple runs into one daemon concept
 
+## Design guidance from tmux study
+
+### What to borrow from tmux
+
+**Layout as data, not just view state.** tmux encodes split hierarchies as compact strings (`120x40,0,0{60x40,0,0,5,59x40,61,0,6}`) that serialize the full tree. iTerm2 parses these to build its `NSSplitView` hierarchy on attach. Concerto should similarly serialize layout trees — not just tab order, but split directions, sizes, and pane types — so layout persistence and wave-context switching are data operations.
+
+**Session identity above compositor identity.** tmux sessions have stable IDs; windows and panes are subordinate. Concerto's composition should work the same way: `TerminalSession` IDs and wave/run IDs are the stable anchors. Pane positions and split ratios are compositor state that can change without affecting session identity.
+
+**Independent active-pane per client.** tmux lets each attached client independently select which pane is active. In a Concerto split layout, this means focus/selection is a per-view-instance concern, not a session-level concern. Two split terminal panes showing different sessions can each have independent focus.
+
+### What to avoid from tmux
+
+**Pane as runtime identity.** tmux pane IDs are runtime primitives — they gate input routing, size negotiation, and process lifecycle. Concerto panes should be pure compositor constructs. The runtime primitives are `TerminalSession` and `WaveRun`. If Concerto creates a split view showing two terminals, that's two pane views wrapping two session references, not two new runtime identities.
+
+**Universal terminal assumption.** tmux's every pane is a terminal. Concerto's value is that panes can be native views (diff, queue, calibration) that understand their content semantically. Don't force native panes through a terminal abstraction.
+
+### iTerm2 as reference client
+
+iTerm2's tmux integration is the most mature example of a rich native GUI consuming tmux sessions. Key patterns:
+- **Tab affinity** — which tmux windows group into one native window is persisted as tmux session variables and restored on reconnect. Concerto needs equivalent persistence for which sessions/views group into a layout.
+- **Outstanding-resize counter** — prevents feedback loops during resize. Concerto will face the same problem when split panes resize affects terminal sessions.
+- **Pending-request watermark** — iTerm2 tracks outstanding async commands and delays UI construction until all respond. Concerto should similarly batch initial state loading before rendering a layout.
+
+### Mosh insight for composition
+
+Mosh's state-sync model (sync screen snapshot, not replay bytes) is relevant for composition. When switching wave context, Concerto doesn't need to replay terminal history — it needs the current screen state. If `lfd` later exposes a `capture-pane` equivalent (current terminal grid as text), layout switching can show instant content without streaming replay.
+
 ## Open questions
 
-- How should saved layouts interact with the current `TerminalWorkspaceStore` ordering and selection model?
-- What is the right restore story for running Ghostty surfaces that currently only survive inside one app process?
-- Which panes must work for remote repos before remote PTY transport exists, and which stay local-only?
-- How much tmux-style keyboard vocabulary helps vs confuses in a native macOS app?
+- How should saved layouts interact with the current `TerminalWorkspaceStore` ordering and selection model? (Guidance: layouts should reference sessions by ID, and `TerminalWorkspaceStore` remains the authority for per-repo session ordering. Layouts compose over that — they describe spatial arrangement, not session lifecycle.)
+- What is the right restore story for running Ghostty surfaces that currently only survive inside one app process? (Guidance: once `lfd` owns PTYs (item 04), Ghostty views just reattach to daemon sessions on restore. Before that, local Ghostty processes die with the app — persist the layout tree, recreate shells on restart.)
+- Which panes must work for remote repos before remote PTY transport exists, and which stay local-only? (Guidance: queue, portfolio, calibration, and diff panes work for any repo with an `lfd` HTTP connection. Terminal panes need either local Ghostty or daemon PTY transport. Keep the pane type roster split along that line.)
+- How much tmux-style keyboard vocabulary helps vs confuses in a native macOS app? (Guidance: leader-key + hjkl for pane navigation is natural for tmux/vim users. But Concerto is a macOS app — Cmd-based shortcuts should also work. Offer both, don't force one.)
 
 ## Done when
 

@@ -14,21 +14,15 @@ use crate::lfd::id::LfdId;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AttentionKind {
-    DesignReview,
-    CodeReview,
-    Calibration,
-    QueueFailure,
-    StepFailure,
+    Interactive,
+    Algedonic,
 }
 
 impl AttentionKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::DesignReview => "design_review",
-            Self::CodeReview => "code_review",
-            Self::Calibration => "calibration",
-            Self::QueueFailure => "queue_failure",
-            Self::StepFailure => "step_failure",
+            Self::Interactive => "interactive",
+            Self::Algedonic => "algedonic",
         }
     }
 }
@@ -38,11 +32,11 @@ impl std::str::FromStr for AttentionKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "design_review" => Ok(Self::DesignReview),
-            "code_review" => Ok(Self::CodeReview),
-            "calibration" => Ok(Self::Calibration),
-            "queue_failure" => Ok(Self::QueueFailure),
-            "step_failure" => Ok(Self::StepFailure),
+            "interactive" => Ok(Self::Interactive),
+            "algedonic" => Ok(Self::Algedonic),
+            // Accept legacy kind strings during migration.
+            "design_review" | "code_review" | "calibration" => Ok(Self::Interactive),
+            "queue_failure" | "step_failure" => Ok(Self::Algedonic),
             _ => Err(format!("unknown attention kind: {value}")),
         }
     }

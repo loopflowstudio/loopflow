@@ -1,29 +1,34 @@
 import Foundation
 
+/// Two attention paths:
+/// - `interactive`: `lf` is at a step that needs a human
+/// - `algedonic`: something is wrong and the system is escalating
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
-    case designReview = "design_review"
-    case codeReview = "code_review"
-    case calibration
-    case queueFailure = "queue_failure"
-    case stepFailure = "step_failure"
+    case interactive
+    case algedonic
 
     public var icon: String {
         switch self {
-        case .designReview: return "doc.text.magnifyingglass"
-        case .codeReview: return "arrow.up.right.square"
-        case .calibration: return "slider.horizontal.3"
-        case .queueFailure: return "exclamationmark.triangle"
-        case .stepFailure: return "xmark.octagon"
+        case .interactive: return "person.fill.questionmark"
+        case .algedonic: return "exclamationmark.triangle"
         }
     }
 
     public var label: String {
         switch self {
-        case .designReview: return "Design Review"
-        case .codeReview: return "Code Review"
-        case .calibration: return "Calibration"
-        case .queueFailure: return "Queue Failure"
-        case .stepFailure: return "Step Failure"
+        case .interactive: return "Interactive"
+        case .algedonic: return "Escalation"
+        }
+    }
+
+    /// Accept legacy kind strings during migration.
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "interactive": self = .interactive
+        case "algedonic": self = .algedonic
+        case "design_review", "code_review", "calibration": self = .interactive
+        case "queue_failure", "step_failure": self = .algedonic
+        default: return nil
         }
     }
 }
@@ -34,46 +39,24 @@ public enum AttentionStatus: String, Sendable, CaseIterable, Hashable {
     case resolved
 }
 
-/// Context for code review attention items.
-public struct CodeReviewAttentionContext: Sendable, Hashable {
-    public let prURL: URL?
-    public let prNumber: Int?
-    public let prTitle: String?
-    public let branch: String?
-}
-
-/// Context for queue failure attention items (rebase conflicts, blocked queues).
-public struct QueueFailureAttentionContext: Sendable, Hashable {
-    public let reason: String?
-    public let conflictFiles: [String]
-    public let error: String?
-}
-
-/// Context for step failure attention items (agent crashed, build failed).
-public struct StepFailureAttentionContext: Sendable, Hashable {
+/// Context for interactive attention items (step needs human input).
+public struct InteractiveAttentionContext: Sendable, Hashable {
     public let step: String?
     public let terminalSessionId: String?
     public let designPath: String?
 }
 
-public struct DesignReviewAttentionContext: Sendable, Hashable {
-    public let step: String
-    public let designPath: String?
-    public let terminalSessionId: String?
-}
-
-public struct CalibrationAttentionContext: Sendable, Hashable {
-    public let step: String
-    public let chordPath: String?
-    public let terminalSessionId: String?
+/// Context for algedonic attention items (system escalation).
+public struct AlgedonicAttentionContext: Sendable, Hashable {
+    public let step: String?
+    public let error: String?
+    public let reason: String?
+    public let conflictFiles: [String]
 }
 
 public enum AttentionContext: Sendable, Hashable {
-    case codeReview(CodeReviewAttentionContext)
-    case queueFailure(QueueFailureAttentionContext)
-    case stepFailure(StepFailureAttentionContext)
-    case designReview(DesignReviewAttentionContext)
-    case calibration(CalibrationAttentionContext)
+    case interactive(InteractiveAttentionContext)
+    case algedonic(AlgedonicAttentionContext)
     case raw(String)
 }
 
@@ -120,66 +103,26 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 }
 
 public extension AttentionItem {
-    /// Parse typed context from JSON based on discriminator fields.
-    /// Context type is determined by the `step` field first, then payload shape.
-    static func context(json: [String: Any]) -> AttentionContext {
-        let step = json["step"] as? String ?? ""
-        let terminalSessionId = json["terminal_session_id"] as? String
-
-        // Design review: step starts with "code/design"
-        if step.hasPrefix("code/design") {
-            return .designReview(
-                DesignReviewAttentionContext(
-                    step: step,
-                    designPath: json["design_path"] as? String,
-                    terminalSessionId: terminalSessionId
-                )
-            )
-        }
-        // Calibration: step starts with "chord/"
-        if step.hasPrefix("chord/") {
-            return .calibration(
-                CalibrationAttentionContext(
-                    step: step,
-                    chordPath: json["design_path"] as? String,
-                    terminalSessionId: terminalSessionId
-                )
-            )
-        }
-        // Queue failure: has "reason" field
-        if json["reason"] != nil {
-            return .queueFailure(
-                QueueFailureAttentionContext(
-                    reason: json["reason"] as? String,
-                    conflictFiles: json["conflict_files"] as? [String] ?? [],
-                    error: json["error"] as? String
-                )
-            )
-        }
-        // Code review: has "pr_url" field
-        if json["pr_url"] != nil {
-            let url = (json["pr_url"] as? String).flatMap(URL.init(string:))
-            return .codeReview(
-                CodeReviewAttentionContext(
-                    prURL: url,
-                    prNumber: json["pr_number"] as? Int,
-                    prTitle: json["pr_title"] as? String,
-                    branch: json["branch"] as? String
-                )
-            )
-        }
-        // Step failure: has "error" field
-        if json["error"] != nil {
-            return .stepFailure(
-                StepFailureAttentionContext(
+    /// Parse typed context from JSON based on kind.
+    static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
+        switch kind {
+        case .interactive:
+            return .interactive(
+                InteractiveAttentionContext(
                     step: json["step"] as? String,
                     terminalSessionId: json["terminal_session_id"] as? String,
                     designPath: json["design_path"] as? String
                 )
             )
+        case .algedonic:
+            return .algedonic(
+                AlgedonicAttentionContext(
+                    step: json["step"] as? String,
+                    error: json["error"] as? String,
+                    reason: json["reason"] as? String,
+                    conflictFiles: json["conflict_files"] as? [String] ?? []
+                )
+            )
         }
-        // Fallback
-        let data = (try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])) ?? Data()
-        return .raw(String(data: data, encoding: .utf8) ?? "{}")
     }
 }

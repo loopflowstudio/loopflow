@@ -921,7 +921,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             status: status,
             title: title,
             summary: summary,
-            context: AttentionItem.context(json: json["context"] as? [String: Any] ?? [:]),
+            context: AttentionItem.context(kind: kind, json: json["context"] as? [String: Any] ?? [:]),
             surfacedAt: parseDate(json["surfaced_at"]) ?? Date(),
             viewedAt: parseDate(json["viewed_at"]),
             resolvedAt: parseDate(json["resolved_at"])

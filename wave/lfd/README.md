@@ -76,6 +76,19 @@ Clients should be able to:
 
 This should feel SSH-like in product terms even if the first transport is not literal SSH.
 
+### tmux lessons, applied
+
+The tmux architecture study (item 01, `wave/lfd/01-tmux-architecture-study.md`) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
+
+- **Monotonic, type-prefixed, never-reused IDs** for sessions and runs. tmux does this with `$session`, `@window`, `%pane`. Loopflow's `LfdId` scheme already fits.
+- **Server owns all persistent state.** Clients are disposable renderers. `lfd` owns run state, session state, scrollback buffers. Concerto reconstructs on reconnect.
+- **Structured event protocol, not terminal scraping.** tmux control mode separates command-response from async notifications with `%begin`/`%end` framing. `lf` → `lfd` events should follow the same principle: typed messages, correlation IDs, fire-and-forget delivery that never blocks execution.
+- **Flow control for high-output sessions.** tmux's `pause-after` prevents slow clients from killing sessions. Agent output can be enormous. Event delivery must be resilient to slow consumers.
+- **Multi-client size negotiation is a server policy** (`smallest`/`largest`/`latest`/`manual`). Mobile + desktop coexistence needs this from the start.
+- **Auth is filesystem permissions locally, tokens remotely.** Start simple (Unix socket permissions), add cryptographic auth when remote access arrives.
+- **WezTerm's Domain abstraction** (local/SSH/socket/TLS all implement the same interface) is the model for transport-agnostic session access.
+- **Mosh's state sync** (sync current screen, not replay bytes) is the model for late-joining observers of agent sessions.
+
 ### Structured observation, not terminal scraping
 
 The runtime should not infer execution by scraping terminal text.

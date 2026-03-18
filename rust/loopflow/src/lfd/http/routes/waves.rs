@@ -1180,7 +1180,7 @@ pub async fn land_wave_handler(
     let create_pr = payload.create_pr.unwrap_or(true);
 
     let repo_path = wave.repo().clone();
-    run_blocking_result(
+    let land_result = run_blocking_result(
         move || {
             let progress = crate::ops::NullProgress;
             crate::ops::land(
@@ -1200,6 +1200,20 @@ pub async fn land_wave_handler(
         StatusCode::BAD_REQUEST,
     )
     .await?;
+
+    // Sync PR info back to the run so downstream code (CI webhooks) can find it.
+    if let (Some(mut run), Some(pr_info)) = (latest_run, land_result.pr) {
+        run.pr = Some(crate::lfd::types::PullRequest {
+            url: pr_info.url,
+            number: Some(pr_info.number as u32),
+            state: Some(pr_info.state),
+            title: None,
+            branch: Some(pr_info.branch),
+        });
+        if let Err(err) = state.store.update_wave_run(&run).await {
+            tracing::warn!(run_id = %run.id, error = %err, "failed to sync PR to run after land");
+        }
+    }
 
     state.event_hub.send(Event::wave_updated(wave_id_for_event));
 

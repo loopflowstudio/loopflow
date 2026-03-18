@@ -181,7 +181,6 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         flow: row.text(11)?,
         direction: snapshot_direction,
         area: snapshot_area,
-        pr: snapshot_pr,
     };
 
     Ok(WaveRun {
@@ -206,6 +205,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         lineage_inferred,
         target_branch,
         repair_of,
+        pr: snapshot_pr,
     })
 }
 

@@ -564,7 +564,7 @@ fn inferred_stack_status(
 }
 
 fn pr_number(run: &WaveRun) -> Option<u32> {
-    run.snapshot.pr.as_ref()?.number
+    run.pr.as_ref()?.number
 }
 
 async fn set_queue_block(
@@ -743,13 +743,6 @@ mod tests {
                 flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
-                pr: Some(PullRequest {
-                    url: format!("https://example.test/pr/{pr_number}"),
-                    number: Some(pr_number),
-                    state: Some("open".to_string()),
-                    title: Some(format!("run-{pr_number}")),
-                    branch: Some(format!("feature-{pr_number}")),
-                }),
             },
             iteration: stack_position,
             step_index: 0,
@@ -769,6 +762,13 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: Some(PullRequest {
+                url: format!("https://example.test/pr/{pr_number}"),
+                number: Some(pr_number),
+                state: Some("open".to_string()),
+                title: Some(format!("run-{pr_number}")),
+                branch: Some(format!("feature-{pr_number}")),
+            }),
         }
     }
 

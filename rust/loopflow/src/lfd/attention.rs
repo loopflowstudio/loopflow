@@ -27,7 +27,7 @@ pub async fn create_code_review_attention(
     run: &WaveRun,
 ) -> Result<AttentionItem, String> {
     let id = LfdId::new();
-    let pr = run.snapshot.pr.as_ref();
+    let pr = run.pr.as_ref();
     let item = AttentionItem {
         id,
         wave_id: wave.id().clone(),
@@ -179,7 +179,7 @@ async fn should_resolve_code_review(
     else {
         return Ok(true);
     };
-    let Some(pr_number) = run.snapshot.pr.as_ref().and_then(|pr| pr.number) else {
+    let Some(pr_number) = run.pr.as_ref().and_then(|pr| pr.number) else {
         return Ok(true);
     };
     let Some(state) = store

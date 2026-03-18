@@ -422,13 +422,6 @@ mod tests {
                 flow: "build".to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
-                pr: Some(PullRequest {
-                    url: "https://example.test/pr/1".to_string(),
-                    number: pr_number,
-                    state: pr_state.map(ToString::to_string),
-                    title: Some("test".to_string()),
-                    branch: Some("feature".to_string()),
-                }),
             },
             iteration: 0,
             step_index: 0,
@@ -448,6 +441,13 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: Some(PullRequest {
+                url: "https://example.test/pr/1".to_string(),
+                number: pr_number,
+                state: pr_state.map(ToString::to_string),
+                title: Some("test".to_string()),
+                branch: Some("feature".to_string()),
+            }),
         }
     }
 
@@ -488,13 +488,6 @@ mod tests {
                 flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
-                pr: Some(PullRequest {
-                    url: format!("https://example.test/pr/{pr_number}"),
-                    number: Some(pr_number),
-                    state: Some("open".to_string()),
-                    title: Some("title".to_string()),
-                    branch: Some(format!("feature-{pr_number}")),
-                }),
             },
             iteration: pr_number,
             step_index: 0,
@@ -514,6 +507,13 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: Some(PullRequest {
+                url: format!("https://example.test/pr/{pr_number}"),
+                number: Some(pr_number),
+                state: Some("open".to_string()),
+                title: Some("title".to_string()),
+                branch: Some(format!("feature-{pr_number}")),
+            }),
         }
     }
 

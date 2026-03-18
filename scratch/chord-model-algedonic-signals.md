@@ -33,9 +33,9 @@ pub(crate) fn lf_home_dir() -> PathBuf {
 
 ### 2. PR state sync after land
 
-After `ops: land` creates a PR, write the PR back to the run's snapshot. The change lives in the land handler (`rust/loopflow/src/lfd/http/routes/waves.rs:1155`). After `land()` returns with a PR URL/number, update the run's `snapshot.pr` in the store.
+After `ops: land` creates a PR, set `run.pr` in the store. The change lives in the land handler (`rust/loopflow/src/lfd/http/routes/waves.rs:1155`). After `land()` returns with a PR URL/number, update `run.pr`.
 
-The `WaveRunSnapshot` is meant to be immutable (captured at run start), but this is a special case: the run *created* the PR. The snapshot should reflect the run's own output. Alternative: store PR number outside the snapshot (a new field on `WaveRun`). But the snapshot's `pr` field already exists and is what downstream code reads. Updating it post-land is simpler and more correct — the snapshot captures the run's state, and the PR is part of that state.
+The PR is a run output, not initial state — it belongs on `WaveRun` directly, not inside `WaveRunSnapshot`. A run *is* a snapshot of the wave; `WaveRunSnapshot` as a separate struct is redundant. Move `pr` from `snapshot.pr` to `run.pr` and update readers accordingly. This also cleans up the awkwardness of mutating something called a "snapshot."
 
 ### 3. Retry limit (3 attempts)
 
@@ -45,19 +45,39 @@ Add a store query: count runs where `repair_of` traces back to the same original
 
 Implementation: `count_repair_chain(store, &run)` walks `repair_of` links backwards to count depth. Simple and correct — no new fields needed.
 
+**Restructuring required:** The current code in `execute_run_inner` (line 59) short-circuits with `if run.repair_of.is_some() { return; }` — repair runs that fail don't trigger further repairs. Escalation happens inside `fail_run` in the executor. To support 3 attempts:
+- Remove the `repair_of.is_some()` early return in `execute_run_inner`
+- Move algedonic signal creation out of `fail_run` for repair runs
+- `execute_run_inner` handles all runs uniformly: on failure, check chain depth → if < 3, repair; if >= 3, escalate
+
+**Backoff between retries.** Immediate retry burns attempts against transient failures (GitHub API down, network blip). Fixed delays indexed by chain depth:
+
+```rust
+const REPAIR_DELAYS: [Duration; 3] = [
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+];
+```
+
+The agent runs themselves take minutes, so these delays are small relative to total cycle time. Hardcoded — configurable when someone needs it.
+
 ### 4. Demo harness script
 
-`scripts/demo-algedonic.sh` orchestrates the full path:
+`scripts/demo-algedonic.py` orchestrates the pure repair chain → escalation path:
 
 1. Build lfd (`cargo build -p loopflow --bin lfd`)
 2. Start isolated lfd (`LF_HOME=$(mktemp -d)`)
-3. Create wave with `make-tests-fail` → `land --create-pr` flow
-4. Run wave — step breaks a test, pushes PR
-5. Simulate CI failure event (POST to webhook endpoint)
-6. Wait for ci-fix run to appear
-7. If ci-fix fails → verify repair run dispatched (repair_of set)
-8. If repair fails → verify algedonic attention item created
-9. Print results, cleanup
+3. Create wave with a step that always fails
+4. Run wave — step fails
+5. Verify repair run 1 dispatched (`repair_of` links to failed run, 30s delay)
+6. Repair 1 fails → verify repair run 2 dispatched (60s delay)
+7. Repair 2 fails → verify repair run 3 dispatched (120s delay)
+8. Repair 3 fails → verify algedonic attention item created
+9. Attention item visible via GET /attention
+10. Print results, cleanup
+
+No webhook simulation, no PR, no CI. Tests the core mechanism: repeated failure → backoff → escalation. Total runtime ~4 minutes (3 delays + step execution time).
 
 Uses `LfdRuntime` pattern from `scripts/lib/lfd_runtime.py` — proven to work.
 
@@ -66,19 +86,21 @@ Uses `LfdRuntime` pattern from `scripts/lib/lfd_runtime.py` — proven to work.
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
 | `HOME` env var instead of `LF_HOME` | Isolates everything, not just lfd state | Too broad — breaks git, ssh, cargo. `LF_HOME` is surgical. |
-| New `WaveRun.pr_number` field instead of updating snapshot | Cleaner separation of mutable/immutable | Downstream code reads `snapshot.pr`. Adding another field means updating all readers. Updating snapshot is one write. |
+| Keep `pr` on `WaveRunSnapshot` and mutate it post-land | Fewer reader changes | Mutating a "snapshot" is a lie. The run is the snapshot; PR is a run output. Move it to `WaveRun.pr` and update readers. |
 | Retry limit as a config field | Configurable per wave | Premature. Start with a constant. Make it configurable when someone needs it. |
+| No backoff between retries | Simpler, fewer moving parts | Burns all 3 attempts immediately against transient failures (API down, rate limit). Fixed delays are one constant. |
+| Exponential backoff with jitter | Better for high-contention systems | Over-engineered for 3 retries where each attempt takes minutes. Fixed delays are predictable and sufficient. |
 | Polling-based CI check instead of webhook | No webhook infra needed | Slower, wasteful. Webhook path already exists. Demo can simulate the webhook. |
 
 ## Key decisions
 
 1. **`LF_HOME` over `HOME` override.** Scoped to lfd state only. Doesn't break the rest of the system.
 
-2. **Update snapshot.pr post-land.** Yes, this mutates an "immutable" snapshot. But the alternative (a new field + updating all readers) is worse. The snapshot should reflect reality, and reality includes the PR that the run created.
+2. **`pr` moves from `WaveRunSnapshot` to `WaveRun`.** A run *is* a snapshot of the wave. The separate `WaveRunSnapshot` struct is redundant, and mutating something called a "snapshot" is wrong. PR is a run output — it belongs on the run directly. Readers that access `run.snapshot.pr` update to `run.pr`.
 
 3. **Retry count by walking `repair_of` chain, not a counter field.** No schema change. The chain *is* the count. Slightly more expensive (N queries for depth N, max 3), but N is tiny and correctness is obvious.
 
-4. **Demo simulates CI webhook rather than waiting for real CI.** Real CI takes minutes and requires GitHub. The demo should run locally in seconds. Real CI integration is already tested via the webhook path.
+4. **Demo tests pure repair chain, not CI path.** A failing step exercises the full repair → backoff → escalation mechanism without requiring GitHub, webhooks, or PRs. The CI-fix path is a separate trigger that creates fresh runs — it doesn't exercise the `repair_of` chain. Test one thing well.
 
 ## Scope
 
@@ -86,7 +108,7 @@ Uses `LfdRuntime` pattern from `scripts/lib/lfd_runtime.py` — proven to work.
   - `LF_HOME` env var in `lf_home_dir()`
   - PR state sync after `ops: land --create-pr`
   - Retry limit (3) with chain depth counting
-  - `scripts/demo-algedonic.sh` orchestration script
+  - `scripts/demo-algedonic.py` orchestration script
   - Update `scripts/dev-lfq` to use `LF_HOME`
   - Tests for retry limit and PR sync
 
@@ -100,17 +122,19 @@ Uses `LfdRuntime` pattern from `scripts/lib/lfd_runtime.py` — proven to work.
 
 ```bash
 # Demo runs end-to-end
-scripts/demo-algedonic.sh
+scripts/demo-algedonic.py
 
 # Output shows:
 # 1. Wave created
 # 2. Run executed (step fails)
-# 3. Repair run dispatched (repair_of links to failed run)
-# 4. After 3 failed repairs, algedonic attention item created
-# 5. Attention item visible via GET /attention
+# 3. Repair run 1 dispatched (30s delay, repair_of links to failed run)
+# 4. Repair run 2 dispatched (60s delay)
+# 5. Repair run 3 dispatched (120s delay)
+# 6. Repair run 3 fails → algedonic attention item created
+# 7. Attention item visible via GET /attention
 ```
 
 - `LF_HOME=/tmp/test cargo test` passes — lfd uses isolated state
-- `cargo test repair_chain` — retry limit works at depth 3
+- `cargo test repair_chain` — retry limit works at depth 3, backoff delays correct
 - `cargo test pr_sync_after_land` — snapshot.pr updated after land
-- `scripts/demo-algedonic.sh` completes without errors
+- `scripts/demo-algedonic.py` completes without errors

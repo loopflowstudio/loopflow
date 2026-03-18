@@ -529,7 +529,7 @@ async fn find_waves_for_pr(
             .await
             .map_err(|err| err.to_string())?
             .into_iter()
-            .any(|run| run.snapshot.pr.and_then(|pr| pr.number) == Some(pr_number));
+            .any(|run| run.pr.and_then(|pr| pr.number) == Some(pr_number));
         if has_pr {
             matches.push(wave.id().clone());
         }
@@ -588,7 +588,7 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
         return false;
     }
 
-    let Some(pr) = run.snapshot.pr.as_ref() else {
+    let Some(pr) = run.pr.as_ref() else {
         return false;
     };
     super::is_open_pr_state(pr.state.as_deref())
@@ -601,7 +601,7 @@ fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
 }
 
 fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &WaveRun) -> Option<WaveCiTarget> {
-    let pr = run.snapshot.pr.as_ref()?;
+    let pr = run.pr.as_ref()?;
     Some(WaveCiTarget {
         wave_id: wave_id.clone(),
         wave_run_id: run.id.clone(),
@@ -851,13 +851,6 @@ mod tests {
                 flow: flow.to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
-                pr: Some(PullRequest {
-                    url: "https://example.test/pr/1".to_string(),
-                    number: Some(1),
-                    state: pr_state.map(ToString::to_string),
-                    title: Some("test".to_string()),
-                    branch: branch.map(ToString::to_string),
-                }),
             },
             iteration: 0,
             step_index: 0,
@@ -877,6 +870,13 @@ mod tests {
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
+            pr: Some(PullRequest {
+                url: "https://example.test/pr/1".to_string(),
+                number: Some(1),
+                state: pr_state.map(ToString::to_string),
+                title: Some("test".to_string()),
+                branch: branch.map(ToString::to_string),
+            }),
         }
     }
 

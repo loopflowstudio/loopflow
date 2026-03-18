@@ -6,6 +6,7 @@ set -o pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 cd "$REPO"
+export LF_HOME="${LF_HOME:-/tmp/lfd-dev}"
 export LFD_URL="${LFD_URL:-http://127.0.0.1:2487}"
 export LFD_TOKEN="${LFD_TOKEN:-02c9ac4d8a0a1f0d65f99a439bd062b282ad6a8d2da3c30470e6a544a9f2bbfb}"
 uv run python -m loopflow.cli "$@"

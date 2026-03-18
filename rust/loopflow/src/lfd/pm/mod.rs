@@ -83,7 +83,9 @@ pub enum PmProviderKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmConfig {
-    pub provider: PmProviderKind,
+    pub rw_provider: PmProviderKind,
+    #[serde(default)]
+    pub export_providers: Vec<PmProviderKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asana_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

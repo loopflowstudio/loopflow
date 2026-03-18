@@ -271,7 +271,7 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Import projects from PM tool as waves
+    /// Import roadmap items from PM tool to wave files
     Import {
         /// Team ID in the PM provider
         #[arg(short = 't', long = "team")]

@@ -29,12 +29,18 @@ pub struct PmInitOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmInitResult {
-    pub wave: String,
+pub struct PmInitProviderResult {
     pub provider: PmProviderKind,
     pub project_id: String,
     pub linked: usize,
-    pub created: Vec<String>,
+    pub created_local: Vec<String>,
+    pub created_remote: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmInitResult {
+    pub wave: String,
+    pub providers: Vec<PmInitProviderResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,9 +116,16 @@ pub struct PmStatusOptions {
     pub wave: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PmProviderRole {
+    ReadWrite,
+    Export,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmProviderStatus {
     pub provider: PmProviderKind,
+    pub role: PmProviderRole,
     pub project_id: String,
     pub local_total: usize,
     pub linked: usize,
@@ -123,7 +136,7 @@ pub struct PmProviderStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmWaveStatus {
     pub wave: String,
-    pub status: PmProviderStatus,
+    pub providers: Vec<PmProviderStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +145,24 @@ pub struct PmStatusResult {
 }
 
 // ── Provider construction ───────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PmRoles {
+    rw_provider: PmProviderKind,
+    export_providers: Vec<PmProviderKind>,
+}
+
+impl PmRoles {
+    fn all_providers(&self) -> Vec<PmProviderKind> {
+        let mut providers = vec![self.rw_provider];
+        for provider in &self.export_providers {
+            if !providers.contains(provider) {
+                providers.push(*provider);
+            }
+        }
+        providers
+    }
+}
 
 /// Resolved PM context for a wave: the provider client, provider kind, and project ID (if any).
 pub(crate) struct PmContext {
@@ -144,19 +175,36 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
+fn resolve_pm_roles(repo: &Path, wave: &str) -> OpsResult<PmRoles> {
     let config = load_config_or_default(Some(repo));
     let wave_pm = read_wave_pm_config(repo, wave);
-    wave_pm
+    let rw_provider = wave_pm
         .as_ref()
-        .and_then(|pm| pm.provider)
-        .or_else(|| config.pm.as_ref().map(|pm| pm.provider))
+        .and_then(|pm| pm.rw_provider)
+        .or_else(|| config.pm.as_ref().map(|pm| pm.rw_provider))
         .ok_or_else(|| {
             OpsError::Message(
-                "No PM provider configured. Set `pm.provider` in .lf/config.yaml or wave config."
+                "No PM read/write provider configured. Set `pm.rw_provider` in .lf/config.yaml or wave config."
                     .to_string(),
             )
-        })
+        })?;
+    let export_providers = if let Some(pm) = wave_pm
+        .as_ref()
+        .filter(|pm| !pm.export_providers.is_empty())
+    {
+        pm.export_providers.clone()
+    } else {
+        config
+            .pm
+            .as_ref()
+            .map(|pm| pm.export_providers.clone())
+            .unwrap_or_default()
+    };
+
+    Ok(PmRoles {
+        rw_provider,
+        export_providers,
+    })
 }
 
 async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dyn PmProvider>> {
@@ -207,15 +255,24 @@ pub(crate) async fn build_provider(
     })
 }
 
-pub(crate) async fn build_wave_provider(repo: &Path, wave: &str) -> OpsResult<PmContext> {
-    let provider = resolve_provider(repo, wave)?;
-    build_provider(repo, wave, provider).await
+pub(crate) async fn build_rw_provider(repo: &Path, wave: &str) -> OpsResult<PmContext> {
+    let roles = resolve_pm_roles(repo, wave)?;
+    build_provider(repo, wave, roles.rw_provider).await
+}
+
+pub(crate) async fn build_export_contexts(repo: &Path, wave: &str) -> OpsResult<Vec<PmContext>> {
+    let roles = resolve_pm_roles(repo, wave)?;
+    let mut contexts = Vec::new();
+    for provider in roles.all_providers() {
+        contexts.push(build_provider(repo, wave, provider).await?);
+    }
+    Ok(contexts)
 }
 
 pub(crate) fn wave_pm_is_enabled(repo: &Path, wave: &str) -> bool {
-    resolve_provider(repo, wave).ok().is_some_and(|provider| {
+    resolve_pm_roles(repo, wave).ok().is_some_and(|roles| {
         read_wave_pm_config(repo, wave)
-            .and_then(|pm| pm.project_for(provider).map(str::to_string))
+            .and_then(|pm| pm.project_for(roles.rw_provider).map(str::to_string))
             .is_some()
     })
 }
@@ -367,6 +424,28 @@ fn update_wave_pm_yaml(
     Ok(())
 }
 
+pub(crate) fn write_pm_roles_to_wave_yaml(
+    repo: &Path,
+    wave: &str,
+    rw_provider: PmProviderKind,
+    export_providers: &[PmProviderKind],
+) -> OpsResult<()> {
+    update_wave_pm_yaml(repo, wave, |pm_map| {
+        pm_map.insert(
+            yaml_string("rw_provider"),
+            serde_yaml_ng::to_value(rw_provider)
+                .map_err(|err| OpsError::Message(format!("failed to encode pm rw provider: {err}")))?,
+        );
+        pm_map.insert(
+            yaml_string("export_providers"),
+            serde_yaml_ng::to_value(export_providers.to_vec()).map_err(|err| {
+                OpsError::Message(format!("failed to encode pm export providers: {err}"))
+            })?,
+        );
+        Ok(())
+    })
+}
+
 pub(crate) fn write_pm_provider_to_wave_yaml(
     repo: &Path,
     wave: &str,
@@ -374,7 +453,7 @@ pub(crate) fn write_pm_provider_to_wave_yaml(
 ) -> OpsResult<()> {
     update_wave_pm_yaml(repo, wave, |pm_map| {
         pm_map.insert(
-            yaml_string("provider"),
+            yaml_string("rw_provider"),
             serde_yaml_ng::to_value(provider)
                 .map_err(|err| OpsError::Message(format!("failed to encode pm provider: {err}")))?,
         );
@@ -419,11 +498,12 @@ async fn pm_init_async(
         )));
     }
 
-    let provider_kind = resolve_provider(repo, &wave)?;
-    write_pm_provider_to_wave_yaml(repo, &wave, provider_kind)?;
+    let roles = resolve_pm_roles(repo, &wave)?;
+    write_pm_roles_to_wave_yaml(repo, &wave, roles.rw_provider, &roles.export_providers)?;
 
     let (project_name, description) = read_wave_project_metadata(repo, &wave)?;
     let mut local_items = read_local_roadmap_items(&wave_dir)?;
+    let mut providers = Vec::new();
     let bootstrap = BootstrapArgs {
         repo,
         wave: &wave,
@@ -433,8 +513,14 @@ async fn pm_init_async(
         progress,
     };
 
-    let ctx = build_provider(repo, &wave, provider_kind).await?;
-    let rw_result = bootstrap_read_write_provider(&bootstrap, &mut local_items, ctx).await?;
+    let rw_context = build_provider(repo, &wave, roles.rw_provider).await?;
+    providers.push(bootstrap_read_write_provider(&bootstrap, &mut local_items, rw_context).await?);
+
+    for provider in roles.export_providers {
+        let export_context = build_provider(repo, &wave, provider).await?;
+        providers
+            .push(bootstrap_export_provider(&bootstrap, &mut local_items, export_context).await?);
+    }
 
     let commit_message = format!("lf pm: bootstrap {wave}");
     let _ = crate::ops::commit_workflow(
@@ -447,13 +533,7 @@ async fn pm_init_async(
         progress,
     )?;
 
-    Ok(PmInitResult {
-        wave,
-        provider: rw_result.provider,
-        project_id: rw_result.project_id,
-        linked: rw_result.linked,
-        created: rw_result.created_local,
-    })
+    Ok(PmInitResult { wave, providers })
 }
 
 pub fn pm_status(
@@ -478,8 +558,8 @@ async fn pm_status_async(
 
     let mut results = Vec::new();
     for wave in waves {
-        let provider_kind = match resolve_provider(repo, &wave) {
-            Ok(p) => p,
+        let roles = match resolve_pm_roles(repo, &wave) {
+            Ok(roles) => roles,
             Err(_) => continue,
         };
         let wave_dir = repo.join("wave").join(&wave);
@@ -494,57 +574,59 @@ async fn pm_status_async(
             .map(|title| normalize_title(&title))
             .collect::<HashSet<_>>();
 
-        let ctx = build_provider(repo, &wave, provider_kind).await?;
-        if ctx.project.trim().is_empty() {
-            continue;
-        }
-        progress.status(&format!("checking {:?} for wave/{wave}", provider_kind));
-        let remote_items = ctx
-            .client
-            .list_items(&ctx.project)
-            .await
-            .map_err(pm_to_ops)?;
-        let linked_ids = local_items
-            .iter()
-            .filter_map(|item| item.doc.frontmatter.id_for(provider_kind))
-            .collect::<HashSet<_>>();
-        let remote_only = remote_items
-            .iter()
-            .filter(|item| {
-                !local_titles.contains(&normalize_title(&item.name))
-                    && !linked_ids.contains(item.id.as_str())
-            })
-            .count();
-
-        results.push(PmWaveStatus {
-            wave,
-            status: PmProviderStatus {
-                provider: provider_kind,
+        let mut providers = Vec::new();
+        for provider in roles.all_providers() {
+            let ctx = build_provider(repo, &wave, provider).await?;
+            if ctx.project.trim().is_empty() {
+                continue;
+            }
+            progress.status(&format!("checking {:?} for wave/{wave}", provider));
+            let remote_items = ctx
+                .client
+                .list_items(&ctx.project)
+                .await
+                .map_err(pm_to_ops)?;
+            let linked = local_items
+                .iter()
+                .filter(|item| item.doc.frontmatter.id_for(provider).is_some())
+                .count();
+            let remote_only = remote_items
+                .iter()
+                .filter(|item| {
+                    !local_titles.contains(&normalize_title(&item.name))
+                        && !local_items.iter().any(|local| {
+                            local.doc.frontmatter.id_for(provider) == Some(item.id.as_str())
+                        })
+                })
+                .count();
+            providers.push(PmProviderStatus {
+                provider,
+                role: if provider == roles.rw_provider {
+                    PmProviderRole::ReadWrite
+                } else {
+                    PmProviderRole::Export
+                },
                 project_id: ctx.project,
                 local_total: local_items.len(),
-                linked: linked_ids.len(),
+                linked,
                 remote_total: remote_items.len(),
                 remote_only,
-            },
-        });
+            });
+        }
+
+        if !providers.is_empty() {
+            results.push(PmWaveStatus { wave, providers });
+        }
     }
 
     Ok(PmStatusResult { waves: results })
-}
-
-#[derive(Debug, Clone)]
-struct BootstrapResult {
-    provider: PmProviderKind,
-    project_id: String,
-    linked: usize,
-    created_local: Vec<String>,
 }
 
 async fn bootstrap_read_write_provider(
     args: &BootstrapArgs<'_>,
     local_items: &mut [LocalRoadmapItem],
     ctx: PmContext,
-) -> OpsResult<BootstrapResult> {
+) -> OpsResult<PmInitProviderResult> {
     let project_id = ensure_project(
         args.repo,
         args.wave,
@@ -569,6 +651,7 @@ async fn bootstrap_read_write_provider(
         .collect::<HashMap<_, _>>();
     let mut matched_remote_ids = HashSet::new();
     let mut created_local = Vec::new();
+    let mut created_remote = Vec::new();
     let mut pending_remote_creates = Vec::new();
 
     for (index, local_item) in local_items.iter_mut().enumerate() {
@@ -602,6 +685,7 @@ async fn bootstrap_read_write_provider(
             &local_title,
         )
         .await?;
+        created_remote.push(local_items[index].item.filename.clone());
     }
 
     for remote_item in &remote_items {
@@ -613,11 +697,84 @@ async fn bootstrap_read_write_provider(
         created_local.push(filename);
     }
 
-    Ok(BootstrapResult {
+    Ok(PmInitProviderResult {
         provider: ctx.provider,
         project_id,
         linked: count_linked_items(local_items, ctx.provider) + created_local.len(),
         created_local,
+        created_remote,
+    })
+}
+
+async fn bootstrap_export_provider(
+    args: &BootstrapArgs<'_>,
+    local_items: &mut [LocalRoadmapItem],
+    ctx: PmContext,
+) -> OpsResult<PmInitProviderResult> {
+    let project_id = ensure_project(
+        args.repo,
+        args.wave,
+        args.project_name,
+        args.description,
+        &ctx,
+        args.progress,
+    )
+    .await?;
+    let remote_items = ctx
+        .client
+        .list_items(&project_id)
+        .await
+        .map_err(pm_to_ops)?;
+    let remote_by_id = remote_items
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    let mut remote_by_title = remote_items
+        .iter()
+        .map(|item| (normalize_title(&item.name), item))
+        .collect::<HashMap<_, _>>();
+    let mut created_remote = Vec::new();
+
+    for local_item in local_items.iter_mut() {
+        let local_title = local_item.title();
+        if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
+            if remote_by_id.contains_key(pm_id) {
+                continue;
+            }
+        }
+
+        if let Some(remote_item) = remote_by_title.remove(&normalize_title(&local_title)) {
+            local_item
+                .doc
+                .frontmatter
+                .set_id(ctx.provider, remote_item.id.clone());
+            write_local_item(args.wave_dir, local_item)?;
+            continue;
+        }
+
+        let pm_id = ctx
+            .client
+            .create_item(
+                &project_id,
+                &PmItemCreate {
+                    name: local_title,
+                    description: local_item.description(),
+                    rank: local_item.item.rank(),
+                },
+            )
+            .await
+            .map_err(pm_to_ops)?;
+        local_item.doc.frontmatter.set_id(ctx.provider, pm_id);
+        write_local_item(args.wave_dir, local_item)?;
+        created_remote.push(local_item.item.filename.clone());
+    }
+
+    Ok(PmInitProviderResult {
+        provider: ctx.provider,
+        project_id,
+        linked: count_linked_items(local_items, ctx.provider),
+        created_local: Vec::new(),
+        created_remote,
     })
 }
 
@@ -812,9 +969,9 @@ async fn pm_import_async(
 ) -> OpsResult<PmImportResult> {
     // Get the provider from global config (no wave context yet)
     let config = load_config_or_default(Some(repo));
-    let provider_kind = config.pm.as_ref().map(|pm| pm.provider).ok_or_else(|| {
+    let provider_kind = config.pm.as_ref().map(|pm| pm.rw_provider).ok_or_else(|| {
         OpsError::Message(
-            "No PM provider configured. Set `pm.provider` in .lf/config.yaml.".to_string(),
+            "No PM provider configured. Set `pm.rw_provider` in .lf/config.yaml.".to_string(),
         )
     })?;
     let client = build_client(repo, provider_kind).await?;
@@ -849,7 +1006,7 @@ async fn pm_import_async(
         // Pull items
         let remote_items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
         let existing_items = read_local_roadmap_items(&wave_dir).unwrap_or_default();
-        let existing_ids: std::collections::HashSet<String> = existing_items
+        let existing_ids: HashSet<String> = existing_items
             .iter()
             .filter_map(|item| {
                 item.doc
@@ -924,7 +1081,7 @@ async fn pm_try_claim_async(
     progress: &impl Progress,
 ) -> OpsResult<Option<String>> {
     let wave_dir = require_wave_dir(repo, wave)?;
-    let ctx = build_wave_provider(repo, wave).await?;
+    let ctx = build_rw_provider(repo, wave).await?;
     require_project(&ctx, wave)?;
 
     // Fetch remote items and find unassigned ones
@@ -991,7 +1148,7 @@ async fn pm_pull_async(
 ) -> OpsResult<PmPullResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_rw_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
@@ -1021,7 +1178,7 @@ async fn pm_export_async(
 ) -> OpsResult<PmExportResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_rw_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
@@ -1078,7 +1235,7 @@ async fn pm_push_diff_async(
     progress: &impl Progress,
 ) -> OpsResult<PmPushDiffResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_rw_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     let baseline = find_push_diff_baseline(repo)?;
@@ -1221,7 +1378,7 @@ async fn pm_sync_async(
 ) -> OpsResult<PmSyncResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_rw_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
     let main_branch = get_default_branch(repo)
         .map_err(|err| OpsError::Message(format!("failed to determine main branch: {err}")))?;
@@ -1256,7 +1413,7 @@ async fn pm_sync_async(
     let mut conflicts = Vec::new();
 
     // Collect all pm_ids across all three states
-    let mut all_pm_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_pm_ids: HashSet<String> = HashSet::new();
     for pm_id in base_items.keys() {
         all_pm_ids.insert(pm_id.clone());
     }
@@ -1890,6 +2047,35 @@ mod tests {
     }
 
     #[test]
+    fn write_pm_roles_to_wave_yaml_sets_role_fields() {
+        let dir = TempDir::new().expect("temp dir");
+        let wave_dir = dir.path().join("wave").join("pm");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
+
+        write_pm_roles_to_wave_yaml(
+            dir.path(),
+            "pm",
+            PmProviderKind::Linear,
+            &[PmProviderKind::Asana],
+        )
+        .expect("write pm roles");
+
+        let content = std::fs::read_to_string(wave_dir.join("pm.yaml")).expect("read wave config");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).expect("parse yaml");
+        let pm = value.get("pm").expect("pm block");
+        assert_eq!(
+            pm.get("rw_provider").and_then(|value| value.as_str()),
+            Some("linear")
+        );
+        let export = pm
+            .get("export_providers")
+            .and_then(|value| value.as_sequence())
+            .expect("export providers");
+        assert_eq!(export[0].as_str(), Some("asana"));
+    }
+
+    #[test]
     fn write_pm_provider_to_wave_yaml_sets_provider_field() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
@@ -1903,18 +2089,21 @@ mod tests {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).expect("parse yaml");
         let pm = value.get("pm").expect("pm block");
         assert_eq!(
-            pm.get("provider").and_then(|value| value.as_str()),
+            pm.get("rw_provider").and_then(|value| value.as_str()),
             Some("linear")
         );
     }
 
     #[test]
-    fn wave_pm_is_enabled_requires_provider_project() {
+    fn wave_pm_is_enabled_requires_rw_project() {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
         std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
-        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: linear\n")
-            .expect("write config");
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "pm:\n  rw_provider: linear\n  export_providers:\n    - asana\n",
+        )
+        .expect("write config");
 
         let wave_dir = repo.join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");

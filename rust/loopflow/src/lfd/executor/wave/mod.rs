@@ -305,6 +305,39 @@ impl WaveExecutor {
             run.worktree.clone(),
         );
 
+        let run_is_pr_oriented = run.target_branch == "main" || run.target_branch.is_empty();
+
+        if run_is_pr_oriented
+            && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
+        {
+            let worktree = run.worktree.clone();
+            let wave_name = wave.name().clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::ops::pm::pm_pull(
+                    Path::new(&worktree),
+                    &crate::ops::pm::PmPullOptions { wave: wave_name },
+                    &crate::ops::NullProgress,
+                )
+            })
+            .await
+            {
+                Ok(Ok(result)) => {
+                    info!(
+                        run_id = %run.id,
+                        local_written = result.local_written,
+                        local_removed = result.local_removed,
+                        "synced roadmap from read/write PM provider"
+                    );
+                }
+                Ok(Err(err)) => {
+                    warn!(run_id = %run.id, error = %err, "PM pull failed at run start; continuing");
+                }
+                Err(err) => {
+                    warn!(run_id = %run.id, error = %err, "PM pull task join failed; continuing");
+                }
+            }
+        }
+
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "launching flow in tmux session");
 
         let session_id = LfdId::new();
@@ -390,6 +423,38 @@ impl WaveExecutor {
 
         let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
         let should_manage_pr = run.target_branch == "main" || run.target_branch.is_empty();
+
+        if should_manage_pr
+            && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
+        {
+            let worktree = run.worktree.clone();
+            let wave_name = wave.name().clone();
+            match tokio::task::spawn_blocking(move || -> Result<()> {
+                crate::ops::export(
+                    Path::new(&worktree),
+                    &crate::ops::ExportOptions {
+                        wave: wave_name,
+                        dry_run: false,
+                    },
+                    &crate::ops::NullProgress,
+                )
+                .map_err(|err| anyhow!(err.to_string()))?;
+                Ok(())
+            })
+            .await
+            {
+                Ok(Ok(())) => {
+                    info!(run_id = %run.id, "exported roadmap to PM providers");
+                }
+                Ok(Err(err)) => {
+                    warn!(run_id = %run.id, error = %err, "PM export failed at run end; continuing");
+                }
+                Err(err) => {
+                    warn!(run_id = %run.id, error = %err, "PM export task join failed; continuing");
+                }
+            }
+        }
+
         if should_manage_pr {
             let worktree = run.worktree.clone();
             let wave_name = wave.name().clone();

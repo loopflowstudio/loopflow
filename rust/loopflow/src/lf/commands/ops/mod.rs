@@ -322,44 +322,28 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
                 .ok_or_else(|| anyhow!("cannot determine wave name"))?])
         };
-
     match cmd {
         PmCommand::Init {
             wave,
             wave_flag,
             all,
         } => {
-            if *all {
-                for wave in list_all_waves()? {
-                    let result = crate::ops::pm::pm_init(
-                        &repo_root,
-                        &crate::ops::pm::PmInitOptions { wave: Some(wave) },
-                        progress,
-                    )?;
-                    println!(
-                        "{}: {:?} project {} ({} linked, {} created)",
-                        result.wave,
-                        result.provider,
-                        result.project_id,
-                        result.linked,
-                        result.created.len()
-                    );
-                }
-            } else {
-                let result = crate::ops::pm::pm_init(
-                    &repo_root,
-                    &crate::ops::pm::PmInitOptions {
-                        wave: wave.clone().or_else(|| wave_flag.clone()),
-                    },
-                    progress,
-                )?;
+            let waves = resolve_pm_waves(wave, wave_flag, *all)?;
+            let wave_opt = if waves.len() == 1 { Some(waves[0].clone()) } else { wave.clone() };
+            let result = crate::ops::pm::pm_init(
+                &repo_root,
+                &crate::ops::pm::PmInitOptions { wave: wave_opt },
+                progress,
+            )?;
+            println!("{}: PM bootstrapped", result.wave);
+            for provider in result.providers {
                 println!(
-                    "{}: {:?} project {} ({} linked, {} created)",
-                    result.wave,
-                    result.provider,
-                    result.project_id,
-                    result.linked,
-                    result.created.len()
+                    "  {:?}: project {} ({} linked, {} local created, {} remote created)",
+                    provider.provider,
+                    provider.project_id,
+                    provider.linked,
+                    provider.created_local.len(),
+                    provider.created_remote.len()
                 );
             }
         }
@@ -371,16 +355,16 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 },
                 progress,
             )?;
-            if result.waves_created.is_empty() {
-                println!("no projects found");
+            if result.items_created == 0 {
+                println!("nothing to import");
             } else {
                 println!(
-                    "imported {} waves ({} items)",
-                    result.waves_created.len(),
-                    result.items_created
+                    "imported {} items across {} waves",
+                    result.items_created,
+                    result.waves_created.len()
                 );
                 for wave in &result.waves_created {
-                    println!("  wave/{wave}");
+                    println!("  {wave}");
                 }
             }
         }
@@ -488,17 +472,22 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    let s = &wave.status;
-                    println!(
-                        "{}: {:?} project {} — local {}, linked {}, remote {}, remote-only {}",
-                        wave.wave,
-                        s.provider,
-                        s.project_id,
-                        s.local_total,
-                        s.linked,
-                        s.remote_total,
-                        s.remote_only
-                    );
+                    println!("{}:", wave.wave);
+                    for provider in wave.providers {
+                        let role = match provider.role {
+                            crate::ops::pm::PmProviderRole::ReadWrite => "rw",
+                            crate::ops::pm::PmProviderRole::Export => "export",
+                        };
+                        println!(
+                            "  {:?} ({role}) project {} — local {}, linked {}, remote {}, remote-only {}",
+                            provider.provider,
+                            provider.project_id,
+                            provider.local_total,
+                            provider.linked,
+                            provider.remote_total,
+                            provider.remote_only
+                        );
+                    }
                 }
             }
         }

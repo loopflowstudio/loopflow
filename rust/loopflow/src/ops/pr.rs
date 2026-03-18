@@ -203,7 +203,16 @@ pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCo
             parse_generated_pr_copy(&combined)
         })
         .ok_or_else(|| {
-            OpsError::Message("failed to parse generated PR copy from agent output".to_string())
+            let combined = format!("{}\n{}", result.stdout.trim(), result.stderr.trim());
+            let preview = truncate_chars(combined.trim(), 400);
+            let detail = if preview.trim().is_empty() {
+                "agent output was empty".to_string()
+            } else {
+                format!("agent output preview:\n{preview}")
+            };
+            OpsError::Message(format!(
+                "failed to parse generated PR copy from agent output ({detail})"
+            ))
         })
 }
 
@@ -402,6 +411,7 @@ fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
     parse_json_copy(raw)
         .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
         .or_else(|| extract_json_candidates(raw).find_map(parse_json_copy))
+        .or_else(|| parse_labeled_copy(raw))
 }
 
 fn parse_json_copy(raw: &str) -> Option<PrCopy> {
@@ -414,6 +424,94 @@ fn parse_json_copy(raw: &str) -> Option<PrCopy> {
         title,
         body: parsed.body,
     })
+}
+
+fn parse_labeled_copy(raw: &str) -> Option<PrCopy> {
+    #[derive(Clone, Copy)]
+    enum Section {
+        Title,
+        Body,
+    }
+
+    let mut section = None;
+    let mut title = None;
+    let mut body_lines = Vec::new();
+
+    for line in raw.lines() {
+        if let Some((label, remainder)) = parse_labeled_line(line) {
+            match label {
+                "title" => {
+                    if !remainder.is_empty() {
+                        title = Some(remainder.to_string());
+                        section = None;
+                    } else {
+                        section = Some(Section::Title);
+                    }
+                }
+                "body" => {
+                    body_lines.clear();
+                    if !remainder.is_empty() {
+                        body_lines.push(remainder.to_string());
+                    }
+                    section = Some(Section::Body);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        match section {
+            Some(Section::Title) => {
+                if !line.trim().is_empty() {
+                    title = Some(line.trim().to_string());
+                    section = None;
+                }
+            }
+            Some(Section::Body) => body_lines.push(line.to_string()),
+            None => {}
+        }
+    }
+
+    let title = title?.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+
+    Some(PrCopy {
+        title,
+        body: body_lines.join("\n").trim_matches('\n').to_string(),
+    })
+}
+
+fn parse_labeled_line(line: &str) -> Option<(&'static str, &str)> {
+    for label in ["title", "body"] {
+        if let Some(remainder) = match_label(line, label) {
+            return Some((label, remainder));
+        }
+    }
+    None
+}
+
+fn match_label<'a>(line: &'a str, label: &str) -> Option<&'a str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let bare = trimmed
+        .trim_start_matches(['#', '-', '*', ' '])
+        .trim_end_matches(['*', ':', ' ']);
+    if bare.eq_ignore_ascii_case(label) {
+        return Some("");
+    }
+
+    let colon_index = trimmed.find(':')?;
+    let (prefix, remainder) = trimmed.split_at(colon_index);
+    let prefix = prefix.trim().trim_matches('*');
+    if !prefix.eq_ignore_ascii_case(label) {
+        return None;
+    }
+    Some(remainder[1..].trim())
 }
 
 fn extract_fenced_json(raw: &str) -> Option<&str> {
@@ -536,6 +634,42 @@ trailer"###;
             Some(PrCopy {
                 title: "docs: tighten lfd docs".to_string(),
                 body: "Use {native|container} and keep JSON like {\"a\":1}.".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_accepts_title_and_body_labels() {
+        let raw = r#"Title: pm: add linear provider
+Body:
+## Usage
+
+```bash
+lf ops linear init
+```"#;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "pm: add linear provider".to_string(),
+                body: "## Usage\n\n```bash\nlf ops linear init\n```".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_accepts_markdown_section_labels() {
+        let raw = r#"## Title
+pm: add linear provider
+
+## Body
+## Usage
+
+- bootstrap a Linear-backed wave"#;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "pm: add linear provider".to_string(),
+                body: "## Usage\n\n- bootstrap a Linear-backed wave".to_string(),
             })
         );
     }

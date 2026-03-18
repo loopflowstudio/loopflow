@@ -21,6 +21,10 @@ fn claude_script() -> &'static str {
     "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
+fn codex_script(output: &str) -> String {
+    format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\nexit 0\n")
+}
+
 fn write_gh_script_reject_base(expected_reject: &str) -> String {
     format!(
         "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list')\n    echo '[]'; exit 0;;\n  'pr diff') exit 1;;\n  'pr create')\n    base=\"\"\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = \"--base\" ]; then\n        shift\n        base=\"$1\"\n      fi\n      shift\n    done\n    if [ \"$base\" = \"{expected_reject}\" ]; then\n      echo \"base branch matches head\" >&2\n      exit 1\n    fi\n    echo 'https://example.com/pr/1'\n    exit 0;;\n  'pr edit') exit 0;;\n  'pr ready') exit 0;;\n  'pr view') echo 'OPEN'; exit 0;;\nesac\nexit 0\n"
@@ -38,11 +42,14 @@ fn push_branch(repo: &TestRepo, name: &str) {
 fn pr_create_calls_gh() {
     let gh_script = write_gh_script("[]", None);
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_home(&[
-        ("gh", gh_script.as_str()),
-        ("open", noop_script()),
-        ("claude", claude_script()),
-    ], Some(home.path()));
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", noop_script()),
+            ("claude", claude_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -68,11 +75,14 @@ fn pr_update_refreshes_body() {
         Some("diff"),
     );
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_home(&[
-        ("gh", gh_script.as_str()),
-        ("open", noop_script()),
-        ("claude", claude_script()),
-    ], Some(home.path()));
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", noop_script()),
+            ("claude", claude_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -95,11 +105,14 @@ fn pr_update_refreshes_body() {
 fn pr_create_uses_default_base_when_upstream_matches_head() {
     let gh_script = write_gh_script_reject_base("feature");
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_home(&[
-        ("gh", gh_script.as_str()),
-        ("open", noop_script()),
-        ("claude", claude_script()),
-    ], Some(home.path()));
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", noop_script()),
+            ("claude", claude_script()),
+        ],
+        Some(home.path()),
+    );
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -160,6 +173,45 @@ fn pr_auto_generates_title_when_missing() {
 
     let Ok(result) = result else {
         panic!("expected auto-generated title to succeed");
+    };
+    assert!(result.created);
+}
+
+#[test]
+fn pr_auto_generates_title_from_labeled_codex_output() {
+    let gh_script = write_gh_script("[]", None);
+    let codex_output = r#"Title: generated title
+Body:
+## Usage
+
+- generated body"#;
+    let codex = codex_script(codex_output);
+    let home = tempfile::TempDir::new().expect("temp home");
+    std::fs::create_dir_all(home.path().join(".lf")).expect("config dir");
+    std::fs::write(home.path().join(".lf/config.yaml"), "agent: codex\n").expect("config");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", noop_script()),
+            ("codex", codex.as_str()),
+        ],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    push_branch(&repo, "feature");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+        },
+        &NullProgress,
+    );
+
+    let Ok(result) = result else {
+        panic!("expected labeled codex output to succeed");
     };
     assert!(result.created);
 }

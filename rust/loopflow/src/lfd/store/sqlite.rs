@@ -135,33 +135,12 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
     })
 }
 
-type SecretsConfigRow = (String, String, Option<String>, Option<String>, i64, bool);
-
-fn read_secrets_config_row(row: &rusqlite::Row) -> StoreResult<SecretsConfigRow> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-    ))
-}
-
-fn decrypt_secrets_config(row: SecretsConfigRow) -> StoreResult<super::SecretsProviderConfig> {
-    let (provider, access_token, project, config, updated_at, encrypted) = row;
-    let access_token =
-        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to decrypt secrets provider token for '{provider}': {error}"
-            ))
-        })?;
+fn read_secrets_config_row(row: &rusqlite::Row) -> StoreResult<super::SecretsProviderConfig> {
     Ok(super::SecretsProviderConfig {
-        provider,
-        access_token,
-        project,
-        config,
-        updated_at,
+        provider: row.get(0)?,
+        project: row.get(1)?,
+        config: row.get(2)?,
+        updated_at: row.get(3)?,
     })
 }
 
@@ -363,25 +342,15 @@ impl SqliteStore {
         config: &super::SecretsProviderConfig,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let encrypted_token =
-            token_crypto::encrypt_token(&config.access_token).map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "failed to encrypt secrets provider token for '{}': {error}",
-                    config.provider
-                ))
-            })?;
         conn.execute(
-            "INSERT INTO secrets_provider_config (provider, access_token, project, config, updated_at, encrypted)
-             VALUES (?1, ?2, ?3, ?4, ?5, 1)
+            "INSERT INTO secrets_provider_config (provider, project, config, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(provider) DO UPDATE SET
-                access_token = excluded.access_token,
                 project = excluded.project,
                 config = excluded.config,
-                updated_at = excluded.updated_at,
-                encrypted = excluded.encrypted",
+                updated_at = excluded.updated_at",
             params![
                 config.provider,
-                encrypted_token,
                 config.project,
                 config.config,
                 config.updated_at,
@@ -402,13 +371,13 @@ impl SqliteStore {
     pub fn list_secrets_provider_configs(&self) -> StoreResult<Vec<super::SecretsProviderConfig>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider, access_token, project, config, updated_at, encrypted
+            "SELECT provider, project, config, updated_at
              FROM secrets_provider_config ORDER BY provider",
         )?;
         let rows = stmt.query_map([], |row| Ok(read_secrets_config_row(row)))?;
         let mut configs = Vec::new();
         for row in rows {
-            configs.push(decrypt_secrets_config(row??)?);
+            configs.push(row??);
         }
         Ok(configs)
     }

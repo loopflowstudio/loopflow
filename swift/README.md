@@ -195,6 +195,16 @@ Two patterns, intentionally different:
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 
+## Connections Panel
+
+Providers are grouped by role (Agents, Source Control, Project Management, Secrets). Each group renders as a `ProviderGroupSection` containing `ProviderRow` items with status dot, auth action, and optional enable/disable toggle.
+
+The Secrets group (Doppler) expands inline when connected to show project/config selection, key status, and sync controls. Smart defaults pick `dev > prd > prod` when loading configs.
+
+`ConnectionsPanel` is shared between repo-level settings (`ConnectionSettingsView`) and the portfolio toolbar sheet (`PortfolioConnectionsSheet`).
+
+## Communication with lfd
+
 Connection settings support two modes:
 
 - **Bundled** (default): Concerto starts one bundled `lfd` process automatically.

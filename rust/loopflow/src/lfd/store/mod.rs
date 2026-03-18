@@ -836,7 +836,6 @@ pub trait TokenStore: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretsProviderConfig {
     pub provider: String,
-    pub access_token: String,
     pub project: Option<String>,
     pub config: Option<String>,
     pub updated_at: i64,

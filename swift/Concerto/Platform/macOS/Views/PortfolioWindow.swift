@@ -10,9 +10,11 @@ struct PortfolioWindow: View {
     @Environment(\.palette) private var palette
 
     @State private var connectionStore = ConnectionStore()
+    @State private var authProviderStore = AuthProviderStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
     @State private var eventService: EventService?
     @State private var isShowingTypeahead = false
+    @State private var isShowingConnections = false
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: Spacing.lg)]
 
@@ -63,6 +65,22 @@ struct PortfolioWindow: View {
             }
         }
         .background(palette.background.ignoresSafeArea())
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isShowingConnections = true
+                } label: {
+                    Image(systemName: "link")
+                }
+                .help("Connections")
+            }
+        }
+        .sheet(isPresented: $isShowingConnections) {
+            PortfolioConnectionsSheet(
+                authStore: authProviderStore,
+                onDismiss: { isShowingConnections = false }
+            )
+        }
         .onAppear {
             ensureRepoStates()
         }
@@ -121,6 +139,10 @@ struct PortfolioWindow: View {
         let service = EventService(connection: connection, tokenProvider: { token })
         eventService = service
 
+        let waveService = WaveService(connection: connection, tokenProvider: { token })
+        authProviderStore.bindService(waveService)
+        Task { await authProviderStore.refresh() }
+
         await service.subscribe(
             onEvent: { event in
                 Task { @MainActor in
@@ -132,6 +154,7 @@ struct PortfolioWindow: View {
                     for repoState in repoStates.values {
                         repoState.updateConnectionState(state)
                     }
+                    await authProviderStore.handleConnectionState(state)
                 }
             }
         )
@@ -159,7 +182,10 @@ struct PortfolioWindow: View {
             }
             repoStates[wave.repo.normalizedFilePath]?.applyWaveEvent(waveEvent)
 
-        case .worktree, .agentStarted, .agentEnded, .output, .attention, .auth, .secrets:
+        case .auth(let authEvent):
+            authProviderStore.handleEvent(authEvent)
+
+        case .worktree, .agentStarted, .agentEnded, .output, .attention, .secrets:
             break
         }
     }

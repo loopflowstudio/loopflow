@@ -36,8 +36,7 @@ struct ConnectionSettingsView: View {
                     }
 
                     statusContent
-                    providerConnectionsContent
-                    secretsProviderContent
+                    connectionsPanel
                     supportedHarnessesContent
 
                     if let cliMessage, mode == .bundled {
@@ -259,38 +258,22 @@ struct ConnectionSettingsView: View {
     }
 
     @ViewBuilder
-    private var providerConnectionsContent: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Provider Connections")
+    private var connectionsPanel: some View {
+        if !isProviderAuthAvailable {
+            Text("Connect to server first.")
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
-
-            if !isProviderAuthAvailable {
-                Text("Connect to server first.")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-
-            ForEach(repoState.authProviderStore.ordered) { status in
-                AuthProviderCard(
-                    status: status,
-                    pendingFlow: repoState.authProviderStore.pendingFlows[status.provider],
-                    isEnabled: isProviderAuthAvailable,
-                    error: repoState.authProviderStore.errorProvider == status.provider
-                        ? repoState.authProviderStore.error
-                        : nil,
-                    showURLFallback: browserFallbackProviders.contains(status.provider),
-                    onConnect: connectProvider,
-                    onDisconnect: disconnectProvider,
-                    onCancel: disconnectProvider,
-                    onCopy: copyToClipboard
-                )
-            }
+        } else {
+            ConnectionsPanel(
+                authStore: repoState.authProviderStore,
+                secretsStore: repoState.secretsProviderStore,
+                browserFallback: browserFallbackProviders,
+                onConnect: connectProvider,
+                onDisconnect: disconnectProvider,
+                onCancel: disconnectProvider,
+                onCopy: copyToClipboard
+            )
         }
-    }
-
-    private var secretsProviderContent: some View {
-        SecretsProviderSection(store: repoState.secretsProviderStore)
     }
 
     private var supportedHarnessesContent: some View {

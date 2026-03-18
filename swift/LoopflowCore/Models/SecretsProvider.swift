@@ -55,3 +55,27 @@ public struct SecretsProviderStatus: Codable, Sendable {
     public var presentKeys: [SuppliedKey] { keys.filter(\.present) }
     public var missingKeys: [SuppliedKey] { keys.filter { !$0.present } }
 }
+
+public struct DopplerProject: Codable, Sendable, Identifiable, Hashable {
+    public let slug: String
+    public let name: String
+
+    public var id: String { slug }
+
+    public init(slug: String, name: String) {
+        self.slug = slug
+        self.name = name
+    }
+}
+
+public struct DopplerConfig: Codable, Sendable, Identifiable, Hashable {
+    public let name: String
+    public let environment: String
+
+    public var id: String { name }
+
+    public init(name: String, environment: String) {
+        self.name = name
+        self.environment = environment
+    }
+}

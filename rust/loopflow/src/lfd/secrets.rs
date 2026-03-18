@@ -1,9 +1,9 @@
 //! Secrets provider integration.
 //!
-//! `SecretsProvider` is the boundary trait. `DopplerSecretsProvider` is the
-//! first implementation. After connect or refresh, fetched secrets are matched
-//! against known env-var names and persisted through the existing
-//! credential-storage path.
+//! Doppler is the secrets provider. After OAuth via the `doppler` CLI, the
+//! stored token is used to discover projects/configs and fetch secrets.
+//! Fetched secrets are matched against known env-var names and persisted
+//! through the existing credential-storage path.
 
 use std::collections::HashMap;
 
@@ -21,12 +21,29 @@ const KEY_MAPPINGS: &[(&str, Provider)] = &[
     ("OPENAI_API_KEY", Provider::Codex),
 ];
 
+/// Smart default config preference order.
+const PREFERRED_CONFIGS: &[&str] = &["dev", "prd", "prod"];
+
 /// A key supplied by a secrets provider and its mapping status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuppliedKey {
     pub env_name: String,
     pub provider: String,
     pub present: bool,
+}
+
+/// A Doppler project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DopplerProject {
+    pub slug: String,
+    pub name: String,
+}
+
+/// A Doppler config within a project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DopplerConfig {
+    pub name: String,
+    pub environment: String,
 }
 
 /// Status of a connected secrets provider.
@@ -61,20 +78,6 @@ impl SecretsProviderStatus {
     }
 }
 
-/// Provider-agnostic secrets-fetching boundary.
-#[async_trait::async_trait]
-pub trait SecretsProvider: Send + Sync {
-    fn name(&self) -> &str;
-
-    /// Fetch all secrets from the provider. Returns env-var name → value.
-    async fn fetch_secrets(
-        &self,
-        token: &str,
-        project: &str,
-        config: &str,
-    ) -> Result<HashMap<String, String>, SecretsError>;
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum SecretsError {
     #[error("HTTP request failed: {0}")]
@@ -83,64 +86,115 @@ pub enum SecretsError {
     InvalidResponse(String),
     #[error("unauthorized — token may be expired")]
     Unauthorized,
+    #[error("Doppler is not connected")]
+    NotConnected,
 }
 
-/// Doppler secrets provider implementation.
-pub struct DopplerSecretsProvider;
+// -- Doppler API client -----------------------------------------------------
 
-#[async_trait::async_trait]
-impl SecretsProvider for DopplerSecretsProvider {
-    fn name(&self) -> &str {
-        "doppler"
+async fn doppler_get<T: serde::de::DeserializeOwned>(
+    token: &str,
+    url: &str,
+) -> Result<T, SecretsError> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| SecretsError::Http(e.to_string()))?;
+
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(SecretsError::Unauthorized);
+    }
+    if !response.status().is_success() {
+        return Err(SecretsError::Http(format!("status {}", response.status())));
     }
 
-    async fn fetch_secrets(
-        &self,
-        token: &str,
-        project: &str,
-        config: &str,
-    ) -> Result<HashMap<String, String>, SecretsError> {
-        let url = format!(
-            "https://api.doppler.com/v3/configs/config/secrets/download?project={project}&config={config}&format=json"
-        );
-        let client = reqwest::Client::new();
-        let response = client
-            .get(&url)
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| SecretsError::Http(e.to_string()))?;
-
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(SecretsError::Unauthorized);
-        }
-        if !response.status().is_success() {
-            return Err(SecretsError::Http(format!("status {}", response.status())));
-        }
-
-        let secrets: HashMap<String, String> = response
-            .json()
-            .await
-            .map_err(|e| SecretsError::InvalidResponse(e.to_string()))?;
-        Ok(secrets)
-    }
+    response
+        .json()
+        .await
+        .map_err(|e| SecretsError::InvalidResponse(e.to_string()))
 }
 
-/// Sync secrets from the configured provider into provider tokens.
+/// List Doppler projects accessible with the stored token.
+pub async fn list_projects(store: &SharedStore) -> Result<Vec<DopplerProject>, SecretsError> {
+    let token = get_doppler_token(store).await?;
+
+    #[derive(Deserialize)]
+    struct Response {
+        projects: Vec<DopplerProject>,
+    }
+
+    let resp: Response =
+        doppler_get(&token, "https://api.doppler.com/v3/projects?per_page=100").await?;
+    Ok(resp.projects)
+}
+
+/// List configs for a Doppler project.
+pub async fn list_configs(
+    store: &SharedStore,
+    project: &str,
+) -> Result<Vec<DopplerConfig>, SecretsError> {
+    let token = get_doppler_token(store).await?;
+
+    #[derive(Deserialize)]
+    struct Response {
+        configs: Vec<DopplerConfig>,
+    }
+
+    let url = format!("https://api.doppler.com/v3/configs?project={project}&per_page=100");
+    let resp: Response = doppler_get(&token, &url).await?;
+    Ok(resp.configs)
+}
+
+/// Fetch secrets from Doppler for the given project/config.
+pub async fn fetch_secrets(
+    token: &str,
+    project: &str,
+    config: &str,
+) -> Result<HashMap<String, String>, SecretsError> {
+    let url = format!(
+        "https://api.doppler.com/v3/configs/config/secrets/download?project={project}&config={config}&format=json"
+    );
+    doppler_get(token, &url).await
+}
+
+/// Pick the best default config from a list.
+pub fn smart_default_config(configs: &[DopplerConfig]) -> Option<&DopplerConfig> {
+    for preferred in PREFERRED_CONFIGS {
+        if let Some(c) = configs.iter().find(|c| c.name == *preferred) {
+            return Some(c);
+        }
+    }
+    configs.first()
+}
+
+// -- Sync / clear / status --------------------------------------------------
+
+/// Read the Doppler OAuth token from provider_tokens.
+async fn get_doppler_token(store: &SharedStore) -> Result<String, SecretsError> {
+    let token = store
+        .get_provider_token(Provider::Doppler.as_str())
+        .await
+        .map_err(|e| SecretsError::Http(e.to_string()))?
+        .ok_or(SecretsError::NotConnected)?;
+    Ok(token.access_token)
+}
+
+/// Sync secrets from Doppler into provider tokens.
 ///
 /// Returns the list of keys that were found and synced.
 pub async fn sync_secrets(
     store: &SharedStore,
-    provider: &dyn SecretsProvider,
     config: &SecretsProviderConfig,
     event_hub: Option<&EventHub>,
 ) -> Result<Vec<SuppliedKey>, SecretsError> {
+    let token = get_doppler_token(store).await?;
     let project = config.project.as_deref().unwrap_or_default();
     let config_name = config.config.as_deref().unwrap_or_default();
 
-    let secrets = provider
-        .fetch_secrets(&config.access_token, project, config_name)
-        .await?;
+    let secrets = fetch_secrets(&token, project, config_name).await?;
 
     let mut supplied_keys = Vec::new();
 
@@ -153,16 +207,16 @@ pub async fn sync_secrets(
         });
 
         if let Some(value) = value {
-            let token = ProviderToken {
+            let provider_token = ProviderToken {
                 provider: target_provider.as_str().to_string(),
                 access_token: value.clone(),
                 refresh_token: None,
                 expires_at: None,
-                login: Some(format!("via {}", provider.name())),
+                login: Some("via doppler".to_string()),
                 updated_at: crate::lfd::store::rows::now_unix(),
                 credential_type: CredentialType::ApiKey,
             };
-            if let Err(err) = store.upsert_provider_token(&token).await {
+            if let Err(err) = store.upsert_provider_token(&provider_token).await {
                 tracing::warn!(
                     provider = target_provider.as_str(),
                     error = %err,
@@ -177,7 +231,7 @@ pub async fn sync_secrets(
                 if let Some(hub) = event_hub {
                     hub.send(Event::auth_connected(
                         target_provider,
-                        Some(format!("via {}", provider.name())),
+                        Some("via doppler".to_string()),
                     ));
                 }
             }
@@ -185,7 +239,7 @@ pub async fn sync_secrets(
     }
 
     if let Some(hub) = event_hub {
-        hub.send(Event::secrets_synced(provider.name().to_string()));
+        hub.send(Event::secrets_synced("doppler".to_string()));
     }
 
     Ok(supplied_keys)
@@ -222,16 +276,26 @@ pub async fn clear_secrets_credentials(store: &SharedStore, event_hub: Option<&E
     }
 }
 
-/// Build status from stored config.
+/// Build status from stored config and Doppler auth state.
 pub async fn secrets_status(store: &SharedStore) -> SecretsProviderStatus {
+    // Check if Doppler is authed
+    let doppler_connected = store
+        .get_provider_token(Provider::Doppler.as_str())
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    if !doppler_connected {
+        return SecretsProviderStatus::disconnected();
+    }
+
     let configs = store
         .list_secrets_provider_configs()
         .await
         .unwrap_or_default();
 
-    let Some(config) = configs.into_iter().next() else {
-        return SecretsProviderStatus::disconnected();
-    };
+    let config = configs.into_iter().next();
 
     let mut keys: Vec<SuppliedKey> = Vec::new();
     for &(env_name, target_provider) in KEY_MAPPINGS {
@@ -249,10 +313,10 @@ pub async fn secrets_status(store: &SharedStore) -> SecretsProviderStatus {
     }
 
     SecretsProviderStatus {
-        provider: config.provider,
+        provider: "doppler".to_string(),
         connected: true,
-        project: config.project,
-        config: config.config,
+        project: config.as_ref().and_then(|c| c.project.clone()),
+        config: config.as_ref().and_then(|c| c.config.clone()),
         keys,
     }
 }
@@ -274,92 +338,20 @@ mod tests {
         )
     }
 
-    struct MockSecretsProvider {
-        secrets: HashMap<String, String>,
-    }
-
-    #[async_trait::async_trait]
-    impl SecretsProvider for MockSecretsProvider {
-        fn name(&self) -> &str {
-            "mock"
-        }
-
-        async fn fetch_secrets(
-            &self,
-            _token: &str,
-            _project: &str,
-            _config: &str,
-        ) -> Result<HashMap<String, String>, SecretsError> {
-            Ok(self.secrets.clone())
-        }
-    }
-
-    #[tokio::test]
-    async fn sync_populates_matching_provider_tokens() {
-        let store = test_store().await;
-        let provider = MockSecretsProvider {
-            secrets: HashMap::from([
-                ("ANTHROPIC_API_KEY".to_string(), "sk-ant-test".to_string()),
-                ("OPENAI_API_KEY".to_string(), "sk-oai-test".to_string()),
-                ("UNRELATED_KEY".to_string(), "ignored".to_string()),
-            ]),
-        };
-
-        let config = SecretsProviderConfig {
-            provider: "mock".to_string(),
-            access_token: "dp-token".to_string(),
-            project: Some("myproject".to_string()),
-            config: Some("dev".to_string()),
-            updated_at: 0,
-        };
-
-        let keys = sync_secrets(&store, &provider, &config, None)
+    /// Store a fake Doppler token so sync_secrets can read it.
+    async fn store_doppler_token(store: &SharedStore, token: &str) {
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "doppler".to_string(),
+                access_token: token.to_string(),
+                refresh_token: None,
+                expires_at: None,
+                login: None,
+                updated_at: 0,
+                credential_type: CredentialType::OAuth,
+            })
             .await
-            .expect("sync should succeed");
-
-        assert_eq!(keys.len(), 2);
-        assert!(keys.iter().all(|k| k.present));
-
-        let claude_token = store
-            .get_provider_token("claude")
-            .await
-            .expect("store read")
-            .expect("claude token should exist");
-        assert_eq!(claude_token.access_token, "sk-ant-test");
-        assert_eq!(claude_token.credential_type, CredentialType::ApiKey);
-        assert_eq!(claude_token.login.as_deref(), Some("via mock"));
-
-        let codex_token = store
-            .get_provider_token("codex")
-            .await
-            .expect("store read")
-            .expect("codex token should exist");
-        assert_eq!(codex_token.access_token, "sk-oai-test");
-    }
-
-    #[tokio::test]
-    async fn sync_marks_missing_keys_as_not_present() {
-        let store = test_store().await;
-        let provider = MockSecretsProvider {
-            secrets: HashMap::from([("ANTHROPIC_API_KEY".to_string(), "sk-ant-test".to_string())]),
-        };
-
-        let config = SecretsProviderConfig {
-            provider: "mock".to_string(),
-            access_token: "dp-token".to_string(),
-            project: Some("myproject".to_string()),
-            config: Some("dev".to_string()),
-            updated_at: 0,
-        };
-
-        let keys = sync_secrets(&store, &provider, &config, None)
-            .await
-            .expect("sync should succeed");
-
-        let claude_key = keys.iter().find(|k| k.env_name == "ANTHROPIC_API_KEY");
-        let codex_key = keys.iter().find(|k| k.env_name == "OPENAI_API_KEY");
-        assert!(claude_key.unwrap().present);
-        assert!(!codex_key.unwrap().present);
+            .expect("store doppler token");
     }
 
     #[tokio::test]
@@ -373,7 +365,7 @@ mod tests {
                 access_token: "sk-from-secrets".to_string(),
                 refresh_token: None,
                 expires_at: None,
-                login: Some("via mock".to_string()),
+                login: Some("via doppler".to_string()),
                 updated_at: 0,
                 credential_type: CredentialType::ApiKey,
             })
@@ -413,13 +405,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_reflects_connected_provider_with_keys() {
+    async fn status_reflects_connected_doppler_with_config() {
         let store = test_store().await;
+
+        store_doppler_token(&store, "dp.ct.test-token").await;
 
         store
             .upsert_secrets_provider_config(&SecretsProviderConfig {
                 provider: "doppler".to_string(),
-                access_token: "dp-token".to_string(),
                 project: Some("myproject".to_string()),
                 config: Some("dev".to_string()),
                 updated_at: 0,
@@ -452,10 +445,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_returns_disconnected_when_no_config() {
+    async fn status_returns_disconnected_when_no_doppler_token() {
         let store = test_store().await;
         let status = secrets_status(&store).await;
         assert!(!status.connected);
         assert!(status.keys.iter().all(|k| !k.present));
+    }
+
+    #[tokio::test]
+    async fn status_connected_but_no_config_selected() {
+        let store = test_store().await;
+        store_doppler_token(&store, "dp.ct.test-token").await;
+
+        let status = secrets_status(&store).await;
+        assert!(status.connected);
+        assert!(status.project.is_none());
+        assert!(status.config.is_none());
+    }
+
+    #[test]
+    fn smart_default_prefers_dev() {
+        let configs = vec![
+            DopplerConfig {
+                name: "prod".into(),
+                environment: "production".into(),
+            },
+            DopplerConfig {
+                name: "dev".into(),
+                environment: "development".into(),
+            },
+            DopplerConfig {
+                name: "staging".into(),
+                environment: "staging".into(),
+            },
+        ];
+        assert_eq!(smart_default_config(&configs).unwrap().name, "dev");
+    }
+
+    #[test]
+    fn smart_default_falls_back_to_prod() {
+        let configs = vec![
+            DopplerConfig {
+                name: "prod".into(),
+                environment: "production".into(),
+            },
+            DopplerConfig {
+                name: "staging".into(),
+                environment: "staging".into(),
+            },
+        ];
+        assert_eq!(smart_default_config(&configs).unwrap().name, "prod");
+    }
+
+    #[test]
+    fn smart_default_falls_back_to_first() {
+        let configs = vec![DopplerConfig {
+            name: "custom".into(),
+            environment: "custom".into(),
+        }];
+        assert_eq!(smart_default_config(&configs).unwrap().name, "custom");
+    }
+
+    #[test]
+    fn smart_default_empty_returns_none() {
+        let configs: Vec<DopplerConfig> = vec![];
+        assert!(smart_default_config(&configs).is_none());
     }
 }

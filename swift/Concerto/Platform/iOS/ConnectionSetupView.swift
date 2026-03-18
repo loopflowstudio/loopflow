@@ -7,18 +7,16 @@ struct ConnectionSetupView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        List {
-            Section("Provider Auth") {
-                ForEach(repoState.authProviderStore.providers) { provider in
-                    AuthProviderCard(provider: provider)
-                }
-            }
-
-            Section("Secrets") {
-                SecretsProviderSection(store: repoState.secretsProviderStore)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-            }
+        ScrollView {
+            ConnectionsPanel(
+                authStore: repoState.authProviderStore,
+                secretsStore: repoState.secretsProviderStore,
+                onConnect: { Task { await repoState.authProviderStore.connect($0) } },
+                onDisconnect: { Task { await repoState.authProviderStore.disconnect($0) } },
+                onCancel: { Task { await repoState.authProviderStore.disconnect($0) } },
+                onCopy: { copyToClipboard($0) }
+            )
+            .padding(Spacing.lg)
         }
         .navigationTitle("Connections")
         .task {

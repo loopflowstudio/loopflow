@@ -340,16 +340,26 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try decodeResponse(SecretsProviderStatus.self, from: data)
     }
 
-    public func connectSecrets(
-        provider: String, token: String, project: String, config: String
+    public func listSecretsProjects() async throws -> [DopplerProject] {
+        let (data, response) = try await performGet(secretsURL("projects"))
+        try requireOKStatus(response, data: data)
+        return try decodeResponse([DopplerProject].self, from: data)
+    }
+
+    public func listSecretsConfigs(project: String) async throws -> [DopplerConfig] {
+        var components = URLComponents(url: secretsURL("configs"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "project", value: project)]
+        let url = components.url!
+        let (data, response) = try await performGet(url)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse([DopplerConfig].self, from: data)
+    }
+
+    public func selectSecretsConfig(
+        project: String, config: String
     ) async throws -> SecretsProviderStatus {
-        var request = try makeRequest(secretsURL("connect"), method: "POST")
-        let body = [
-            "provider": provider,
-            "token": token,
-            "project": project,
-            "config": config,
-        ]
+        var request = try makeRequest(secretsURL("select"), method: "POST")
+        let body = ["project": project, "config": config]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
@@ -358,19 +368,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func syncSecrets() async throws -> SecretsProviderStatus {
         let request = try makeRequest(secretsURL("sync"), method: "POST")
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(SecretsProviderStatus.self, from: data)
-    }
-
-    public func updateSecretsConfig(
-        project: String?, config: String?
-    ) async throws -> SecretsProviderStatus {
-        var request = try makeRequest(secretsURL("config"), method: "PUT")
-        var body: [String: String] = [:]
-        if let project { body["project"] = project }
-        if let config { body["config"] = config }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
         return try decodeResponse(SecretsProviderStatus.self, from: data)

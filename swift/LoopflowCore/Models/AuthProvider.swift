@@ -1,30 +1,75 @@
 import Foundation
 
+public enum ProviderRole: String, Codable, Sendable {
+    case agent
+    case sourceControl
+    case projectManagement
+    case secrets
+
+    public var displayName: String {
+        switch self {
+        case .agent: "Agents"
+        case .sourceControl: "Source Control"
+        case .projectManagement: "Project Management"
+        case .secrets: "Secrets"
+        }
+    }
+
+    public static var displayOrder: [ProviderRole] {
+        [.agent, .sourceControl, .projectManagement, .secrets]
+    }
+
+    /// Roles configurable per-repo (enable/disable agents, PM tools, secrets config).
+    /// Source control is global-only — GitHub auto-detects.
+    public static var repoConfigurable: [ProviderRole] {
+        [.agent, .projectManagement, .secrets]
+    }
+}
+
 public enum AuthProvider: String, Codable, Sendable, CaseIterable {
     case github
     case claude
     case codex
+    case opencode = "opencodezen"
+    case asana
+    case linear
+    case doppler
 
     public var displayName: String {
         switch self {
-        case .github:
-            "GitHub"
-        case .claude:
-            "Claude"
-        case .codex:
-            "Codex"
+        case .github: "GitHub"
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .opencode: "OpenCode"
+        case .asana: "Asana"
+        case .linear: "Linear"
+        case .doppler: "Doppler"
         }
     }
 
     public var icon: String {
         switch self {
-        case .github:
-            "terminal"
-        case .claude:
-            "brain.head.profile"
-        case .codex:
-            "cpu"
+        case .github: "terminal"
+        case .claude: "brain.head.profile"
+        case .codex: "cpu"
+        case .opencode: "chevron.left.forwardslash.chevron.right"
+        case .asana: "list.bullet.rectangle"
+        case .linear: "square.stack.3d.up"
+        case .doppler: "key.fill"
         }
+    }
+
+    public var role: ProviderRole {
+        switch self {
+        case .claude, .codex, .opencode: .agent
+        case .github: .sourceControl
+        case .asana, .linear: .projectManagement
+        case .doppler: .secrets
+        }
+    }
+
+    public static func providers(for role: ProviderRole) -> [AuthProvider] {
+        allCases.filter { $0.role == role }
     }
 }
 

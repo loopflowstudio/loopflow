@@ -160,7 +160,7 @@ public final class AuthProviderStore {
         providers[provider] = AuthProviderStatus(provider: provider, status: status, login: login)
     }
 
-    private func status(for provider: AuthProvider) -> AuthProviderStatus {
+    public func status(for provider: AuthProvider) -> AuthProviderStatus {
         providers[provider] ?? AuthProviderStatus(provider: provider, status: .none, login: nil)
     }
 

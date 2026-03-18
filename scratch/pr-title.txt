@@ -1,1 +1,1 @@
-secrets provider: Doppler integration across lfd, API, and Concerto
+Connections panel redesign + Doppler secrets provider

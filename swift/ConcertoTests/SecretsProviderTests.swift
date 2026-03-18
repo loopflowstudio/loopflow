@@ -74,6 +74,79 @@ struct SecretsProviderStatusTests {
     }
 }
 
+@Suite("DopplerProject decoding")
+struct DopplerProjectTests {
+    @Test("project decodes from API response")
+    func decodeProject() throws {
+        let payload = """
+        {"slug": "my-app", "name": "My App"}
+        """
+        let project = try JSONDecoder().decode(DopplerProject.self, from: Data(payload.utf8))
+        #expect(project.slug == "my-app")
+        #expect(project.name == "My App")
+        #expect(project.id == "my-app")
+    }
+}
+
+@Suite("DopplerConfig decoding")
+struct DopplerConfigTests {
+    @Test("config decodes from API response")
+    func decodeConfig() throws {
+        let payload = """
+        {"name": "dev", "environment": "development"}
+        """
+        let config = try JSONDecoder().decode(DopplerConfig.self, from: Data(payload.utf8))
+        #expect(config.name == "dev")
+        #expect(config.environment == "development")
+        #expect(config.id == "dev")
+    }
+}
+
+@Suite("Smart default config selection")
+struct SmartDefaultConfigTests {
+    @Test("prefers dev over others")
+    func prefersDev() {
+        let configs = [
+            DopplerConfig(name: "prod", environment: "production"),
+            DopplerConfig(name: "dev", environment: "development"),
+            DopplerConfig(name: "staging", environment: "staging"),
+        ]
+        #expect(smartDefaultConfig(configs)?.name == "dev")
+    }
+
+    @Test("falls back to prod when no dev")
+    func fallsBackToProd() {
+        let configs = [
+            DopplerConfig(name: "prod", environment: "production"),
+            DopplerConfig(name: "staging", environment: "staging"),
+        ]
+        #expect(smartDefaultConfig(configs)?.name == "prod")
+    }
+
+    @Test("falls back to prd")
+    func fallsBackToPrd() {
+        let configs = [
+            DopplerConfig(name: "prd", environment: "production"),
+            DopplerConfig(name: "staging", environment: "staging"),
+        ]
+        #expect(smartDefaultConfig(configs)?.name == "prd")
+    }
+
+    @Test("falls back to first when no preferred match")
+    func fallsBackToFirst() {
+        let configs = [
+            DopplerConfig(name: "custom", environment: "custom"),
+        ]
+        #expect(smartDefaultConfig(configs)?.name == "custom")
+    }
+
+    @Test("returns nil for empty list")
+    func emptyReturnsNil() {
+        let configs: [DopplerConfig] = []
+        #expect(smartDefaultConfig(configs) == nil)
+    }
+}
+
 @Suite("Secrets event parsing")
 struct SecretsEventParsingTests {
     @Test("secrets.connected parses as secrets event")

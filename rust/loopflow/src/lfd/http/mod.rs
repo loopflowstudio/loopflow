@@ -60,12 +60,10 @@ pub fn router(state: HttpState) -> Router {
             "/secrets",
             get(secrets::secrets_status_handler).delete(secrets::disconnect_secrets_handler),
         )
-        .route("/secrets/connect", post(secrets::connect_secrets_handler))
+        .route("/secrets/projects", get(secrets::list_projects_handler))
+        .route("/secrets/configs", get(secrets::list_configs_handler))
+        .route("/secrets/select", post(secrets::select_secrets_handler))
         .route("/secrets/sync", post(secrets::sync_secrets_handler))
-        .route(
-            "/secrets/config",
-            put(secrets::update_secrets_config_handler),
-        )
         .route("/providers", get(providers::list_providers_handler))
         .route("/flows", get(flows::list_flows_handler))
         .route(

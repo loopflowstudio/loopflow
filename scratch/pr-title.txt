@@ -1,1 +1,1 @@
-concerto: route selected waves through a workspace with additive terminal tabs
+concerto: add workspace-first wave detail and tracked terminal runs

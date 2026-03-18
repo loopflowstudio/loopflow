@@ -12,15 +12,15 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 
 The daemon should stay **parallel-first**. A wave is configuration and grouping; a run is execution. `primary_flow` is the wave default, while each `WaveRun` owns its actual `snapshot.flow`, worktree, branch, status, and any interactive terminal session. Reactive work like CI-fix, repo triggers, cron, and listener activations should compose as additional runs, not as special cases that mutate the wave's identity.
 
-The execution path should also converge on the real CLI. `lfd` still decides when runs start, but it should start them by forking normal `lf <flow-or-step>` commands in the correct worktree and executor environment instead of carrying a second bespoke executor forever. Interactive clients should attach to daemon-owned shells or PTYs — SSH-like in product feel whether or not the first transport is literal SSH — and run the same `lf` commands there. In that environment, `lf` should detect that it is running under `lfd` and emit structured lifecycle events so the daemon observes execution instead of scraping terminal output or receiving one-off launch-spec requests.
+The execution path should also converge on the real CLI. The first cut is not "daemon-owned PTYs everywhere." The first cut is that `lf` writes structured lifecycle state to a globally agreed runtime store when that store is present. `lfd` can supervise and later launch normal `lf <flow-or-step>` commands against that same store instead of carrying a second bespoke executor forever. Concerto can then consume the same runtime state whether the work started from the CLI, from the app, or from daemon automation.
 
 Concerto can still present a calmer singular surface: one selected wave, one foreground run, one presented terminal. That is a product policy, not an infrastructure limit. Serialized waves remain useful where roadmap UX wants one thing at a time, but the base model should allow many runs and worktrees per wave.
 
 Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, `WaveRun` remains the execution unit, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
 
-The local-first terminal workspace is now in place: `lfd` persists `terminal_sessions`, emits terminal-session events, and Concerto embeds tracked Ghostty tabs keyed by terminal-session ID while keeping Work as the default surface. That gives the queue, workspace, and future portfolio views one shared state model for interactive runs instead of a separate Swift-only terminal stack.
+The local-first terminal workspace is now in place: `lfd` persists `terminal_sessions`, emits terminal-session events, and Concerto embeds tracked Ghostty tabs keyed by terminal-session ID while keeping Work as the default surface. That gives the queue, workspace, and future portfolio views one shared state model for interactive runs instead of a separate Swift-only terminal stack. In the near term, that can stay local-first: Concerto can open ordinary local Ghostty sessions while relying on the shared runtime store for durable state.
 
-But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next risky infrastructure step is to replace that shim with a real `lfd`-owned PTY transport that keeps executor choice, auth, and attach semantics in one place for local, container, and future remote runs.
+But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
 
 Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities. In particular, session ordering and selection already persist per repo; compositor work needs to either extend that repo-scoped state deliberately or replace it with a richer layout model in one move.
 
@@ -39,11 +39,11 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 ## Risks
 
 - Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
-- The current launch-spec shim diverges from the eventual daemon-owned PTY design (tracked in `wave/lfd/`); remote repos stay blocked until transport is upgraded
+- The current launch-spec shim diverges from the shared-store-first runtime model and the eventual daemon-owned PTY design (tracked in `wave/lfd/`); Swift should avoid taking new dependencies on it
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
-- Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state
+- Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state until the shared-store contract replaces that path
 - The product surface foregrounds one run per selected wave even though the runtime acknowledges many-run waves; portfolio and lifecycle work should not assume single-run exclusivity
 
 ## Metrics

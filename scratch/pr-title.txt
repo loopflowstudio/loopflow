@@ -1,1 +1,1 @@
-concerto: add workspace-first wave detail and tracked terminal runs
+concerto: stabilize workspace-first terminal runs

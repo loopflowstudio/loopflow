@@ -7,6 +7,7 @@
 - `rust/loopflow/src/bin/lfd.rs` still dispatches `migrate`, `install`, `uninstall`, `start`, `stop`, and `status` by reading `std::env::args()` and scanning flags with `args.get(1)` / `has_flag()`.
 - `output_log_retention_days` is part of persisted `lfd` config, but `apply_env_overrides()` still lacks an `LFD_OUTPUT_LOG_RETENTION_DAYS` path.
 - `rust/loopflow/src/ops/release.rs` supports tagging a non-`HEAD` ref through `tag_and_push_ref(..., target_ref)`, but that path is only exercised indirectly via `release_run`.
+- Container mode is already Docker-only after the sandbox cleanup, so parser and config reshaping must preserve that single supported executor path instead of reopening a second branch.
 
 ## What to build
 

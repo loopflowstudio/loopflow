@@ -6,7 +6,7 @@ Keep Loopflow's post-collapse codebase small and internally coherent. This wave 
 
 ## Strategy
 
-The deployment and auth collapses are now baseline constraints, not active roadmap items. Use this wave to remove the leftover seams those cuts exposed: shared helpers should live in shared layers, `lfd` should have one real command parser, config knobs should expose env overrides consistently, release safety should have isolated tests, and shipped client/app surfaces should match supported platforms instead of leaking demos or stale minimum versions.
+The deployment and auth collapses are now baseline constraints, not active roadmap items. Docker is the only blessed container executor now; the sandbox branch is gone, local worktree git metadata did not survive the old mount shape cleanly, local create/remove timings stayed in the double-digit-second range, and Daytona stays out of tree until its production story changes. Use this wave to remove the leftover seams those cuts exposed: shared helpers should live in shared layers, `lfd` should have one real command parser, config knobs should expose env overrides consistently, release safety should have isolated tests, and shipped client/app surfaces should match supported platforms instead of leaking demos or stale minimum versions.
 
 Sequence by blast radius. Fix Rust boundary debt and missing release/config coverage first, because those paths shape daily maintenance work. Then clean the Python and Swift surfaces that still advertise or ship the wrong thing. Do not add abstractions to "prepare" for later cleanup. Move code to the layer that already owns the concept, delete duplicates, and tighten tests around the simpler shape.
 
@@ -20,6 +20,7 @@ Sequence by blast radius. Fix Rust boundary debt and missing release/config cove
 
 - Cleanup can sprawl into opportunistic refactors that make the roadmap fuzzy again.
 - Moving helpers across layers can fork behavior unless the existing worktree and release tests move with the code.
+- Docker-only container mode could quietly widen again through docs or parser/config churn unless it stays an explicit invariant.
 - Demo-only UI and stale package metadata can linger because they look harmless even though they widen the support surface.
 
 ## Metrics

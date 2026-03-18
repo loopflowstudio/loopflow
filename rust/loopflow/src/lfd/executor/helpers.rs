@@ -1014,12 +1014,7 @@ mod tests {
 
         run_git(
             &main_repo,
-            &[
-                "worktree",
-                "add",
-                worktree.to_str().unwrap_or(""),
-                wave_name,
-            ],
+            &["worktree", "add", worktree.to_str().unwrap_or(""), wave_name],
         );
 
         let collaborator = main_repo
@@ -1046,8 +1041,7 @@ mod tests {
 
         assert_eq!(resolved_worktree, worktree.to_string_lossy());
         assert_eq!(resolved_branch, wave_name);
-        let shared =
-            std::fs::read_to_string(worktree.join("shared.txt")).expect("read shared file");
+        let shared = std::fs::read_to_string(worktree.join("shared.txt")).expect("read shared file");
         assert_eq!(shared, "wave branch change\n");
     }
 }

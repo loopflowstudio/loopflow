@@ -94,6 +94,16 @@ private enum AppRuntime {
     }
 }
 
+private enum LaunchArguments {
+    static func repoURL() -> URL? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--repo"), args.count > index + 1 else {
+            return nil
+        }
+        return URL(fileURLWithPath: args[index + 1])
+    }
+}
+
 private func bootstrapConcertoApp() {
     AppFontRegistration.registerBundledFonts()
     guard !AppRuntime.isAutomatedTest else { return }
@@ -129,6 +139,7 @@ struct ConcertoApp: App {
         let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
+        let launchRepoURL = screenshotMode == nil ? LaunchArguments.repoURL() : nil
 
         WindowGroup {
             Group {
@@ -139,6 +150,8 @@ struct ConcertoApp: App {
                         repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
                         portfolioService: portfolioService
                     )
+                } else if let launchRepoURL {
+                    RepoWindow(repoURL: launchRepoURL, portfolioService: portfolioService)
                 } else {
                     PortfolioWindow(portfolioService: portfolioService)
                 }

@@ -3,9 +3,25 @@
 
 import Foundation
 import SwiftUI
+import AppKit
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
+
+@MainActor
+protocol GhosttySessionSurfaceOwner: AnyObject {
+    func destroyManagedSurface(_ surface: ghostty_surface_t)
+}
+
+private final class ManagedGhosttySurface {
+    weak var owner: GhosttySessionSurfaceOwner?
+    let surface: ghostty_surface_t
+
+    init(surface: ghostty_surface_t, owner: GhosttySessionSurfaceOwner) {
+        self.surface = surface
+        self.owner = owner
+    }
+}
 
 @MainActor
 final class GhosttyManager: ObservableObject {
@@ -21,7 +37,7 @@ final class GhosttyManager: ObservableObject {
     private nonisolated(unsafe) var app: ghostty_app_t?
     private nonisolated(unsafe) var config: ghostty_config_t?
 
-    private nonisolated(unsafe) var surfaces: [String: ghostty_surface_t] = [:]
+    private nonisolated(unsafe) var surfaces: [String: ManagedGhosttySurface] = [:]
 
     static let shared = GhosttyManager()
 
@@ -167,25 +183,48 @@ final class GhosttyManager: ObservableObject {
         }
     }
 
-    func registerSurface(_ surface: ghostty_surface_t, sessionId: String) {
-        surfaces[sessionId] = surface
+    func registerSurface(
+        _ surface: ghostty_surface_t,
+        sessionId: String,
+        owner: GhosttySessionSurfaceOwner
+    ) {
+        surfaces[sessionId] = ManagedGhosttySurface(surface: surface, owner: owner)
+    }
+
+    func unregisterSurface(_ sessionId: String, surface: ghostty_surface_t) {
+        guard let handle = surfaces[sessionId], handle.surface == surface else { return }
+        surfaces.removeValue(forKey: sessionId)
+    }
+
+    func hasSession(_ sessionId: String) -> Bool {
+        surfaces[sessionId] != nil
     }
 
     func destroySession(_ sessionId: String) {
-        guard let surface = surfaces.removeValue(forKey: sessionId) else { return }
-        ghostty_surface_free(surface)
+        guard let handle = surfaces.removeValue(forKey: sessionId) else { return }
+        if let owner = handle.owner {
+            owner.destroyManagedSurface(handle.surface)
+        } else {
+            ghostty_surface_free(handle.surface)
+        }
     }
 
     func sendText(_ text: String, sessionId: String) {
-        guard let surface = surfaces[sessionId] else { return }
+        guard let surface = surfaces[sessionId]?.surface else { return }
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
     }
 
     deinit {
-        for surface in surfaces.values {
-            ghostty_surface_free(surface)
+        MainActor.assumeIsolated {
+            for handle in surfaces.values {
+                if let owner = handle.owner {
+                    owner.destroyManagedSurface(handle.surface)
+                } else {
+                    ghostty_surface_free(handle.surface)
+                }
+            }
         }
         if let app {
             ghostty_app_free(app)
@@ -219,6 +258,14 @@ final class GhosttyManager: ObservableObject {
     }
 
     func tick() {}
+
+    func hasSession(_ sessionId: String) -> Bool {
+        false
+    }
+
+    func unregisterSurface(_ sessionId: String, surface: OpaquePointer) {
+        // Stub - no-op
+    }
 
     func destroySession(_ sessionId: String) {
         // Stub - no-op

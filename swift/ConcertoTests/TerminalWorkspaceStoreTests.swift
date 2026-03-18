@@ -54,6 +54,7 @@ struct TerminalWorkspaceStoreTests {
         #expect(store.selectedSession?.id == "session-a")
     }
 
+<<<<<<< HEAD
     @Test("wave selections stay independent across workspaces")
     func waveSelectionsStayIndependent() {
         let store = TerminalWorkspaceStore(userDefaults: UserDefaults(suiteName: "TerminalWorkspaceStoreTests.\(UUID().uuidString)")!)
@@ -91,6 +92,10 @@ struct TerminalWorkspaceStoreTests {
     private func makeSession(
         id: String,
         waveId: String? = nil,
+=======
+    private func makeSession(
+        id: String,
+>>>>>>> caddde45 (lf commit: compress)
         createdAt: TimeInterval,
         status: TerminalSessionStatus = .pending
     ) -> TerminalSession {

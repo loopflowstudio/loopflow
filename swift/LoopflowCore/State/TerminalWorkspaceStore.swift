@@ -76,9 +76,12 @@ public final class TerminalWorkspaceStore {
             selectedSessionId = session.id
             keepsGlobalSelectionCleared = false
         }
+<<<<<<< HEAD
         if select || selectedSessionIdsByWave[session.waveId] == nil {
             selectedSessionIdsByWave[session.waveId] = session.id
         }
+=======
+>>>>>>> caddde45 (lf commit: compress)
         reconcileSelection()
         persist()
     }
@@ -92,6 +95,7 @@ public final class TerminalWorkspaceStore {
 
     public func select(_ sessionId: String?, waveId: String? = nil) {
         selectedSessionId = sessionId
+<<<<<<< HEAD
         keepsGlobalSelectionCleared = sessionId == nil
         if let sessionId,
            let session = sessionsById[sessionId] {
@@ -99,6 +103,8 @@ public final class TerminalWorkspaceStore {
         } else if let waveId, selectedSessionIdsByWave[waveId] == nil {
             selectedSessionIdsByWave[waveId] = nextSelectableSessionId(for: waveId)
         }
+=======
+>>>>>>> caddde45 (lf commit: compress)
         reconcileSelection()
         persist()
     }
@@ -169,6 +175,26 @@ public final class TerminalWorkspaceStore {
         }
     }
 
+    private func reconcileSelection() {
+        let currentSelection = selectedSessionId
+        guard let currentSelection,
+              let session = sessionsById[currentSelection],
+              !session.status.isTerminal else {
+            selectedSessionId = nextSelectableSessionId(excluding: currentSelection)
+            return
+        }
+    }
+
+    private func nextSelectableSessionId(excluding excludedSessionId: String? = nil) -> String? {
+        orderedSessionIds.first { sessionId in
+            guard sessionId != excludedSessionId,
+                  let session = sessionsById[sessionId] else {
+                return false
+            }
+            return !session.status.isTerminal
+        }
+    }
+
     private func restoreSelection() {
         guard let orderKey = storageKey("order"),
               let selectedKey = storageKey("selected"),
@@ -178,6 +204,7 @@ public final class TerminalWorkspaceStore {
             selectedSessionId = nil
             return
         }
+<<<<<<< HEAD
         orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
         selectedSessionId = userDefaults.string(forKey: selectedKey)
         selectedSessionIdsByWave = userDefaults.dictionary(forKey: waveSelectionKey) as? [String: String] ?? [:]
@@ -201,5 +228,10 @@ public final class TerminalWorkspaceStore {
             return nil
         }
         return session
+=======
+        orderedSessionIds = userDefaults.stringArray(forKey: "terminalWorkspace.order.\(repoKey)") ?? []
+        selectedSessionId = userDefaults.string(forKey: "terminalWorkspace.selected.\(repoKey)")
+        reconcileSelection()
+>>>>>>> caddde45 (lf commit: compress)
     }
 }

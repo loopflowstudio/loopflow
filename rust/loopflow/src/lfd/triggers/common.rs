@@ -11,10 +11,9 @@ use crate::lfd::scheduler::SchedulerSlotGuard;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, WaveRun, WaveRunStatus, WaveStatus};
 
-/// Maximum number of repair attempts before escalating to an algedonic signal.
-const MAX_REPAIR_DEPTH: usize = 3;
-
 /// Fixed backoff delays between repair attempts, indexed by chain depth.
+/// The array length defines the maximum number of repair attempts before
+/// escalating to an algedonic signal.
 const REPAIR_DELAYS: [Duration; 3] = [
     Duration::from_secs(30),
     Duration::from_secs(60),
@@ -79,7 +78,7 @@ async fn execute_run_inner(
     };
 
     let depth = count_repair_chain(store, &run).await;
-    if depth >= MAX_REPAIR_DEPTH {
+    if depth >= REPAIR_DELAYS.len() {
         // Exhausted all repair attempts — escalate to algedonic signal.
         let step_name = run.error.as_deref().unwrap_or("unknown");
         tracing::info!(
@@ -110,10 +109,7 @@ async fn execute_run_inner(
     }
 
     // Apply backoff delay before dispatching repair.
-    let delay = REPAIR_DELAYS
-        .get(depth)
-        .copied()
-        .unwrap_or(REPAIR_DELAYS[2]);
+    let delay = REPAIR_DELAYS[depth];
     tracing::info!(
         run_id = %run.id,
         wave_id = %wave.id(),

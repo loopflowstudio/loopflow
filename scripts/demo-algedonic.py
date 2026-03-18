@@ -17,7 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -159,8 +159,6 @@ steps:
     )
 
     # Commit the step so lfd can find it
-    import subprocess
-
     subprocess.run(
         ["git", "add", "."],
         cwd=repo_dir,

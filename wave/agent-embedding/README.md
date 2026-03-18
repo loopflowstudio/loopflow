@@ -8,29 +8,13 @@ Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Conce
 
 ## Strategy
 
-## Execution model
+Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
 
-The daemon should stay **parallel-first**. A wave is configuration and grouping; a run is execution. `primary_flow` is the wave default, while each `WaveRun` owns its actual `snapshot.flow`, worktree, branch, status, and any interactive terminal session. Reactive work like CI-fix, repo triggers, cron, and listener activations should compose as additional runs, not as special cases that mutate the wave's identity.
+The local-first terminal workspace is now in place: `lfd` owns terminal lifecycle, Concerto embeds Ghostty tabs keyed by terminal-session ID, and the sidebar already shows wave context beside the real terminal. Launch args, completion tokens, and run resumption still flow through `lfd`, so follow-on UI work should keep that authority instead of adding a second Swift-side callback path. The remaining work is to finish attention coverage for design review and chord calibration, then widen out into portfolio, lifecycle, and richer window composition without reintroducing chat-shaped coding surfaces.
 
-The execution path should also converge on the real CLI. The first cut is not "daemon-owned PTYs everywhere." The first cut is that `lf` writes structured lifecycle state to a globally agreed runtime store when that store is present. `lfd` can supervise and later launch normal `lf <flow-or-step>` commands against that same store instead of carrying a second bespoke executor forever. Concerto can then consume the same runtime state whether the work started from the CLI, from the app, or from daemon automation.
+Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities.
 
-Concerto can still present a calmer singular surface: one selected wave, one foreground run, one presented terminal. That is a product policy, not an infrastructure limit. Serialized waves remain useful where roadmap UX wants one thing at a time, but the base model should allow many runs and worktrees per wave.
-
-Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, `WaveRun` remains the execution unit, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
-
-The local-first terminal workspace is now in place: `lfd` persists `terminal_sessions`, emits terminal-session events, and Concerto embeds tracked Ghostty tabs keyed by terminal-session ID while keeping Work as the default surface. The attention queue has two clean paths — Interactive (human checkpoint) and Algedonic (system escalation) — with an HTTP API that lets `lf` create and resolve attention items. Wave lifecycle (create, configure, run, stop, land, next, restart-step, clone, delete, triggers) is fully managed from Concerto through `WaveDetailPanel` and `StepRunner`.
-
-But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
-
-The tmux architecture study (item 01 of `wave/lfd/`, full research in `wave/lfd/01-tmux-architecture-study.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means remaining work should:
-- Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
-- Treat Ghostty embedding as a rendering surface, not a session owner
-- Prepare for layout serialization (tmux encodes split trees as compact strings; Concerto should similarly persist layout as data)
-- Expect multi-client size negotiation to be a daemon concern — Concerto sends its viewport size, `lfd` decides
-
-Treat today's tabbed terminal workspace as the seam for later composition work. Split layouts, persistence, and keyboard routing should promote the existing `TerminalSession` / `TerminalWorkspaceStore` model instead of replacing it with pane-local session identities. In particular, session ordering and selection already persist per repo; compositor work needs to either extend that repo-scoped state deliberately or replace it with a richer layout model in one move.
-
-Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. The existing portfolio window already proves the repo-card shell: basic per-repo wave counts, blocked counts, and diff summaries. Future portfolio work should deepen that surface with shared wave/run/attention/session queries instead of building a second dashboard stack beside it. The persisted `terminal_sessions` records in `lfd` are also the source of truth for adoption and latency measurement: portfolio trend lines, in-app completion rate, and resume-latency work should query those rows rather than inventing a second analytics cache.
+Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. If a surface needs wave health, queue pressure, recent PRs, or terminal presence, it should come from the shared run/attention/session state rather than a second reporting pipeline.
 
 ## Goals
 
@@ -38,23 +22,20 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 - Every human checkpoint in build and garden flows surfaces as an `AttentionItem`
 - Coding sessions happen in embedded Ghostty terminals
 - Multi-repo, multi-wave status is visible at a glance
+- Wave lifecycle (create, configure, start, stop) is managed from Concerto
 - Human calibration moments have a dedicated UX
 - Chord-wave graph and portfolio views derive from existing wave/chord relationships
-- Development surfaces compose into layouts the way tmux composes panes
 
 ## Risks
 
-- Partial attention coverage still creates blind spots until `lf` calls `POST /attention` at every interactive step (depends on daemon-aware CLI contract in `wave/lfd/`)
-- The current launch-spec shim diverges from the shared-store-first runtime model and the eventual daemon-owned PTY design (tracked in `wave/lfd/`); Swift should avoid taking new dependencies on it
+- Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
+- Local-only terminal embedding creates a temporary product split; remote repos need explicit queue/detail states until a remote PTY transport exists
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
-- Compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
-- Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
-- Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state until the shared-store contract replaces that path
-- The product surface foregrounds one run per selected wave even though the runtime acknowledges many-run waves; portfolio and compositor work should not assume single-run exclusivity
+- Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 
 ## Metrics
 
-- Clicks from "I see a problem" to "I'm acting on it" (target: <=2)
+- Clicks from “I see a problem” to “I’m acting on it” (target: <=2)
 - Share of unresolved human checkpoints represented as attention items (target: 100%)
 - Time to assess all-waves status (target: <10 seconds glance)
 - Percentage of coding sessions that happen inside Concerto vs external terminal (target: >70%)

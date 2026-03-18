@@ -121,6 +121,20 @@ In `AttentionDetailView`, add rendering for the new contexts:
 
 Both cases route the conductor to the embedded terminal where the interactive step agent is waiting. The attention item surfaces the checkpoint; the terminal session is where work happens.
 
+### Tend: remote branch awareness
+
+Also extend the tend scan so it looks at remote branches and spots unlanded work that appears to belong to the same wave family. The point is not to create more attention items directly from git state; it is to give `tend/scan-waves` and calibration a better picture of integration pressure.
+
+Proposed shape:
+
+- Add a remote-branch summary to the wave/tend data path, sourced from `git ls-remote --heads <remote>` or equivalent daemon-side git query
+- Match candidate branches using the existing branch naming schema plus wave/worktree naming conventions (`<user>.<wave>.<timestamp>`, run branches, related stacked branches)
+- Filter to branches that are not already merged/landed and are not the wave's currently tracked branch
+- Surface the result as "unlanded related branches" / "integration candidates" in tend assessment context
+- Use that signal in calibration UI and queue copy so the conductor can see that there is sibling work waiting to be integrated
+
+This is a tend-awareness feature, not a replacement for explicit trigger relationships. The goal is: if there is remote work that looks like part of this wave but has not landed yet, calibration should notice it and factor it into recommendations.
+
 ### Swift: action routing
 
 Add to `RepoState` or equivalent:

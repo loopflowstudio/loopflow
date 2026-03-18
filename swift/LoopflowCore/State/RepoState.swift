@@ -843,6 +843,18 @@ public final class RepoState {
         }
     }
 
+    /// Navigate to a terminal session from the attention queue.
+    /// Selects the wave, switches to the terminal tab, and selects the session.
+    public func openTerminalSession(_ sessionId: String) {
+        terminalWorkspaceStore.select(sessionId)
+        if let session = terminalWorkspaceStore.sessionsById[sessionId] {
+            selectedWaveId = session.waveId
+            markAutoPresentTerminal(for: session.waveId)
+            loadWaveContent(for: session.waveId)
+            loadRuns(for: session.waveId)
+        }
+    }
+
     public func loadRuns(for waveId: String) {
         Task {
             guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }

@@ -56,10 +56,24 @@ public struct StepFailureAttentionContext: Sendable, Hashable {
     public let designPath: String?
 }
 
+public struct DesignReviewAttentionContext: Sendable, Hashable {
+    public let step: String
+    public let designPath: String?
+    public let terminalSessionId: String?
+}
+
+public struct CalibrationAttentionContext: Sendable, Hashable {
+    public let step: String
+    public let chordPath: String?
+    public let terminalSessionId: String?
+}
+
 public enum AttentionContext: Sendable, Hashable {
     case codeReview(CodeReviewAttentionContext)
     case queueFailure(QueueFailureAttentionContext)
     case stepFailure(StepFailureAttentionContext)
+    case designReview(DesignReviewAttentionContext)
+    case calibration(CalibrationAttentionContext)
     case raw(String)
 }
 
@@ -107,8 +121,31 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 
 public extension AttentionItem {
     /// Parse typed context from JSON based on discriminator fields.
-    /// Context type is determined by the payload shape.
+    /// Context type is determined by the `step` field first, then payload shape.
     static func context(json: [String: Any]) -> AttentionContext {
+        let step = json["step"] as? String ?? ""
+        let terminalSessionId = json["terminal_session_id"] as? String
+
+        // Design review: step starts with "code/design"
+        if step.hasPrefix("code/design") {
+            return .designReview(
+                DesignReviewAttentionContext(
+                    step: step,
+                    designPath: json["design_path"] as? String,
+                    terminalSessionId: terminalSessionId
+                )
+            )
+        }
+        // Calibration: step starts with "chord/"
+        if step.hasPrefix("chord/") {
+            return .calibration(
+                CalibrationAttentionContext(
+                    step: step,
+                    chordPath: json["design_path"] as? String,
+                    terminalSessionId: terminalSessionId
+                )
+            )
+        }
         // Queue failure: has "reason" field
         if json["reason"] != nil {
             return .queueFailure(
@@ -131,7 +168,7 @@ public extension AttentionItem {
                 )
             )
         }
-        // Step failure: has "error" field (and "step")
+        // Step failure: has "error" field
         if json["error"] != nil {
             return .stepFailure(
                 StepFailureAttentionContext(

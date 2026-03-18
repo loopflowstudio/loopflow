@@ -27,7 +27,7 @@ struct AttentionStoreTests {
                 runId: nil,
                 kind: .designReview,
                 status: .surfaced,
-                title: "older escalation",
+                title: "older review",
                 summary: "",
                 context: .raw("{}"),
                 surfacedAt: now.addingTimeInterval(-100)
@@ -38,7 +38,7 @@ struct AttentionStoreTests {
                 runId: nil,
                 kind: .designReview,
                 status: .surfaced,
-                title: "newer escalation",
+                title: "newer review",
                 summary: "",
                 context: .raw("{}"),
                 surfacedAt: now.addingTimeInterval(-20)
@@ -71,67 +71,87 @@ struct AttentionStoreTests {
             #expect(context.conflictFiles == ["src/lib.rs"])
             #expect(context.error == "merge failed")
         } else {
-            Issue.record("Expected algedonic context")
+            Issue.record("Expected queue failure context")
         }
     }
 
-    @Test("context decodes interactive from kind")
-    func parsesInteractiveContext() {
+    @Test("context decodes design review from step field")
+    func parsesDesignReviewContext() {
         let context: [String: Any] = [
             "step": "code/design",
             "terminal_session_id": "ts-123",
             "design_path": "scratch/my-branch.md",
         ]
-        let parsed = AttentionItem.context(kind: .interactive, json: context)
-        if case .interactive(let ctx) = parsed {
+        let parsed = AttentionItem.context(json: context)
+        if case .designReview(let ctx) = parsed {
             #expect(ctx.step == "code/design")
             #expect(ctx.terminalSessionId == "ts-123")
             #expect(ctx.designPath == "scratch/my-branch.md")
         } else {
-            Issue.record("Expected interactive context, got \(parsed)")
+            Issue.record("Expected design review context, got \(parsed)")
         }
     }
 
-    @Test("context decodes algedonic from kind")
-    func parsesAlgedonicContext() {
+    @Test("context decodes calibration from chord step field")
+    func parsesCalibrationContext() {
         let context: [String: Any] = [
-            "step": "implement",
-            "error": "agent crashed",
+            "step": "chord/review",
+            "terminal_session_id": "ts-456",
+            "design_path": "scratch/chord.md",
         ]
-        let parsed = AttentionItem.context(kind: .algedonic, json: context)
-        if case .algedonic(let ctx) = parsed {
-            #expect(ctx.step == "implement")
-            #expect(ctx.error == "agent crashed")
+        let parsed = AttentionItem.context(json: context)
+        if case .calibration(let ctx) = parsed {
+            #expect(ctx.step == "chord/review")
+            #expect(ctx.terminalSessionId == "ts-456")
+            #expect(ctx.chordPath == "scratch/chord.md")
         } else {
-            Issue.record("Expected algedonic context, got \(parsed)")
+            Issue.record("Expected calibration context, got \(parsed)")
         }
     }
 
-    @Test("legacy kind strings map to collapsed kinds")
-    func legacyKindMapping() {
-        #expect(AttentionKind(rawValue: "design_review") == .interactive)
-        #expect(AttentionKind(rawValue: "code_review") == .interactive)
-        #expect(AttentionKind(rawValue: "calibration") == .interactive)
-        #expect(AttentionKind(rawValue: "queue_failure") == .algedonic)
-        #expect(AttentionKind(rawValue: "step_failure") == .algedonic)
-        #expect(AttentionKind(rawValue: "interactive") == .interactive)
-        #expect(AttentionKind(rawValue: "algedonic") == .algedonic)
+    @Test("context decodes code review with step field present")
+    func parsesCodeReviewWithStep() {
+        let context: [String: Any] = [
+            "step": "code/review",
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "pr_number": 1,
+            "pr_title": "Test PR",
+            "branch": "main",
+        ]
+        let parsed = AttentionItem.context(json: context)
+        if case .codeReview(let ctx) = parsed {
+            #expect(ctx.prNumber == 1)
+            #expect(ctx.prTitle == "Test PR")
+        } else {
+            Issue.record("Expected code review context, got \(parsed)")
+        }
     }
 
-    @Test("parseAttentionFromJSON handles legacy kind strings")
-    func parsesLegacyKinds() {
+    @Test("parseAttentionFromJSON decodes design review kind and context")
+    func parsesDesignReviewAttention() {
         let json: [String: Any] = [
-            "id": "attn-legacy",
+            "id": "attn-dr",
             "wave_id": "wave-1",
-            "kind": "step_failure",
+            "run_id": "run-1",
+            "kind": "design_review",
             "status": "surfaced",
-            "title": "Step failed",
-            "summary": "error",
-            "context": ["error": "boom"] as [String: Any],
+            "title": "test-wave needs design review",
+            "summary": "Waiting for design review.",
+            "context": [
+                "step": "code/design",
+                "terminal_session_id": "ts-789",
+                "design_path": "scratch/test.md",
+            ] as [String: Any],
             "surfaced_at": ISO8601DateFormatter().string(from: now),
         ]
         let item = WaveService.parseAttentionFromJSON(json)
-        #expect(item?.kind == .algedonic)
+        #expect(item?.kind == .designReview)
+        if case .designReview(let ctx) = item?.context {
+            #expect(ctx.step == "code/design")
+            #expect(ctx.terminalSessionId == "ts-789")
+        } else {
+            Issue.record("Expected design review context")
+        }
     }
 
     private var now: Date { Date(timeIntervalSince1970: 1_700_000_000) }

@@ -33,28 +33,23 @@ struct WaveWorkspaceView: View {
                 Divider()
             }
 
-            if selectedTab == .terminal {
+            switch selectedTab {
+            case .work:
+                WaveDetailPanel(wave: wave)
+                    .id(wave.id)
+            case .terminal:
                 if repoState.terminalWorkspaceStore.selectedSession != nil {
                     TerminalWorkspaceView()
                 } else {
-                    ProgressView("Loading terminal session…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    WaveDetailPanel(wave: wave)
+                        .id(wave.id)
                 }
-            } else {
-                WaveDetailPanel(wave: wave)
-                    .id(wave.id)
             }
         }
         .onChange(of: hasTerminal) { _, hasIt in
             if !hasIt && selectedTab == .terminal {
                 selectedTab = .work
             }
-        }
-        .onChange(of: terminalSession?.id) { _, sessionId in
-            guard let sessionId,
-                  repoState.consumeAutoPresentTerminal(for: wave.id) else { return }
-            selectedTab = .terminal
-            repoState.selectTerminalSession(sessionId)
         }
         .onChange(of: wave.id) { _, _ in
             selectedTab = .work

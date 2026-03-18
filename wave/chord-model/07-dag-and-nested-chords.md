@@ -1,10 +1,10 @@
-# 07: DAG and Default Chord-Wave
+# 07: DAG and Nested Chords
 
-**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced, and the default chord-wave concept is ready to absorb existing waves.
+**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced. A VSM chord (five waves, one per system) is representable as a nested structure.
 
 ## Context
 
-The redesign chord-wave already proves the first level: a wave can coordinate other waves by pointing its `area` at their directories. The trigger/runtime work also means sourceless `wave` and `block` triggers already treat repo-local `wave/<name>/` entries as membership. The remaining question is how far that model stretches. This item validates nesting and uses the same area-derived membership model to introduce a default top-level chord-wave.
+The redesign chord-wave already proves the first level: a wave can coordinate other waves by pointing its `area` at their directories. The remaining question is how far that model stretches. This item validates nesting and uses the same area-derived membership model to introduce a default top-level chord-wave.
 
 ## What to build
 

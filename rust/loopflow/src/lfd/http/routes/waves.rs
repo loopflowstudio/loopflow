@@ -197,17 +197,11 @@ pub async fn create_wave_handler(
     let id = LfdId::new();
     let name = requested_name.unwrap_or_else(|| format!("wave-{}", id));
     let wave_config = read_wave_config(&repo_path, &name);
-    let config_triggers = wave_config
+    let config_trigger = wave_config
         .as_ref()
         .and_then(|config| config.triggers.as_ref())
-        .map(|triggers| {
-            triggers
-                .iter()
-                .map(parse_trigger)
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
+        .map(parse_trigger)
+        .transpose()?;
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
@@ -222,16 +216,14 @@ pub async fn create_wave_handler(
     if existing {
         return Err(wave_name_exists_error(&name));
     }
+    let wave_source_wave_id =
+        resolve_wave_source_wave_id(&state.store, &repo, &name, config_trigger.as_ref()).await?;
+
     let mode = wave_config
         .as_ref()
         .and_then(|c| c.mode.as_deref())
         .and_then(|m| m.parse::<WaveMode>().ok())
         .unwrap_or_default();
-    let mut config_source_wave_ids = Vec::with_capacity(config_triggers.len());
-    for parsed in &config_triggers {
-        config_source_wave_ids
-            .push(resolve_wave_source_wave_id(&state.store, &repo, &name, Some(parsed)).await?);
-    }
     let primary_flow = flow
         .or_else(|| wave_config.as_ref().and_then(|c| c.primary_flow.clone()))
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
@@ -268,10 +260,10 @@ pub async fn create_wave_handler(
     // Collect triggers: config-provided first, then defaults.
     let mut triggers: Vec<Trigger> = Vec::new();
 
-    for (parsed, source_wave_id) in config_triggers.iter().zip(config_source_wave_ids) {
+    if let Some(parsed) = config_trigger {
         let mut s = Trigger::new(LfdId::new(), wave.id().clone(), parsed.signal);
-        s.source_wave_id = source_wave_id;
-        s.flow = parsed.flow.clone();
+        s.source_wave_id = wave_source_wave_id.clone();
+        s.flow = parsed.flow;
         triggers.push(s);
     }
 
@@ -351,7 +343,6 @@ fn parse_trigger(trigger: &TriggerDef) -> Result<ParsedTrigger, (StatusCode, Jso
         "repo" => Signal::Repo,
         "wave" => Signal::Wave,
         "ci_failure" => Signal::CiFailure,
-        "block" => Signal::Block,
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
@@ -379,15 +370,27 @@ fn parse_trigger(trigger: &TriggerDef) -> Result<ParsedTrigger, (StatusCode, Jso
         }
     }
 
+    let source = if signal == Signal::Wave {
+        Some(source.ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "wave config wave trigger requires source",
+            )
+        })?)
+    } else {
+        None
+    };
+    let source_repo = if signal == Signal::Wave {
+        source_repo
+    } else {
+        None
+    };
+
     Ok(ParsedTrigger {
         signal,
         flow,
-        source: if signal == Signal::Wave { source } else { None },
-        source_repo: if signal == Signal::Wave {
-            source_repo
-        } else {
-            None
-        },
+        source,
+        source_repo,
     })
 }
 
@@ -410,9 +413,10 @@ async fn resolve_wave_source_wave_id(
     if parsed.signal != Signal::Wave {
         return Ok(None);
     }
-    let Some(source) = parsed.source.as_deref() else {
-        return Ok(None);
-    };
+    let source = parsed
+        .source
+        .as_deref()
+        .expect("wave trigger parsing requires source");
     let source_repo = parsed.source_repo.as_deref().unwrap_or(repo);
     if source_repo == repo && source == wave_name {
         return Err(api_error(
@@ -1494,7 +1498,7 @@ mod tests {
     }
 
     #[test]
-    fn wave_trigger_schema_allows_area_derived_source() {
+    fn wave_trigger_schema_requires_source() {
         let trigger = TriggerDef {
             signal: "wave".to_string(),
             flow: None,
@@ -1502,23 +1506,8 @@ mod tests {
             source_repo: None,
         };
 
-        let parsed = parse_trigger(&trigger).expect("parse trigger");
-        assert_eq!(parsed.signal, Signal::Wave);
-        assert!(parsed.source.is_none());
-    }
-
-    #[test]
-    fn block_trigger_schema_parses() {
-        let trigger = TriggerDef {
-            signal: "block".to_string(),
-            flow: Some("tend".to_string()),
-            source: None,
-            source_repo: None,
-        };
-
-        let parsed = parse_trigger(&trigger).expect("parse trigger");
-        assert_eq!(parsed.signal, Signal::Block);
-        assert_eq!(parsed.flow.as_deref(), Some("tend"));
+        let result = parse_trigger(&trigger);
+        assert!(result.is_err());
     }
 
     #[test]

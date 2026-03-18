@@ -1,5 +1,5 @@
 flow: ship-wave
-mode: managed
+mode: manual
 area:
   - rust/loopflow/src/lfd/
   - rust/loopflow/src/lfd/http/

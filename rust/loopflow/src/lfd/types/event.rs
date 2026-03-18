@@ -111,13 +111,6 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    WaveBlocked {
-        wave_id: LfdId,
-        wave_run_id: LfdId,
-        reason: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
     CiFailure {
         wave_id: LfdId,
         wave_run_id: LfdId,
@@ -371,15 +364,6 @@ impl Event {
             commit_sha,
             check_name,
             logs_url,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn wave_blocked(wave_id: LfdId, wave_run_id: LfdId, reason: String) -> Self {
-        Self::WaveBlocked {
-            wave_id,
-            wave_run_id,
-            reason,
             timestamp: Self::now(),
         }
     }

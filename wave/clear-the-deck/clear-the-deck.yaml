@@ -1,5 +1,5 @@
 flow: ship-wave
-mode: managed
+mode: manual
 area:
   - rust/loopflow/src/lfd/auth.rs
   - rust/loopflow/src/lfd/provider_auth.rs

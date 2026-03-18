@@ -1,1 +1,0 @@
-lfd: add area-derived chord triggers and managed waves

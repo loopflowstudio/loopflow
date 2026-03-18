@@ -599,7 +599,6 @@ struct TriggerTests {
     func descriptionSignal() {
         #expect(Trigger(signal: .repo).description == "repo")
         #expect(Trigger(signal: .wave).description == "wave")
-        #expect(Trigger(signal: .block).description == "block")
         #expect(Trigger(signal: .ciFailure).description == "ci_failure")
     }
 
@@ -614,7 +613,6 @@ struct TriggerTests {
     func iconForSignal() {
         #expect(Trigger(signal: .repo).icon == "arrow.triangle.branch")
         #expect(Trigger(signal: .wave).icon == "waveform")
-        #expect(Trigger(signal: .block).icon == "exclamationmark.circle")
         #expect(Trigger(signal: .ciFailure).icon == "exclamationmark.triangle")
     }
 }

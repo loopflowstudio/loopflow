@@ -140,9 +140,7 @@ fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
 mod tests {
     use super::should_pause_for_max_iterations;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Signal, Trigger, Wave, WaveMode, WaveStatus};
-    use std::sync::Arc;
     use time::OffsetDateTime;
 
     fn make_trigger(max_iterations: Option<u32>) -> Trigger {
@@ -202,39 +200,5 @@ mod tests {
         let trigger = make_trigger(Some(5));
         let wave = make_wave(7, 5);
         assert!(!should_pause_for_max_iterations(&trigger, &wave));
-    }
-
-    #[tokio::test]
-    async fn managed_mode_not_polled() {
-        let path = std::env::temp_dir().join(format!("lfd-managed-poll-test-{}.db", LfdId::new()));
-        let store = open_store(&StorageConfig::sqlite(path))
-            .await
-            .map(Arc::new)
-            .expect("store");
-
-        let managed = Wave {
-            id: LfdId::new(),
-            name: "managed-wave".to_string(),
-            repo: "/tmp/repo".to_string(),
-            mode: WaveMode::Managed,
-            primary_flow: "ship-roadmap".to_string(),
-            cron: Some("0 9 * * *".to_string()),
-            direction: Vec::new(),
-            area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
-        };
-        store
-            .create_wave(&managed)
-            .await
-            .expect("create managed wave");
-
-        let loopable = store.list_loopable_waves().await.expect("list loopable");
-        let cron = store.list_cron_waves().await.expect("list cron");
-        assert!(loopable.is_empty());
-        assert!(cron.is_empty());
     }
 }

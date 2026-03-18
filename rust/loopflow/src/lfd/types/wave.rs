@@ -152,7 +152,6 @@ pub enum WaveMode {
     Loop,
     Cron,
     Manual,
-    Managed,
 }
 
 impl WaveMode {
@@ -161,7 +160,6 @@ impl WaveMode {
             Self::Loop => "loop",
             Self::Cron => "cron",
             Self::Manual => "manual",
-            Self::Managed => "managed",
         }
     }
 }
@@ -174,7 +172,6 @@ impl std::str::FromStr for WaveMode {
             "loop" => Ok(Self::Loop),
             "cron" => Ok(Self::Cron),
             "manual" => Ok(Self::Manual),
-            "managed" => Ok(Self::Managed),
             _ => Err(format!("unknown wave mode: {value}")),
         }
     }
@@ -199,13 +196,6 @@ impl QueueBlockReason {
             Self::RebaseConflict => "rebase_conflict",
             Self::PromotionFailed => "promotion_failed",
         }
-    }
-
-    pub fn is_persistent(self) -> bool {
-        matches!(
-            self,
-            Self::ScratchDirty | Self::RebaseConflict | Self::PromotionFailed
-        )
     }
 }
 
@@ -295,17 +285,6 @@ impl Wave {
 
     pub fn area(&self) -> &Vec<String> {
         &self.area
-    }
-
-    pub fn listens_to_member_wave(&self, source_wave: &Wave) -> bool {
-        if self.repo != source_wave.repo {
-            return false;
-        }
-
-        let expected = format!("wave/{}", source_wave.name);
-        self.area
-            .iter()
-            .any(|entry| entry.trim().trim_end_matches('/') == expected)
     }
 
     pub fn status(&self) -> WaveStatus {

@@ -416,10 +416,6 @@ pub async fn github_webhook_handler(
                 })?;
                 if handled {
                     processed += 1;
-                    state
-                        .executor
-                        .trigger_listeners_on_completion(&wave_id, "main", true)
-                        .await;
                 }
             }
             Ok(Json(
@@ -664,13 +660,8 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        PullRequest, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        PullRequest, Signal, Trigger, Wave, WaveMode, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
-    use axum::body::Bytes;
-    use axum::http::HeaderMap;
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -923,188 +914,5 @@ mod tests {
 
         assert!(emit_ci_failure(&event_hub, &cache, event.clone()).await);
         assert!(!emit_ci_failure(&event_hub, &cache, event).await);
-    }
-
-    #[tokio::test]
-    async fn webhook_merge_fires_area_derived_triggers() {
-        type HmacSha256 = Hmac<Sha256>;
-
-        let mut state = test_http_state().await;
-        state.github.webhook_secret = "webhook-secret".to_string();
-
-        let repo_dir = tempdir().expect("repo tempdir");
-        std::process::Command::new("git")
-            .args(["-C", repo_dir.path().to_string_lossy().as_ref(), "init"])
-            .status()
-            .expect("git init should run");
-        std::process::Command::new("git")
-            .args([
-                "-C",
-                repo_dir.path().to_string_lossy().as_ref(),
-                "remote",
-                "add",
-                "origin",
-                "git@github.com:loopflowstudio/loopflow.git",
-            ])
-            .status()
-            .expect("git remote add should run");
-
-        let member_wave = Wave {
-            id: LfdId::new(),
-            name: "signals".to_string(),
-            repo: repo_dir.path().to_string_lossy().to_string(),
-            mode: WaveMode::Managed,
-            primary_flow: "ship-wave".to_string(),
-            cron: None,
-            direction: vec![],
-            area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
-        };
-        let chord_wave = Wave {
-            id: LfdId::new(),
-            name: "redesign".to_string(),
-            repo: repo_dir.path().to_string_lossy().to_string(),
-            mode: WaveMode::Cron,
-            primary_flow: "tend".to_string(),
-            cron: Some("0 9 * * *".to_string()),
-            direction: vec![],
-            area: vec!["wave/signals/".to_string()],
-            status: WaveStatus::Running,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            created_at: Some(OffsetDateTime::now_utc()),
-            serialized: true,
-        };
-        state
-            .store
-            .create_wave(&member_wave)
-            .await
-            .expect("member wave");
-        state
-            .store
-            .create_wave(&chord_wave)
-            .await
-            .expect("chord wave");
-        let trigger = Trigger {
-            id: LfdId::new(),
-            wave_id: chord_wave.id.clone(),
-            source_wave_id: None,
-            signal: Signal::Wave,
-            flow: Some("tend".to_string()),
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-            max_iterations: None,
-        };
-        state.store.create_trigger(&trigger).await.expect("trigger");
-        state
-            .store
-            .create_wave_run(&WaveRun {
-                id: LfdId::new(),
-                wave_id: chord_wave.id.clone(),
-                snapshot: WaveRunSnapshot {
-                    repo: chord_wave.repo.clone(),
-                    flow: chord_wave.primary_flow.clone(),
-                    direction: vec![],
-                    area: chord_wave.area.clone(),
-                    pr: None,
-                },
-                iteration: 0,
-                step_index: 0,
-                status: WaveRunStatus::Running,
-                worktree: chord_wave.repo.clone(),
-                branch: "main".to_string(),
-                started_at: Some(OffsetDateTime::now_utc()),
-                ended_at: None,
-                error: None,
-                flow_parents: Vec::new(),
-                activation_log_id: None,
-                parent_run_id: None,
-                parent_pr_number: None,
-                stack_position: 0,
-                stack_group_id: chord_wave.id.to_string(),
-                stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-                lineage_inferred: false,
-                target_branch: "main".to_string(),
-            })
-            .await
-            .expect("chord active run");
-        state
-            .store
-            .create_wave_run(&WaveRun {
-                id: LfdId::new(),
-                wave_id: member_wave.id.clone(),
-                snapshot: WaveRunSnapshot {
-                    repo: member_wave.repo.clone(),
-                    flow: member_wave.primary_flow.clone(),
-                    direction: vec![],
-                    area: vec![],
-                    pr: Some(PullRequest {
-                        url: "https://example.test/pr/21".to_string(),
-                        number: Some(21),
-                        state: Some("open".to_string()),
-                        title: Some("member work".to_string()),
-                        branch: Some("signals-branch".to_string()),
-                    }),
-                },
-                iteration: 0,
-                step_index: 0,
-                status: WaveRunStatus::Completed,
-                worktree: member_wave.repo.clone(),
-                branch: "signals-branch".to_string(),
-                started_at: Some(OffsetDateTime::now_utc()),
-                ended_at: Some(OffsetDateTime::now_utc()),
-                error: None,
-                flow_parents: Vec::new(),
-                activation_log_id: None,
-                parent_run_id: None,
-                parent_pr_number: None,
-                stack_position: 0,
-                stack_group_id: member_wave.id.to_string(),
-                stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-                lineage_inferred: false,
-                target_branch: "main".to_string(),
-            })
-            .await
-            .expect("member run");
-
-        let payload = serde_json::json!({
-            "action": "closed",
-            "pull_request": {
-                "number": 21,
-                "merged": true,
-                "merged_at": "2026-03-17T12:00:00Z"
-            },
-            "repository": {
-                "full_name": "loopflowstudio/loopflow"
-            }
-        });
-        let body = serde_json::to_vec(&payload).expect("serialize payload");
-        let mut mac = HmacSha256::new_from_slice(b"webhook-secret").expect("mac");
-        mac.update(&body);
-        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
-        let mut headers = HeaderMap::new();
-        headers.insert("X-GitHub-Event", "pull_request".parse().expect("header"));
-        headers.insert(
-            "X-Hub-Signature-256",
-            signature.parse().expect("signature header"),
-        );
-
-        let _ = github_webhook_handler(State(state.clone()), headers, Bytes::from(body))
-            .await
-            .expect("webhook handler");
-
-        let pending = state
-            .store
-            .list_pending_activations(&chord_wave.id)
-            .await
-            .expect("pending activations");
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].reason, "member wave signals completed");
     }
 }

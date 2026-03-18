@@ -29,7 +29,6 @@ The wave's `mode` controls its execution pattern. Set it at creation or update i
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped |
 | **cron** | On schedule |
-| **managed** | Triggered by another wave |
 
 ### Manual
 
@@ -79,8 +78,7 @@ A trigger pairs a signal (what changed) with a flow (what to run). They fire reg
 | Signal | What changed | Default flow |
 |--------|--------------|--------------|
 | **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed. Omit `source` in YAML to derive members from `area` | `build` |
-| **block** | A member wave hit a persistent queue block | listener flow |
+| **wave** | Another wave completed | `build` |
 | **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
 Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.

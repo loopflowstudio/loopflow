@@ -2,72 +2,117 @@
 
 ## Vision
 
-Make chord-waves first-class without introducing a second runtime model. A chord-wave is an ordinary wave whose `area` points at `wave/<name>/` directories, so coordination, mutation, and memory all grow out of the existing wave/flow system instead of parallel chord CRUD.
+Every chord is a viable system. Each chord maintains its own identity, boundary, and all five VSM systems for its members. The root chord is special only because it has no parent — its algedonic signals go to a human.
 
-This wave builds the machinery the redesign chord-wave will use to tend its own member waves. Build remains the code-producing voice. Tend becomes the coordinating voice. The system only works if those two voices can share one data model.
+A chord-wave is an ordinary wave whose `area` points at `wave/<name>/` directories. No parallel runtime model. Coordination, self-healing, and policy all grow out of the existing wave/flow system.
+
+## The VSM mapping
+
+### Any chord (S2–S5)
+
+Every chord is responsible for its own five systems:
+
+- **S5 (Identity/Policy)** — what is this chord? what's its boundary? what autonomy levels do members get? what gets escalated vs handled locally?
+- **S4 (Intelligence)** — what changed in the environment? what's coming? scanning for relevant signals.
+- **S3 (Control)** — are members performing? where to allocate attention? resource management. Algedonic signals from members land here first.
+- **S2 (Coordination)** — are members conflicting? oscillating? duplicating work? resolve interference.
+- **S1 (Operations)** — the member waves themselves, running their own flows.
+
+### Root chord (S5 especially)
+
+The root chord's S5 holds the most consequential policy — the identity and boundary of the whole system. Its decisions cascade to every nested chord. It answers: what is this project? what matters? what risk tolerance do agents operate under?
+
+The root chord is also the terminal escalation point. Algedonic signals that no nested chord can handle surface here, and from here to the human.
+
+### Algedonic channel
+
+The pain signal that bypasses normal hierarchy. When a wave fails and self-healing fails, the algedonic signal goes to the nearest chord's S5. If that chord can't handle it (per its policy), it escalates to its parent. The root chord escalates to the human via the attention queue.
+
+Pattern: detect failure → classify error → headless repair in same branch → if repair fails, escalate.
+
+## Two granularities
+
+### VSM flow (single pass)
+
+One agent walks through all five systems in descending order. One PR.
+
+```yaml
+# flow: vsm
+- s5   # identity: still who we say we are? boundary right?
+- s4   # intelligence: what changed? what's coming?
+- s3   # control: members performing? allocate attention
+- s2   # coordination: conflicts? oscillation? duplication?
+```
+
+S1 is absent — it's the member waves running their own flows. The chord doesn't do S1 work.
+
+The existing `tend` flow is a specific arrangement of the same ideas for interactive use (scan → assess → branch to chord or reorg). `vsm` is the general-purpose builtin.
+
+### VSM chord (five waves)
+
+For projects complex enough that each system needs its own persistent wave, memory, and cadence:
+
+```yaml
+# wave/root/root.yaml
+flow: vsm
+area:
+  - wave/s5-policy/
+  - wave/s4-intelligence/
+  - wave/s3-control/
+  - wave/s2-coordination/
+  - wave/s1-operations/    # or just the leaf waves directly
+```
+
+Each system wave runs on its own rhythm. S5 slower (weekly, on-demand). S4 scans frequently. S3 tends daily. S2 reconciles as needed. Same model, different scale.
 
 ## Strategy
 
-### Start from the waves-only baseline
+### Algedonic signals first
 
-Bootstrap is already the ground truth: the redesign chord-wave registers through the normal wave API, membership lives in `wave/redesign/redesign.yaml`, and the redesign waves start in ordinary wave directories. Everything left in this wave builds on that baseline. No separate chord tables, DTOs, or client helpers come back.
+The first atom to get right is the pain signal. When something goes wrong — CI fails, agent crashes, step produces garbage — the system tries to fix it headlessly. When it can't, it creates an algedonic signal routed to the parent chord. The root chord surfaces it to the human.
 
-### Keep chord cadence inside ordinary wave primitives
+Error classification drives repair strategy:
 
-The trigger/cadence foundation is now in place:
-- the redesign chord-wave runs on `mode: cron` with daily heartbeat plus `wave` and `block` triggers
-- member waves run in `mode: managed`, so the chord owns their rhythm
-- sourceless `wave` and `block` triggers derive membership from `area: [wave/<name>/]`
-- merged-PR webhooks and persistent queue blocks wake the chord through the existing trigger runtime
+| Error class | Detection | Repair |
+|-------------|-----------|--------|
+| CI failure | GitHub webhook | `ci-fix` flow |
+| Agent crash | Non-zero exit | `debug` with error log |
+| Step contract violation | Post-step check | Re-run with guidance |
+| Branch router ambiguous | No valid path | Re-run with stricter prompt |
+| Rebase conflict | Git exit code | Auto-resolve attempt |
 
-Future work should treat that as fixed infrastructure, not re-solve scheduling.
+### Wave discovery from disk
 
-### Turn tend into a real flow
+Waves exist as YAML in `wave/`. lfd discovers them, reconciles against the store, starts running. No manual `lfq create`. The root chord gets auto-created when Concerto launches, with membership derived from what's on disk.
 
-The next milestone is a full tend cycle:
+### Self-healing before coordination
 
-```yaml
-- scan-waves
-- assess
-- branch:
-    chord: tend-chord   # draft-chord -> review-chord -> apply-chord
-    reorg: reorg
-```
+Once waves are self-starting and self-healing, the chord's VSM flow has real operational data. It can read algedonic history, see which waves are healthy vs struggling, and make coordination decisions grounded in observed behavior.
 
-Those steps need a concrete contract for what a chord-wave can see about its member waves, how it detects drift, and how it turns judgment into durable mutations. The flow should tolerate imperfect state, fix what it finds, and stay legible enough that humans can calibrate it.
+### Recursion
 
-### Keep the architecture waves all the way down
-
-Membership is `area`. Runtime state lives in lfd. Filesystem identity lives in `wave/<name>/`. Letta, triggers, mutation APIs, and eventual DAG support all need to extend that model rather than route around it. The current trigger runtime already treats repo-local `wave/<name>/` area entries as membership; the remaining work is to make that contract richer and more observable, not to invent a side channel.
-
-### Build for human calibration, not hidden autonomy
-
-Tend should surface trajectory, conflicts, and shallow work clearly enough that a human can intervene at the right moments. Mechanical fixes can auto-apply. Judgment-heavy changes need explicit calibration hooks, clear rationale, and reversible mutations.
-
-### Use VSM as pressure, not ceremony
-
-The tend steps should naturally ask coordination, optimization, intelligence, identity, and algedonic questions. That pressure belongs in the flow and prompts, not in a second governance framework bolted onto the side. Explicit VSM chord structures should remain representable as nested chord-waves if users want them.
+Chords can contain chords. Each is a viable system with its own S5. Acyclicity enforced. The area-derived membership model handles nesting naturally — a chord's area entries that match `wave/<name>/` are its members.
 
 ## Goals
 
-- The redesign chord-wave can run `tend` against its own member waves through ordinary wave configs and APIs
-- Tend steps produce structured observations, actionable proposals, and durable applied changes
-- Letta gives the redesign chord-wave persistent qualitative memory across tend cycles
-- Wave mutation stays waves-only: direction, area, flow, triggers, work items, and lifecycle all mutate through one model
-- Nested chord-waves remain possible without reintroducing chord-specific runtime concepts
+- Algedonic signals: failure → headless repair → escalate if stuck, end-to-end
+- VSM flow as the default chord flow (s5 → s4 → s3 → s2)
+- Wave discovery from disk, root chord auto-created
+- Each chord holds its own identity and policy
+- Root chord as terminal escalation point to human
+- Recursive viable systems: chords containing chords
 
 ## Risks
 
-- Tend could become a report generator instead of a coordinating loop that changes outcomes
-- Letta integration could sprawl beyond a thin memory boundary
-- Mutation APIs could become too implicit and make human calibration harder instead of easier
-- `area` membership still depends on exact `wave/<name>/` entries; silent typos or missing members could make the chord misread its own shape
-- DAG and trigger work could leak chord-specific special cases back into the runtime
+- Self-healing could mask root causes if repair succeeds superficially
+- VSM steps could become formulaic checklists instead of genuine system assessment
+- Wave discovery could fight with manual wave management
+- Algedonic signals could be noisy if thresholds are too sensitive
+- Recursive chords could create deep escalation chains that delay human awareness
 
 ## Metrics
 
-- First successful tend cycle against `redesign`: 1
-- Tend cycles that surface at least one actionable observation: >50%
-- Time from block detection to human awareness during working hours: <1 hour
-- Mutation proposals accepted by a human reviewer: tracked per cycle, trending upward
-- Human calibration sessions that produce a course correction or explicit affirmation: >0 each week while redesign is active
+- Time from failure to either auto-fix or human notification: <10 minutes
+- Repair success rate by error class: tracked, trending upward
+- Algedonic signals that resolve without human intervention: tracked
+- VSM flow cycles that produce at least one actionable change: >50%

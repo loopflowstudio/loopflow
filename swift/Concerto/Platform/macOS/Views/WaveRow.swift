@@ -193,7 +193,6 @@ struct WaveRow: View {
         switch trigger.signal {
         case .repo: return "repo"
         case .wave: return "wave"
-        case .block: return "block"
         case .ciFailure: return "ci-fix"
         }
     }
@@ -207,3 +206,4 @@ struct WaveRow: View {
         return "\(step.step), \(time)"
     }
 }
+

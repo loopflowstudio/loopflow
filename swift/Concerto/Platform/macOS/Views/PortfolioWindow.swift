@@ -82,15 +82,21 @@ struct PortfolioWindow: View {
             )
         }
         .onAppear {
-            ensureRepoStates()
+            Task {
+                await prepareConnectionIfNeeded()
+                ensureRepoStates()
+            }
         }
         .task {
+            await prepareConnectionIfNeeded()
+            ensureRepoStates()
             await syncRepoStates()
             await startEventSubscription()
         }
         .onChange(of: repoPaths) { _, _ in
-            ensureRepoStates()
             Task {
+                await prepareConnectionIfNeeded()
+                ensureRepoStates()
                 await syncRepoStates()
             }
         }
@@ -120,7 +126,24 @@ struct PortfolioWindow: View {
         }
     }
 
+    private func prepareConnectionIfNeeded() async {
+        guard connectionStore.mode == .bundled else { return }
+        if let current = SharedDaemon.currentConnection {
+            connectionStore.setBundledRuntimeConnection(current)
+            return
+        }
+        do {
+            let connection = try await SharedDaemon.manager.start()
+            connectionStore.setBundledRuntimeConnection(connection)
+        } catch {
+            return
+        }
+    }
+
     private func syncRepoStates() async {
+        if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
+            return
+        }
         ensureRepoStates()
 
         let statesToRefresh = repoStates.values.filter { $0.isLoading }
@@ -133,6 +156,9 @@ struct PortfolioWindow: View {
 
     private func startEventSubscription() async {
         guard eventService == nil else { return }
+        if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
+            return
+        }
 
         let connection = connectionStore.activeConnection
         let token = connectionStore.token(for: connection)

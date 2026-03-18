@@ -62,8 +62,8 @@ struct WaveRow: View {
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
-                    } else if !wave.flow.isEmpty {
-                        Text(wave.flow)
+                    } else if !wave.displayFlow.isEmpty {
+                        Text(wave.displayFlow)
                             .font(Typography.caption(10))
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)

@@ -51,6 +51,9 @@ async fn tick_loop_waves(
     };
 
     for wave in waves {
+        if wave.status() == WaveStatus::Paused {
+            continue;
+        }
         if scheduler.has_active_session(wave.id().as_str()) {
             continue;
         }

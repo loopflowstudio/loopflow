@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ipnet::IpNet;
 use secrecy::ExposeSecret;
@@ -30,6 +32,29 @@ fn env_flag(name: &str) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn maybe_spawn_parent_watch() {
+    let Some(parent_pid) = std::env::var("LFD_PARENT_PID")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+    else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let status = Command::new("/bin/kill")
+                .args(["-0", &parent_pid.to_string()])
+                .status();
+            if status.as_ref().is_ok_and(|status| status.success()) {
+                continue;
+            }
+            tracing::info!(parent_pid, "bundled parent exited; shutting down lfd");
+            std::process::exit(0);
+        }
+    });
 }
 
 #[tokio::main]
@@ -65,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let lfd_config = LfdConfig::load().expect("failed to load lfd config");
     let allow_insecure_bind = has_flag(&args[1..], "--allow-insecure-bind");
+    maybe_spawn_parent_watch();
 
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:2486".to_string())

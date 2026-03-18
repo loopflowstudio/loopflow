@@ -1672,8 +1672,9 @@ mod tests {
     async fn create_and_get_handlers() {
         let state = test_http_state().await;
         let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo_with_origin(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
+        let repo_path = repo_tmp.path().join("repo");
+        init_git_repo_with_origin(&repo_path);
+        let repo = repo_path.to_string_lossy().to_string();
 
         let Json(created) = create_wave_handler(
             State(state.clone()),

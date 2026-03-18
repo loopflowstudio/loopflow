@@ -257,6 +257,35 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try await performRequest(request, useLongTimeouts: useLongTimeouts)
     }
 
+    private func jsonObject(from data: Data) throws -> [String: Any] {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return json
+    }
+
+    private func parsedObject<T>(
+        from data: Data,
+        parse: ([String: Any]) -> T?
+    ) throws -> T {
+        let json = try jsonObject(from: data)
+        guard let value = parse(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return value
+    }
+
+    private func parsedList<T>(
+        from data: Data,
+        parse: ([String: Any]) -> T?
+    ) throws -> [T] {
+        let json = try jsonObject(from: data)
+        guard let items = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return items.compactMap(parse)
+    }
+
     private func waveURL(_ waveId: String, components: String...) -> URL {
         components.reduce(
             apiBaseURL
@@ -563,21 +592,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
         let (data, response) = try await performGet(url)
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = json["data"] as? [[String: Any]] else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return items.compactMap(Self.parseAttentionFromJSON)
+        return try parsedList(from: data, parse: Self.parseAttentionFromJSON)
     }
 
     public func getAttention(_ id: String) async throws -> AttentionItem {
         let (data, response) = try await performGet(attentionURL(id))
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let item = Self.parseAttentionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return item
+        return try parsedObject(from: data, parse: Self.parseAttentionFromJSON)
     }
 
     public func markAttentionViewed(_ id: String) async throws -> AttentionItem {
@@ -589,11 +610,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let item = Self.parseAttentionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return item
+        return try parsedObject(from: data, parse: Self.parseAttentionFromJSON)
     }
 
     public func listTerminalSessions(
@@ -613,21 +630,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
         let (data, response) = try await performGet(url)
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = json["data"] as? [[String: Any]] else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return items.compactMap(Self.parseTerminalSessionFromJSON)
+        return try parsedList(from: data, parse: Self.parseTerminalSessionFromJSON)
     }
 
     public func getTerminalSession(_ id: String) async throws -> TerminalSession {
         let (data, response) = try await performGet(terminalSessionURL(id))
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseTerminalSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
+        return try parsedObject(from: data, parse: Self.parseTerminalSessionFromJSON)
     }
 
     public func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec {
@@ -675,11 +684,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = parse(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return value
+        return try parsedObject(from: data, parse: parse)
     }
 
     // MARK: - Actions

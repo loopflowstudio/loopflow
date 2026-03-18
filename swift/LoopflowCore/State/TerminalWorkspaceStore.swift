@@ -32,16 +32,15 @@ public final class TerminalWorkspaceStore {
         let activeIds = Set(sessionsById.keys)
 
         orderedSessionIds = orderedSessionIds.filter(activeIds.contains)
-        for session in sessions.sorted(by: { $0.createdAt < $1.createdAt }) where !orderedSessionIds.contains(session.id) {
-            orderedSessionIds.append(session.id)
-        }
+        let knownIds = Set(orderedSessionIds)
+        orderedSessionIds.append(
+            contentsOf: sessions
+                .sorted(by: { $0.createdAt < $1.createdAt })
+                .map(\.id)
+                .filter { !knownIds.contains($0) }
+        )
 
-        if let selectedSessionId, sessionsById[selectedSessionId] == nil {
-            self.selectedSessionId = orderedSessionIds.first
-        } else if self.selectedSessionId == nil {
-            self.selectedSessionId = orderedSessionIds.first
-        }
-
+        reconcileSelection()
         persist()
     }
 
@@ -53,25 +52,20 @@ public final class TerminalWorkspaceStore {
         if select || selectedSessionId == nil {
             selectedSessionId = session.id
         }
-        if session.status.isTerminal {
-            if selectedSessionId == session.id {
-                selectedSessionId = orderedSessionIds.first(where: { $0 != session.id })
-            }
-        }
+        reconcileSelection()
         persist()
     }
 
     public func remove(_ sessionId: String) {
         sessionsById.removeValue(forKey: sessionId)
         orderedSessionIds.removeAll { $0 == sessionId }
-        if selectedSessionId == sessionId {
-            selectedSessionId = orderedSessionIds.first
-        }
+        reconcileSelection()
         persist()
     }
 
     public func select(_ sessionId: String?) {
         selectedSessionId = sessionId
+        reconcileSelection()
         persist()
     }
 
@@ -85,6 +79,26 @@ public final class TerminalWorkspaceStore {
         userDefaults.set(selectedSessionId, forKey: "terminalWorkspace.selected.\(repoKey)")
     }
 
+    private func reconcileSelection() {
+        let currentSelection = selectedSessionId
+        guard let currentSelection,
+              let session = sessionsById[currentSelection],
+              !session.status.isTerminal else {
+            selectedSessionId = nextSelectableSessionId(excluding: currentSelection)
+            return
+        }
+    }
+
+    private func nextSelectableSessionId(excluding excludedSessionId: String? = nil) -> String? {
+        orderedSessionIds.first { sessionId in
+            guard sessionId != excludedSessionId,
+                  let session = sessionsById[sessionId] else {
+                return false
+            }
+            return !session.status.isTerminal
+        }
+    }
+
     private func restoreSelection() {
         guard let repoKey else {
             orderedSessionIds = []
@@ -93,5 +107,6 @@ public final class TerminalWorkspaceStore {
         }
         orderedSessionIds = userDefaults.stringArray(forKey: "terminalWorkspace.order.\(repoKey)") ?? []
         selectedSessionId = userDefaults.string(forKey: "terminalWorkspace.selected.\(repoKey)")
+        reconcileSelection()
     }
 }

@@ -1,4 +1,4 @@
-# 01: Code Cleanup
+# 05: Code Cleanup
 
 **Finish line:** No cross-layer imports, no duplicate utilities, no dead code.
 
@@ -16,4 +16,4 @@
 
 **Config env override.** `output_log_retention_days` has no `LFD_OUTPUT_LOG_RETENTION_DAYS` env override — every other config field supports env overrides via `apply_env_overrides()`.
 
-**Release tag test gap.** `tag_and_push_ref` with a non-HEAD `target_ref` (used by `release_run` when tagging a merged commit) is exercised by the full flow but not unit-tested in isolation. Added during ops orchestration (item 05).
+**Release tag test gap.** `tag_and_push_ref` with a non-HEAD `target_ref` (used by `release_run` when tagging a merged commit) is exercised by the full flow but not unit-tested in isolation.

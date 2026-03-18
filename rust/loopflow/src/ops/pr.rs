@@ -35,7 +35,7 @@ pub struct PrInfo {
     pub branch: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrCopy {
     pub title: String,
     pub body: String,
@@ -196,10 +196,15 @@ pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCo
         )));
     }
 
-    let combined = format!("{}\n{}", result.stdout, result.stderr);
-    parse_generated_pr_copy(&combined).ok_or_else(|| {
-        OpsError::Message("failed to parse generated PR copy from agent output".to_string())
-    })
+    parse_generated_pr_copy(&result.stdout)
+        .or_else(|| parse_generated_pr_copy(&result.stderr))
+        .or_else(|| {
+            let combined = format!("{}\n{}", result.stdout, result.stderr);
+            parse_generated_pr_copy(&combined)
+        })
+        .ok_or_else(|| {
+            OpsError::Message("failed to parse generated PR copy from agent output".to_string())
+        })
 }
 
 pub fn gh_available() -> bool {
@@ -396,7 +401,7 @@ struct GeneratedPrCopy {
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
     parse_json_copy(raw)
         .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
-        .or_else(|| extract_json_object(raw).and_then(parse_json_copy))
+        .or_else(|| extract_json_candidates(raw).find_map(parse_json_copy))
 }
 
 fn parse_json_copy(raw: &str) -> Option<PrCopy> {
@@ -418,13 +423,98 @@ fn extract_fenced_json(raw: &str) -> Option<&str> {
     Some(rest[..end].trim())
 }
 
-fn extract_json_object(raw: &str) -> Option<&str> {
-    let start = raw.find('{')?;
-    let end = raw.rfind('}')?;
-    if end <= start {
-        return None;
+fn extract_json_candidates(raw: &str) -> impl Iterator<Item = &str> {
+    let mut candidates = Vec::new();
+    let mut start = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (idx, ch) in raw.char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => escape = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => {
+                if depth == 0 {
+                    start = Some(idx);
+                }
+                depth += 1;
+            }
+            '}' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(object_start) = start {
+                        candidates.push(&raw[object_start..=idx]);
+                    }
+                    start = None;
+                }
+            }
+            _ => {}
+        }
     }
-    Some(&raw[start..=end])
+
+    candidates.into_iter()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_generated_pr_copy, PrCopy};
+
+    #[test]
+    fn parse_generated_pr_copy_accepts_plain_json() {
+        let raw = r###"{"title":"docs: tighten lfd docs","body":"## Try it!"}"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "docs: tighten lfd docs".to_string(),
+                body: "## Try it!".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_ignores_non_json_braces_around_reply() {
+        let raw = r###"warning: telemetry payload {ignored=true}
+{"title":"docs: tighten lfd docs","body":"## Try it!\n- run tests"}
+info: done {ok=true}"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "docs: tighten lfd docs".to_string(),
+                body: "## Try it!\n- run tests".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_generated_pr_copy_handles_braces_inside_body_strings() {
+        let raw = r###"preface
+{"title":"docs: tighten lfd docs","body":"Use {native|container} and keep JSON like {\"a\":1}."}
+trailer"###;
+        assert_eq!(
+            parse_generated_pr_copy(raw),
+            Some(PrCopy {
+                title: "docs: tighten lfd docs".to_string(),
+                body: "Use {native|container} and keep JSON like {\"a\":1}.".to_string(),
+            })
+        );
+    }
 }
 
 fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {

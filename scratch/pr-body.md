@@ -17,34 +17,44 @@ uv run python scripts/concerto-dev.py run-debug
 
 Start two local waves that pause on interactive steps. Verify:
 
-- selecting a wave opens a work surface (not a terminal takeover)
-- one Ghostty-backed terminal tab per interactive wave, available alongside native chat
-- sidebar with wave metadata, queue pressure, recent run/PR context, and quick actions
+- selecting a wave opens a work surface instead of a terminal takeover
+- the native work/session view stays the default tab
+- a Ghostty-backed Terminal tab appears only when that wave has an active terminal session
+- the terminal sidebar shows wave metadata, queue pressure, recent run/PR context, and quick actions
 - terminal exit 0 resumes the wave in `lfd`; non-zero exits fail the run
-- no-wave-selected shows the repo-wide attention queue with real backend data
+- no-wave-selected still lands on the repo-wide attention queue with live backend data
+
+Automated validation from this gate:
+
+- `cargo fmt --check` ✅
+- `cargo clippy -- -D warnings` ✅
+- `cargo test --all` ✅
+- `uv run pytest python/tests/` ✅ (113 passed)
+- `swift test --package-path swift` ✅ (243 passed)
+- `tests/e2e/test_smoke.sh && uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` ✅ (smoke pass + 16 passed)
+- `xcodebuild test ...` built the app and unit suites, but the UI runner hung before establishing connection in this no-rendering environment
 
 ## Intent
 
-Reframe the macOS UI around a **wave workspace** instead of a terminal takeover. Embedded terminals are additive — they surface as an optional tab when a terminal session exists for the selected wave. Native chat/TUI sessions remain the default interactive surface.
-
-Backend adds terminal session CRUD (SQLite + Postgres), lifecycle events, and wave executor integration so `lfd` can track and resume sessions by exit code.
-
-Swift attention models now decode backend attention kinds (`design_review`, `code_review`, `calibration`, `queue_failure`, `step_failure`) directly instead of using placeholder values.
+Turn the selected-wave experience into a **workspace-first** UI. Embedded terminals should support interactive work without replacing the native wave detail/session surface, and terminal lifecycle should be durable enough for `lfd` to resume or fail waiting runs from terminal exit codes.
 
 ## Assumptions
 
-- Ghostty C library is available at Concerto link time
-- `lfd` WebSocket broadcasts terminal session events that Concerto subscribes to
-- Wave executor creates terminal sessions when a step requires interactive input
+- Ghostty's C library is available when Concerto links/runs terminal views.
+- `lfd` broadcasts terminal-session lifecycle events over the existing websocket stream.
+- Interactive wave steps create terminal-session records server-side before the client renders them.
+- Full macOS UI automation needs a normal logged-in GUI session; this gate ran headless with no rendering environment.
 
 ## Key decisions
 
-- **Terminal as tab, not takeover**: tab bar only appears when a terminal session exists. No UI change for waves without terminal sessions.
-- **1:1 attention kind mapping**: direct mapping from Rust enum variants to Swift enum cases. No semantic collapsing — simpler and avoids lossy translation.
-- **`@ObservedObject` for singleton**: GhosttyManager is externally owned; views observe but don't own it.
+- **Terminal as an additive tab**: `WaveWorkspaceView` defaults to the native work view and only exposes a Terminal tab when the selected wave has an active terminal session.
+- **Server-owned terminal state**: terminal sessions live in `lfd` storage and APIs, not only in the client, so lifecycle state survives reconnects/restarts.
+- **Typed attention parity**: Swift decodes backend attention kinds directly instead of collapsing them into placeholders.
+- **Separate terminal workspace store**: terminal-session selection/order is isolated from chat/session state so the existing interactive-session path stays intact.
 
 ## Not included
 
-- Multi-wave command grid (future milestone)
-- tmux-like pane management or layout persistence
-- Wave config/settings redesign
+- Remote terminal transport
+- Multi-wave terminal grids or pane management
+- Layout persistence
+- Wave settings/config redesign

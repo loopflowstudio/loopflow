@@ -1,1 +1,1 @@
-concerto: wave workspace routing with additive terminal embedding
+concerto: route selected waves through a workspace with additive terminal tabs

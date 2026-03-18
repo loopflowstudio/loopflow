@@ -107,8 +107,8 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 
 public extension AttentionItem {
     /// Parse typed context from JSON based on discriminator fields.
-    /// Context type is determined by the payload shape, not the kind enum.
-    static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
+    /// Context type is determined by the payload shape.
+    static func context(json: [String: Any]) -> AttentionContext {
         // Queue failure: has "reason" field
         if json["reason"] != nil {
             return .queueFailure(

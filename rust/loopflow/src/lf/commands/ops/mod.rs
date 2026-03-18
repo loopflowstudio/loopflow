@@ -12,10 +12,10 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, export, ingest, land, next_branch,
+    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, AbandonOptions, CommitOptions, ExportOptions, IngestOptions, LandOptions,
-    NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
+    release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
+    Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -87,7 +87,6 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
         },
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
-        OpsCommand::Export { wave, dry_run } => export_cmd(wave, *dry_run, &progress),
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
     }
@@ -275,31 +274,6 @@ fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn export_cmd(wave: &str, dry_run: bool, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let result = export(
-        &repo_root,
-        &ExportOptions {
-            wave: wave.to_string(),
-            dry_run,
-        },
-        progress,
-    )?;
-
-    let total = result.created.len() + result.updated.len();
-    if total == 0 {
-        println!("nothing to export");
-    } else {
-        println!(
-            "exported {} items ({} created, {} updated)",
-            total,
-            result.created.len(),
-            result.updated.len()
-        );
-    }
-    Ok(())
-}
-
 fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let resolve_waves = |explicit: Option<&String>| -> Result<Vec<String>> {
@@ -334,61 +308,33 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 &crate::ops::pm::PmInitOptions { wave: wave.clone() },
                 progress,
             )?;
-            println!("{}: PM bootstrapped", result.wave);
-            for provider in result.providers {
+            println!(
+                "{}: {:?} project {} ({} linked, {} created)",
+                result.wave,
+                result.provider,
+                result.project_id,
+                result.linked,
+                result.created.len()
+            );
+        }
+        PmCommand::Import { team_id } => {
+            let result = crate::ops::pm::pm_import(
+                &repo_root,
+                &crate::ops::pm::PmImportOptions {
+                    team_id: team_id.clone(),
+                },
+                progress,
+            )?;
+            if result.waves_created.is_empty() {
+                println!("no projects found");
+            } else {
                 println!(
-                    "  {:?}: project {} ({} linked, {} local created, {} remote created)",
-                    provider.provider,
-                    provider.project_id,
-                    provider.linked,
-                    provider.created_local.len(),
-                    provider.created_remote.len()
+                    "imported {} waves ({} items)",
+                    result.waves_created.len(),
+                    result.items_created
                 );
-            }
-        }
-        PmCommand::Import { wave } => {
-            let waves = resolve_waves(wave.as_ref())?;
-            for wave in &waves {
-                let result = crate::ops::pm::pm_import(
-                    &repo_root,
-                    &crate::ops::pm::PmImportOptions { wave: wave.clone() },
-                    progress,
-                )?;
-                let total = result.created.len() + result.updated.len() + result.deleted.len();
-                if total == 0 {
-                    println!("{wave}: nothing to import");
-                } else {
-                    println!(
-                        "{wave}: imported {} items ({} created, {} updated, {} deleted)",
-                        total,
-                        result.created.len(),
-                        result.updated.len(),
-                        result.deleted.len()
-                    );
-                }
-            }
-        }
-        PmCommand::Export { wave, dry_run } => {
-            let waves = resolve_waves(wave.as_ref())?;
-            for wave in &waves {
-                let result = export(
-                    &repo_root,
-                    &ExportOptions {
-                        wave: wave.clone(),
-                        dry_run: *dry_run,
-                    },
-                    progress,
-                )?;
-                let total = result.created.len() + result.updated.len();
-                if total == 0 {
-                    println!("{wave}: nothing to export");
-                } else {
-                    println!(
-                        "{wave}: exported {} items ({} created, {} updated)",
-                        total,
-                        result.created.len(),
-                        result.updated.len()
-                    );
+                for wave in &result.waves_created {
+                    println!("  wave/{wave}");
                 }
             }
         }
@@ -424,22 +370,17 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    println!("{}:", wave.wave);
-                    for provider in wave.providers {
-                        let role = match provider.role {
-                            crate::ops::pm::PmProviderRole::ReadWrite => "rw",
-                            crate::ops::pm::PmProviderRole::Export => "export",
-                        };
-                        println!(
-                            "  {:?} ({role}) project {} — local {}, linked {}, remote {}, remote-only {}",
-                            provider.provider,
-                            provider.project_id,
-                            provider.local_total,
-                            provider.linked,
-                            provider.remote_total,
-                            provider.remote_only
-                        );
-                    }
+                    let s = &wave.status;
+                    println!(
+                        "{}: {:?} project {} — local {}, linked {}, remote {}, remote-only {}",
+                        wave.wave,
+                        s.provider,
+                        s.project_id,
+                        s.local_total,
+                        s.linked,
+                        s.remote_total,
+                        s.remote_only
+                    );
                 }
             }
         }

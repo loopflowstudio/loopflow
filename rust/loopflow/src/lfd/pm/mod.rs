@@ -17,13 +17,17 @@ pub enum PmProviderKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmConfig {
-    pub rw_provider: PmProviderKind,
-    #[serde(default)]
-    pub export_providers: Vec<PmProviderKind>,
+    pub provider: PmProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asana_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_project: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmProject {
+    pub id: String,
+    pub name: String,
 }
 
 impl PmConfig {
@@ -91,6 +95,7 @@ pub type PmResult<T> = Result<T, PmError>;
 #[async_trait]
 pub trait PmProvider: Send + Sync {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;

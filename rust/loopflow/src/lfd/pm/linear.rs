@@ -7,7 +7,8 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult, RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -89,6 +90,17 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
       id
       name
       type
+    }
+  }
+}"#;
+
+const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: String!) {
+  team(id: $teamId) {
+    projects {
+      nodes {
+        id
+        name
+      }
     }
   }
 }"#;
@@ -232,6 +244,22 @@ impl PmProvider for LinearClient {
             .await?;
 
         Ok(response.project_create.project.id)
+    }
+
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
+        let response: TeamProjectsData = self
+            .graphql(LIST_TEAM_PROJECTS_QUERY, json!({ "teamId": team_id }))
+            .await?;
+        Ok(response
+            .team
+            .projects
+            .nodes
+            .into_iter()
+            .map(|p| PmProject {
+                id: p.id,
+                name: p.name,
+            })
+            .collect())
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -471,6 +499,27 @@ struct TeamCreateData {
 #[derive(Deserialize)]
 struct TeamCreatePayload {
     team: IdNode,
+}
+
+#[derive(Deserialize)]
+struct TeamProjectsData {
+    team: TeamWithProjects,
+}
+
+#[derive(Deserialize)]
+struct TeamWithProjects {
+    projects: ProjectsConnection,
+}
+
+#[derive(Deserialize)]
+struct ProjectsConnection {
+    nodes: Vec<ProjectNode>,
+}
+
+#[derive(Deserialize)]
+struct ProjectNode {
+    id: String,
+    name: String,
 }
 
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {

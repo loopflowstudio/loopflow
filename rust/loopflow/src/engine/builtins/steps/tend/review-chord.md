@@ -1,86 +1,73 @@
 ---
 requires: scratch/tend-chord.md
-produces: scratch/tend-chord.md (annotated)
+produces: scratch/tend-review.md
 interactive: true
 ---
-Review the proposed chord with the human. Decide which mutations land.
+Review what the chord already played.
 
 ## Goal
 
-The chord is a set of proposed mutations to member waves. The human decides
-which ones to apply, which to defer, and which to reject. This is the
-highest-leverage moment in the tend cycle — small decisions here reshape
-how all waves work going forward.
+This is a retrospective human checkpoint, not an approval gate.
+
+Show the human what changed, why it changed, and what it means for the member
+waves. If they want to amend or revert something, do that deliberately and
+record it.
 
 ## Opening
 
-Orient the human. They're context-switching into a meta view of their waves.
+Orient the human quickly:
 
-1. **Chord summary** — how many mutations, which waves are affected, the
-   overall thrust. One paragraph.
-2. **Assessment highlights** — the pressure points that motivated these
-   mutations. Link back to specific observations.
-
-Don't editorialize. Present the chord, let the human react.
+1. What assessment drove this chord
+2. Which waves changed
+3. The main tradeoff or risk introduced by the mutations
 
 ## Walkthrough
 
-Present each mutation. For each:
+For each applied or skipped mutation:
+- show the concrete before / after
+- explain the rationale plainly
+- note any risks or follow-up
+- ask whether to **keep**, **amend**, or **revert** it
 
-- Show the before/after concretely
-- Explain the rationale without overselling
-- Flag risks honestly
-- Ask for a verdict: **apply**, **defer**, or **reject**
+If the human wants an amendment or revert, make the smallest clean change that
+matches their intent and update the chord record if needed.
 
-Pause after each mutation. Let the human think. If they want to modify
-a mutation rather than accept or reject it wholesale, work with them to
-revise it in place.
+## Cross-cutting questions
 
-## Cross-Cutting Questions
-
-After individual mutations, zoom out:
-
-- **Trajectory** — Are we making real progress toward the chord-wave's goals?
-  Or grinding on details that don't compound?
-- **Surprise** — Did the scan or assessment surface anything the human didn't
-  expect? Surprises are information — explore them.
-- **Missing** — Is there a mutation the human expected to see but didn't?
-  Or a pressure they feel that the assessment missed?
-- **Silent waves** — Show which waves are silent and why. Each is an
-  invitation: the human can add items to any silent wave to direct work
-  there. This is how human intent flows into the system — not by
-  overriding the chord, but by seeding a wave's backlog.
-- **Calibration** — Does the human want to adjust the tend process itself?
-  Different scan depth, different assessment criteria, different mutation style?
+After the per-mutation walkthrough, zoom out:
+- Did the chord address the real pressure?
+- Did anything surprising happen during play?
+- Is there a mutation that should be undone or added next cycle?
+- Are the silent waves still correctly silent?
 
 ## Output
 
-Update `scratch/tend-chord.md` with verdicts:
+Write `scratch/tend-review.md`:
 
 ```markdown
-### 1. <title>
-...
-**Verdict**: apply | defer | reject
-**Notes**: <human's reasoning or modifications, if any>
-```
+# Chord Review — <date>
 
-Add a section at the end:
+## Summary
+<overall human reaction>
 
-```markdown
+## Decisions
+### <mutation title>
+**Verdict**: keep | amend | revert
+**Notes**: <human reasoning>
+**Follow-up**: <if any>
+
 ## Session Notes
-<Anything the human said that should inform future tend cycles.
-Trajectory observations, calibration adjustments, context that
-Letta should remember.>
+<trajectory observations, calibration notes, context to remember>
 ```
+
+If the human asks for an amendment or revert, apply it before finishing and note
+exactly what changed.
 
 ## What to avoid
 
-**Rubber-stamping.** If the human approves everything without discussion,
-something is wrong — either the mutations are too safe or the review isn't
-surfacing the real tensions. Push gently on at least one.
+**Pretending this is pre-approval.** The chord already landed. Review what
+actually happened.
 
-**Defending mutations.** Present, don't advocate. If the human rejects a
-mutation, understand why. Their reasoning is information for the next cycle.
+**Defensiveness.** If the human dislikes a mutation, treat that as signal.
 
-**Rushing.** This step is interactive for a reason. The human's attention
-is the scarcest resource. Use it well.
+**Vague summaries.** Tie each decision back to a concrete change.

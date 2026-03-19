@@ -87,6 +87,8 @@ pub struct OrDef {
 pub struct OrPath {
     pub flow: Option<String>,
     pub step: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<Step>,
     pub description: String,
     #[serde(default)]
     pub direction: Vec<String>,
@@ -715,10 +717,14 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
 
         let flow = parse_optional_string(path_map, "flow");
         let step = parse_optional_string(path_map, "step");
+        let steps = parse_or_path_steps(path_map, key_str)?;
 
-        if flow.is_some() && step.is_some() {
+        let target_count = usize::from(flow.is_some())
+            + usize::from(step.is_some())
+            + usize::from(!steps.is_empty());
+        if target_count > 1 {
             return Err(LoadError::InvalidFlow(format!(
-                "or path '{key_str}' cannot have both flow and step"
+                "or path '{key_str}' cannot have more than one of flow, step, or steps"
             )));
         }
 
@@ -733,6 +739,7 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
             OrPath {
                 flow,
                 step,
+                steps,
                 description,
                 direction,
             },
@@ -747,11 +754,22 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
 /// Validate that flows referenced by or paths can be loaded and expanded.
 fn validate_or_paths(or_def: &OrDef, repo: &Path) -> Result<(), LoadError> {
     for path in or_def.paths.values() {
-        let Some(ref flow_name) = path.flow else {
+        if let Some(ref flow_name) = path.flow {
+            let flow = load_flow(flow_name, repo)?;
+            expand_flow(&flow, repo)?;
             continue;
-        };
-        let flow = load_flow(flow_name, repo)?;
-        expand_flow(&flow, repo)?;
+        }
+
+        if let Some(ref step_name) = path.step {
+            load_step(step_name, repo)?;
+            continue;
+        }
+
+        for step in &path.steps {
+            if step.content.is_none() {
+                load_step(&step.name, repo)?;
+            }
+        }
     }
     Ok(())
 }
@@ -814,7 +832,51 @@ pub fn load_or_path_items(or_path: &OrPath, repo: &Path) -> Result<Vec<ConcreteI
         })]);
     }
 
+    if !or_path.steps.is_empty() {
+        return Ok(or_path
+            .steps
+            .iter()
+            .map(|step| {
+                ConcreteItem::Step(ConcreteStep {
+                    step: resolve_step_reference(step, repo),
+                    flow_parents: Vec::new(),
+                })
+            })
+            .collect());
+    }
+
     Ok(Vec::new())
+}
+
+fn parse_or_path_steps(
+    map: &serde_yaml_ng::Mapping,
+    path_name: &str,
+) -> Result<Vec<Step>, LoadError> {
+    let Some(value) = map.get(key("steps")) else {
+        return Ok(Vec::new());
+    };
+
+    let Value::Sequence(items) = value else {
+        return Err(LoadError::InvalidFlow(format!(
+            "or path '{path_name}' steps must be a list"
+        )));
+    };
+
+    items
+        .iter()
+        .map(|item| match item {
+            Value::String(name) => Ok(Step::named(name)),
+            Value::Mapping(step_map) => {
+                if let Some(step_value) = step_map.get(key("step")) {
+                    return parse_step_value(step_value);
+                }
+                parse_step_value(item)
+            }
+            _ => Err(LoadError::InvalidFlow(format!(
+                "or path '{path_name}' steps must contain only step items"
+            ))),
+        })
+        .collect()
 }
 
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -2016,6 +2078,50 @@ Be careful.
     }
 
     #[test]
+    fn parse_or_accepts_inline_steps() {
+        let yaml = r#"
+- or:
+    paths:
+      tune:
+        description: "Adjust the chord"
+        steps:
+          - implement
+          - step:
+              name: review
+              interactive: true
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+
+        let FlowItem::Or(or_def) = &items[0] else {
+            panic!("expected or item");
+        };
+        let tune = &or_def.paths["tune"];
+        assert_eq!(tune.flow, None);
+        assert_eq!(tune.step, None);
+        assert_eq!(tune.steps.len(), 2);
+        assert_eq!(tune.steps[0].name, "implement");
+        assert_eq!(tune.steps[1].name, "review");
+        assert_eq!(tune.steps[1].interactive, Some(true));
+    }
+
+    #[test]
+    fn parse_or_rejects_multiple_targets() {
+        let yaml = r#"
+- or:
+    paths:
+      bad:
+        description: "invalid"
+        step: implement
+        steps:
+          - review
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = parse_flow_items(&value).unwrap_err().to_string();
+        assert!(err.contains("flow, step, or steps"));
+    }
+
+    #[test]
     fn expand_or_keeps_concrete_or() {
         let tmp = TempDir::new().unwrap();
         let flow = Flow {
@@ -2031,6 +2137,7 @@ Be careful.
                             OrPath {
                                 flow: Some("build".to_string()),
                                 step: None,
+                                steps: Vec::new(),
                                 description: "Fix it".to_string(),
                                 direction: Vec::new(),
                             },
@@ -2063,6 +2170,7 @@ Be careful.
                     OrPath {
                         flow: Some("build".to_string()),
                         step: None,
+                        steps: Vec::new(),
                         description: "Path A".to_string(),
                         direction: Vec::new(),
                     },
@@ -2087,6 +2195,7 @@ Be careful.
             OrPath {
                 flow: None,
                 step: None,
+                steps: Vec::new(),
                 description: "Last".to_string(),
                 direction: Vec::new(),
             },
@@ -2096,6 +2205,7 @@ Be careful.
             OrPath {
                 flow: None,
                 step: None,
+                steps: Vec::new(),
                 description: "First".to_string(),
                 direction: Vec::new(),
             },
@@ -2124,6 +2234,7 @@ Be careful.
             OrPath {
                 flow: None,
                 step: None,
+                steps: Vec::new(),
                 description: "Known".to_string(),
                 direction: Vec::new(),
             },
@@ -2148,6 +2259,7 @@ Be careful.
             &OrPath {
                 flow: None,
                 step: None,
+                steps: Vec::new(),
                 description: "Silence".to_string(),
                 direction: Vec::new(),
             },
@@ -2159,6 +2271,32 @@ Be careful.
             items.is_empty(),
             "silence path should not expand into items"
         );
+    }
+
+    #[test]
+    fn load_or_path_items_expands_inline_steps() {
+        let tmp = TempDir::new().unwrap();
+        let items = load_or_path_items(
+            &OrPath {
+                flow: None,
+                step: None,
+                steps: vec![Step::named("design"), Step::named("gate")],
+                description: "Inline steps".to_string(),
+                direction: Vec::new(),
+            },
+            tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(items.len(), 2);
+        match &items[0] {
+            ConcreteItem::Step(step) => assert_eq!(step.step.name, "design"),
+            other => panic!("expected step, got {other:?}"),
+        }
+        match &items[1] {
+            ConcreteItem::Step(step) => assert_eq!(step.step.name, "gate"),
+            other => panic!("expected step, got {other:?}"),
+        }
     }
 
     #[test]

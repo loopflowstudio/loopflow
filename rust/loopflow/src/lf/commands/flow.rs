@@ -598,7 +598,7 @@ mod tests {
         fs::create_dir_all(&flows_dir).unwrap();
         fs::write(
             flows_dir.join("tune.yaml"),
-            "- tend/draft-chord\n- tend/review-chord\n- tend/apply-chord\n",
+            "- tend/play-chord\n- tend/review-chord\n",
         )
         .unwrap();
 
@@ -616,6 +616,7 @@ mod tests {
                             crate::engine::flow::OrPath {
                                 flow: Some("tend/tune".to_string()),
                                 step: None,
+                                steps: Vec::new(),
                                 description: "Adjust the chord".to_string(),
                                 direction: Vec::new(),
                             },
@@ -625,6 +626,7 @@ mod tests {
                             crate::engine::flow::OrPath {
                                 flow: None,
                                 step: None,
+                                steps: Vec::new(),
                                 description: "No-op".to_string(),
                                 direction: Vec::new(),
                             },
@@ -645,7 +647,7 @@ mod tests {
                 "tend/scan-waves".to_string(),
                 "[or via tend/assess]".to_string(),
                 "├─ silence".to_string(),
-                "└─ tune → tend/draft-chord → tend/review-chord → tend/apply-chord".to_string(),
+                "└─ tune → tend/play-chord → tend/review-chord".to_string(),
             ]
         );
 

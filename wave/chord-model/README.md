@@ -32,21 +32,33 @@ Pattern: detect failure → classify error → headless repair in same branch �
 
 ## Two granularities
 
-### VSM flow (single pass)
+### VSM governance flows
 
-One agent walks through all five systems in descending order. One PR.
+Four focused governance flows cover identity, intelligence, control, and coordination. Each flow is scan → assess → play-chord.
 
 ```yaml
-# flow: vsm
-- s5   # identity: still who we say we are? boundary right?
-- s4   # intelligence: what changed? what's coming?
-- s3   # control: members performing? allocate attention
-- s2   # coordination: conflicts? oscillation? duplication?
+# govern-identity
+- vsm/s5-scan
+- vsm/s5-assess
+- tend/play-chord
+
+# govern-intelligence
+- vsm/s4-scan
+- vsm/s4-assess
+- tend/play-chord
+
+# govern-control
+- vsm/s3-scan
+- vsm/s3-assess
+- tend/play-chord
+
+# govern-coordination
+- vsm/s2-scan
+- vsm/s2-assess
+- tend/play-chord
 ```
 
-S1 is absent — it's the member waves running their own flows. The chord doesn't do S1 work.
-
-The existing `tend` flow is a specific arrangement of the same ideas for interactive use (scan → assess → branch to chord or reorg). `vsm` is the general-purpose builtin.
+There is no builtin sequential `vsm` flow anymore. S1 stays out of scope here — member waves still do the actual work, and worker-pool operations come later.
 
 ### VSM chord (five waves)
 
@@ -54,7 +66,7 @@ For projects complex enough that each system needs its own persistent wave, memo
 
 ```yaml
 # wave/root/root.yaml
-flow: vsm
+flow: govern-identity  # plus govern-intelligence / govern-control / govern-coordination on sibling governance waves
 area:
   - wave/s5-policy/
   - wave/s4-intelligence/
@@ -87,7 +99,7 @@ Waves exist as YAML in `wave/`. lfd discovers them, reconciles against the store
 
 ### Self-healing before coordination
 
-Once waves are self-starting and self-healing, the chord's VSM flow has real operational data. It can read algedonic history, see which waves are healthy vs struggling, and make coordination decisions grounded in observed behavior.
+Once waves are self-starting and self-healing, the chord's governance flows have real operational data. It can read algedonic history, see which waves are healthy vs struggling, and make coordination decisions grounded in observed behavior.
 
 The old standalone `signals` wave folds back here. Stall detection, repeated repair failure, and later signal memory are chord concerns, not a second block system beside attention items.
 
@@ -98,7 +110,7 @@ Chords can contain chords. Each is a viable system with its own S5. Acyclicity e
 ## Goals
 
 - Algedonic signals: failure → headless repair → escalate if stuck, end-to-end
-- VSM flow as the default chord flow (s5 → s4 → s3 → s2)
+- Governance flows as the chord's reusable VSM lens (s5/s4/s3/s2 as separate flows)
 - Wave discovery from disk, root chord auto-created
 - Each chord holds its own identity and policy
 - Root chord as terminal escalation point to human
@@ -118,4 +130,4 @@ Chords can contain chords. Each is a viable system with its own S5. Acyclicity e
 - Time from failure to either auto-fix or human notification: <10 minutes
 - Repair success rate by error class: tracked, trending upward
 - Algedonic signals that resolve without human intervention: tracked
-- VSM flow cycles that produce at least one actionable change: >50%
+- Governance flow cycles that produce at least one actionable change: >50%

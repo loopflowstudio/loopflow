@@ -3,7 +3,9 @@
     router: tend/assess
     paths:
       tune:
-        flow: tend-tune
-        description: "Adjustments needed — compose and review chord changes"
+        description: "Adjustments needed — play the chord, then review what happened"
+        steps:
+          - tend/play-chord
+          - tend/review-chord
       silence:
-        description: "Everything is in tune — no action needed this cycle"
+        description: "Everything is in tune"

@@ -105,19 +105,21 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 |------|--------------|
 | `tend/scan-waves` | Read member wave state — PRs, blocks, progress, git activity |
 | `tend/assess` | Judge wave health and identify pressure points |
-| `tend/draft-chord` | Compose coordinated mutations across member waves |
-| `tend/review-chord` | Walk the human through proposed mutations, get verdicts |
-| `tend/apply-chord` | Execute approved mutations to wave configs and items |
+| `tend/play-chord` | Compose and apply coordinated mutations across member waves |
+| `tend/review-chord` | Review what already changed, then amend or revert if needed |
 
 ### VSM steps (`vsm/`)
 
 | Step | What it does |
 |------|--------------|
-| `vsm/s5` | Set system identity and policy, then fix urgent structural drift if needed |
-| `vsm/s4` | Read upstream changes and translate them into wave-plan implications |
-| `vsm/s3` | Assess control health, fix urgent mechanical blocks, and choose batch size |
-| `vsm/s2` | Coordinate member-wave backlogs, resolve interference, and write a safe batch |
-| `vsm/s1` | Launch the batch as tracked subwave runs and record initial status |
+| `vsm/s5-scan` | Scan chord identity, roster, policy, and recent structural change |
+| `vsm/s5-assess` | Assess identity, boundary, roster, and autonomy drift |
+| `vsm/s4-scan` | Scan dependencies, advisories, upstream APIs, and other external signals |
+| `vsm/s4-assess` | Assess which environmental changes matter and what they imply |
+| `vsm/s3-scan` | Scan live health, velocity, CI, retries, and usage signals |
+| `vsm/s3-assess` | Assess control health, mechanical blocks, and worker-pool size |
+| `vsm/s2-scan` | Scan backlogs, PR overlap, area overlap, and conflict history |
+| `vsm/s2-assess` | Assess coordination risk, conflict map, and safe ordering |
 
 ### Scan steps (`scan/`)
 
@@ -188,13 +190,15 @@ Flows can include mechanical ops items directly:
 | Flow | Steps |
 |------|-------|
 | `tend` | scan-waves → assess → or(tune, silence) |
-| `tend-tune` | draft-chord → review-chord → apply-chord |
 
 ### VSM flows (`vsm/`)
 
 | Flow | Steps |
 |------|-------|
-| `vsm` | s5 → s4 → s3 → s2 → s1 |
+| `govern-identity` | s5-scan → s5-assess → play-chord |
+| `govern-intelligence` | s4-scan → s4-assess → play-chord |
+| `govern-control` | s3-scan → s3-assess → play-chord |
+| `govern-coordination` | s2-scan → s2-assess → play-chord |
 
 ### Scan flows (`scan/`)
 
@@ -223,10 +227,12 @@ Branches route a flow based on an agent's assessment of the current state. One p
     router: tend/assess
     paths:
       tune:
-        flow: tend-tune
-        description: "Adjustments needed — compose and review chord changes"
+        description: "Adjustments needed — play the chord, then review what happened"
+        steps:
+          - tend/play-chord
+          - tend/review-chord
       silence:
-        description: "Everything is in tune — no action needed this cycle"
+        description: "Everything is in tune"
 ```
 
 The `or` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.

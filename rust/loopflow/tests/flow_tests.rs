@@ -351,28 +351,52 @@ fn builtin_tend_flow_structure() {
             assert_eq!(or_def.paths.len(), 2);
             assert!(or_def.paths.contains_key("tune"));
             assert!(or_def.paths.contains_key("silence"));
-            assert_eq!(or_def.paths["tune"].flow.as_deref(), Some("tend-tune"));
+            assert_eq!(or_def.paths["tune"].flow, None);
+            assert_eq!(or_def.paths["tune"].step, None);
+            assert_eq!(
+                or_def.paths["tune"]
+                    .steps
+                    .iter()
+                    .map(|step| step.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["tend/play-chord", "tend/review-chord"]
+            );
             assert_eq!(or_def.paths["silence"].flow, None);
             assert_eq!(or_def.paths["silence"].step, None);
+            assert!(or_def.paths["silence"].steps.is_empty());
         }
         other => panic!("expected Or, got {other:?}"),
     }
-
-    let tune_items = expand_named_flow(repo, "tend-tune");
-    assert_eq!(tune_items.len(), 3);
-    assert_step_name(&tune_items[0], "tend/draft-chord");
-    assert_step_name(&tune_items[1], "tend/review-chord");
-    assert_step_name(&tune_items[2], "tend/apply-chord");
 }
 
 #[test]
-fn builtin_vsm_flow_structure() {
+fn builtin_governance_flows_structure() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "vsm");
+    let cases = [
+        (
+            "govern-identity",
+            ["vsm/s5-scan", "vsm/s5-assess", "tend/play-chord"],
+        ),
+        (
+            "govern-intelligence",
+            ["vsm/s4-scan", "vsm/s4-assess", "tend/play-chord"],
+        ),
+        (
+            "govern-control",
+            ["vsm/s3-scan", "vsm/s3-assess", "tend/play-chord"],
+        ),
+        (
+            "govern-coordination",
+            ["vsm/s2-scan", "vsm/s2-assess", "tend/play-chord"],
+        ),
+    ];
 
-    assert_step_sequence(&items, &["vsm/s5", "vsm/s4", "vsm/s3", "vsm/s2", "vsm/s1"]);
+    for (flow_name, expected) in cases {
+        let items = expand_named_flow(repo, flow_name);
+        assert_step_sequence(&items, &expected);
+    }
 }
 
 #[test]

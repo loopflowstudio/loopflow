@@ -51,22 +51,33 @@ static NAMESPACED_STEPS: std::sync::LazyLock<
         ),
         ("tend/assess", include_str!("builtins/steps/tend/assess.md")),
         (
-            "tend/draft-chord",
-            include_str!("builtins/steps/tend/draft-chord.md"),
+            "tend/play-chord",
+            include_str!("builtins/steps/tend/play-chord.md"),
         ),
         (
             "tend/review-chord",
             include_str!("builtins/steps/tend/review-chord.md"),
         ),
+        ("vsm/s5-scan", include_str!("builtins/steps/vsm/s5-scan.md")),
         (
-            "tend/apply-chord",
-            include_str!("builtins/steps/tend/apply-chord.md"),
+            "vsm/s5-assess",
+            include_str!("builtins/steps/vsm/s5-assess.md"),
         ),
-        ("vsm/s5", include_str!("builtins/steps/vsm/s5.md")),
-        ("vsm/s4", include_str!("builtins/steps/vsm/s4.md")),
-        ("vsm/s3", include_str!("builtins/steps/vsm/s3.md")),
-        ("vsm/s2", include_str!("builtins/steps/vsm/s2.md")),
-        ("vsm/s1", include_str!("builtins/steps/vsm/s1.md")),
+        ("vsm/s4-scan", include_str!("builtins/steps/vsm/s4-scan.md")),
+        (
+            "vsm/s4-assess",
+            include_str!("builtins/steps/vsm/s4-assess.md"),
+        ),
+        ("vsm/s3-scan", include_str!("builtins/steps/vsm/s3-scan.md")),
+        (
+            "vsm/s3-assess",
+            include_str!("builtins/steps/vsm/s3-assess.md"),
+        ),
+        ("vsm/s2-scan", include_str!("builtins/steps/vsm/s2-scan.md")),
+        (
+            "vsm/s2-assess",
+            include_str!("builtins/steps/vsm/s2-assess.md"),
+        ),
     ])
 });
 

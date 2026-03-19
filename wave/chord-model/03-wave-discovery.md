@@ -9,7 +9,7 @@ linear_id: e4bced9c-17a1-4cde-bf4a-ea8496e00bc5
 
 1. **Disk scanner** — on startup and periodically, scan `wave/` for YAML configs. Reconcile against waves in the store: create new, update changed, mark removed.
 
-2. **Root chord auto-creation** — when Concerto launches (or on first `lfq` command), create the root chord-wave if it doesn't exist. Its `area` includes all discovered `wave/<name>/` entries. Its flow is `vsm`.
+2. **Root chord auto-creation** — when Concerto launches (or on first `lfq` command), create the root chord-wave if it doesn't exist. Its `area` includes all discovered `wave/<name>/` entries. Its initial flow is `tend` until the dedicated governance-wave structure exists.
 
 3. **Owner filtering** — eventually, filter discovered waves by `owner` field in the YAML. Initially, run everything.
 

@@ -33,7 +33,6 @@ Flows that let a chord scan, assess, and tune its member waves.
 | Flow | Steps | Use case |
 |------|-------|----------|
 | `tend` | scan-waves → assess → or(tune, silence) | Assess chord health and decide whether to tune |
-| `tend-tune` | draft-chord → review-chord → apply-chord | Compose, review, and apply coordinated mutations |
 
 ## VSM flows (`vsm/`)
 
@@ -41,7 +40,10 @@ Flows that walk the viable system model from governance down to execution.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `vsm` | s5 → s4 → s3 → s2 → s1 | Assess the chord at every governance level, write a safe batch, and launch it |
+| `govern-identity` | s5-scan → s5-assess → play-chord | Assess chord identity and apply structural mutations |
+| `govern-intelligence` | s4-scan → s4-assess → play-chord | Assess environmental changes and apply relevant mutations |
+| `govern-control` | s3-scan → s3-assess → play-chord | Assess control health and apply resource or mechanical fixes |
+| `govern-coordination` | s2-scan → s2-assess → play-chord | Assess coordination risk and apply interference fixes |
 
 ## Scan flows (`scan/`)
 

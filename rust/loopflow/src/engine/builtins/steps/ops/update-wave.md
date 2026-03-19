@@ -152,7 +152,7 @@ until it has something genuinely compelling earns trust that compounds.
 - If the wave's area is still active and evolving → stay silent
 - If the human explicitly closes the wave → delete
 
-The chord's tend flow (specifically assess and draft-chord) can propose waking
+The chord's tend flow (specifically assess and play-chord) can propose waking
 a silent wave by adding items, or closing it entirely. The human reviews these
 proposals in review-chord.
 

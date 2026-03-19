@@ -38,7 +38,7 @@ be fine. Look past activity to actual progress toward finish lines.
      codebase evolves between tend cycles. Items can go stale: finish lines
      moved, designs diverged, value diminished. Waves should reorganize
      internally — this is a single beat, not a human review. Flag waves
-     whose items look incoherent so draft-chord can account for it.
+     whose items look incoherent so play-chord can account for it.
 
 3. **Assess the chord.** Look across all waves:
 
@@ -91,4 +91,4 @@ needs a specific observation backing it.
 healthy. Finish lines crossed is the metric.
 
 **Premature solutions.** Identify pressure points, don't propose fixes. That's
-draft-chord's job.
+play-chord's job.

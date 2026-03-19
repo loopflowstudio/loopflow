@@ -83,7 +83,7 @@ A chord's execution alternates between tending and building.
 ```
 tend (1 global update)
   scan-waves → assess → branch:
-    tune: draft-chord → review-chord → apply-chord
+    tune: play-chord → review-chord
     silence: exit cleanly
 
 build × N (parallel, one per active wave)

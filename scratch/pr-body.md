@@ -1,6 +1,8 @@
 ## Try it!
 
 ```bash
+cargo fmt --check
+cargo clippy -- -D warnings
 cargo test --all
 uv run pytest python/tests/
 tests/e2e/test_smoke.sh
@@ -11,21 +13,23 @@ cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodepro
 
 What to look for:
 
-- `lfd` now exposes persisted terminal sessions and richer wave/attention state.
-- Concerto wave detail views behave like workspaces: runs, terminals, and attention live together.
-- Attention items round-trip as the collapsed `interactive` / `algedonic` model instead of the older wider taxonomy.
-- Gate polish also fixes the generated macOS app runpath so a locally built Concerto app can resolve bundled frameworks from `Contents/Frameworks`.
+- `lfd` now persists `terminal_sessions` and exposes attach/start/complete/cancel routes for them.
+- Concerto wave detail views now behave like workspaces: runs, attention, and tracked terminal tabs live together.
+- Attention items now round-trip as the collapsed `interactive` / `algedonic` model across daemon, Python client, Swift models, and UI.
+- The generated macOS app now resolves bundled frameworks from `Contents/Frameworks`, so a locally built Concerto app launches outside the package-test harness.
 
 Validation from this gate:
 
 - `cargo fmt --check` ✅
 - `cargo clippy -- -D warnings` ✅
 - `cargo test --all` ✅
-- `uv run pytest python/tests/` ✅ (115 passed)
+- `uv run pytest python/tests/` ✅
 - `tests/e2e/test_smoke.sh` ✅
 - `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` ✅ (16 passed)
-- `swift test --package-path swift` ✅ (271 tests passed)
-- `xcodebuild test ...` ⚠️ unit/package coverage inside the run passed, but local `ConcertoUITests-Runner` still exits during bootstrap before establishing the UI-test connection
+- `swift test --package-path swift` ✅
+- direct launch of the built app ✅
+  - `/Users/jack/Library/Developer/Xcode/DerivedData/LoopflowSwift-fhniguselvodfhbnlvqizehygmun/Build/Products/Debug/Concerto.app/Contents/MacOS/Concerto -ui-test-mode mock-waves`
+- `xcodebuild test ...` ⚠️ after a clean DerivedData rebuild, the app and unit/package tests pass but local `ConcertoUITests-Runner` still exits during bootstrap before establishing the UI-test connection
 
 ## Intent
 
@@ -36,7 +40,7 @@ Ship the first cohesive pass of agent embedding: `lfd` owns terminal-session sta
 - Concerto continues to talk to a local or bundled `lfd` that is the source of truth for wave and terminal state.
 - Terminal sessions are wave-scoped artifacts worth persisting and restoring, not disposable UI-only state.
 - Existing callers either already use the new attention kinds or can tolerate the legacy-to-collapsed mapping in the updated client/UI code.
-- The remaining local macOS UI-test bootstrap kill is an environment/runner issue separate from the now-fixed app runpath bug.
+- The remaining local macOS UI-test bootstrap kill is an environment or runner issue separate from the now-fixed app runpath bug.
 
 ## Key decisions
 

@@ -9,7 +9,7 @@ Flows that produce code changes.
 | Flow | Steps | Use case |
 |------|-------|----------|
 | `build` | implement → compress → lint → gate → update-wave | Headless build and wave reconciliation |
-| `ship` | design → build → review → land | Interactive design, headless build, interactive review, then land |
+| `ship` | design → build → or(demo, code-review) → land | Interactive design, headless build, then the right review before landing |
 | `pair` | design → build | Interactive design then build |
 | `grind` | research → iterate → build → gate | Research-driven iteration |
 | `incident` | debug → 5whys → build | Fix bug, analyze root cause, build fixes |

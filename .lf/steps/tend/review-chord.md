@@ -1,72 +1,73 @@
 ---
-requires: scratch/tend-chord.md, scratch/tend-assessment.md
-produces: updated scratch/tend-chord.md
+requires: scratch/tend-chord.md
+produces: scratch/tend-review.md
 interactive: true
 ---
-Find coherence across waves. What's working, what isn't, what wants to change.
+Review what the chord already played.
 
 ## Goal
 
-The tend cycle produced a scan, an assessment, and a draft chord. This
-review steps back from the prescriptions to examine the situation itself.
-The right moves emerge from shared understanding of what's working and
-what isn't — not from approving or rejecting a list.
+This is a retrospective human checkpoint, not an approval gate.
+
+Show the human what changed, why it changed, and what it means for the member
+waves. If they want to amend or revert something, do that deliberately and
+record it.
 
 ## Opening
 
-Orient the human to the field. They're context-switching into a meta view
-of their waves.
+Orient the human quickly:
 
-Read the assessment and chord together. Surface the central tension — not
-the list of proposed changes, but the underlying dynamic. One or two
-sentences.
+1. What assessment drove this chord
+2. Which waves changed
+3. The main tradeoff or risk introduced by the mutations
 
-## The Conversation
+## Walkthrough
 
-**What's working.** Start here. Which waves are producing good work?
-Where is the current structure serving the goals? What should be
-protected?
+For each applied or skipped mutation:
+- show the concrete before / after
+- explain the rationale plainly
+- note any risks or follow-up
+- ask whether to **keep**, **amend**, or **revert** it
 
-**What isn't.** Where is energy being lost? What patterns keep recurring?
-Where does the structure fight the work instead of supporting it?
+If the human wants an amendment or revert, make the smallest clean change that
+matches their intent and update the chord record if needed.
 
-**What's the same problem in multiple places.** Area violations, scope
-creep, blocked PRs, stale worktrees — these might be separate issues or
-symptoms of one thing. Explore which.
+## Cross-cutting questions
 
-**What wants to change on its own.** Some tensions resolve themselves.
-Some proposed interventions are compensating for situations that are
-already shifting. Identify those.
-
-**What's the natural next state.** Not the ideal end state. The next
-stable configuration where waves can ship again.
-
-Let the conversation find its own shape. The chord's proposed mutations
-are reference material, not an agenda.
+After the per-mutation walkthrough, zoom out:
+- Did the chord address the real pressure?
+- Did anything surprising happen during play?
+- Is there a mutation that should be undone or added next cycle?
+- Are the silent waves still correctly silent?
 
 ## Output
 
-Rewrite `scratch/tend-chord.md` to reflect the session. The chord should
-contain only moves that emerged as necessary from the conversation —
-fewer is better. Each move should feel like it follows from shared
-understanding, not from a checklist.
-
-Add:
+Write `scratch/tend-review.md`:
 
 ```markdown
-## Session
-<What the human sees that the tend cycle didn't. Trajectory,
-calibration, context for future cycles.>
+# Chord Review — <date>
+
+## Summary
+<overall human reaction>
+
+## Decisions
+### <mutation title>
+**Verdict**: keep | amend | revert
+**Notes**: <human reasoning>
+**Follow-up**: <if any>
+
+## Session Notes
+<trajectory observations, calibration notes, context to remember>
 ```
+
+If the human asks for an amendment or revert, apply it before finishing and note
+exactly what changed.
 
 ## What to avoid
 
-**Point-by-point review.** Don't walk through mutations asking for
-verdicts. The question is "what's the right shape?" not "which items
-survive triage?"
+**Pretending this is pre-approval.** The chord already landed. Review what
+actually happened.
 
-**Leading with prescriptions.** Present the situation, not the fixes.
-Let the human's read of what's working and what isn't drive toward moves.
+**Defensiveness.** If the human dislikes a mutation, treat that as signal.
 
-**Complexity as thoroughness.** The best chord has the fewest moves that
-resolve the most tension.
+**Vague summaries.** Tie each decision back to a concrete change.

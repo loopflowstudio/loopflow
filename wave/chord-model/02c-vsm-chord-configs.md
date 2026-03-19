@@ -7,9 +7,11 @@
 Item 02 creates the governance flows (govern-identity, govern-intelligence, govern-control, govern-coordination) and their scan/assess steps. This item creates the actual wave configs that run those flows, and wires s1 as a worker pool.
 
 Depends on:
-- 02 (governance flows and steps exist)
+- ~~02 (governance flows and steps exist)~~ — shipped
 - 02a (worker pools — s1 needs `workers: N`)
 - 02b (wave modes — s1 needs `mode: loop`, governance waves need `mode: cron`)
+
+Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Governance waves need graceful skip behavior when their scan can't reach an expected data source.
 
 ## The shape
 
@@ -71,5 +73,5 @@ area:
 - s5–s2 run their governance flows on independent cron schedules
 - s1 runs `ship-roadmap` with `workers: N`
 - Redesign chord area includes all five member waves
-- Sequential `vsm.yaml` is removed
+- Sequential `vsm.yaml` is removed (already done in 02)
 - Tend flow still works for human check-ins on the same chord

@@ -1,3 +1,6 @@
+---
+linear_id: 8efb6e1c-0da8-4b3c-af4e-771b4a9084b5
+---
 # 01: Mac Mini Server
 
 **Finish line:** lfd runs natively on Mac Mini via launchd, stays up across reboots, and behaves identically to local development.

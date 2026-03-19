@@ -80,8 +80,11 @@ public struct CalibrationAttentionContext: Sendable, Hashable {
 public enum AttentionContext: Sendable, Hashable {
     case interactive(InteractiveAttentionContext)
     case algedonic(AlgedonicAttentionContext)
+<<<<<<< HEAD
     case raw(String)
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
+=======
+>>>>>>> 429609a0 (swift: trim unused attention fallback state)
 }
 
 public struct AttentionItem: Identifiable, Sendable, Hashable {

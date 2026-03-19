@@ -240,6 +240,7 @@ private struct AttentionDetailView: View {
             }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         case .stepFailure(let context):
             VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -267,6 +268,8 @@ private struct AttentionDetailView: View {
                 .font(Typography.code())
                 .foregroundStyle(palette.text)
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
+=======
+>>>>>>> 429609a0 (swift: trim unused attention fallback state)
         }
     }
 
@@ -290,6 +293,7 @@ private struct AttentionDetailView: View {
                 }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
             case .designReview(let context):
                 if let sessionId = context.terminalSessionId {
@@ -311,6 +315,8 @@ private struct AttentionDetailView: View {
 >>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
                 EmptyView()
 >>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
+=======
+>>>>>>> 429609a0 (swift: trim unused attention fallback state)
             }
         }
     }

@@ -1,4 +1,4 @@
-flow: build-or-silent
+flow: ship-wave
 mode: manual
 area:
 - swift/Concerto/

@@ -276,10 +276,7 @@ fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
 
 fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let resolve_waves = |explicit: Option<&String>| -> Result<Vec<String>> {
-        if let Some(name) = explicit {
-            return Ok(vec![name.clone()]);
-        }
+    let list_all_waves = || -> Result<Vec<String>> {
         // List all wave directories
         let wave_dir = repo_root.join("wave");
         if !wave_dir.is_dir() {
@@ -302,20 +299,44 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     };
 
     match cmd {
-        PmCommand::Init { wave } => {
-            let result = crate::ops::pm::pm_init(
-                &repo_root,
-                &crate::ops::pm::PmInitOptions { wave: wave.clone() },
-                progress,
-            )?;
-            println!(
-                "{}: {:?} project {} ({} linked, {} created)",
-                result.wave,
-                result.provider,
-                result.project_id,
-                result.linked,
-                result.created.len()
-            );
+        PmCommand::Init {
+            wave,
+            wave_flag,
+            all,
+        } => {
+            if *all {
+                for wave in list_all_waves()? {
+                    let result = crate::ops::pm::pm_init(
+                        &repo_root,
+                        &crate::ops::pm::PmInitOptions { wave: Some(wave) },
+                        progress,
+                    )?;
+                    println!(
+                        "{}: {:?} project {} ({} linked, {} created)",
+                        result.wave,
+                        result.provider,
+                        result.project_id,
+                        result.linked,
+                        result.created.len()
+                    );
+                }
+            } else {
+                let result = crate::ops::pm::pm_init(
+                    &repo_root,
+                    &crate::ops::pm::PmInitOptions {
+                        wave: wave.clone().or_else(|| wave_flag.clone()),
+                    },
+                    progress,
+                )?;
+                println!(
+                    "{}: {:?} project {} ({} linked, {} created)",
+                    result.wave,
+                    result.provider,
+                    result.project_id,
+                    result.linked,
+                    result.created.len()
+                );
+            }
         }
         PmCommand::Import { team_id } => {
             let result = crate::ops::pm::pm_import(
@@ -339,7 +360,11 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             }
         }
         PmCommand::Sync { wave } => {
-            let waves = resolve_waves(wave.as_ref())?;
+            let waves = if let Some(name) = wave.as_ref() {
+                vec![name.clone()]
+            } else {
+                list_all_waves()?
+            };
             for wave in &waves {
                 let result = crate::ops::pm::pm_sync(
                     &repo_root,

@@ -260,8 +260,13 @@ pub enum PmCommand {
     /// Bootstrap PM provider roles for a wave
     Init {
         /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Initialize all waves under wave/
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
     },
     /// Import projects from PM tool as waves
     Import {
@@ -421,4 +426,55 @@ pub enum ShellCommand {
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pm_init_accepts_positional_wave() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "pm"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Init {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("pm"));
+        assert_eq!(wave_flag, None);
+        assert!(!all);
+    }
+
+    #[test]
+    fn pm_init_accepts_all_flag() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "--all"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Init {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave, None);
+        assert_eq!(wave_flag, None);
+        assert!(all);
+    }
 }

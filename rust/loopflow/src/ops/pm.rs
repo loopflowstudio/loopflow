@@ -521,8 +521,9 @@ async fn bootstrap_read_write_provider(
         .collect::<HashMap<_, _>>();
     let mut matched_remote_ids = HashSet::new();
     let mut created_local = Vec::new();
+    let mut pending_remote_creates = Vec::new();
 
-    for local_item in local_items.iter_mut() {
+    for (index, local_item) in local_items.iter_mut().enumerate() {
         let local_title = local_item_title(local_item);
         let local_key = normalize_title(&local_title);
         if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
@@ -539,8 +540,24 @@ async fn bootstrap_read_write_provider(
             continue;
         }
 
-        create_remote_for_local_item(args.wave_dir, local_item, &ctx, &project_id, &local_title)
-            .await?;
+        pending_remote_creates.push((index, local_title));
+    }
+
+    let pending_remote_creates = if provider_prefers_reverse_create_order(ctx.provider) {
+        pending_remote_creates.into_iter().rev().collect::<Vec<_>>()
+    } else {
+        pending_remote_creates
+    };
+
+    for (index, local_title) in pending_remote_creates {
+        create_remote_for_local_item(
+            args.wave_dir,
+            &mut local_items[index],
+            &ctx,
+            &project_id,
+            &local_title,
+        )
+        .await?;
     }
 
     for remote_item in &remote_items {
@@ -1154,6 +1171,10 @@ pub(crate) fn title_case(slug: &str) -> String {
         .join(" ")
 }
 
+fn provider_prefers_reverse_create_order(provider: PmProviderKind) -> bool {
+    matches!(provider, PmProviderKind::Asana | PmProviderKind::Linear)
+}
+
 fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
 }
@@ -1168,6 +1189,12 @@ mod tests {
     #[derive(Debug)]
     struct StaticProvider {
         items: Vec<PmItem>,
+    }
+
+    #[derive(Debug)]
+    struct RecordingProvider {
+        created: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        next_id: std::sync::Arc<std::sync::Mutex<u32>>,
     }
 
     #[async_trait]
@@ -1186,6 +1213,43 @@ mod tests {
 
         async fn create_item(&self, _project_id: &str, _item: &PmItemCreate) -> PmResult<String> {
             panic!("create_item should not be called in this test");
+        }
+
+        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
+            panic!("update_item should not be called in this test");
+        }
+
+        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
+            panic!("complete_item should not be called in this test");
+        }
+
+        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
+            panic!("comment should not be called in this test");
+        }
+    }
+
+    #[async_trait]
+    impl PmProvider for RecordingProvider {
+        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
+            panic!("create_project should not be called in this test");
+        }
+
+        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            panic!("list_projects should not be called in this test");
+        }
+
+        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
+            Ok(Vec::new())
+        }
+
+        async fn create_item(&self, _project_id: &str, item: &PmItemCreate) -> PmResult<String> {
+            self.created
+                .lock()
+                .expect("created lock")
+                .push(item.name.clone());
+            let mut next_id = self.next_id.lock().expect("next_id lock");
+            *next_id += 1;
+            Ok(format!("lin-{}", *next_id))
         }
 
         async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
@@ -1381,5 +1445,95 @@ mod tests {
         assert!(imported.contains("linear_id: lin-2"));
         assert!(imported.contains("# Second task"));
         assert!(imported.contains("Imported from remote."));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_read_write_provider_creates_linear_items_in_reverse_local_order() {
+        let dir = TempDir::new().expect("temp dir");
+        let wave_dir = dir.path().join("wave").join("pm");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
+        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
+        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
+
+        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
+        let progress = crate::ops::NullProgress;
+        let args = BootstrapArgs {
+            repo: dir.path(),
+            wave: "pm",
+            wave_dir: &wave_dir,
+            project_name: "PM",
+            description: "",
+            progress: &progress,
+        };
+        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = RecordingProvider {
+            created: created.clone(),
+            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
+        };
+        let ctx = PmContext {
+            client: Box::new(provider),
+            provider: PmProviderKind::Linear,
+            project: "proj-1".to_string(),
+        };
+
+        bootstrap_read_write_provider(&args, &mut local_items, ctx)
+            .await
+            .expect("bootstrap succeeds");
+
+        let created = created.lock().expect("created lock").clone();
+        assert_eq!(created, vec!["Third", "Second", "First"]);
+
+        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
+        assert!(created_order.contains("linear_id: lin-3"));
+        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
+        assert!(created_order.contains("linear_id: lin-2"));
+        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
+        assert!(created_order.contains("linear_id: lin-1"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_read_write_provider_creates_asana_items_in_reverse_local_order() {
+        let dir = TempDir::new().expect("temp dir");
+        let wave_dir = dir.path().join("wave").join("pm");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
+        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
+        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
+
+        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
+        let progress = crate::ops::NullProgress;
+        let args = BootstrapArgs {
+            repo: dir.path(),
+            wave: "pm",
+            wave_dir: &wave_dir,
+            project_name: "PM",
+            description: "",
+            progress: &progress,
+        };
+        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = RecordingProvider {
+            created: created.clone(),
+            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
+        };
+        let ctx = PmContext {
+            client: Box::new(provider),
+            provider: PmProviderKind::Asana,
+            project: "proj-1".to_string(),
+        };
+
+        bootstrap_read_write_provider(&args, &mut local_items, ctx)
+            .await
+            .expect("bootstrap succeeds");
+
+        let created = created.lock().expect("created lock").clone();
+        assert_eq!(created, vec!["Third", "Second", "First"]);
+
+        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
+        assert!(created_order.contains("asana_id: lin-3"));
+        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
+        assert!(created_order.contains("asana_id: lin-2"));
+        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
+        assert!(created_order.contains("asana_id: lin-1"));
     }
 }

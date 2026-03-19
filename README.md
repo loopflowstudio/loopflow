@@ -339,10 +339,9 @@ notion:
 ```
 
 ```bash
-lf op pm init             # create fresh PM projects for all waves
-lf op pm pull pm          # rewrite one wave from PM; remote changes win
-lf op pm pull --all       # rewrite every wave from PM; remote changes win
-lf op pm status           # show linked waves and local/remote counts
+lf op pm init pm           # connect/create one wave project, link items, write IDs
+lf op pm init --all        # bootstrap every wave/ project on the shared PM team
+lf op pm status            # show linked waves and local/remote counts
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

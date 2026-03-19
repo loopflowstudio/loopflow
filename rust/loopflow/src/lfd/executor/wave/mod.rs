@@ -12,15 +12,17 @@ use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::build_agent_command;
-use crate::engine::config::{load_config_or_default, parse_agent};
+use crate::engine::agent::{build_agent_command, build_agent_env, AgentConfig, ProcessConfig};
+use crate::engine::config::load_config_or_default;
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
     build_or_routing_suffix, expand_flow, load_flow, load_or_path_items, load_step, next_action,
     read_or_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
 };
+use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
+use crate::engine::prompt::{write_prompt_log, Surface};
+use crate::engine::structured_reply::ClientContext;
 use crate::engine::worktree::remove_worktree;
-use crate::lfd::attention::create_code_review_attention;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
@@ -28,16 +30,14 @@ use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, SessionStatus};
-use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
     dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun, WaveRunSnapshot,
-    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
+    Event, LivePrState, LivePullRequestState, Signal, TerminalSession, TerminalSessionStatus, Wave,
+    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
 use super::docker::DockerExecutor;
@@ -86,7 +86,6 @@ pub struct WaveExecutor {
     output: OutputHub,
     runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
-    sessions: SessionManager,
     executor_type: ExecutorType,
     github_config: GitHubConfig,
 }
@@ -105,7 +104,6 @@ impl WaveExecutor {
         scheduler: Arc<Scheduler>,
         output: OutputHub,
         event_hub: EventHub,
-        sessions: SessionManager,
         config: ExecutorConfig,
         github_config: GitHubConfig,
     ) -> Result<Self> {
@@ -123,7 +121,6 @@ impl WaveExecutor {
             output,
             runner,
             event_hub,
-            sessions,
             executor_type,
             github_config,
         })
@@ -137,14 +134,12 @@ impl WaveExecutor {
         event_hub: EventHub,
         runner: Arc<dyn AgentExecutor>,
     ) -> Self {
-        let sessions = SessionManager::new(store.clone());
         Self {
             store,
             scheduler,
             output,
             runner,
             event_hub,
-            sessions,
             executor_type: ExecutorType::Local,
             github_config: GitHubConfig::default(),
         }
@@ -510,16 +505,17 @@ impl WaveExecutor {
                     }
                 }
                 FlowAction::WaitInteractive { step } => {
-                    let (session, initial_user_message) = self
-                        .create_interactive_session(&wave, &run, &step)
-                        .await
-                        .map_err(|err| anyhow!("failed to create interactive session: {err}"))?;
-                    let session_id = session.id.clone();
-                    self.spawn_interactive_session_watcher(
+                    let terminal_session =
+                        self.create_terminal_session(&wave, &run, &step)
+                            .await
+                            .map_err(|err| anyhow!("failed to create terminal session: {err}"))?;
+                    let terminal_session_id = terminal_session.id.clone();
+                    self.spawn_terminal_session_watcher(
                         wave.id().clone(),
                         run.id.clone(),
-                        session_id.clone(),
+                        terminal_session_id.clone(),
                     );
+
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run).await?;
@@ -528,8 +524,9 @@ impl WaveExecutor {
                         wave.id().clone(),
                         run.id.clone(),
                         step.step.name.clone(),
-                        Some(session_id),
-                        initial_user_message,
+                        None,
+                        Some(terminal_session_id),
+                        None,
                     ));
                     return Ok(());
                 }
@@ -808,12 +805,6 @@ impl WaveExecutor {
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
                     if should_manage_pr && run.pr.is_some() {
-                        match create_code_review_attention(&self.store, &wave, &run).await {
-                            Ok(item) => self.event_hub.send(Event::attention_created(item)),
-                            Err(err) => {
-                                warn!(wave_id = %wave.id(), error = %err, "failed to create code review attention")
-                            }
-                        }
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,
@@ -1020,48 +1011,105 @@ impl WaveExecutor {
         Ok(())
     }
 
-    async fn create_interactive_session(
+    pub async fn create_terminal_session_for_waiting_wave(
+        &self,
+        wave_id: &LfdId,
+        wave_run_id: Option<&LfdId>,
+    ) -> std::result::Result<TerminalSession, String> {
+        let wave = self
+            .store
+            .get_wave(wave_id)
+            .await
+            .map_err(|err| format!("failed to load wave: {err}"))?
+            .ok_or_else(|| "wave not found".to_string())?;
+        let run = if let Some(wave_run_id) = wave_run_id {
+            self.store
+                .get_wave_run(wave_run_id)
+                .await
+                .map_err(|err| format!("failed to load wave run: {err}"))?
+                .ok_or_else(|| "wave run not found".to_string())?
+        } else {
+            self.store
+                .get_active_wave_run(wave_id)
+                .await
+                .map_err(|err| format!("failed to load active wave run: {err}"))?
+                .ok_or_else(|| "no active wave run for wave".to_string())?
+        };
+        if run.status != WaveRunStatus::Waiting {
+            return Err("wave run is not waiting for terminal input".to_string());
+        }
+
+        if let Some(session) = self
+            .store
+            .get_active_terminal_session_for_wave_run(&run.id)
+            .await
+            .map_err(|err| format!("failed to load terminal session: {err}"))?
+        {
+            return Ok(session);
+        }
+
+        let repo = Path::new(&run.snapshot.repo);
+        let flow = load_flow(&run.snapshot.flow, repo).map_err(|err| err.to_string())?;
+        let plan = expand_flow(&flow, repo).map_err(|err| err.to_string())?;
+        let FlowAction::WaitInteractive { step } = next_action(&plan, run.step_index as usize)
+        else {
+            return Err("current wave step is not interactive".to_string());
+        };
+        self.create_terminal_session(&wave, &run, &step)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
+    async fn create_terminal_session(
         &self,
         wave: &Wave,
         run: &WaveRun,
         step: &ConcreteStep,
-    ) -> std::result::Result<(Session, Option<String>), SessionManagerError> {
-        let repo_config = load_config_or_default(Some(Path::new(&run.worktree)));
-        let agent_override =
-            wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name);
-        let agent = agent_override
-            .or_else(|| step.step.agent.clone())
-            .or_else(|| repo_config.agent.clone())
-            .or_else(|| step.step.default_agent.clone())
-            .unwrap_or_else(|| "claude:opus".to_string());
-        let (harness, _) = parse_agent(&agent);
-        let session_config = interactive_session_config(wave, run, step, agent);
-
-        let session = self
-            .sessions
-            .create_session(CreateSessionParams {
-                harness,
-                wave_run_id: Some(run.id.to_string()),
-                config: session_config,
-            })
+    ) -> Result<TerminalSession> {
+        let (launch, process, agent) = build_terminal_launch_config(wave, run, step).await?;
+        let terminal_session = TerminalSession {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            wave_run_id: Some(run.id.clone()),
+            step: step.step.name.clone(),
+            agent,
+            cwd: launch
+                .cwd
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(&run.worktree))
+                .to_string_lossy()
+                .to_string(),
+            argv: build_agent_command(&launch, &process, &build_agent_capabilities(&run.worktree)),
+            env: build_agent_env(&launch, &process),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: Some(LfdId::new().to_string()),
+        };
+        self.store
+            .create_terminal_session(&terminal_session)
             .await?;
-        let initial_user_message = self.sessions.seeded_user_prompt(&session.id).await?;
-        Ok((session, initial_user_message))
+        self.event_hub
+            .send(Event::terminal_session_created(terminal_session.clone()));
+        Ok(terminal_session)
     }
 
-    fn spawn_interactive_session_watcher(&self, wave_id: LfdId, run_id: LfdId, session_id: LfdId) {
+    fn spawn_terminal_session_watcher(&self, wave_id: LfdId, run_id: LfdId, session_id: LfdId) {
         let executor = self.clone();
         tokio::spawn(async move {
             if let Err(err) = executor
-                .wait_for_interactive_session_and_resume(wave_id, run_id, session_id.clone())
+                .wait_for_terminal_session_and_resume(wave_id, run_id, session_id.clone())
                 .await
             {
-                warn!(session_id = %session_id, error = %err, "interactive session watcher failed");
+                warn!(session_id = %session_id, error = %err, "terminal session watcher failed");
             }
         });
     }
 
-    async fn wait_for_interactive_session_and_resume(
+    async fn wait_for_terminal_session_and_resume(
         &self,
         wave_id: LfdId,
         run_id: LfdId,
@@ -1072,7 +1120,7 @@ impl WaveExecutor {
             wave_run_id = %run_id,
             session_id = %session_id,
             status = %session_status.as_str(),
-            "interactive session ended; resuming wave flow"
+            "terminal session ended; resuming wave flow"
         );
 
         let Some(mut run) = self.store.get_wave_run(&run_id).await? else {
@@ -1086,11 +1134,14 @@ impl WaveExecutor {
             return Ok(());
         };
 
-        if session_status == SessionStatus::Failed {
+        if matches!(
+            session_status,
+            TerminalSessionStatus::Failed | TerminalSessionStatus::Canceled
+        ) {
             self.fail_run(
                 &mut run,
                 &wave,
-                format!("interactive session {session_id} failed"),
+                format!("terminal session {session_id} {}", session_status.as_str()),
             )
             .await?;
             return Ok(());
@@ -1111,8 +1162,8 @@ impl WaveExecutor {
             auto_commit_if_dirty(Path::new(&worktree), &step_name)
         })
         .await
-        .map_err(|err| anyhow!("interactive auto-commit task failed: {err}"))
-        .and_then(|r| r.map_err(|err| anyhow!("interactive auto-commit failed: {err}")))
+        .map_err(|err| anyhow!("terminal auto-commit task failed: {err}"))
+        .and_then(|r| r.map_err(|err| anyhow!("terminal auto-commit failed: {err}")))
         {
             self.fail_run(&mut run, &wave, err.to_string()).await?;
             return Ok(());
@@ -1124,13 +1175,17 @@ impl WaveExecutor {
         Ok(())
     }
 
-    async fn wait_for_terminal_session_status(&self, session_id: &LfdId) -> Result<SessionStatus> {
+    async fn wait_for_terminal_session_status(
+        &self,
+        session_id: &LfdId,
+    ) -> Result<TerminalSessionStatus> {
         loop {
             let session = self
-                .sessions
-                .get_session(session_id)
+                .store
+                .get_terminal_session(session_id)
                 .await
-                .map_err(|err| anyhow!("failed to load session {session_id}: {err}"))?;
+                .map_err(|err| anyhow!("failed to load terminal session {session_id}: {err}"))?
+                .ok_or_else(|| anyhow!("terminal session {session_id} not found"))?;
             if session.status.is_terminal() {
                 return Ok(session.status);
             }
@@ -1225,22 +1280,70 @@ fn wave_agent_override(repo: &Path, wave_name: &str, step_name: &str) -> Option<
         .or(wave_config.agent)
 }
 
-fn interactive_session_config(
+async fn build_terminal_launch_config(
     wave: &Wave,
     run: &WaveRun,
     step: &ConcreteStep,
-    agent: String,
-) -> SessionConfig {
-    SessionConfig {
-        step: step.step.name.clone(),
-        repo_root: run.worktree.clone(),
-        directions: run.snapshot.direction.clone(),
-        area: run.snapshot.area.first().cloned(),
-        wave: Some(wave.name().clone()),
-        agent: Some(agent),
-        client_has_ui: Some(true),
-        ..Default::default()
-    }
+) -> Result<(AgentConfig, ProcessConfig, String)> {
+    let repo_root = Path::new(&run.worktree);
+    let repo_config = load_config_or_default(Some(repo_root));
+    let summary = None;
+    let agent = wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name)
+        .or_else(|| step.step.agent.clone())
+        .or_else(|| repo_config.agent.clone())
+        .or_else(|| step.step.default_agent.clone())
+        .unwrap_or_else(|| "claude:opus".to_string());
+
+    let prepared = prepare_launch_prompt(
+        &repo_config,
+        LaunchPromptInput {
+            repo_root: repo_root.to_path_buf(),
+            step: Some(step.step.name.clone()),
+            resolved_step: None,
+            surface: Surface::ConcertoMac,
+            directions: run.snapshot.direction.clone(),
+            area: None,
+            wave: Some(wave.name().clone()),
+            message: None,
+            agent: Some(agent.clone()),
+            cwd: None,
+            max_turns: None,
+            yolo_mode: false,
+            include_config_directions: false,
+            include_config_area: true,
+            source_overrides: Default::default(),
+            summary,
+            client_context: ClientContext::default(),
+            related_repos: Vec::new(),
+        },
+    )?;
+
+    let _ = write_prompt_log(repo_root, &prepared.prompt, &step.step.name, None);
+    let mut launch = prepared.config;
+    let cwd = launch
+        .cwd
+        .clone()
+        .unwrap_or_else(|| repo_root.to_path_buf());
+    let context_file = write_prompt_log(
+        &cwd,
+        &launch.system_prompt,
+        &format!("{}.context", step.step.name),
+        None,
+    )
+    .ok();
+    launch.cwd = Some(cwd);
+    launch.skip_permissions = repo_config.yolo;
+
+    Ok((
+        launch,
+        ProcessConfig {
+            auto: false,
+            stream: false,
+            context_file,
+            ..Default::default()
+        },
+        agent,
+    ))
 }
 
 // -----------------------------------------------------------------------------
@@ -1273,12 +1376,11 @@ pub(crate) fn classify_repair_flow(failed_run: &WaveRun) -> String {
 mod tests {
     use super::*;
     use crate::engine::worktree::create_worktree;
-    use crate::lfd::sessions::types::{Session, SessionConfig};
-    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
+    use std::path::PathBuf;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -1839,7 +1941,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_interactive_session_marks_run_failed() {
+    async fn failed_terminal_session_marks_run_failed() {
         let tmp = tempdir().expect("tempdir");
         let repo = tmp.path();
         let db_path = tmp.path().join("test.db");
@@ -1862,24 +1964,27 @@ mod tests {
             .expect("run update should succeed");
 
         let session_id = LfdId::new();
-        let session = Session {
+        let session = TerminalSession {
             id: session_id.clone(),
-            harness: "claude".to_string(),
-            status: SessionStatus::Failed,
-            wave_run_id: Some(run_id.to_string()),
-            provider_session_id: None,
-            config: SessionConfig {
-                step: "design".to_string(),
-                repo_root: repo.to_string_lossy().to_string(),
-                ..Default::default()
-            },
+            wave_id: wave_id.clone(),
+            wave_run_id: Some(run_id.clone()),
+            step: "design".to_string(),
+            agent: "claude".to_string(),
+            cwd: repo.to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Failed,
+            attached_at: None,
+            started_at: None,
+            completed_at: Some(OffsetDateTime::now_utc()),
             created_at: OffsetDateTime::now_utc(),
-            ended_at: Some(OffsetDateTime::now_utc()),
+            completion_token: None,
         };
         store
-            .create_session(&session)
+            .create_terminal_session(&session)
             .await
-            .expect("session should be created");
+            .expect("terminal session should be created");
 
         let scheduler = Arc::new(Scheduler::new(1));
         let output_dir = tempdir().expect("output dir");
@@ -1894,7 +1999,7 @@ mod tests {
         );
 
         executor
-            .wait_for_interactive_session_and_resume(
+            .wait_for_terminal_session_and_resume(
                 wave_id.clone(),
                 run_id.clone(),
                 session_id.clone(),
@@ -1922,7 +2027,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interactive_session_config_sets_client_has_ui() {
+    async fn terminal_launch_config_uses_concerto_surface() {
         let tmp = tempdir().expect("tempdir");
         let repo = tmp.path();
         let db_path = tmp.path().join("test.db");
@@ -1948,11 +2053,14 @@ mod tests {
             flow_parents: Vec::new(),
         };
 
-        let config = interactive_session_config(&wave, &run, &step, "claude".to_string());
+        let (launch, process, _) = build_terminal_launch_config(&wave, &run, &step)
+            .await
+            .expect("launch config should build");
 
-        assert_eq!(config.client_has_ui, Some(true));
-        assert_eq!(config.step, "design");
-        assert_eq!(config.repo_root, run.worktree);
+        assert_eq!(launch.cwd.expect("cwd"), PathBuf::from(&run.worktree));
+        assert!(!process.auto);
+        assert!(!process.stream);
+        assert!(process.context_file.is_some());
     }
 
     #[tokio::test]
@@ -1988,7 +2096,6 @@ mod tests {
             output,
             runner: Arc::new(MockRunner),
             event_hub,
-            sessions: SessionManager::new(store.clone()),
             executor_type: ExecutorType::Docker,
             github_config: GitHubConfig::default(),
         };

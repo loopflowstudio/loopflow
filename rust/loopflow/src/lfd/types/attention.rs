@@ -4,18 +4,24 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
+/// Two attention paths:
+/// - `Interactive`: `lf` is at a step that needs a human. Created and resolved by `lf` via API.
+/// - `Algedonic`: something is wrong and the system is escalating. Created by daemon policy
+///   (repair chain exhaustion, queue blocks) or by `lf` when an agent decides to escalate.
+///   Routes through the wave hierarchy — child wave escalates to parent, only root escalates
+///   to human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AttentionKind {
-    InteractiveStep,
+    Interactive,
     Algedonic,
 }
 
 impl AttentionKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::InteractiveStep => "interactive_step",
+            Self::Interactive => "interactive",
             Self::Algedonic => "algedonic",
         }
     }
@@ -26,8 +32,11 @@ impl std::str::FromStr for AttentionKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "interactive_step" => Ok(Self::InteractiveStep),
+            "interactive" => Ok(Self::Interactive),
             "algedonic" => Ok(Self::Algedonic),
+            // Accept legacy kind strings during migration.
+            "design_review" | "code_review" | "calibration" => Ok(Self::Interactive),
+            "queue_failure" | "step_failure" => Ok(Self::Algedonic),
             _ => Err(format!("unknown attention kind: {value}")),
         }
     }

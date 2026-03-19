@@ -256,7 +256,10 @@ struct ContentView: View {
             post(.switchToRunsTab)
         case .focusSessionComposer:
             if let selectedWave = repoState.selectedWave,
-               repoState.shouldShowInteractiveSession(for: selectedWave) {
+               let terminalSession = repoState.terminalWorkspaceStore.activeSession(for: selectedWave.id) {
+                repoState.selectTerminalSession(terminalSession.id)
+            } else if let selectedWave = repoState.selectedWave,
+                      repoState.shouldShowInteractiveSession(for: selectedWave) {
                 NotificationCenter.default.post(
                     name: .focusSessionComposer,
                     object: nil,
@@ -364,7 +367,7 @@ struct ContentView: View {
         if repoState.showingAnalytics {
             AnalyticsDashboardView()
         } else if let wave = repoState.selectedWave {
-            WaveDetailPanel(wave: wave)
+            WaveWorkspaceView(wave: wave)
                 .id(wave.id)
         } else {
             AttentionQueueView()

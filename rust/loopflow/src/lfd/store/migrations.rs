@@ -146,6 +146,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "031_secrets_provider",
         sql: include_str!("migrations/031_secrets_provider.sql"),
     },
+    Migration {
+        version: "032_terminal_sessions",
+        sql: include_str!("migrations/032_terminal_sessions.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

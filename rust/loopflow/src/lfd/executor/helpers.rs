@@ -194,9 +194,8 @@ pub async fn create_wave_run_with_id(
 /// Create a worktree for this wave, or reuse the existing one.
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
     let wt = wave_worktree_path(main_repo, wave_name);
-    if wt.exists() {
+    if wt.exists() && wt.join(".git").exists() {
         let branch = current_branch(&wt)?.unwrap_or_default();
-        sync_existing_worktree(main_repo, &wt, &branch)?;
         return Ok((wt.to_string_lossy().to_string(), branch));
     }
 
@@ -807,7 +806,8 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{is_ephemeral_worktree_path, pre_step_sync};
+    use super::{ensure_wave_worktree, is_ephemeral_worktree_path, pre_step_sync};
+    use crate::engine::worktrees::worktree_path as wave_worktree_path;
 
     fn run_git(dir: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -995,5 +995,56 @@ mod tests {
             &worktree,
             &["merge-base", "--is-ancestor", "origin/main", "HEAD"]
         ));
+    }
+
+    #[test]
+    fn ensure_wave_worktree_reuses_existing_sibling_without_rebasing() {
+        let (_temp, main_repo, origin) = setup_repo_with_remote();
+        let wave_name = "agent-embedding";
+        let worktree = wave_worktree_path(&main_repo, wave_name);
+
+        run_git(&main_repo, &["checkout", "-b", wave_name]);
+        write_file(&main_repo.join("shared.txt"), "wave branch change\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "wave branch change"]);
+        run_git(&main_repo, &["checkout", "main"]);
+
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                worktree.to_str().unwrap_or(""),
+                wave_name,
+            ],
+        );
+
+        let collaborator = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("collaborator-conflict");
+        run_git(
+            main_repo.parent().expect("main repo parent"),
+            &[
+                "clone",
+                origin.to_str().unwrap_or(""),
+                collaborator.to_str().unwrap_or(""),
+            ],
+        );
+        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
+        run_git(&collaborator, &["config", "user.name", "Test User"]);
+        write_file(&collaborator.join("shared.txt"), "main branch change\n");
+        run_git(&collaborator, &["add", "."]);
+        run_git(&collaborator, &["commit", "-m", "main branch change"]);
+        run_git(&collaborator, &["push"]);
+
+        let (resolved_worktree, resolved_branch) =
+            ensure_wave_worktree(&main_repo, wave_name).expect("reuse existing worktree");
+
+        assert_eq!(resolved_worktree, worktree.to_string_lossy());
+        assert_eq!(resolved_branch, wave_name);
+        let shared =
+            std::fs::read_to_string(worktree.join("shared.txt")).expect("read shared file");
+        assert_eq!(shared, "wave branch change\n");
     }
 }

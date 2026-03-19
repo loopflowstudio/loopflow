@@ -5,7 +5,15 @@ import SwiftUI
 import LoopflowCore
 
 struct FlowTypeahead: View {
+    enum Style: Equatable {
+        case form
+        case compact
+    }
+
     let wave: WaveViewModel
+    var initialSelection: String? = nil
+    var style: Style = .form
+    var onSubmitSelection: ((String) -> Void)? = nil
     let onSelect: (String) -> Void
 
     @Environment(RepoState.self) private var repoState
@@ -38,11 +46,18 @@ struct FlowTypeahead: View {
         return steps.filter { $0.name.lowercased().contains(inputText.lowercased()) }
     }
 
+    private var compactSuggestions: [Flow] {
+        guard !inputText.isEmpty else { return [] }
+        return Array((filteredFlows + filteredSteps).prefix(8))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Flow")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
+            if style == .form {
+                Text("Flow")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+            }
 
             // Selected flow chip + input
             HStack(spacing: 4) {
@@ -62,12 +77,13 @@ struct FlowTypeahead: View {
                 .frame(minWidth: 80, maxWidth: .infinity)
                 .frame(height: 20)
             }
-            .padding(Spacing.sm)
+            .padding(style == .compact ? Spacing.md : Spacing.sm)
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
 
             // Step chain for selected flow
-            if let flow = repoState.flows.first(where: { $0.name == selectedFlow }),
+            if style == .form,
+               let flow = repoState.flows.first(where: { $0.name == selectedFlow }),
                flow.type == .flow, !flow.steps.isEmpty {
                 let chain = flow.steps.map(\.prompt).joined(separator: " \u{2192} ")
                 Text(chain)
@@ -82,7 +98,11 @@ struct FlowTypeahead: View {
             }
         }
         .onAppear {
-            selectedFlow = wave.flow
+            selectedFlow = initialSelection ?? wave.flow
+        }
+        .onChange(of: initialSelection) { _, newValue in
+            guard let newValue, !newValue.isEmpty else { return }
+            selectedFlow = newValue
         }
     }
 
@@ -90,12 +110,40 @@ struct FlowTypeahead: View {
 
     @ViewBuilder
     private var candidateList: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            if !filteredFlows.isEmpty {
-                flowSection("Flows", items: filteredFlows, icon: "arrow.triangle.branch")
+        if style == .compact {
+            if !compactSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(compactSuggestions) { item in
+                        Button {
+                            selectFlow(item.name)
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                Image(systemName: item.type == .flow ? "arrow.triangle.branch" : "square")
+                                    .font(Typography.caption(10))
+                                    .foregroundStyle(palette.textSecondary)
+                                Text(item.name)
+                                    .font(Typography.body(12))
+                                    .foregroundStyle(palette.text)
+                                Spacer()
+                            }
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xs)
+                            .background(palette.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 320, alignment: .leading)
             }
-            if !filteredSteps.isEmpty {
-                flowSection("Steps", items: filteredSteps, icon: "square")
+        } else {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if !filteredFlows.isEmpty {
+                    flowSection("Flows", items: filteredFlows, icon: "arrow.triangle.branch")
+                }
+                if !filteredSteps.isEmpty {
+                    flowSection("Steps", items: filteredSteps, icon: "square")
+                }
             }
         }
     }
@@ -172,8 +220,15 @@ struct FlowTypeahead: View {
 
     private func commitToken() {
         let name = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        selectFlow(name)
+        if !name.isEmpty {
+            selectFlow(name)
+            onSubmitSelection?(name)
+            return
+        }
+
+        let existingSelection = selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existingSelection.isEmpty else { return }
+        onSubmitSelection?(existingSelection)
     }
 
     private func removeSelection() {

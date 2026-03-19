@@ -4,7 +4,13 @@ import SwiftUI
 import LoopflowCore
 
 struct StepRunner: View {
+    enum Mode {
+        case full
+        case advanced
+    }
+
     let wave: WaveViewModel
+    var mode: Mode = .full
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
@@ -17,29 +23,55 @@ struct StepRunner: View {
     @State private var isSendingTrigger = false
     @State private var errorMessage: String?
     @State private var showingError = false
+    @State private var isAdvancedExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                areaHeader
-                directionHeader
-                agentHeader
-            }
+            if mode == .full {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    flowHeader
+                    promptField
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                flowHeader
-                promptField
-
-                if wave.hasActiveTrigger {
-                    activeTriggerView
-                } else {
-                    HStack(spacing: Spacing.md) {
-                        runButton
-                        addTriggerButton
+                    if wave.hasActiveTrigger {
+                        activeTriggerView
+                    } else {
+                        HStack(spacing: Spacing.md) {
+                            runButton
+                            addTriggerButton
+                        }
                     }
                 }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    areaHeader
+                    directionHeader
+                    agentHeader
+                }
+            } else {
+                DisclosureGroup(
+                    isExpanded: $isAdvancedExpanded,
+                    content: {
+                        VStack(alignment: .leading, spacing: Spacing.lg) {
+                            if wave.hasActiveTrigger {
+                                activeTriggerView
+                            } else {
+                                addTriggerButton
+                            }
+
+                            areaHeader
+                            directionHeader
+                            agentHeader
+                        }
+                        .padding(.top, Spacing.sm)
+                    },
+                    label: {
+                        Text("Advanced")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                )
             }
         }
         .padding(Spacing.xl)

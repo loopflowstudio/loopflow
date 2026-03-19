@@ -18,6 +18,13 @@ public protocol WaveServiceProtocol: Sendable {
     func listWaves(repo: RepoTarget) async throws -> [Wave]
     func getWave(_ id: String) async throws -> Wave
     func createWave(name: String, repo: RepoTarget) async throws -> Wave
+    func createWave(
+        name: String,
+        repo: RepoTarget,
+        flow: String,
+        run: Bool,
+        status: WaveStatus?
+    ) async throws -> Wave
     func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
@@ -41,6 +48,11 @@ public protocol WaveServiceProtocol: Sendable {
     func listAttention(repo: RepoTarget) async throws -> [AttentionItem]
     func getAttention(_ id: String) async throws -> AttentionItem
     func markAttentionViewed(_ id: String) async throws -> AttentionItem
+    func listTerminalSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [TerminalSession]
+    func getTerminalSession(_ id: String) async throws -> TerminalSession
+    func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec
+    func startTerminalSession(_ id: String) async throws -> TerminalSession
+    func cancelTerminalSession(_ id: String) async throws -> TerminalSession
     func landWave(_ id: String) async throws
     func nextWave(_ id: String) async throws -> String
     func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult

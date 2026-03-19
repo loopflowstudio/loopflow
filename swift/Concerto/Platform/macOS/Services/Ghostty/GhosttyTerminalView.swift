@@ -10,18 +10,21 @@ import GhosttyKit
 
 struct GhosttyTerminalView: View {
     let workingDirectory: String
-    let command: String?
+    let argv: [String]
+    let env: [String: String]
     let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
-        command: String? = nil,
+        argv: [String] = [],
+        env: [String: String] = [:],
         sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
-        self.command = command
+        self.argv = argv
+        self.env = env
         self.sessionId = sessionId
         self.manager = manager
     }
@@ -30,12 +33,22 @@ struct GhosttyTerminalView: View {
         GeometryReader { geo in
             GhosttyTerminalRepresentable(
                 workingDirectory: workingDirectory,
-                command: command,
+                command: shellCommand,
                 sessionId: sessionId,
                 size: geo.size,
                 manager: manager
             )
         }
+    }
+
+    private var shellCommand: String? {
+        let envPrefix = env
+            .sorted { $0.key < $1.key }
+            .map { key, value in "\(key)=\(shellEscape(value))" }
+            .joined(separator: " ")
+        let command = argv.map(shellEscape).joined(separator: " ")
+        let fullCommand = [envPrefix, command].filter { !$0.isEmpty }.joined(separator: " ")
+        return fullCommand.isEmpty ? nil : fullCommand
     }
 }
 
@@ -70,7 +83,8 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
 
 // MARK: - GhosttyMetalView
 
-final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
+@MainActor
+final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrency NSTextInputClient {
     var workingDirectory: String = ""
     var command: String?
     var sessionId: String?
@@ -111,7 +125,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if let surface {
             // Register surface as active session for lifecycle callbacks
             if let sessionId {
-                manager.registerActiveSession(surface, sessionId: sessionId)
+                manager.registerSurface(surface, sessionId: sessionId, owner: self)
             }
 
             updateContentScale()
@@ -125,6 +139,30 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         let link = displayLink(target: self, selector: #selector(displayLinkFired))
         link.add(to: .main, forMode: .common)
         displayLink = link
+    }
+
+    private func teardownSurface(freeSurface: Bool) {
+        displayLink?.invalidate()
+        displayLink = nil
+
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+            self.trackingArea = nil
+        }
+
+        guard let surface else { return }
+        self.surface = nil
+        if freeSurface {
+            ghostty_surface_free(surface)
+        }
+    }
+
+    func destroyManagedSurface(_ managedSurface: ghostty_surface_t) {
+        guard surface == managedSurface else {
+            ghostty_surface_free(managedSurface)
+            return
+        }
+        teardownSurface(freeSurface: true)
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
@@ -490,8 +528,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     @objc private func clearAction() {
         guard let surface else { return }
         // Send clear screen sequence
-        "clear\n".withCString { ptr in
-            ghostty_surface_text(surface, ptr, 6)
+        let clearCmd = "clear\n"
+        clearCmd.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(clearCmd.utf8.count))
         }
     }
 
@@ -558,11 +597,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     deinit {
-        displayLink?.invalidate()
-        if let surface {
-            ghostty_surface_free(surface)
+        MainActor.assumeIsolated {
+            if let sessionId, let surface {
+                GhosttyManager.shared.unregisterSurface(sessionId, surface: surface)
+            }
+            teardownSurface(freeSurface: true)
         }
     }
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
 }
 
 #else
@@ -570,18 +616,21 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 // Stub view when GhosttyKit is not available
 struct GhosttyTerminalView: View {
     let workingDirectory: String
-    let command: String?
+    let argv: [String]
+    let env: [String: String]
     let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
-        command: String? = nil,
+        argv: [String] = [],
+        env: [String: String] = [:],
         sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
-        self.command = command
+        self.argv = argv
+        self.env = env
         self.sessionId = sessionId
         self.manager = manager
     }
@@ -603,4 +652,3 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
-

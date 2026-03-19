@@ -1,61 +1,18 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, LivePrState, QueueBlock, Wave, WaveRun,
+    AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Wave, WaveRun,
     WaveRunStatus,
 };
 use serde_json::json;
 use time::OffsetDateTime;
 
-/// Derive a stable attention ID from the underlying object.
-///
-/// Algedonic items reuse the run_id so the same block produces the same
-/// attention item across reconciliation cycles.  Interactive steps generate
-/// a fresh ID (the step invocation is the source of truth).
-pub fn attention_id(kind: AttentionKind, _wave_id: &LfdId, run_id: Option<&LfdId>) -> LfdId {
-    if matches!(kind, AttentionKind::Algedonic) {
-        if let Some(run_id) = run_id {
-            return run_id.clone();
-        }
-    }
-    LfdId::new()
+/// Stable ID for queue-block attention items: reuse the run_id so upserts converge.
+pub fn attention_id_for_queue_block(run_id: &LfdId) -> LfdId {
+    run_id.clone()
 }
 
-pub async fn create_code_review_attention(
-    store: &SharedStore,
-    wave: &Wave,
-    run: &WaveRun,
-) -> Result<AttentionItem, String> {
-    let id = LfdId::new();
-    let pr = run.pr.as_ref();
-    let item = AttentionItem {
-        id,
-        wave_id: wave.id().clone(),
-        run_id: Some(run.id.clone()),
-        kind: AttentionKind::InteractiveStep,
-        status: AttentionStatus::Surfaced,
-        title: format!("Review ready: {}", wave.name()),
-        summary: pr
-            .and_then(|pr| pr.title.clone())
-            .unwrap_or_else(|| "Wave is ready for code review and shipping.".to_string()),
-        context: json!({
-            "step": "code_review",
-            "pr_url": pr.map(|pr| pr.url.clone()),
-            "pr_number": pr.and_then(|pr| pr.number),
-            "pr_title": pr.and_then(|pr| pr.title.clone()),
-            "branch": run.branch,
-        }),
-        surfaced_at: OffsetDateTime::now_utc(),
-        viewed_at: None,
-        resolved_at: None,
-    };
-    store
-        .upsert_attention_item(&item)
-        .await
-        .map_err(|err| format!("upsert code review attention failed: {err}"))?;
-    Ok(item)
-}
-
+/// Daemon-created algedonic attention: repair chain exhausted.
 pub async fn create_step_failure_attention(
     store: &SharedStore,
     wave: &Wave,
@@ -63,9 +20,8 @@ pub async fn create_step_failure_attention(
     step_name: &str,
     error: &str,
 ) -> Result<AttentionItem, String> {
-    let id = LfdId::new();
     let item = AttentionItem {
-        id,
+        id: LfdId::new(),
         wave_id: wave.id().clone(),
         run_id: Some(run.id.clone()),
         kind: AttentionKind::Algedonic,
@@ -85,6 +41,30 @@ pub async fn create_step_failure_attention(
         .await
         .map_err(|err| format!("upsert step failure attention failed: {err}"))?;
     Ok(item)
+}
+
+/// Resolve an attention item by ID.
+pub async fn resolve_attention_item(
+    store: &SharedStore,
+    attention_id: &LfdId,
+) -> Result<Option<AttentionItem>, String> {
+    let Some(mut item) = store
+        .get_attention_item(attention_id)
+        .await
+        .map_err(|err| format!("get attention item failed: {err}"))?
+    else {
+        return Ok(None);
+    };
+    if item.status == AttentionStatus::Resolved {
+        return Ok(Some(item));
+    }
+    item.status = AttentionStatus::Resolved;
+    item.resolved_at = Some(OffsetDateTime::now_utc());
+    store
+        .upsert_attention_item(&item)
+        .await
+        .map_err(|err| format!("resolve attention item failed: {err}"))?;
+    Ok(Some(item))
 }
 
 pub async fn mark_attention_viewed(
@@ -112,6 +92,14 @@ pub async fn mark_attention_viewed(
     Ok(Some(item))
 }
 
+/// Reconciliation: auto-resolve stale attention items based on context.
+///
+/// For algedonic items, checks whether the underlying condition has cleared:
+/// - Queue blocks with `reason` in context: never auto-resolve (requires manual intervention)
+/// - Items with `error` in context: resolve when the run is no longer failed or a newer run exists
+/// - All others: resolve when the wave has a newer run
+///
+/// For interactive items: resolve when the wave has a newer run (the human moved on).
 pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<AttentionItem>, String> {
     let mut resolved = Vec::new();
     let items = store
@@ -123,9 +111,14 @@ pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<Attent
         if item.status == AttentionStatus::Resolved {
             continue;
         }
-        let should_resolve = match item.kind {
-            AttentionKind::Algedonic => should_resolve_algedonic(store, &item).await?,
-            AttentionKind::InteractiveStep => should_resolve_interactive_step(store, &item).await?,
+        let should_resolve = if is_queue_block(&item) {
+            // Queue blocks require manual intervention.
+            false
+        } else if has_step_failure(&item) {
+            should_resolve_step_failure(store, &item).await?
+        } else {
+            // Interactive items and other algedonic items resolve when the wave restarts.
+            should_resolve_when_wave_restarted(store, &item).await?
         };
         if should_resolve {
             item.status = AttentionStatus::Resolved;
@@ -141,58 +134,14 @@ pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<Attent
     Ok(resolved)
 }
 
-/// Algedonic items with a queue block context never auto-resolve (explicit
-/// clearance required).  Step failures resolve when the run is superseded.
-async fn should_resolve_algedonic(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    if item.context.get("reason").is_some() {
-        return Ok(false);
-    }
-    should_resolve_step_failure(store, item).await
+/// Queue blocks have a `reason` field in context (from QueueBlockReason).
+fn is_queue_block(item: &AttentionItem) -> bool {
+    item.context.get("reason").is_some() && item.context.get("conflict_files").is_some()
 }
 
-/// Interactive steps with PR context resolve when the PR merges/closes.
-/// Others resolve when the wave restarts with a different run.
-async fn should_resolve_interactive_step(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    if item.context.get("pr_url").is_some() {
-        return should_resolve_code_review(store, item).await;
-    }
-    should_resolve_when_wave_restarted(store, item).await
-}
-
-async fn should_resolve_code_review(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    let Some(run_id) = item.run_id.as_ref() else {
-        return Ok(true);
-    };
-    let Some(run) = store
-        .get_wave_run(run_id)
-        .await
-        .map_err(|err| format!("get wave run failed: {err}"))?
-    else {
-        return Ok(true);
-    };
-    let Some(pr_number) = run.pr.as_ref().and_then(|pr| pr.number) else {
-        return Ok(true);
-    };
-    let Some(state) = store
-        .get_live_pr_state(&run.snapshot.repo, pr_number)
-        .await
-        .map_err(|err| format!("get live pr state failed: {err}"))?
-    else {
-        return Ok(false);
-    };
-    Ok(matches!(
-        state.state,
-        LivePrState::Closed | LivePrState::Merged
-    ))
+/// Step failures have an `error` field and a `step` field but no `reason` field.
+fn has_step_failure(item: &AttentionItem) -> bool {
+    item.context.get("error").is_some() && item.context.get("reason").is_none()
 }
 
 async fn should_resolve_step_failure(
@@ -227,28 +176,24 @@ async fn should_resolve_when_wave_restarted(
         .get_latest_wave_run(&item.wave_id)
         .await
         .map_err(|err| format!("get latest wave run failed: {err}"))?;
-    Ok(latest.is_some_and(|run| run_id_changed_from(&run, item.run_id.as_ref())))
+    Ok(latest.is_some_and(|run| {
+        item.run_id
+            .as_ref()
+            .is_none_or(|prev_id| &run.id != prev_id)
+    }))
 }
 
-fn run_id_changed_from(run: &WaveRun, previous_run_id: Option<&LfdId>) -> bool {
-    match previous_run_id {
-        Some(previous_run_id) => &run.id != previous_run_id,
-        None => true,
-    }
-}
+// Queue block <-> attention item conversion helpers.
 
 pub fn queue_block_from_attention(item: &AttentionItem) -> Result<Option<QueueBlock>, String> {
     let Some(run_id) = item.run_id.clone() else {
         return Ok(None);
     };
-    let Some(reason_str) = item
+    let reason = item
         .context
         .get("reason")
         .and_then(serde_json::Value::as_str)
-    else {
-        return Ok(None);
-    };
-    let reason = reason_str
+        .unwrap_or(QueueBlockReason::PromotionFailed.as_str())
         .parse()
         .map_err(|err| format!("invalid queue block reason: {err}"))?;
     let conflict_files = item
@@ -280,11 +225,7 @@ pub fn queue_block_from_attention(item: &AttentionItem) -> Result<Option<QueueBl
 
 pub fn queue_block_attention_item(block: &QueueBlock) -> AttentionItem {
     AttentionItem {
-        id: attention_id(
-            AttentionKind::Algedonic,
-            &block.wave_id,
-            Some(&block.run_id),
-        ),
+        id: attention_id_for_queue_block(&block.run_id),
         wave_id: block.wave_id.clone(),
         run_id: Some(block.run_id.clone()),
         kind: AttentionKind::Algedonic,
@@ -326,10 +267,14 @@ pub fn queue_block_attention_item_from_existing(
 mod tests {
     use super::{
         queue_block_attention_item, queue_block_attention_item_from_existing,
-        queue_block_from_attention,
+        queue_block_from_attention, resolve_attention_item,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{AttentionStatus, QueueBlock, QueueBlockReason};
+    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
+    use crate::lfd::types::{
+        AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason,
+    };
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -344,6 +289,7 @@ mod tests {
         };
 
         let item = queue_block_attention_item(&block);
+        assert_eq!(item.kind, AttentionKind::Algedonic);
         let restored = queue_block_from_attention(&item)
             .expect("queue block context parses")
             .expect("queue block exists");
@@ -376,5 +322,48 @@ mod tests {
         assert_eq!(refreshed.status, AttentionStatus::Viewed);
         assert_eq!(refreshed.surfaced_at, existing.surfaced_at);
         assert_eq!(refreshed.viewed_at, existing.viewed_at);
+    }
+
+    async fn test_store() -> SharedStore {
+        let db_path = std::env::temp_dir().join(format!("lfd-attention-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        Arc::new(open_store(&config).await.expect("sqlite store"))
+    }
+
+    #[tokio::test]
+    async fn resolve_attention_item_by_id() {
+        use crate::lfd::types::Wave;
+        let store = test_store().await;
+        let wave_id = LfdId::new();
+        let wave = Wave::new(wave_id.clone(), "test".to_string(), "/tmp/repo".to_string());
+        store.create_wave(&wave).await.unwrap();
+        let item = AttentionItem {
+            id: LfdId::new(),
+            wave_id,
+            run_id: None,
+            kind: AttentionKind::Interactive,
+            status: AttentionStatus::Surfaced,
+            title: "test".to_string(),
+            summary: "test".to_string(),
+            context: serde_json::json!({}),
+            surfaced_at: OffsetDateTime::now_utc(),
+            viewed_at: None,
+            resolved_at: None,
+        };
+        store.upsert_attention_item(&item).await.unwrap();
+
+        let resolved = resolve_attention_item(&store, &item.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.status, AttentionStatus::Resolved);
+        assert!(resolved.resolved_at.is_some());
+
+        // Resolving again returns the already-resolved item
+        let again = resolve_attention_item(&store, &item.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.status, AttentionStatus::Resolved);
     }
 }

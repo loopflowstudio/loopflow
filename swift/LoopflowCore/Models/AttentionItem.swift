@@ -1,20 +1,34 @@
 import Foundation
 
+/// Two attention paths:
+/// - `interactive`: `lf` is at a step that needs a human
+/// - `algedonic`: something is wrong and the system is escalating
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
-    case interactiveStep = "interactive_step"
+    case interactive
     case algedonic
 
     public var icon: String {
         switch self {
-        case .interactiveStep: return "hand.raised"
+        case .interactive: return "person.fill.questionmark"
         case .algedonic: return "exclamationmark.triangle"
         }
     }
 
     public var label: String {
         switch self {
-        case .interactiveStep: return "Step"
-        case .algedonic: return "Alert"
+        case .interactive: return "Interactive"
+        case .algedonic: return "Escalation"
+        }
+    }
+
+    /// Accept legacy kind strings during migration.
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "interactive": self = .interactive
+        case "algedonic": self = .algedonic
+        case "design_review", "code_review", "calibration": self = .interactive
+        case "queue_failure", "step_failure": self = .algedonic
+        default: return nil
         }
     }
 }
@@ -25,28 +39,24 @@ public enum AttentionStatus: String, Sendable, CaseIterable, Hashable {
     case resolved
 }
 
-public struct CodeReviewAttentionContext: Sendable, Hashable {
-    public let prURL: URL?
-    public let prNumber: Int?
-    public let prTitle: String?
-    public let branch: String?
+/// Context for interactive attention items (step needs human input).
+public struct InteractiveAttentionContext: Sendable, Hashable {
+    public let step: String?
+    public let terminalSessionId: String?
+    public let designPath: String?
 }
 
-public struct QueueFailureAttentionContext: Sendable, Hashable {
-    public let reason: String?
-    public let conflictFiles: [String]
-    public let error: String?
-}
-
-public struct StepFailureAttentionContext: Sendable, Hashable {
+/// Context for algedonic attention items (system escalation).
+public struct AlgedonicAttentionContext: Sendable, Hashable {
     public let step: String?
     public let error: String?
+    public let reason: String?
+    public let conflictFiles: [String]
 }
 
 public enum AttentionContext: Sendable, Hashable {
-    case codeReview(CodeReviewAttentionContext)
-    case queueFailure(QueueFailureAttentionContext)
-    case stepFailure(StepFailureAttentionContext)
+    case interactive(InteractiveAttentionContext)
+    case algedonic(AlgedonicAttentionContext)
     case raw(String)
 }
 
@@ -93,42 +103,26 @@ public struct AttentionItem: Identifiable, Sendable, Hashable {
 }
 
 public extension AttentionItem {
-    /// Parse typed context from JSON based on discriminator fields.
-    /// Context type is determined by the payload shape, not the kind enum.
+    /// Parse typed context from JSON based on kind.
     static func context(kind: AttentionKind, json: [String: Any]) -> AttentionContext {
-        // Queue failure: has "reason" field
-        if json["reason"] != nil {
-            return .queueFailure(
-                QueueFailureAttentionContext(
-                    reason: json["reason"] as? String,
-                    conflictFiles: json["conflict_files"] as? [String] ?? [],
-                    error: json["error"] as? String
-                )
-            )
-        }
-        // Code review: has "pr_url" field
-        if json["pr_url"] != nil {
-            let url = (json["pr_url"] as? String).flatMap(URL.init(string:))
-            return .codeReview(
-                CodeReviewAttentionContext(
-                    prURL: url,
-                    prNumber: json["pr_number"] as? Int,
-                    prTitle: json["pr_title"] as? String,
-                    branch: json["branch"] as? String
-                )
-            )
-        }
-        // Step failure: has "error" field (and "step")
-        if json["error"] != nil {
-            return .stepFailure(
-                StepFailureAttentionContext(
+        switch kind {
+        case .interactive:
+            return .interactive(
+                InteractiveAttentionContext(
                     step: json["step"] as? String,
-                    error: json["error"] as? String
+                    terminalSessionId: json["terminal_session_id"] as? String,
+                    designPath: json["design_path"] as? String
+                )
+            )
+        case .algedonic:
+            return .algedonic(
+                AlgedonicAttentionContext(
+                    step: json["step"] as? String,
+                    error: json["error"] as? String,
+                    reason: json["reason"] as? String,
+                    conflictFiles: json["conflict_files"] as? [String] ?? []
                 )
             )
         }
-        // Fallback
-        let data = (try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])) ?? Data()
-        return .raw(String(data: data, encoding: .utf8) ?? "{}")
     }
 }

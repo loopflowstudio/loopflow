@@ -25,8 +25,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, Stor
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
     ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus,
+    Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -240,6 +240,32 @@ impl PostgresStore {
             created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
             ended_at: row
                 .get::<_, Option<i64>>(7)
+                .map(crate::lfd::store::rows::unix_to_datetime),
+        })
+    }
+
+    fn map_terminal_session_row(row: &tokio_postgres::Row) -> StoreResult<TerminalSession> {
+        Ok(TerminalSession {
+            id: row.get(0),
+            wave_id: row.get(1),
+            wave_run_id: row.get(2),
+            step: row.get(3),
+            agent: row.get(4),
+            cwd: row.get(5),
+            argv: serde_json::from_str(row.get::<_, &str>(6))?,
+            env: serde_json::from_str(row.get::<_, &str>(7))?,
+            source: row.get(8),
+            status: TerminalSessionStatus::from_i32(row.get::<_, i32>(9)),
+            completion_token: row.get(10),
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(11)),
+            attached_at: row
+                .get::<_, Option<i64>>(12)
+                .map(crate::lfd::store::rows::unix_to_datetime),
+            started_at: row
+                .get::<_, Option<i64>>(13)
+                .map(crate::lfd::store::rows::unix_to_datetime),
+            completed_at: row
+                .get::<_, Option<i64>>(14)
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
     }
@@ -834,6 +860,169 @@ impl PostgresStore {
         .await
     }
 
+    const TERMINAL_SESSION_COLS: &str =
+        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status, \
+         completion_token, created_at, attached_at, started_at, completed_at";
+
+    pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO terminal_sessions ({cols}) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
+                    ),
+                    &[
+                        &session.id,
+                        &session.wave_id,
+                        &session.wave_run_id,
+                        &session.step,
+                        &session.agent,
+                        &session.cwd,
+                        &serde_json::to_string(&session.argv)?,
+                        &serde_json::to_string(&session.env)?,
+                        &session.source,
+                        &session.status.as_i32(),
+                        &session.completion_token,
+                        &session.created_at.unix_timestamp(),
+                        &session.attached_at.map(|dt| dt.unix_timestamp()),
+                        &session.started_at.map(|dt| dt.unix_timestamp()),
+                        &session.completed_at.map(|dt| dt.unix_timestamp()),
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn get_terminal_session(
+        &self,
+        session_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    &format!("SELECT {cols} FROM terminal_sessions WHERE id = $1"),
+                    &[&session_id],
+                )
+                .await?;
+            row.as_ref().map(Self::map_terminal_session_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn list_terminal_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+        statuses: Option<&[TerminalSessionStatus]>,
+    ) -> StoreResult<Vec<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        self.with_client(|client| async move {
+            let mut sql = format!("SELECT {cols} FROM terminal_sessions");
+            let mut predicates = Vec::new();
+            let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
+
+            if let Some(wave_id) = wave_id {
+                params.push(Box::new(wave_id.clone()));
+                predicates.push(format!("wave_id = ${}", params.len()));
+            }
+            if let Some(statuses) = statuses {
+                let status_ints: Vec<i32> = statuses.iter().map(|status| status.as_i32()).collect();
+                params.push(Box::new(status_ints));
+                predicates.push(format!("status = ANY(${})", params.len()));
+            }
+            if !predicates.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&predicates.join(" AND "));
+            }
+            sql.push_str(" ORDER BY created_at ASC");
+
+            let param_refs: Vec<&(dyn ToSql + Sync)> = params
+                .iter()
+                .map(|p| p.as_ref() as &(dyn ToSql + Sync))
+                .collect();
+            let rows = client.query(&sql, &param_refs).await?;
+            rows.iter().map(Self::map_terminal_session_row).collect()
+        })
+        .await
+    }
+
+    pub async fn get_active_terminal_session_for_wave_run(
+        &self,
+        wave_run_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        let active_statuses = vec![
+            TerminalSessionStatus::Pending.as_i32(),
+            TerminalSessionStatus::Attached.as_i32(),
+            TerminalSessionStatus::Running.as_i32(),
+        ];
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    &format!(
+                        "SELECT {cols} FROM terminal_sessions \
+                         WHERE wave_run_id = $1 AND status = ANY($2) \
+                         ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    &[&wave_run_id, &active_statuses],
+                )
+                .await?;
+            row.as_ref().map(Self::map_terminal_session_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let updated = client
+                .execute(
+                    "UPDATE terminal_sessions
+                     SET wave_id = $2,
+                         wave_run_id = $3,
+                         step = $4,
+                         agent = $5,
+                         cwd = $6,
+                         argv = $7,
+                         env = $8,
+                         source = $9,
+                         status = $10,
+                         completion_token = $11,
+                         created_at = $12,
+                         attached_at = $13,
+                         started_at = $14,
+                         completed_at = $15
+                     WHERE id = $1",
+                    &[
+                        &session.id,
+                        &session.wave_id,
+                        &session.wave_run_id,
+                        &session.step,
+                        &session.agent,
+                        &session.cwd,
+                        &serde_json::to_string(&session.argv)?,
+                        &serde_json::to_string(&session.env)?,
+                        &session.source,
+                        &session.status.as_i32(),
+                        &session.completion_token,
+                        &session.created_at.unix_timestamp(),
+                        &session.attached_at.map(|dt| dt.unix_timestamp()),
+                        &session.started_at.map(|dt| dt.unix_timestamp()),
+                        &session.completed_at.map(|dt| dt.unix_timestamp()),
+                    ],
+                )
+                .await?;
+            if updated == 0 {
+                return Err(StoreError::NotFound);
+            }
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo).await
     }
@@ -1228,16 +1417,17 @@ impl PostgresStore {
 
     pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
         let wave_id = wave_id.clone();
-        self.list_attention_items(
-            Some(AttentionStatus::Surfaced),
-            Some(AttentionKind::Algedonic),
-        )
-        .await?
-        .into_iter()
-        .filter(|item| item.wave_id == wave_id)
-        .map(|item| queue_block_from_attention(&item).map_err(StoreError::InvalidData))
-        .filter_map(|result| result.transpose())
-        .collect()
+        let blocks = self
+            .list_attention_items(
+                Some(AttentionStatus::Surfaced),
+                Some(AttentionKind::Algedonic),
+            )
+            .await?
+            .into_iter()
+            .filter(|item| item.wave_id == wave_id)
+            .filter_map(|item| queue_block_from_attention(&item).ok().flatten())
+            .collect();
+        Ok(blocks)
     }
 
     pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
@@ -1245,9 +1435,8 @@ impl PostgresStore {
             .await
     }
 
-    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let attention_id =
-            crate::lfd::attention::attention_id(AttentionKind::Algedonic, wave_id, Some(run_id));
+    pub async fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let attention_id = crate::lfd::attention::attention_id_for_queue_block(run_id);
         let Some(mut item) = self.get_attention_item(&attention_id).await? else {
             return Ok(0);
         };

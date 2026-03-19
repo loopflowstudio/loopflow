@@ -56,8 +56,8 @@ private extension AttentionStatus {
 private extension AttentionKind {
     var sortWeight: Int {
         switch self {
-        case .interactiveStep: return 0
-        case .algedonic: return 1
+        case .algedonic: return 0
+        case .interactive: return 1
         }
     }
 }

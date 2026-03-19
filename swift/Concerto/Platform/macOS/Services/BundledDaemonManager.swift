@@ -7,6 +7,9 @@ import LoopflowCore
 @MainActor
 @Observable
 final class BundledDaemonManager {
+    private static let bundledMarkerArgument = "--concerto-bundled"
+    private static let bundledContainerLabel = "com.loopflow.concerto.bundled=1"
+
     enum DaemonState {
         case stopped
         case starting
@@ -129,6 +132,7 @@ final class BundledDaemonManager {
         if case .running = state,
            runningSettings == settings,
            let connection = runtimeConnection {
+            LoggingService.lfd("Concerto bundled lfd: \(connection.displayName)")
             return connection
         }
 
@@ -139,6 +143,7 @@ final class BundledDaemonManager {
         state = .starting
 
         do {
+            cleanupStaleBundledDaemons()
             let token = try generateSessionToken()
             let port = try allocatePort()
 
@@ -177,6 +182,7 @@ final class BundledDaemonManager {
             try await waitForHealth()
             let connection = try requireRuntimeConnection()
             state = .running
+            LoggingService.lfd("Concerto bundled lfd: \(connection.displayName)")
             return connection
         } catch {
             startTask = nil
@@ -205,9 +211,12 @@ final class BundledDaemonManager {
             }
         }
 
-        if let name = containerName, let docker = try? dockerExecutableURL() {
-            _ = try? runProcess(docker, arguments: ["stop", "-t", "3", name])
-            _ = try? runProcess(docker, arguments: ["rm", "-f", name])
+        if let docker = try? dockerExecutableURL() {
+            if let name = containerName {
+                _ = try? runProcess(docker, arguments: ["stop", "-t", "3", name])
+                _ = try? runProcess(docker, arguments: ["rm", "-f", name])
+            }
+            cleanupBundledContainers(docker)
         }
 
         credentialServer?.stop()
@@ -222,13 +231,17 @@ final class BundledDaemonManager {
         }
 
         process.executableURL = lfdPath
-        process.arguments = connectWithPhone ? ["serve", "--allow-insecure-bind"] : ["serve"]
+        process.arguments = connectWithPhone
+            ? ["serve", Self.bundledMarkerArgument, "--allow-insecure-bind"]
+            : ["serve", Self.bundledMarkerArgument]
 
         var env = ProcessInfo.processInfo.environment
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
         env["LFD_AUTH_MODE"] = connectWithPhone ? "studio" : "local"
         env["LFD_AUTH_TOKEN"] = token
+        env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
+        env["LFD_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = env
 
         process.terminationHandler = { [weak self] process in
@@ -260,6 +273,7 @@ final class BundledDaemonManager {
         try credentialServer.start()
         let containerName = "concerto-lfd-\(String(token.prefix(8)))"
         let docker = try dockerExecutableURL()
+        cleanupBundledContainers(docker)
         let image = lfdContainerImage()
 
         let pullResult = try runProcess(docker, arguments: ["pull", image])
@@ -368,6 +382,18 @@ final class BundledDaemonManager {
         return ProcessResult(terminationStatus: process.terminationStatus)
     }
 
+    private func runProcessCapture(_ executableURL: URL, arguments: [String]) throws -> Data {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return output.fileHandleForReading.readDataToEndOfFile()
+    }
+
     private func buildDockerRunArgs(
         containerName: String,
         port: Int,
@@ -381,6 +407,7 @@ final class BundledDaemonManager {
         var args = [
             "run", "-d",
             "--name", containerName,
+            "--label", Self.bundledContainerLabel,
             "-p", portMapping,
             "-v", "\(srcPath.path):/workspace/src:ro",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
@@ -391,6 +418,7 @@ final class BundledDaemonManager {
             "-e", "LFD_AUTH_MODE=\(authMode)",
             "-e", "LFD_AUTH_TOKEN=\(token)",
             "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
+            "-e", "LFD_DISABLE_WORKTREE_JANITOR=1",
             "-e", "LFD_MODE=container",
         ]
 
@@ -414,9 +442,45 @@ final class BundledDaemonManager {
         }
 
         args += connectWithPhone
-            ? [lfdContainerImage(), "serve", "--allow-insecure-bind"]
-            : [lfdContainerImage(), "serve"]
+            ? [lfdContainerImage(), "serve", Self.bundledMarkerArgument, "--allow-insecure-bind"]
+            : [lfdContainerImage(), "serve", Self.bundledMarkerArgument]
         return args
+    }
+
+    private func cleanupStaleBundledDaemons() {
+        let pkillCandidates = [
+            "/usr/bin/pkill",
+            "/opt/homebrew/bin/pkill",
+            "/usr/local/bin/pkill",
+        ]
+        guard let pkillPath = pkillCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return
+        }
+
+        let pkillURL = URL(fileURLWithPath: pkillPath)
+        _ = try? runProcess(pkillURL, arguments: ["-TERM", "-f", Self.bundledMarkerArgument])
+        Thread.sleep(forTimeInterval: 0.2)
+        _ = try? runProcess(pkillURL, arguments: ["-KILL", "-f", Self.bundledMarkerArgument])
+    }
+
+    private func cleanupBundledContainers(_ docker: URL) {
+        guard let idsData = try? runProcessCapture(
+            docker,
+            arguments: ["ps", "-aq", "--filter", "label=\(Self.bundledContainerLabel)"]
+        ),
+        let output = String(data: idsData, encoding: .utf8) else {
+            return
+        }
+
+        let ids = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        for id in ids {
+            _ = try? runProcess(docker, arguments: ["stop", "-t", "3", id])
+            _ = try? runProcess(docker, arguments: ["rm", "-f", id])
+        }
     }
 
     private func dockerAvailable() async throws -> Bool {

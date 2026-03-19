@@ -10,7 +10,7 @@ struct InteractiveSessionView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
-    @StateObject private var ghosttyManager = GhosttyManager.shared
+    @ObservedObject private var ghosttyManager = GhosttyManager.shared
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: session.waveId)
@@ -25,15 +25,6 @@ struct InteractiveSessionView: View {
             sessionFooter
         }
         .background(palette.background)
-        .task {
-            // Set up callback for when terminal process exits
-            let currentOutputBuffer = outputBuffer
-            GhosttyManager.shared.onSessionClosed = {
-                Task { @MainActor in
-                    currentOutputBuffer.endInteractiveSession()
-                }
-            }
-        }
     }
 
     // MARK: - Header
@@ -134,7 +125,7 @@ struct InteractiveSessionView: View {
     private var terminalContent: some View {
         GhosttyTerminalView(
             workingDirectory: session.worktreePath,
-            command: session.command,
+            argv: ["/bin/zsh", "-lc", session.command],
             sessionId: session.id,
             manager: ghosttyManager
         )
@@ -144,9 +135,7 @@ struct InteractiveSessionView: View {
     // MARK: - Actions
 
     private func cancelSession() {
-        // Destroy the terminal surface, killing the child process (SIGTERM)
-        GhosttyManager.shared.destroyActiveSession()
-        // Clear the session state - wave stays in WAITING, can reconnect
+        ghosttyManager.destroySession(session.id)
         outputBuffer.endInteractiveSession()
     }
 
@@ -156,7 +145,7 @@ struct InteractiveSessionView: View {
         // which calls outputBuffer.endInteractiveSession()
         // Daemon sees exit code 0, advances flow
         let eof = "\u{04}"
-        GhosttyManager.shared.sendText(eof)
+        ghosttyManager.sendText(eof, sessionId: session.id)
     }
 }
 
@@ -179,4 +168,3 @@ struct InteractiveSessionView: View {
         .environment(outputBuffer)
         .frame(width: 600, height: 500)
 }
-

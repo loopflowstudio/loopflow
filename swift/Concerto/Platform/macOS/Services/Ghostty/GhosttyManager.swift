@@ -3,9 +3,25 @@
 
 import Foundation
 import SwiftUI
+import AppKit
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
+
+@MainActor
+protocol GhosttySessionSurfaceOwner: AnyObject {
+    func destroyManagedSurface(_ surface: ghostty_surface_t)
+}
+
+private final class ManagedGhosttySurface {
+    weak var owner: GhosttySessionSurfaceOwner?
+    let surface: ghostty_surface_t
+
+    init(surface: ghostty_surface_t, owner: GhosttySessionSurfaceOwner) {
+        self.surface = surface
+        self.owner = owner
+    }
+}
 
 @MainActor
 final class GhosttyManager: ObservableObject {
@@ -21,14 +37,7 @@ final class GhosttyManager: ObservableObject {
     private nonisolated(unsafe) var app: ghostty_app_t?
     private nonisolated(unsafe) var config: ghostty_config_t?
 
-    // Current active session ID (MVP: only one session at a time)
-    private var activeSessionId: String?
-
-    // Current active surface for termination
-    private nonisolated(unsafe) var activeSurface: ghostty_surface_t?
-
-    // Callback when the active session closes (process exits or user closes terminal)
-    var onSessionClosed: (() -> Void)?
+    private nonisolated(unsafe) var surfaces: [String: ManagedGhosttySurface] = [:]
 
     static let shared = GhosttyManager()
 
@@ -127,7 +136,7 @@ final class GhosttyManager: ObservableObject {
             guard let userdata else { return }
             let manager = Unmanaged<GhosttyManager>.fromOpaque(userdata).takeUnretainedValue()
             Task { @MainActor in
-                manager.handleSessionClosed()
+                manager.tick()
             }
         }
 
@@ -174,40 +183,49 @@ final class GhosttyManager: ObservableObject {
         }
     }
 
-    func destroySurface(_ surface: ghostty_surface_t) {
-        ghostty_surface_free(surface)
+    func registerSurface(
+        _ surface: ghostty_surface_t,
+        sessionId: String,
+        owner: GhosttySessionSurfaceOwner
+    ) {
+        surfaces[sessionId] = ManagedGhosttySurface(surface: surface, owner: owner)
     }
 
-    /// Register a surface as the active session.
-    func registerActiveSession(_ surface: ghostty_surface_t, sessionId: String) {
-        activeSessionId = sessionId
-        activeSurface = surface
+    func unregisterSurface(_ sessionId: String, surface: ghostty_surface_t) {
+        guard let handle = surfaces[sessionId], handle.surface == surface else { return }
+        surfaces.removeValue(forKey: sessionId)
     }
 
-    /// Destroy the active session's surface, killing the child process.
-    func destroyActiveSession() {
-        guard let surface = activeSurface else { return }
-        activeSessionId = nil
-        activeSurface = nil
-        ghostty_surface_free(surface)
+    func hasSession(_ sessionId: String) -> Bool {
+        surfaces[sessionId] != nil
     }
 
-    /// Send text to the active terminal session.
-    func sendText(_ text: String) {
-        guard let surface = activeSurface else { return }
+    func destroySession(_ sessionId: String) {
+        guard let handle = surfaces.removeValue(forKey: sessionId) else { return }
+        if let owner = handle.owner {
+            owner.destroyManagedSurface(handle.surface)
+        } else {
+            ghostty_surface_free(handle.surface)
+        }
+    }
+
+    func sendText(_ text: String, sessionId: String) {
+        guard let surface = surfaces[sessionId]?.surface else { return }
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
     }
 
-    /// Called when Ghostty closes the active surface (process exits).
-    private func handleSessionClosed() {
-        activeSessionId = nil
-        activeSurface = nil
-        onSessionClosed?()
-    }
-
     deinit {
+        MainActor.assumeIsolated {
+            for handle in surfaces.values {
+                if let owner = handle.owner {
+                    owner.destroyManagedSurface(handle.surface)
+                } else {
+                    ghostty_surface_free(handle.surface)
+                }
+            }
+        }
         if let app {
             ghostty_app_free(app)
         }
@@ -231,9 +249,6 @@ final class GhosttyManager: ObservableObject {
 
     @Published private(set) var state: State = .failed("GhosttyKit not available")
 
-    // Callback when a session closes (stub - never called)
-    var onSessionClosed: (() -> Void)?
-
     static let shared = GhosttyManager()
 
     private init() {}
@@ -244,14 +259,21 @@ final class GhosttyManager: ObservableObject {
 
     func tick() {}
 
-    func destroyActiveSession() {
+    func hasSession(_ sessionId: String) -> Bool {
+        false
+    }
+
+    func unregisterSurface(_ sessionId: String, surface: OpaquePointer) {
         // Stub - no-op
     }
 
-    func sendText(_ text: String) {
+    func destroySession(_ sessionId: String) {
+        // Stub - no-op
+    }
+
+    func sendText(_ text: String, sessionId: String) {
         // Stub - no-op
     }
 }
 
 #endif
-

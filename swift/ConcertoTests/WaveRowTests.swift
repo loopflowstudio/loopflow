@@ -59,6 +59,33 @@ struct WaveRowViewTests {
         #expect(try flowText.string() == "polish")
     }
 
+    @Test("Row shows active run flow badge when override is running")
+    func showsActiveRunFlowBadge() throws {
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "test-wave-id",
+                name: "swift-falcon",
+                repo: "/tmp/repo",
+                flow: "ship-roadmap",
+                area: ["src/"],
+                triggers: [],
+                status: .running,
+                iteration: 0,
+                activeRun: WaveRun(
+                    id: "run-1",
+                    waveId: "test-wave-id",
+                    flow: "design",
+                    area: ".",
+                    repo: "/tmp/repo"
+                )
+            )
+        )
+        let row = makeRow(wave: wave)
+
+        let flowText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-flow").text()
+        #expect(try flowText.string() == "design")
+    }
+
     @Test("Row shows area in secondary line")
     func showsArea() throws {
         let wave = makeWave(area: ["lib/core"])

@@ -28,8 +28,7 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
-    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
+    spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
     AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
@@ -102,6 +101,7 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    status: Option<String>,
     #[serde(default)]
     run: bool,
     #[serde(default)]
@@ -189,6 +189,7 @@ pub async fn create_wave_handler(
         flow,
         direction,
         area,
+        status,
         run,
         serialized,
     } = payload;
@@ -245,6 +246,10 @@ pub async fn create_wave_handler(
         created_at: Some(OffsetDateTime::now_utc()),
         serialized,
     };
+    if let Some(status) = status {
+        wave.status = WaveStatus::from_str(&status)
+            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+    }
     state
         .store
         .create_wave(&wave)
@@ -703,6 +708,10 @@ async fn start_wave_run(
         }
     }
 
+    if wave.status == WaveStatus::Paused {
+        wave.status = WaveStatus::Idle;
+    }
+
     state
         .store
         .update_wave(wave)
@@ -721,44 +730,16 @@ async fn start_wave_run(
         "main",
     );
 
-    if wave.serialized {
-        let outcome = enqueue_pending_activation(&state.store, &state.event_hub, envelope).await;
-        match outcome {
-            Some(EnqueueOutcome::Dropped) => {
-                warn!(
-                    wave_id = %wave.id(),
-                    "manual activation dropped because activation queue is full"
-                );
-                return Ok(None);
-            }
-            Some(_) => {}
-            None => {
-                return Err(api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "failed to queue manual activation",
-                ));
-            }
-        }
-        Ok(dispatch_wave_if_ready(
-            &state.store,
-            &state.executor,
-            &state.scheduler,
-            &state.event_hub,
-            wave,
-        )
-        .await)
-    } else {
-        Ok(spawn_immediate_activation(
-            &state.store,
-            &state.executor,
-            &state.scheduler,
-            &state.event_hub,
-            wave,
-            flow_override,
-            envelope,
-        )
-        .await)
-    }
+    Ok(spawn_immediate_activation(
+        &state.store,
+        &state.executor,
+        &state.scheduler,
+        &state.event_hub,
+        wave,
+        flow_override,
+        envelope,
+    )
+    .await)
 }
 
 pub async fn check_wave_ci_handler(
@@ -1490,6 +1471,8 @@ mod tests {
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Signal, Wave, WaveMode, WaveStatus};
+    use std::path::Path;
+    use std::process::Command;
     use tempfile::tempdir;
     use time::OffsetDateTime;
 
@@ -1509,6 +1492,61 @@ mod tests {
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         }
+    }
+
+    fn init_git_repo_with_origin(path: &Path) {
+        let root = path.parent().expect("repo parent");
+        let origin = root.join("origin.git");
+
+        let run = |cwd: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+
+        std::fs::create_dir_all(path).expect("create repo directory");
+        run(
+            root,
+            &[
+                "init",
+                "--bare",
+                "-b",
+                "main",
+                origin.to_str().expect("origin path"),
+            ],
+        );
+        run(path, &["init", "-b", "main"]);
+        run(path, &["config", "user.email", "test@example.com"]);
+        run(path, &["config", "user.name", "Test User"]);
+        std::fs::write(path.join("README.md"), "seed").expect("write seed file");
+        run(path, &["add", "."]);
+        run(path, &["commit", "-m", "init"]);
+        run(
+            path,
+            &[
+                "remote",
+                "add",
+                "origin",
+                origin.to_str().expect("origin path"),
+            ],
+        );
+        run(path, &["push", "-u", "origin", "main"]);
+        run(
+            path,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
     }
 
     #[test]
@@ -1634,8 +1672,9 @@ mod tests {
     async fn create_and_get_handlers() {
         let state = test_http_state().await;
         let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
+        let repo_path = repo_tmp.path().join("repo");
+        init_git_repo_with_origin(&repo_path);
+        let repo = repo_path.to_string_lossy().to_string();
 
         let Json(created) = create_wave_handler(
             State(state.clone()),
@@ -1645,6 +1684,7 @@ mod tests {
                 flow: Some("build".to_string()),
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1669,6 +1709,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn serialized_manual_run_applies_flow_override() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo: repo.clone(),
+                name: Some("designer".to_string()),
+                flow: Some("ship-roadmap".to_string()),
+                direction: None,
+                area: None,
+                status: Some("paused".to_string()),
+                run: false,
+                serialized: true,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        let mut wave = state
+            .store
+            .get_wave(&created.id.parse().expect("wave id"))
+            .await
+            .expect("load wave")
+            .expect("wave exists");
+
+        let run = start_wave_run(
+            &state,
+            &mut wave,
+            Some(RunWaveRequest {
+                area: None,
+                direction: None,
+                flow: Some("design".to_string()),
+            }),
+        )
+        .await
+        .expect("run wave");
+
+        assert_eq!(wave.status, WaveStatus::Idle);
+        if let Some(run) = run {
+            assert_eq!(run.snapshot.flow, "design");
+        }
+    }
+
+    #[tokio::test]
     async fn create_wave_uses_mode_from_wave_config() {
         let state = test_http_state().await;
         let repo_tmp = tempdir().expect("tempdir");
@@ -1690,6 +1778,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1701,6 +1790,32 @@ mod tests {
         assert_eq!(created.primary_flow, "build");
         assert_eq!(created.direction, vec!["clarity".to_string()]);
         assert_eq!(created.area, vec!["src/".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn create_wave_accepts_initial_paused_status() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("designer".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                status: Some("paused".to_string()),
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        assert_eq!(created.status, "paused");
     }
 
     #[tokio::test]
@@ -1721,6 +1836,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1735,6 +1851,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1775,6 +1892,7 @@ mod tests {
                 flow: Some("ship-roadmap".to_string()),
                 direction: Some(vec!["infra".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                status: None,
                 run: false,
                 serialized: false,
             }),
@@ -1829,6 +1947,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                status: None,
                 run: false,
                 serialized: false,
             }),

@@ -141,11 +141,17 @@ mod tests {
         let update_wave = get_builtin_step("update-wave").expect("update-wave prompt");
         let ingest = get_builtin_step("ingest").expect("ingest prompt");
         let design = get_builtin_step("design").expect("design prompt");
+        let scan_waves = get_builtin_step("scan-waves").expect("scan-waves prompt");
+        let split_wave = get_builtin_step("split-wave").expect("split-wave prompt");
 
         assert!(update_wave.contains("p0-*.md"));
         assert!(update_wave.contains("p3-*"));
+        assert!(!update_wave.contains("numbered item files"));
         assert!(ingest.contains("highest-priority non-empty bucket"));
         assert!(design.contains("p0-*.md"));
+        assert!(scan_waves.contains("p0-*` through `p3-*"));
+        assert!(!scan_waves.contains("All numbered item files"));
+        assert!(split_wave.contains("Bucketed roadmap files"));
         assert!(WAVE_AUTHORING_DOC.contains("p0-fix-crash-loop.md"));
         assert!(WAVE_AUTHORING_DOC.contains("p1-daemon-integrity.md"));
         assert!(!WAVE_AUTHORING_DOC.contains("all `01-*` items complete"));

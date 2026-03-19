@@ -7,7 +7,7 @@ Read the territory. Understand what each member wave has done, is doing, and is 
 ## Scope
 
 The chord-wave's area lists member wave directories. Each directory contains a
-README (vision, strategy, goals, risks, metrics) and numbered work items
+README (vision, strategy, goals, risks, metrics) and roadmap work items
 (the roadmap). This step reads all of it, plus the living state around it.
 
 Member wave names come from those directory names. If the chord-wave area
@@ -18,7 +18,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 1. **Read wave configs.** For each member wave directory in the area:
    - README.md — vision, strategy, goals, risks, metrics
-   - All numbered item files — the roadmap
+   - All roadmap item files (`p0-*` through `p3-*`, plus any legacy numbered files still present during transition)
    - The wave YAML — flow, mode, direction, triggers
 
 2. **Read runtime state.** For each member wave:

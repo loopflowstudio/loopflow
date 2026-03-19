@@ -146,7 +146,7 @@ that owns an area of the problem space — watching, sensing, but not building.
 
 A silent wave:
 - Keeps its README (vision, strategy, goals, risks, metrics)
-- Has no numbered item files
+- Has no roadmap item files
 - Is a valid, healthy state — not a failure or stall
 - Signals to the human: "this area is covered, add items here if you want work done"
 - Signals to the chord: "nothing compelling to build right now"

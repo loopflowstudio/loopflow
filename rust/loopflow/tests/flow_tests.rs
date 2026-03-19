@@ -29,6 +29,13 @@ fn assert_step_name(item: &ConcreteItem, expected: &str) {
     }
 }
 
+fn assert_step_sequence(items: &[ConcreteItem], expected: &[&str]) {
+    assert_eq!(items.len(), expected.len());
+    for (item, step_name) in items.iter().zip(expected) {
+        assert_step_name(item, step_name);
+    }
+}
+
 #[test]
 fn flow_parsing_parity() {
     let temp = TempDir::new().unwrap();
@@ -365,12 +372,7 @@ fn builtin_vsm_flow_structure() {
 
     let items = expand_named_flow(repo, "vsm");
 
-    assert_eq!(items.len(), 5);
-    assert_step_name(&items[0], "vsm/s5");
-    assert_step_name(&items[1], "vsm/s4");
-    assert_step_name(&items[2], "vsm/s3");
-    assert_step_name(&items[3], "vsm/s2");
-    assert_step_name(&items[4], "vsm/s1");
+    assert_step_sequence(&items, &["vsm/s5", "vsm/s4", "vsm/s3", "vsm/s2", "vsm/s1"]);
 }
 
 #[test]

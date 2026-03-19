@@ -10,9 +10,17 @@ import loopflow.api as loopflow
 from loopflow.models import Wave
 
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
-WAVE_NAMES = [
+MEMBER_WAVE_NAMES = [
     "chord-model",
     "agent-embedding",
+]
+REDESIGN_FLOW = "tend"
+REDESIGN_AREA = [
+    "wave/chord-model/",
+    "wave/agent-embedding/",
+]
+WAVE_NAMES = [
+    *MEMBER_WAVE_NAMES,
     "redesign",
 ]
 
@@ -71,10 +79,14 @@ def main() -> int:
 
     redesign = loopflow.update_wave(
         "redesign",
-        flow="tend",
-        area=["wave/chord-model/", "wave/agent-embedding/"],
+        flow=REDESIGN_FLOW,
+        area=REDESIGN_AREA,
     )
-    print("redesign: configured flow=tend, area=wave/{chord-model,agent-embedding}/")
+    print(
+        "redesign: configured "
+        f"flow={REDESIGN_FLOW}, "
+        f"area={', '.join(REDESIGN_AREA)}"
+    )
 
     _print_summary(redesign)
     return 0

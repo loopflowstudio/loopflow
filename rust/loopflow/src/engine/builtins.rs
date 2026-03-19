@@ -36,38 +36,38 @@ pub fn get_builtin_step(name: &str) -> Option<&'static str> {
 static NAMESPACED_STEPS: std::sync::LazyLock<
     std::collections::HashMap<&'static str, &'static str>,
 > = std::sync::LazyLock::new(|| {
-    let mut m = std::collections::HashMap::new();
-    m.insert(
-        "scan/scan-report",
-        include_str!("builtins/steps/scan/scan-report.md"),
-    );
-    m.insert(
-        "scan/scan-plan",
-        include_str!("builtins/steps/scan/scan-plan.md"),
-    );
-    m.insert(
-        "tend/scan-waves",
-        include_str!("builtins/steps/tend/scan-waves.md"),
-    );
-    m.insert("tend/assess", include_str!("builtins/steps/tend/assess.md"));
-    m.insert(
-        "tend/draft-chord",
-        include_str!("builtins/steps/tend/draft-chord.md"),
-    );
-    m.insert(
-        "tend/review-chord",
-        include_str!("builtins/steps/tend/review-chord.md"),
-    );
-    m.insert(
-        "tend/apply-chord",
-        include_str!("builtins/steps/tend/apply-chord.md"),
-    );
-    m.insert("vsm/s5", include_str!("builtins/steps/vsm/s5.md"));
-    m.insert("vsm/s4", include_str!("builtins/steps/vsm/s4.md"));
-    m.insert("vsm/s3", include_str!("builtins/steps/vsm/s3.md"));
-    m.insert("vsm/s2", include_str!("builtins/steps/vsm/s2.md"));
-    m.insert("vsm/s1", include_str!("builtins/steps/vsm/s1.md"));
-    m
+    std::collections::HashMap::from([
+        (
+            "scan/scan-report",
+            include_str!("builtins/steps/scan/scan-report.md"),
+        ),
+        (
+            "scan/scan-plan",
+            include_str!("builtins/steps/scan/scan-plan.md"),
+        ),
+        (
+            "tend/scan-waves",
+            include_str!("builtins/steps/tend/scan-waves.md"),
+        ),
+        ("tend/assess", include_str!("builtins/steps/tend/assess.md")),
+        (
+            "tend/draft-chord",
+            include_str!("builtins/steps/tend/draft-chord.md"),
+        ),
+        (
+            "tend/review-chord",
+            include_str!("builtins/steps/tend/review-chord.md"),
+        ),
+        (
+            "tend/apply-chord",
+            include_str!("builtins/steps/tend/apply-chord.md"),
+        ),
+        ("vsm/s5", include_str!("builtins/steps/vsm/s5.md")),
+        ("vsm/s4", include_str!("builtins/steps/vsm/s4.md")),
+        ("vsm/s3", include_str!("builtins/steps/vsm/s3.md")),
+        ("vsm/s2", include_str!("builtins/steps/vsm/s2.md")),
+        ("vsm/s1", include_str!("builtins/steps/vsm/s1.md")),
+    ])
 });
 
 /// Returns the content of a built-in flow, if it exists.

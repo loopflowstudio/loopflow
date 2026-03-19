@@ -52,6 +52,7 @@ def test_resolve_repo_root_falls_back_to_script_root_on_git_error(monkeypatch, t
 def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> None:
     created: list[str] = []
     expected_repo = str(bootstrap_redesign.REPO_ROOT)
+    redesign_area = bootstrap_redesign.REDESIGN_AREA
     waves: dict[str, SimpleNamespace] = {
         "agent-embedding": SimpleNamespace(
             id="wave-agent-embedding",
@@ -69,8 +70,8 @@ def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> 
         assert repo == expected_repo
         wave = SimpleNamespace(
             id=f"wave-{name}",
-            primary_flow="tend" if name == "redesign" else "build",
-            area=["wave/chord-model/", "wave/agent-embedding/"] if name == "redesign" else [repo],
+            primary_flow=bootstrap_redesign.REDESIGN_FLOW if name == "redesign" else "build",
+            area=redesign_area if name == "redesign" else [repo],
             status="idle",
         )
         created.append(name)
@@ -96,11 +97,9 @@ def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> 
 
     assert exit_code == 0
     assert created == ["chord-model", "redesign"]
-    assert updated == [
-        ("redesign", "tend", ["wave/chord-model/", "wave/agent-embedding/"])
-    ]
+    assert updated == [("redesign", bootstrap_redesign.REDESIGN_FLOW, redesign_area)]
     output = stdout.getvalue()
     assert "agent-embedding: exists (wave-agent-embedding)" in output
     assert "redesign: created (wave-redesign)" in output
-    assert "flow: tend" in output
-    assert "area: wave/chord-model/, wave/agent-embedding/" in output
+    assert f"flow: {bootstrap_redesign.REDESIGN_FLOW}" in output
+    assert f"area: {', '.join(redesign_area)}" in output

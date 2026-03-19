@@ -385,6 +385,36 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 }
             }
         }
+        PmCommand::Pull {
+            wave,
+            wave_flag,
+            all,
+        } => {
+            let waves = if *all {
+                list_all_waves()?
+            } else {
+                vec![wave
+                    .clone()
+                    .or_else(|| wave_flag.clone())
+                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
+                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
+            };
+            for wave in waves {
+                let result = crate::ops::pm::pm_pull(
+                    &repo_root,
+                    &crate::ops::pm::PmPullOptions { wave: wave.clone() },
+                    progress,
+                )?;
+                println!(
+                    "{}: {:?} project {} ({} files written, {} removed)",
+                    result.wave,
+                    result.provider,
+                    result.project_id,
+                    result.local_written,
+                    result.local_removed
+                );
+            }
+        }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
                 &repo_root,

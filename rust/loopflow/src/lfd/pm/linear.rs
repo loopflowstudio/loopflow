@@ -48,6 +48,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         title
         description
+        prioritySortOrder
         sortOrder
         state {
           type
@@ -285,7 +286,11 @@ impl PmProvider for LinearClient {
             issues.extend(page.nodes);
 
             if !page.page_info.has_next_page {
-                issues.sort_by(|left, right| left.sort_order.total_cmp(&right.sort_order));
+                issues.sort_by(|left, right| {
+                    left.priority_sort_order
+                        .total_cmp(&right.priority_sort_order)
+                        .then_with(|| left.sort_order.total_cmp(&right.sort_order))
+                });
                 return Ok(issues
                     .into_iter()
                     .enumerate()
@@ -432,6 +437,8 @@ struct IssueNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(rename = "prioritySortOrder", default)]
+    priority_sort_order: f64,
     #[serde(rename = "sortOrder", default)]
     sort_order: f64,
     #[serde(default)]
@@ -741,7 +748,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_paginates_and_assigns_rank_by_sort_order() {
+    async fn list_items_paginates_and_assigns_rank_by_priority_sort_order() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
@@ -754,6 +761,7 @@ mod tests {
                                         "id": "issue-1",
                                         "title": "First",
                                         "description": "one",
+                                        "prioritySortOrder": 30.0,
                                         "sortOrder": 30.0,
                                         "state": { "type": "backlog" }
                                     },
@@ -761,6 +769,7 @@ mod tests {
                                         "id": "issue-2",
                                         "title": "Second",
                                         "description": "two",
+                                        "prioritySortOrder": 10.0,
                                         "sortOrder": 10.0,
                                         "state": { "type": "completed" }
                                     }
@@ -785,6 +794,7 @@ mod tests {
                                         "id": "issue-3",
                                         "title": "Third",
                                         "description": null,
+                                        "prioritySortOrder": 20.0,
                                         "sortOrder": 20.0,
                                         "state": { "type": "unstarted" }
                                     }

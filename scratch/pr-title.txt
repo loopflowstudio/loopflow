@@ -1,0 +1,1 @@
+lfd: add terminal workspace sessions and PM pull/init sync

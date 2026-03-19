@@ -291,20 +291,6 @@ impl Event {
         }
     }
 
-    pub fn terminal_session_created(session: TerminalSession) -> Self {
-        Self::TerminalSessionCreated {
-            session,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn terminal_session_updated(session: TerminalSession) -> Self {
-        Self::TerminalSessionUpdated {
-            session,
-            timestamp: Self::now(),
-        }
-    }
-
     pub fn wave_created(wave_id: LfdId, name: String) -> Self {
         Self::WaveCreated {
             wave_id,

@@ -109,6 +109,16 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `tend/review-chord` | Walk the human through proposed mutations, get verdicts |
 | `tend/apply-chord` | Execute approved mutations to wave configs and items |
 
+### VSM steps (`vsm/`)
+
+| Step | What it does |
+|------|--------------|
+| `vsm/s5` | Set system identity and policy, then fix urgent structural drift if needed |
+| `vsm/s4` | Read upstream changes and translate them into wave-plan implications |
+| `vsm/s3` | Assess control health, fix urgent mechanical blocks, and choose batch size |
+| `vsm/s2` | Coordinate member-wave backlogs, resolve interference, and write a safe batch |
+| `vsm/s1` | Launch the batch as tracked subwave runs and record initial status |
+
 ### Scan steps (`scan/`)
 
 | Step | What it does |
@@ -179,6 +189,12 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `tend` | scan-waves → assess → or(tune, silence) |
 | `tend-tune` | draft-chord → review-chord → apply-chord |
+
+### VSM flows (`vsm/`)
+
+| Flow | Steps |
+|------|-------|
+| `vsm` | s5 → s4 → s3 → s2 → s1 |
 
 ### Scan flows (`scan/`)
 

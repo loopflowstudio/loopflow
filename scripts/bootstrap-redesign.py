@@ -12,9 +12,7 @@ from loopflow.models import Wave
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
 WAVE_NAMES = [
     "chord-model",
-    "clear-the-deck",
     "agent-embedding",
-    "signals",
     "redesign",
 ]
 
@@ -70,6 +68,13 @@ def main() -> int:
 
     if redesign is None:
         raise RuntimeError("bootstrap created no redesign wave")
+
+    redesign = loopflow.update_wave(
+        "redesign",
+        flow="tend",
+        area=["wave/chord-model/", "wave/agent-embedding/"],
+    )
+    print("redesign: configured flow=tend, area=wave/{chord-model,agent-embedding}/")
 
     _print_summary(redesign)
     return 0

@@ -359,6 +359,21 @@ fn builtin_tend_flow_structure() {
 }
 
 #[test]
+fn builtin_vsm_flow_structure() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let items = expand_named_flow(repo, "vsm");
+
+    assert_eq!(items.len(), 5);
+    assert_step_name(&items[0], "vsm/s5");
+    assert_step_name(&items[1], "vsm/s4");
+    assert_step_name(&items[2], "vsm/s3");
+    assert_step_name(&items[3], "vsm/s2");
+    assert_step_name(&items[4], "vsm/s1");
+}
+
+#[test]
 fn builtin_ship_roadmap_has_ops_in_or_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

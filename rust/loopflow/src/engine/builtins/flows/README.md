@@ -26,17 +26,47 @@ Flows that produce wave items and analysis.
 | `wave-polish` | and(polish×3) → update-wave | Find polish priorities |
 | `wave-expand` | and(expand×3) → update-wave | Find expansion opportunities |
 
+## Tend flows (`tend/`)
+
+Flows that let a chord scan, assess, and tune its member waves.
+
+| Flow | Steps | Use case |
+|------|-------|----------|
+| `tend` | scan-waves → assess → or(tune, silence) | Assess chord health and decide whether to tune |
+| `tend-tune` | draft-chord → review-chord → apply-chord | Compose, review, and apply coordinated mutations |
+
+## VSM flows (`vsm/`)
+
+Flows that walk the viable system model from governance down to execution.
+
+| Flow | Steps | Use case |
+|------|-------|----------|
+| `vsm` | s5 → s4 → s3 → s2 → s1 | Assess the chord at every governance level, write a safe batch, and launch it |
+
+## Scan flows (`scan/`)
+
+Flows that scan the environment and turn the findings into roadmap changes.
+
+| Flow | Steps | Use case |
+|------|-------|----------|
+| `scan` | scan-report → scan-plan → build | Report external changes, plan the response, then ship it |
+
 ## And pattern
 
 Plan flows use `and` to get multiple perspectives:
 
 ```yaml
 - and:
-    step: reduce
-    drafts:
-      - direction: infra
-      - direction: ux
-      - direction: ceo
+    branches:
+      - step:
+          name: reduce
+          direction: [infra]
+      - step:
+          name: reduce
+          direction: [ux]
+      - step:
+          name: reduce
+          direction: [ceo]
 - update-wave
 ```
 

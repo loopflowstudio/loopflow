@@ -62,6 +62,11 @@ static NAMESPACED_STEPS: std::sync::LazyLock<
         "tend/apply-chord",
         include_str!("builtins/steps/tend/apply-chord.md"),
     );
+    m.insert("vsm/s5", include_str!("builtins/steps/vsm/s5.md"));
+    m.insert("vsm/s4", include_str!("builtins/steps/vsm/s4.md"));
+    m.insert("vsm/s3", include_str!("builtins/steps/vsm/s3.md"));
+    m.insert("vsm/s2", include_str!("builtins/steps/vsm/s2.md"));
+    m.insert("vsm/s1", include_str!("builtins/steps/vsm/s1.md"));
     m
 });
 

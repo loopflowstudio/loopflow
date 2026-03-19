@@ -2,118 +2,115 @@
 asana_id: '1213718081081138'
 linear_id: 70cde070-1b10-4e97-87b0-e72d35e50d7d
 ---
-# 02: Tend Flow Steps — Live Proof
+# Tend Live Proof + VSM Flow
 
-## Problem
+Two deliverables on this branch: fix the bootstrap script (small), build the VSM flow (the real work).
 
-The tend flow is structurally complete — YAML, steps, router, WaveDto, flow tests — but has never run against live lfd state. Until it does, the chord model's central coordination loop is a blueprint, not a machine. This item closes the gap between "it parses" and "it works."
+## 1. Bootstrap fix
 
-Who benefits: anyone running `lf tend` against a chord-wave — the mechanism that lets a parent wave observe, judge, and tune its member waves. The redesign chord is the first customer.
+`scripts/bootstrap-redesign.py` already updated:
+- Dropped `clear-the-deck` and `signals` from `WAVE_NAMES` (both folded into chord-model per #580)
+- After wave creation, calls `loopflow.update_wave("redesign", flow="tend", area=["wave/chord-model/", "wave/agent-embedding/"])`
 
-Why now: every subsequent chord-model item (algedonic signals, self-healing heuristics, VSM flow) assumes tend works. Proving it now prevents building on an untested foundation.
+This is done. Tests should still pass.
 
-## Approach
+## 2. VSM flow
 
-One script. `scripts/tend-demo.py` boots an isolated lfd, registers the redesign chord and its members, runs `lf tend`, and captures every artifact. The script is the operating recipe and the proof in one artifact.
+Five builtin steps and one flow YAML. Each governance level (s5-s2) follows the same pattern: assess, update wave plans, then optionally implement if something is urgent at that altitude. s1 launches a parallel batch.
 
-### What changes
+### Steps to create
 
-**1. Fix `scripts/bootstrap-redesign.py`** — currently creates waves but never configures redesign with `primary_flow="tend"` or its member wave area. After creation, call `update_wave` to set:
-- `primary_flow: "tend"`
-- `area: ["wave/chord-model/", "wave/signals/"]`
+All under `rust/loopflow/src/engine/builtins/steps/vsm/`:
 
-Also update `WAVE_NAMES` to drop `clear-the-deck` and `agent-embedding` (those waves were folded into chord-model; signals remains as the other member).
+**vsm/s5.md** — Identity and Policy
+- Reads: wave/<chord>/ (member READMEs, configs, roster), algedonic history
+- Writes: scratch/vsm-s5.md (assessment), wave plan updates (if boundary/roster changes needed)
+- Assess: Is the chord responsible for the right things? Member roster correct? Autonomy levels appropriate? Direction drifted?
+- Implement path: chord boundary is wrong — create/archive/merge/split a wave, correct direction drift
 
-**2. Create `scripts/tend-demo.py`** — single entry point for the live proof:
+**vsm/s4.md** — Intelligence
+- Reads: scratch/vsm-s5.md, environment (deps, APIs, upstream changes)
+- Writes: scratch/vsm-s4.md (assessment), wave plan updates (if env changes need items)
+- Assess: What changed since last cycle? Upstream impacts? New deps/deprecations? What's coming?
+- Implement path: urgent environmental change — breaking dep, security advisory, API sunset
 
-```
-1. Build lfd (cargo build --bin lfd)
-2. Start lfd in isolated LF_HOME (temp dir, ephemeral port — reuse LfdRuntime pattern)
-3. Point lfd at the real repo (not a temp repo — tend needs wave/ dirs on disk)
-4. Run bootstrap-redesign.py against the isolated lfd
-5. Verify: lfq show redesign --json returns live state with flow=tend
-6. Verify: lfq show chord-model --json, lfq show signals --json return live state
-7. Run lf tend for redesign (headless, via lf CLI pointed at isolated lfd)
-8. Capture scratch/tend-scan.md, scratch/route-or.md, scratch/tend-assessment.md
-9. Print summary: which path was chosen, what artifacts were written
-10. Stop lfd, clean up
-```
+**vsm/s3.md** — Control
+- Reads: scratch/vsm-s5.md, scratch/vsm-s4.md, `lfq show <wave> --json` for each member, algedonic history
+- Writes: scratch/vsm-s3.md (assessment + batch size recommendation), wave plan updates (reprioritization, resource allocation)
+- Assess: Member performance, velocity, error rates. Algedonic history. Blocks. Resource allocation — how many items in the next batch?
+- Implement path: mechanical block — failing CI, stalled PR, config error
+- s3 determines batch size
 
-**3. LF_HOME isolation** — the demo uses `LfdRuntime` but with the real repo instead of a temp git repo. This means:
-- `HOME` env var → temp dir (isolates `~/.lf/session-token` and db)
-- `LFD_HTTP_ADDR` → ephemeral port (doesn't collide with running lfd)
-- Repo path → current worktree (tend steps need `wave/`, `scratch/`, git history)
+**vsm/s2.md** — Coordination
+- Reads: scratch/vsm-s3.md, all member wave backlogs, open PRs, area overlap analysis
+- Writes: scratch/vsm-s2.md (assessment), scratch/vsm-batch.md (the batch manifest)
+- Assess: Overlapping areas? Conflicting PRs? Oscillation? Trigger/dependency changes needed?
+- Output: updated backlogs per wave + next batch (items safe to run in parallel)
+- Implement path: active interference — conflicting PRs, duplicate work, trigger loops
+- Simulates member wave perspectives to reason about conflicts. Letta upgrades this later.
 
-The `LfdRuntime` class already does the first two. The change: pass the real repo path to wave creation instead of `runtime.repo_dir`.
+**vsm/s1.md** — Operations
+- Reads: scratch/vsm-batch.md
+- Launches each batch item as a subwave run: own worktree, own branch, own PR
+- Runs through ship-roadmap machinery (ingest → kickoff → build → gate → land)
+- Failed runs generate algedonic signals for next cycle's s3
 
-**4. Extend LfdRuntime for real-repo use** — add an optional `use_repo` parameter. When set, skip `_initialize_git_repo` and point wave creation at the provided repo. The temp HOME still isolates auth/db state.
+### Flow YAML
 
-### Running both paths
+`rust/loopflow/src/engine/builtins/flows/vsm/vsm.yaml`:
 
-First run against a quiet chord should route to `silence` — no open PRs, no failing CI, no stalled items. The script captures this.
-
-For the `tune` exercise: the script creates a synthetic pressure point before the second run. Concretely, it writes a temporary wave item file to `wave/chord-model/99-pressure-test.md` with content indicating a stalled item. This gives scan-waves something to flag, and assess a reason to route to `tune`. After the run, the script removes the pressure file.
-
-If the agent environment doesn't support running full `lf tend` end-to-end in headless mode within the demo (no agent API key, model unavailable), the script falls back to documenting the manual recipe and verifying the pre-conditions (lfd boots, waves register, lfq show returns expected state).
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Shell script (`tend-demo.sh`) | Simpler, no Python dependency | Can't reuse LfdRuntime, harder to manage lfd lifecycle and API calls, less composable |
-| Manual recipe in scratch/ | No code to maintain | Fragile, drifts from reality, nobody runs it twice |
-| E2E test in pytest | Runs in CI | Tend needs agent API keys and models, which CI doesn't have; demo script can be run locally when ready |
-| Docker-based isolation | Fully hermetic | Over-engineered for a dev proof; LF_HOME isolation is sufficient |
-
-## Key decisions
-
-**Reuse LfdRuntime, don't reinvent.** The E2E test infrastructure already solves isolated lfd lifecycle. Extending it to accept a real repo is a small change that keeps the demo trustworthy.
-
-**Python, not shell.** The bootstrap script and loopflow API are Python. The demo needs to call both, manage lfd process lifecycle, and handle errors. Python is the right tool.
-
-**Pressure point via temporary file, not API manipulation.** Scan-waves reads wave directories from disk. A temporary item file is the most natural way to create pressure that scan-waves will see. Mutating wave status via API would only affect runtime state, which assess reads secondarily.
-
-**One script, not a flow.** This is a proving tool, not a production workflow. It should be runnable with `uv run python scripts/tend-demo.py` and produce a clear pass/fail with captured artifacts.
-
-**Real repo, isolated daemon.** The tend steps need real `wave/` directories, real git history, real scratch/ space. Only the daemon state (db, tokens, port) needs isolation.
-
-## Scope
-
-- In scope:
-  - Fix bootstrap-redesign.py to configure redesign wave properly
-  - Extend LfdRuntime to support real-repo mode
-  - Create tend-demo.py that boots, bootstraps, runs tend, captures artifacts
-  - Exercise silence path (quiet chord) and document tune path prerequisites
-  - Capture artifacts in scratch/ for reviewer inspection
-
-- Out of scope:
-  - `lf ops` → `lf op` rename (separate item)
-  - Algedonic signal integration (depends on tend working first)
-  - CI integration of tend-demo (needs agent keys)
-  - VSM flow as a separate flow type (later item)
-  - Stall detection and self-healing heuristics
-
-## Done when
-
-```bash
-# All of these pass:
-uv run python scripts/tend-demo.py          # boots lfd, bootstraps, runs tend, captures artifacts
-uv run pytest python/tests/                  # bootstrap changes don't break existing tests
-cargo test --all                             # no Rust regressions
+```yaml
+- vsm/s5
+- vsm/s4
+- vsm/s3
+- vsm/s2
+- vsm/s1
 ```
 
-Observable outcomes:
-- `lfq show redesign --json` returns a wave with `flow: tend` and `area` pointing at member wave dirs
-- `scratch/tend-scan.md` exists with lfd-backed runtime data for each member wave
-- `scratch/route-or.md` exists with a valid path selection
-- If silence: script confirms quiet-chord routing was correct
-- If tune: `scratch/tend-assessment.md` and `scratch/tend-chord.md` exist with assessment and mutations
-- Script prints a summary a reviewer can read to confirm the cycle completed
+### Batch manifest format
 
-## Wave alignment
+`scratch/vsm-batch.md`:
 
-**Vision** — "Every chord is a viable system." This item proves the first chord's central coordination loop actually runs, moving from structural to operational viability.
+```markdown
+# VSM Batch — <date>
 
-**Goals** — Advances: "VSM flow cycles that produce at least one actionable change: >50%" — can't measure this until tend runs at all.
+## Batch size
+N items (determined by s3 resource assessment)
 
-**Risks** — "VSM steps could become formulaic checklists instead of genuine system assessment" — the pressure-point exercise specifically tests whether assess produces real judgment vs boilerplate. If the first live run reveals formulaic output, that's a signal to revise the assess step prompt before building further.
+## Items
+| Wave | Item | Why now |
+|------|------|---------|
+| chord-model | 03-wave-discovery | Unblocks disk-based wave creation |
+| agent-embedding | 02-letta-setup | s4 flagged API changes |
+
+## Parallel safety
+<s2's reasoning about why these items don't conflict>
+```
+
+### The or pattern at each governance level
+
+Each s5-s2 step should end with a routing decision. The step prompt includes:
+
+```
+After assessment, decide:
+- **continue**: Assessment is sufficient. Update wave plans and move to the next level.
+- **implement**: Something at this level is urgent enough to fix now. Implement it, then update wave plans.
+```
+
+This isn't a flow-level `or:` — it's a decision within the step. The step either writes assessment + plan updates, or writes assessment + plan updates + code changes. Either way, it writes to scratch/ for the next level.
+
+### s1 architectural notes
+
+s1 is the first step that spawns subwave runs. Implementation options:
+
+1. **lfd API**: s1 calls `lfq run <wave>` for each batch item. lfd manages worktree creation and run lifecycle. Algedonic signals flow naturally.
+2. **Direct worktree + lf**: s1 creates worktrees via `lf ops wt create` and runs `lf ship-roadmap` in each. Simpler but bypasses lfd tracking.
+
+Prefer option 1 if lfd supports launching runs for specific items. Fall back to option 2 if not. Either way, s1 should report which runs it launched and their initial status.
+
+### What to test
+
+- Flow YAML parses and expands correctly (Rust flow tests)
+- Each step prompt has correct `requires:`/`produces:` frontmatter
+- Existing tend flow tests still pass
+- `cargo test --all` and `uv run pytest python/tests/` green

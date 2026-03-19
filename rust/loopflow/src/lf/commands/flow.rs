@@ -241,29 +241,7 @@ fn run_or(or_def: &ConcreteOr, message: Option<&str>, cli: &Cli, repo: &Path) ->
         .expect("selected path validated by read_or_verdict");
 
     let sub_items = load_or_path_items(or_path, repo)?;
-
-    for sub_item in &sub_items {
-        let sub_step = match sub_item {
-            ConcreteItem::Step(step) => step,
-            ConcreteItem::Op(ops) => {
-                crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
-                continue;
-            }
-            _ => continue,
-        };
-
-        let step_name = sub_step.step.name.clone();
-        eprintln!(
-            "{dim}[or/{selected}]{reset} {bold}{step_name}{reset}",
-            dim = colors.dim,
-            reset = colors.reset,
-            bold = colors.bold,
-        );
-        crate::lf::commands::run::run(Some(&step_name), message, cli)?;
-        commit_step_work(repo, &step_name)?;
-    }
-
-    Ok(())
+    run_steps(&sub_items, message, cli, repo)
 }
 
 fn write_or_route_step(repo: &Path, prompt: &str) -> Result<OrRouteStepGuard> {

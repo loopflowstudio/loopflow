@@ -754,22 +754,7 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
 /// Validate that flows referenced by or paths can be loaded and expanded.
 fn validate_or_paths(or_def: &OrDef, repo: &Path) -> Result<(), LoadError> {
     for path in or_def.paths.values() {
-        if let Some(ref flow_name) = path.flow {
-            let flow = load_flow(flow_name, repo)?;
-            expand_flow(&flow, repo)?;
-            continue;
-        }
-
-        if let Some(ref step_name) = path.step {
-            load_step(step_name, repo)?;
-            continue;
-        }
-
-        for step in &path.steps {
-            if step.content.is_none() {
-                load_step(&step.name, repo)?;
-            }
-        }
+        load_or_path_items(path, repo)?;
     }
     Ok(())
 }

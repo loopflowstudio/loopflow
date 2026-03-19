@@ -68,14 +68,8 @@ def _print_summary(redesign: Wave) -> None:
 
 
 def main() -> int:
-    redesign = None
     for name in WAVE_NAMES:
-        wave = _ensure_wave(name)
-        if name == "redesign":
-            redesign = wave
-
-    if redesign is None:
-        raise RuntimeError("bootstrap created no redesign wave")
+        _ensure_wave(name)
 
     redesign = loopflow.update_wave(
         "redesign",

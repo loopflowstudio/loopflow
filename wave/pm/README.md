@@ -30,15 +30,17 @@ Future items should deepen that path instead of creating a second one.
 - `lf ops auth` remains the single local credential surface. Future PM commands should consume stored credentials, not invent provider-specific auth side paths.
 - `RoadmapItemDocument` stays the only writer for roadmap frontmatter. PM sync code should use `id_for(provider)` / `set_id(provider, id)` for provider-ID access, not open-coding frontmatter mutations.
 - Provider roles stay explicit: one read/write provider drives local state; export providers mirror writes but never become import sources.
-- Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow's markdown and filename order become the desired remote state.
+- Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow only writes back on explicit push events with known local diffs or lifecycle payloads.
 - Automatic wave-level import/export is now the default lifecycle path for PR-oriented runs. Remaining work should hook into that path rather than inventing extra sync entrypoints.
 - Missing config (`asana.workspace`, `asana.default_team`, `linear.team`) should fail with actionable messages at the command boundary, not opaque provider errors.
 - `PmTextUpdate` filters rank-only updates at the trait boundary. Providers never see rank changes — rank is a local concern.
 - Item-level PR/merge/failure sync must survive `ingest` moving a roadmap item into `scratch/`. Stable item identity belongs on the run, not in a transient file lookup.
+- Default day-to-day usage is pull. `lf ops pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
 
 ## Goals
 
 - Thin `import-pm` / `export-pm` step wrappers and a `pm-sync` flow expose the existing mechanical ops commands to normal flows
+- `lf ops pm pull` gives a deterministic remote-wins refresh surface that `ingest` and future step wrappers can build on
 - `ingest` refreshes from PM before picking the next item when a wave is linked
 - Runs retain stable roadmap-item identity so PR open/failure/merge can comment on or complete the specific linked PM item
 - Notion can join the provider-role model without bypassing the shared `PmProvider` seam or frontmatter helpers

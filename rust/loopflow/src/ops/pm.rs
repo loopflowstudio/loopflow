@@ -56,6 +56,20 @@ pub struct PmSyncResult {
     pub conflicts: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PmPullOptions {
+    pub wave: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmPullResult {
+    pub wave: String,
+    pub provider: PmProviderKind,
+    pub project_id: String,
+    pub local_removed: usize,
+    pub local_written: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PmStatusOptions {
     pub wave: Option<String>,
@@ -676,6 +690,47 @@ fn next_remote_filename(wave_dir: &Path, rank: u32, title: &str) -> String {
     }
 }
 
+fn overwrite_local_wave_from_remote(
+    wave_dir: &Path,
+    remote_items: &[PmItem],
+    provider: PmProviderKind,
+) -> OpsResult<usize> {
+    let local_files = list_numbered_items(wave_dir)?;
+    let removed = local_files.len();
+    for item in local_files {
+        std::fs::remove_file(wave_dir.join(item.filename))?;
+    }
+
+    let mut used_filenames = HashSet::new();
+    for (index, remote_item) in remote_items.iter().enumerate() {
+        let filename =
+            next_remote_filename_for_pull(index as u32, &remote_item.name, &used_filenames);
+        used_filenames.insert(filename.clone());
+        let rendered = remote_item_to_document(remote_item, provider)
+            .render()
+            .map_err(pm_to_ops)?;
+        std::fs::write(wave_dir.join(filename), rendered)?;
+    }
+
+    Ok(removed)
+}
+
+fn next_remote_filename_for_pull(
+    rank: u32,
+    title: &str,
+    used_filenames: &HashSet<String>,
+) -> String {
+    let slug = slugify(title);
+    let mut prefix = rank;
+    loop {
+        let filename = format!("{:02}-{slug}.md", prefix + 1);
+        if !used_filenames.contains(&filename) {
+            return filename;
+        }
+        prefix += 1;
+    }
+}
+
 fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let wave_dir = repo.join("wave");
     if !wave_dir.is_dir() {
@@ -795,6 +850,52 @@ pub fn pm_sync(
     let rt = tokio::runtime::Runtime::new()
         .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
     rt.block_on(pm_sync_async(repo, options, progress))
+}
+
+pub fn pm_pull(
+    repo: &Path,
+    options: &PmPullOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmPullResult> {
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
+    rt.block_on(pm_pull_async(repo, options, progress))
+}
+
+async fn pm_pull_async(
+    repo: &Path,
+    options: &PmPullOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmPullResult> {
+    let wave_dir = repo.join("wave").join(&options.wave);
+    if !wave_dir.is_dir() {
+        return Err(OpsError::Message(format!(
+            "wave directory not found: wave/{}/",
+            options.wave
+        )));
+    }
+
+    let ctx = build_wave_provider(repo, &options.wave).await?;
+    require_project(&ctx, &options.wave)?;
+
+    progress.status(&format!(
+        "pulling {:?} project {} into wave/{}",
+        ctx.provider, ctx.project, options.wave
+    ));
+    let remote_items = ctx
+        .client
+        .list_items(&ctx.project)
+        .await
+        .map_err(pm_to_ops)?;
+    let local_removed = overwrite_local_wave_from_remote(&wave_dir, &remote_items, ctx.provider)?;
+
+    Ok(PmPullResult {
+        wave: options.wave.clone(),
+        provider: ctx.provider,
+        project_id: ctx.project,
+        local_removed,
+        local_written: remote_items.len(),
+    })
 }
 
 async fn pm_sync_async(
@@ -1511,5 +1612,47 @@ mod tests {
         assert!(created_order.contains("asana_id: lin-2"));
         let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
         assert!(created_order.contains("asana_id: lin-1"));
+    }
+
+    #[test]
+    fn overwrite_local_wave_from_remote_rewrites_local_files_in_remote_order() {
+        let dir = TempDir::new().expect("temp dir");
+        let wave_dir = dir.path().join("wave").join("pm");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("01-local-first.md"), "# Local first\n").expect("write");
+        std::fs::write(wave_dir.join("02-local-second.md"), "# Local second\n").expect("write");
+
+        let remote_items = vec![
+            PmItem {
+                id: "lin-2".to_string(),
+                name: "Remote second".to_string(),
+                description: "Pulled from PM.".to_string(),
+                rank: 1,
+                completed: false,
+            },
+            PmItem {
+                id: "lin-1".to_string(),
+                name: "Remote first".to_string(),
+                description: "Higher priority.".to_string(),
+                rank: 0,
+                completed: false,
+            },
+        ];
+
+        let removed =
+            overwrite_local_wave_from_remote(&wave_dir, &remote_items, PmProviderKind::Linear)
+                .expect("pull should rewrite local files");
+
+        assert_eq!(removed, 2);
+        assert!(!wave_dir.join("01-local-first.md").exists());
+        assert!(!wave_dir.join("02-local-second.md").exists());
+
+        let first = std::fs::read_to_string(wave_dir.join("01-remote-second.md")).expect("read");
+        assert!(first.contains("linear_id: lin-2"));
+        assert!(first.contains("# Remote second"));
+
+        let second = std::fs::read_to_string(wave_dir.join("02-remote-first.md")).expect("read");
+        assert!(second.contains("linear_id: lin-1"));
+        assert!(second.contains("# Remote first"));
     }
 }

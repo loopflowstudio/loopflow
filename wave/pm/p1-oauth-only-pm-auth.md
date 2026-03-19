@@ -1,3 +1,6 @@
+---
+linear_id: 59e05f22-a6e1-4864-803c-e61eae110388
+---
 # 08: OAuth-only PM auth
 
 **Finish line:** PM providers use browser-based OAuth through the shared auth surface, and PM commands no longer rely on API-key/PAT setup paths.

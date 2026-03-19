@@ -1,3 +1,6 @@
+---
+linear_id: 92c6193a-7619-457f-85fc-449ff0dfce45
+---
 # 10: Notion supporting docs import
 
 **Finish line:** after README sync works, a wave can pull the adjacent Notion docs it actually needs without flattening them into tasks/issues.

@@ -1,3 +1,6 @@
+---
+linear_id: 87d2f61c-37a7-4391-95fa-8a69217cc8ce
+---
 # 09: Notion README sync
 
 **Finish line:** a wave can link one canonical Notion page and round-trip it with `wave/<name>/README.md` through the existing PM lifecycle verbs.

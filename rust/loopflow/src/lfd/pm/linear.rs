@@ -33,7 +33,7 @@ const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: 
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String, $teamId: String!) {
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: String!) {
   projectCreate(input: { name: $name, description: $description, teamIds: [$teamId] }) {
     project {
       id
@@ -598,10 +598,10 @@ fn team_key_from_name(name: &str) -> String {
     }
 }
 
-fn linear_project_description(description: &str) -> Option<String> {
+fn linear_project_description(description: &str) -> String {
     let summary = first_meaningful_paragraph(description);
     if summary.is_empty() {
-        return None;
+        return String::new();
     }
 
     const MAX_DESCRIPTION_LEN: usize = 255;
@@ -609,7 +609,7 @@ fn linear_project_description(description: &str) -> Option<String> {
     for ch in summary.chars().take(MAX_DESCRIPTION_LEN) {
         truncated.push(ch);
     }
-    Some(truncated)
+    truncated
 }
 
 fn first_meaningful_paragraph(description: &str) -> String {
@@ -1211,10 +1211,12 @@ mod tests {
         let summary = linear_project_description(
             "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
         );
-        assert_eq!(summary, Some("This is the first paragraph.".to_string()));
+        assert_eq!(summary, "This is the first paragraph.".to_string());
 
         let long = "a".repeat(300);
-        let summary = linear_project_description(&long).expect("summary");
+        let summary = linear_project_description(&long);
         assert_eq!(summary.len(), 255);
+
+        assert_eq!(linear_project_description(""), "");
     }
 }

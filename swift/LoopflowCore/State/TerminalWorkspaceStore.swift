@@ -21,7 +21,7 @@ public final class TerminalWorkspaceStore {
     }
 
     public var selectedSession: TerminalSession? {
-        selectedSessionId.flatMap { sessionsById[$0] }
+        session(id: selectedSessionId)
     }
 
     public func orderedSessions(for waveId: String) -> [TerminalSession] {
@@ -30,21 +30,19 @@ public final class TerminalWorkspaceStore {
 
     public func selectedSessionId(for waveId: String) -> String? {
         if let selectedSessionId,
-           let session = sessionsById[selectedSessionId],
-           session.waveId == waveId,
-           !session.status.isTerminal {
+           let session = activeSession(id: selectedSessionId),
+           session.waveId == waveId {
             return selectedSessionId
         }
-        guard let storedSessionId = selectedSessionIdsByWave[waveId],
-              let session = sessionsById[storedSessionId],
-              !session.status.isTerminal else {
-            return nextSelectableSessionId(for: waveId)
+        if let storedSessionId = selectedSessionIdsByWave[waveId],
+           activeSession(id: storedSessionId) != nil {
+            return storedSessionId
         }
-        return storedSessionId
+        return nextSelectableSessionId(for: waveId)
     }
 
     public func selectedSession(for waveId: String) -> TerminalSession? {
-        selectedSessionId(for: waveId).flatMap { sessionsById[$0] }
+        session(id: selectedSessionId(for: waveId))
     }
 
     public func configure(repoKey: String?) {
@@ -130,10 +128,9 @@ public final class TerminalWorkspaceStore {
             return
         }
 
-        guard let session = sessionsById[currentSelection],
-              !session.status.isTerminal else {
+        guard let session = activeSession(id: currentSelection) else {
             keepsGlobalSelectionCleared = false
-            let currentWaveId = sessionsById[currentSelection]?.waveId
+            let currentWaveId = session(id: currentSelection)?.waveId
             selectedSessionId = currentWaveId.flatMap { nextSelectableSessionId(for: $0, excluding: currentSelection) }
                 ?? nextSelectableSessionId(excluding: currentSelection)
             return
@@ -143,24 +140,16 @@ public final class TerminalWorkspaceStore {
         selectedSessionIdsByWave[session.waveId] = currentSelection
     }
 
-    private func nextSelectableSessionId(excluding excludedSessionId: String? = nil) -> String? {
+    private func nextSelectableSessionId(
+        for waveId: String? = nil,
+        excluding excludedSessionId: String? = nil
+    ) -> String? {
         orderedSessionIds.first { sessionId in
             guard sessionId != excludedSessionId,
-                  let session = sessionsById[sessionId] else {
+                  let session = activeSession(id: sessionId) else {
                 return false
             }
-            return !session.status.isTerminal
-        }
-    }
-
-    private func nextSelectableSessionId(for waveId: String, excluding excludedSessionId: String? = nil) -> String? {
-        orderedSessionIds.first { sessionId in
-            guard sessionId != excludedSessionId,
-                  let session = sessionsById[sessionId],
-                  session.waveId == waveId else {
-                return false
-            }
-            return !session.status.isTerminal
+            return waveId == nil || session.waveId == waveId
         }
     }
 
@@ -169,8 +158,7 @@ public final class TerminalWorkspaceStore {
         for waveId in waveIds {
             let currentSelection = selectedSessionIdsByWave[waveId]
             guard let currentSelection,
-                  let session = sessionsById[currentSelection],
-                  !session.status.isTerminal else {
+                  let session = activeSession(id: currentSelection) else {
                 selectedSessionIdsByWave[waveId] = nextSelectableSessionId(
                     for: waveId,
                     excluding: currentSelection
@@ -200,5 +188,18 @@ public final class TerminalWorkspaceStore {
     private func storageKey(_ suffix: String) -> String? {
         guard let repoKey else { return nil }
         return "terminalWorkspace.\(suffix).\(repoKey)"
+    }
+
+    private func session(id: String?) -> TerminalSession? {
+        guard let id else { return nil }
+        return sessionsById[id]
+    }
+
+    private func activeSession(id: String?) -> TerminalSession? {
+        guard let session = session(id: id),
+              !session.status.isTerminal else {
+            return nil
+        }
+        return session
     }
 }

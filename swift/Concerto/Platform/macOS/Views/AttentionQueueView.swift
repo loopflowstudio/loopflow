@@ -238,10 +238,6 @@ private struct AttentionDetailView: View {
                     }
                 }
             }
-        case .raw(let raw):
-            Text(raw)
-                .font(Typography.code())
-                .foregroundStyle(palette.text)
         }
     }
 
@@ -263,8 +259,6 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-            case .raw:
-                EmptyView()
             }
         }
     }

@@ -57,7 +57,6 @@ public struct AlgedonicAttentionContext: Sendable, Hashable {
 public enum AttentionContext: Sendable, Hashable {
     case interactive(InteractiveAttentionContext)
     case algedonic(AlgedonicAttentionContext)
-    case raw(String)
 }
 
 public struct AttentionItem: Identifiable, Sendable, Hashable {

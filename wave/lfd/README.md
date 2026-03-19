@@ -78,7 +78,7 @@ This should feel SSH-like in product terms even if the first transport is not li
 
 ### tmux lessons, applied
 
-The tmux architecture study (item 01, `wave/lfd/01-tmux-architecture-study.md`) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
+The tmux architecture study (shipped, guidance propagated into remaining items and `agent-embedding/06`) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
 
 - **Monotonic, type-prefixed, never-reused IDs** for sessions and runs. tmux does this with `$session`, `@window`, `%pane`. Loopflow's `LfdId` scheme already fits.
 - **Server owns all persistent state.** Clients are disposable renderers. `lfd` owns run state, session state, scrollback buffers. Concerto reconstructs on reconnect.
@@ -110,10 +110,9 @@ It should not need its own launch shim or a private interpretation of how loopfl
 
 ## Milestone docs
 
-1. `01-tmux-architecture-study.md` — study tmux's server/client split and identify what still matters once local v0 is shared-store observation plus ordinary local terminals
-2. `02-daemon-aware-cli-contract.md` — define the shared runtime-store contract and how `lf` discovers and writes to it
-3. `03-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against that same store
-4. `04-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
+1. `02-daemon-aware-cli-contract.md` — define the shared runtime-store contract and how `lf` discovers and writes to it
+2. `03-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against that same store
+3. `04-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
 
 ## Boundaries
 

@@ -16,13 +16,17 @@ The execution path should also converge on the real CLI. The first cut is not "d
 
 Concerto can still present a calmer singular surface: one selected wave, one foreground run, one presented terminal. That is a product policy, not an infrastructure limit. Serialized waves remain useful where roadmap UX wants one thing at a time, but the base model should allow many runs and worktrees per wave.
 
+### Algedonic escalation routing
+
+The algedonic path should eventually route through the wave hierarchy: child wave → parent wave → root wave → human. Only the root wave's escalation surfaces as a human attention item. This makes agent-to-agent escalation possible within a wave family before bothering a human. The HTTP contract and attention types are ready; the routing policy is the remaining design work.
+
 Keep one durable model per concept. `AttentionItem` remains the shared contract for human checkpoints, `WaveRun` remains the execution unit, and `TerminalSession` remains the shared contract for embedded coding sessions. Portfolio, lifecycle, calibration, and composition work should derive from those existing types plus wave/run data instead of inventing dashboard-only state.
 
 The local-first terminal workspace is now in place: `lfd` persists `terminal_sessions`, emits terminal-session events, and Concerto embeds tracked Ghostty tabs keyed by terminal-session ID while keeping Work as the default surface. That gives the queue, workspace, and future portfolio views one shared state model for interactive runs instead of a separate Swift-only terminal stack. In the near term, that can stay local-first: Concerto can open ordinary local Ghostty sessions while relying on the shared runtime store for durable state.
 
 But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
 
-The tmux architecture study (item 01 of `wave/lfd/`, full research in `wave/lfd/01-tmux-architecture-study.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
+The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `06-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
 - Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
 - Treat Ghostty embedding as a rendering surface, not a session owner
 - Prepare for layout serialization (tmux encodes split trees as compact strings; Concerto should similarly persist layout as data)

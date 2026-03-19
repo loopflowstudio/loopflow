@@ -1,137 +1,259 @@
-# Terminal Embedding: Production-Grade Local Workspace
+# Wave Workspace: Ghostty + tmux as Infrastructure
+
+## What this wants to be
+
+Concerto should become the place where a conductor lives while managing multiple waves.
+
+A wave is not just a row in a sidebar and not just a terminal tab. A wave is a workspace. The shell space for that workspace should feel tmux-native. The rest of the workspace should be native Concerto tools: file viewing, diff summarization, queue/context, GUI harnesses, Cursor handoff, PM handoff, native coding agents, and whatever other Swift surfaces belong around the work.
+
+The core idea is no longer “embed a terminal and polish it.” The core idea is:
+
+- **Ghostty** is the terminal rendering pillar
+- **tmux** is the shell/session/layout/navigation pillar
+- **lfd** is the loopflow control plane and remote boundary
+- **Concerto** is the tmux-fluent native client that composes shell panes and Swift panes into one wave workspace
 
 ## Problem
 
-The branch ships the foundational terminal embedding: Ghostty renders inside Concerto, sessions are wave-bound and daemon-persisted, the context sidebar shows wave state, and tabs manage multiple sessions. A conductor can watch agents work.
+The current branch proves that embedded terminal state can exist in the product, but it is still shaped like a custom terminal feature.
 
-But the conductor can't *live* in this workspace yet. Sessions depend on completion callbacks that can leave them stuck if the agent crashes. Session creation requires daemon automation — you can't just open a terminal and start working. Keyboard navigation between sessions doesn't exist. Resize handling is one-shot. The workspace is a promising demo, not a daily driver.
+That is too small.
 
-The finish line isn't "Ghostty renders" — it's "a conductor runs three agents from Concerto and never reaches for an external terminal." That means the workspace must be robust, fast, and keyboard-first.
+The real target is a workspace architecture with the right substrate:
+- no coding on main
+- every coding shell belongs to a wave worktree
+- shell behavior uses tmux’s language and operational model where possible
+- terminal rendering stands on Ghostty rather than a bespoke terminal stack
+- Concerto owns the non-shell parts of the workspace without forcing them through terminal abstractions
+- remote still has a clean API boundary through `lfd`
 
-## Approach
+If Ghostty and tmux are the pillars, the design question changes from “what terminal UX should we add?” to “what architecture naturally grows around those pillars?”
 
-Harden the existing local-first terminal workspace into production quality across four areas: session lifecycle robustness, user-initiated sessions, keyboard-first navigation, and terminal rendering polish. Stay compatible with the daemon-hosted PTY future (lfd/04) by keeping `TerminalSession` as the stable identity and `lfd` as the source of truth.
+## Architectural model
 
-### 1. Session lifecycle robustness
+### Pillars
 
-**Heartbeat and timeout.** The current completion model relies on a POST callback from a wrapper script. If the agent process crashes, the daemon never learns the session ended. Add a heartbeat:
+#### Ghostty
 
-- Concerto sends periodic heartbeat for each attached session (every 10s) via `POST /terminal-sessions/{id}/heartbeat`
-- `lfd` tracks `last_heartbeat_at` on the session record
-- A background reaper in `lfd` marks sessions as `Failed` if no heartbeat arrives for 60s and the session is in `Running` state
-- When `lfd` later owns PTYs, the heartbeat becomes unnecessary — process exit is observed directly. Shape the heartbeat as a client-health signal, not a permanent architecture
+Ghostty is infrastructure, not the product model.
 
-**Graceful exit detection.** When Ghostty's child process exits, Concerto should immediately POST completion with the exit code rather than waiting for the wrapper script. The wrapper script callback becomes a fallback, not the primary path. This means `GhosttyTerminalView` needs an `onExit` callback that bubbles up through the view hierarchy to `RepoState.completeTerminalSession()`.
+It owns:
+- terminal rendering
+- VT behavior
+- embedded terminal surfaces
+- local terminal display concerns
 
-**Orphan recovery on launch.** When Concerto connects to `lfd`, scan for sessions in `Running` or `Attached` state that have no heartbeat in the last 60s. Offer to cancel or reattach them. This handles the case where Concerto crashed and restarted.
+Concerto should not invent a second terminal rendering model above it.
 
-### 2. User-initiated sessions
+#### tmux
 
-Today, terminal sessions only appear when a wave run reaches an interactive step. A conductor should also be able to:
+tmux is also infrastructure, but it is much closer to the product model than Ghostty.
 
-- **Start a coding session for a wave.** Select a wave, hit a key, get a terminal in that wave's worktree with the wave's environment. No waiting for automation. The daemon creates a session with source `"user_initiated"` instead of `"wave_step"`.
+It owns the shell part of the system:
+- windows
+- panes
+- attach / detach
+- shell-session identity
+- layout vocabulary
+- navigation vocabulary
+- resize and multi-client shell semantics
 
-- **Start a freeform session for a repo.** Not every terminal needs a wave. Open a shell in the repo root for exploratory work. Session is repo-scoped, not wave-scoped.
+Loopflow should seriously use tmux, not merely imitate it.
 
-Implementation:
-- New `POST /terminal-sessions` variant that accepts `wave_id` (optional) and `cwd` (defaults to wave worktree or repo root). Daemon creates session, returns ID. No `wave_run_id` required.
-- Concerto adds a "New Terminal" action in the wave workspace (keyboard shortcut: `Cmd+T`) and in the sidebar (for repo-scoped sessions).
-- User-initiated sessions use the repo's configured agent as argv (e.g., `["claude"]`), or a plain shell if no agent is configured.
+#### lfd
 
-### 3. Keyboard-first navigation
+`lfd` stays essential.
 
-The conductor pattern — three agents across three waves — demands fast switching without the mouse.
+It owns:
+- remote API boundary
+- auth
+- persistence
+- wave / run / attention semantics
+- loopflow metadata around shells
+- tmux-aware proxy behavior
 
-| Shortcut | Action |
-|----------|--------|
-| `Cmd+1..9` | Switch to terminal tab by position |
-| `Cmd+]` / `Cmd+[` | Next / previous terminal tab |
-| `Cmd+T` | New terminal session (for selected wave) |
-| `Cmd+W` | Cancel and close current terminal session |
-| `Cmd+Shift+]` / `[` | Next / previous wave |
-| `Cmd+K` | Quick switcher (fuzzy find across sessions, waves, attention items) |
+For remote, the authoritative shell substrate lives server-side next to `lfd`.
 
-The quick switcher is the most important piece. It's a Spotlight-style overlay that searches across:
-- Active terminal sessions (by wave name, step, agent)
-- Waves (by name, status)
-- Unresolved attention items (by kind, wave)
+#### Concerto
 
-Selecting a result navigates to it — switches wave, selects terminal tab, or opens the attention item. One keystroke from "I wonder what's happening" to "I'm looking at it."
+Concerto is the client that brings it together.
 
-### 4. Terminal rendering polish
+It should:
+- behave like a tmux client where shells are involved
+- directly speak tmux-shaped operations where that makes sense
+- compose tmux-backed shell panes with Swift-owned panes
+- provide the native loopflow workspace around shell activity
 
-**Resize coordination.** Current resize handling sets the terminal size once at creation. When the Concerto window resizes or the sidebar collapses, the Ghostty surface must resize and the session's PTY must get a `SIGWINCH`. For the local shim, this means:
-- `GhosttyTerminalView` observes `GeometryReader` changes
-- On significant resize (>2 char delta), send `POST /terminal-sessions/{id}/resize` with new cols/rows
-- `lfd` stores the size (useful for future multi-client negotiation per tmux study)
-- Local Ghostty surface handles the actual pty resize via libghostty
+## Product mapping
 
-**Focus management.** When switching tabs, the newly selected terminal must capture keyboard focus immediately. Current implementation may leave focus in the sidebar or tab bar. `GhosttyMetalView.becomeFirstResponder()` must fire on tab selection.
+### One wave = one tmux window
 
-**Session status indicators.** Tab labels should show:
-- Running: wave name + step name + elapsed time
-- Succeeded: wave name + checkmark + duration
-- Failed: wave name + X + exit code
-- Pending: wave name + "waiting..."
+This is the primary visible mapping.
 
-Color coding from the design system: `statusSuccess` for succeeded, `statusError` for failed, `statusWarning` for pending, `burgundy` accent for the selected tab.
+A wave should feel like a tmux window with loopflow semantics attached to it.
 
-## Alternatives considered
+Inside that wave window, the workspace can contain:
+- tmux-backed shell panes
+- open in Cursor
+- open in PM
+- file viewer
+- diff summarizer
+- native coding agent surfaces
+- queue/context views
+- other Swift-owned panes
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Wait for daemon-hosted PTYs (lfd/04) before hardening | Clean architecture from day one | Blocks all terminal UX work for months. Local-first embedding is useful now and the session model carries forward. |
-| Build split panes now instead of hardening tabs | More spatial flexibility | Premature — composition is item 06 and depends on at least 3 pane types. Tabs are the right unit for the conductor pattern today. Splits promote from tabs later. |
-| Replace completion callback with daemon-side process monitoring | More robust lifecycle | Requires lfd to own the process, which is lfd/03-04. Heartbeat + client-side exit detection bridges the gap without deepening the shim. |
-| Add tmux-style leader key instead of Cmd shortcuts | Familiar for terminal users | Concerto is a macOS app. Cmd shortcuts are native and discoverable. Leader key belongs in the composition layer (item 06). |
+### One region for shell panes and Swift panes
 
-## Key decisions
+Do not split the UI into a tmux island plus a separate native app region.
 
-**Heartbeat is a client signal, not a permanent architecture.** When lfd owns PTYs, it observes process exit directly. The heartbeat exists to bridge the local-shim era. It's shaped as "client reports health" not "client reports process status" — that distinction keeps it compatible with the future model where lfd might want to know which clients are still attached even after it owns the PTY.
+There should be one composed workspace region. Some panes are shell panes. Some panes are Swift panes. The user experiences one workspace.
 
-**User-initiated sessions are wave-optional.** The wave-binding model is right for automated flows, but a conductor also needs exploratory terminals. Making `wave_id` optional on session creation covers both without a separate "freeform terminal" concept.
+### TerminalSession is a thin wrapper
 
-**Quick switcher over command palette.** A command palette (VS Code style) is for invoking actions. The conductor needs to navigate to state — "show me wave X's terminal." A fuzzy finder over sessions/waves/attention is the right primitive. Actions come later if needed.
+For shell panes, the tmux pane identity is primary.
 
-**No layout persistence yet.** Tab order persistence already exists in `TerminalWorkspaceStore`. Split layouts belong to item 06. This design doesn't try to bridge the gap — it makes tabs excellent, and composition promotes from there.
+`TerminalSession` should be a thin loopflow wrapper around that tmux pane identity, carrying things tmux does not know:
+- wave binding
+- run / step association
+- agent metadata
+- loopflow attention and resume semantics
 
-## Scope
+It should not become a second shell runtime model.
 
-In scope:
-- Session heartbeat + reaper in lfd
-- Client-side exit detection in Ghostty view
-- Orphan recovery on Concerto launch
-- User-initiated session creation (wave-scoped and repo-scoped)
-- Keyboard shortcuts for tab switching + quick switcher
-- Terminal resize coordination
-- Focus management on tab switch
-- Session status indicators in tabs
+## Ownership boundaries
 
-Out of scope:
-- Split pane layouts (item 06)
-- Daemon-hosted PTYs / daemon-side process observation (lfd/04)
-- Remote terminal transport
-- Portfolio view integration (item 03)
-- Terminal scrollback persistence beyond what Ghostty manages locally
+### tmux owns
+
+- shell panes
+- pane/window identity for shell runtime
+- attach / detach semantics
+- pane lifecycle for shells
+- shell navigation and layout primitives
+
+### Ghostty owns
+
+- terminal rendering of shell panes
+
+### loopflow / Concerto own
+
+- any pane that is not a shell and is rendered in Swift
+- wave semantics
+- attention semantics
+- run semantics
+- persistence and product meaning layered around tmux state
+
+## Implications for the architecture
+
+### 1. Stop deepening the custom local shim
+
+The current launch-spec / callback / local-session machinery may be good enough as a bridge, but it should not become the center of the architecture.
+
+If tmux is the shell substrate, new work should move toward:
+- tmux-backed shell sessions
+- tmux-native window/pane identity
+- Ghostty-rendered shell panes
+- `lfd` proxying and enriching tmux state
+
+Not toward an ever-richer custom terminal session stack inside Swift and Rust.
+
+### 2. Keyboard design should be tmux-fluent
+
+Do not design shortcuts as a separate macOS command palette system with a terminal feature attached.
+
+Do not preserve existing shortcuts just because they already exist.
+
+Design one keyboard/navigation system that fits the surrounding ecosystem:
+- tmux-like navigation and layout habits
+- searchable navigation when needed
+- loopflow actions integrated into that same system
+
+The right test is not “does this look like a normal Mac menu shortcut set?” The right test is “does this feel natural to someone living in terminal/workspace tooling?”
+
+### 3. Wave-homed shells only
+
+Coding happens in wave worktrees.
+
+No main-checkout shells. No repo-scoped freeform coding shells in this milestone.
+
+If a shell is created from Concerto, it belongs to a selected wave and opens in that wave’s workspace.
+
+### 4. Remote should still speak through lfd
+
+Even if Concerto behaves as a tmux client, remote product semantics still go through `lfd`.
+
+That means:
+- authoritative remote tmux lives server-side
+- `lfd` proxies or mediates the relevant tmux operations
+- Concerto can speak tmux directly where appropriate, but the remote contract still belongs to loopflow via `lfd`
+
+### 5. Swift panes should not be terminal-shaped
+
+Native panes are not fake panes rendered through shell output.
+
+File viewers, diff summarizers, queue/context panes, GUI harnesses, and native coding agents should remain Swift components. The composition model should unify them spatially with shell panes, not degrade them into terminal content.
+
+## This milestone
+
+This milestone should reshape terminal embedding around the new center rather than finishing the old design literally as written.
+
+### In scope
+
+- reframe the workspace architecture around Ghostty + tmux
+- make wave-homed shell creation explicit
+- make one wave → one tmux window the guiding mapping
+- define `TerminalSession` as a thin wrapper around tmux pane identity
+- make Concerto’s shell-side interaction model tmux-fluent
+- keep `lfd` as the tmux-aware loopflow boundary, especially for remote
+- define how shell panes and Swift panes coexist in one workspace region
+- identify which current local-session mechanisms are bridge code vs target architecture
+
+### Out of scope
+
+- forcing every pane to be a shell
+- repo-scoped or main-checkout coding shells
+- treating existing Ghostty/session code as the final architecture
+- a fully finished remote transport
+- full composition implementation for every pane type
+- solving all layout persistence details in this item
+
+## Open design questions
+
+### tmux integration depth
+
+How much should Concerto speak tmux directly versus going through `lfd` for convenience APIs?
+
+Current direction:
+- `lfd` as tmux proxy and loopflow control plane
+- Concerto speaking tmux directly where it cleanly can
+
+### Window and pane mapping beyond the first shell
+
+A wave maps to a tmux window.
+
+What exact pane model should that window expose when there are:
+- multiple agent shells
+- utility shells
+- Swift panes that need equal spatial status
+
+### Composition model
+
+The workspace should be one region for shell panes and Swift panes.
+
+What is the cleanest layout engine for that mixed world while preserving tmux fluency where shell panes are involved?
+
+### Transition plan
+
+What bridge architecture gets us from the current Ghostty-embedded custom session model to a Ghostty + tmux-centered architecture without thrashing the whole branch?
 
 ## Done when
 
-```bash
-# Automated
-cargo test --all
-swift test --package-path swift
-uv run pytest python/tests/
+The design is ready to drive implementation of a tmux-centered wave workspace.
 
-# Observable
-# 1. Start Concerto, connect to lfd with a configured wave
-# 2. Cmd+T opens a terminal in that wave's worktree — no waiting for automation
-# 3. Kill the terminal process (kill -9) — session transitions to Failed within 60s
-# 4. Restart Concerto — orphaned sessions are detected and cancellable
-# 5. Three waves running, Cmd+K → type wave name → enter → looking at that session
-# 6. Resize the window — terminal content reflows correctly
-```
-
-Advancing wave goals:
-- "Coding sessions happen in embedded Ghostty terminals" — from demo to daily driver
-- "Percentage of coding sessions that happen inside Concerto vs external terminal (target: >70%)" — keyboard shortcuts and user-initiated sessions remove the reasons to leave
-- "Clicks from 'I see a problem' to 'I'm acting on it' (target: <=2)" — quick switcher makes it 1 keystroke
+Concretely, that means the implementation plan should preserve these truths:
+- a wave is a workspace and maps to a tmux window
+- Ghostty and tmux are treated as infrastructure pillars, not incidental dependencies
+- shell panes are tmux-backed
+- Swift panes stay native
+- `TerminalSession` is a thin wrapper, not a parallel shell model
+- `lfd` remains the loopflow API/control boundary for remote
+- the user experiences one coherent workspace, not separate terminal and native worlds

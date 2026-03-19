@@ -27,15 +27,6 @@ impl PriorityBucket {
         }
     }
 
-    pub fn semantic_label(self) -> &'static str {
-        match self {
-            Self::P0 => "P0",
-            Self::P1 => "P1",
-            Self::P2 => "P2",
-            Self::P3 => "P3",
-        }
-    }
-
     pub fn order(self) -> u8 {
         match self {
             Self::P0 => 0,
@@ -124,24 +115,7 @@ pub struct PmItemUpdate {
     pub priority: Option<PriorityBucket>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PmTextUpdate<'a> {
-    name: Option<&'a str>,
-    description: Option<&'a str>,
-}
-
 impl PmItemUpdate {
-    fn text_update(&self) -> Option<PmTextUpdate<'_>> {
-        if self.name.is_none() && self.description.is_none() {
-            return None;
-        }
-
-        Some(PmTextUpdate {
-            name: self.name.as_deref(),
-            description: self.description.as_deref(),
-        })
-    }
-
     pub(crate) fn is_noop(&self) -> bool {
         self.name.is_none() && self.description.is_none() && self.priority.is_none()
     }
@@ -414,30 +388,13 @@ mod tests {
     }
 
     #[test]
-    fn pm_item_update_text_update_skips_rank_only_changes() {
+    fn pm_item_update_is_noop_skips_priority_only_changes() {
         let update = PmItemUpdate {
             priority: Some(PriorityBucket::P1),
             ..PmItemUpdate::default()
         };
 
-        assert_eq!(update.text_update(), None);
-    }
-
-    #[test]
-    fn pm_item_update_text_update_preserves_name_and_description() {
-        let update = PmItemUpdate {
-            name: Some("Ship Linear".to_string()),
-            description: Some("Build the GraphQL client".to_string()),
-            priority: Some(PriorityBucket::P1),
-        };
-
-        assert_eq!(
-            update.text_update(),
-            Some(PmTextUpdate {
-                name: Some("Ship Linear"),
-                description: Some("Build the GraphQL client"),
-            })
-        );
+        assert!(!update.is_noop());
     }
 
     #[test]

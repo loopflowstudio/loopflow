@@ -267,6 +267,10 @@ fn local_item_priority(item: &LocalRoadmapItem) -> PriorityBucket {
     item.item.priority_bucket().unwrap_or(PriorityBucket::P1)
 }
 
+fn local_item_description(item: &LocalRoadmapItem) -> String {
+    body_without_heading(&item.doc.body).trim().to_string()
+}
+
 fn project_key(provider: PmProviderKind) -> &'static str {
     match provider {
         PmProviderKind::Asana => "asana_project",
@@ -661,9 +665,7 @@ async fn create_remote_for_local_item(
             project_id,
             &PmItemCreate {
                 name: title.to_string(),
-                description: body_without_heading(&local_item.doc.body)
-                    .trim()
-                    .to_string(),
+                description: local_item_description(local_item),
                 priority: local_item_priority(local_item),
             },
         )
@@ -985,11 +987,7 @@ async fn pm_sync_async(
                             pm_id,
                             &PmItemUpdate {
                                 name: Some(name.to_string()),
-                                description: Some(
-                                    body_without_heading(&local_item.doc.body)
-                                        .trim()
-                                        .to_string(),
-                                ),
+                                description: Some(local_item_description(local_item)),
                                 priority: Some(local_item_priority(local_item)),
                             },
                         )
@@ -1022,9 +1020,7 @@ async fn pm_sync_async(
                         &ctx.project,
                         &PmItemCreate {
                             name: name.to_string(),
-                            description: body_without_heading(&local_item.doc.body)
-                                .trim()
-                                .to_string(),
+                            description: local_item_description(local_item),
                             priority: local_item_priority(local_item),
                         },
                     )
@@ -1135,10 +1131,8 @@ fn read_base_items(
         if let Some(content) = show_file(repo, main_branch, &file_path)
             .map_err(|err| OpsError::Message(format!("failed to read base file: {err}")))?
         {
-            if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    items.insert(pm_id.to_string(), LocalRoadmapItem { item, doc });
-                }
+            if let Some((pm_id, local_item)) = linked_local_item(item, &content, provider) {
+                items.insert(pm_id, local_item);
             }
         }
     }
@@ -1154,14 +1148,22 @@ fn read_local_items(
     for item in items {
         let path = wave_dir.join(&item.filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    result.insert(pm_id.to_string(), LocalRoadmapItem { item, doc });
-                }
+            if let Some((pm_id, local_item)) = linked_local_item(item, &content, provider) {
+                result.insert(pm_id, local_item);
             }
         }
     }
     Ok(result)
+}
+
+fn linked_local_item(
+    item: WaveItem,
+    content: &str,
+    provider: PmProviderKind,
+) -> Option<(String, LocalRoadmapItem)> {
+    let doc = RoadmapItemDocument::parse(content).ok()?;
+    let pm_id = doc.frontmatter.id_for(provider)?.to_string();
+    Some((pm_id, LocalRoadmapItem { item, doc }))
 }
 
 fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapItemDocument {

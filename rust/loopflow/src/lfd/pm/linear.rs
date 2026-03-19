@@ -320,17 +320,14 @@ impl PmProvider for LinearClient {
         if update.is_noop() {
             return Ok(());
         }
-        let text_update = update.text_update();
-        let title = text_update.as_ref().and_then(|update| update.name);
-        let description = text_update.as_ref().and_then(|update| update.description);
 
         let _: Value = self
             .graphql(
                 UPDATE_ITEM_MUTATION,
                 json!({
                     "id": item_id,
-                    "title": title,
-                    "description": description,
+                    "title": update.name.as_deref(),
+                    "description": update.description.as_deref(),
                     "priority": update.priority.map(linear_priority_value),
                 }),
             )

@@ -350,13 +350,11 @@ impl PmProvider for AsanaClient {
         }
 
         let mut data = Map::new();
-        if let Some(text_update) = update.text_update() {
-            if let Some(name) = text_update.name {
-                data.insert("name".to_string(), json!(name));
-            }
-            if let Some(description) = text_update.description {
-                data.insert("notes".to_string(), json!(description));
-            }
+        if let Some(name) = update.name.as_deref() {
+            data.insert("name".to_string(), json!(name));
+        }
+        if let Some(description) = update.description.as_deref() {
+            data.insert("notes".to_string(), json!(description));
         }
         if let Some(priority) = update.priority {
             let field = self.priority_field_for_task(item_id).await?;
@@ -529,10 +527,7 @@ struct AsanaEnumOption {
 #[derive(Debug, Clone)]
 struct AsanaPriorityField {
     gid: String,
-    p0_option: String,
-    p1_option: String,
-    p2_option: String,
-    p3_option: String,
+    options: [String; 4],
 }
 
 impl AsanaPriorityField {
@@ -541,27 +536,22 @@ impl AsanaPriorityField {
             return None;
         }
 
-        let mut p0_option = None;
-        let mut p1_option = None;
-        let mut p2_option = None;
-        let mut p3_option = None;
+        let mut options: [Option<String>; 4] = std::array::from_fn(|_| None);
 
         for option in field.enum_options {
-            match PriorityBucket::from_semantic_label(&option.name) {
-                Some(PriorityBucket::P0) => p0_option = Some(option.gid),
-                Some(PriorityBucket::P1) => p1_option = Some(option.gid),
-                Some(PriorityBucket::P2) => p2_option = Some(option.gid),
-                Some(PriorityBucket::P3) => p3_option = Some(option.gid),
-                None => {}
+            if let Some(bucket) = PriorityBucket::from_semantic_label(&option.name) {
+                options[usize::from(bucket.order())] = Some(option.gid);
             }
         }
 
         Some(Self {
             gid: field.gid,
-            p0_option: p0_option?,
-            p1_option: p1_option?,
-            p2_option: p2_option?,
-            p3_option: p3_option?,
+            options: [
+                options[0].take()?,
+                options[1].take()?,
+                options[2].take()?,
+                options[3].take()?,
+            ],
         })
     }
 
@@ -580,12 +570,7 @@ impl AsanaPriorityField {
     }
 
     fn option_gid(&self, priority: PriorityBucket) -> &str {
-        match priority {
-            PriorityBucket::P0 => &self.p0_option,
-            PriorityBucket::P1 => &self.p1_option,
-            PriorityBucket::P2 => &self.p2_option,
-            PriorityBucket::P3 => &self.p3_option,
-        }
+        &self.options[usize::from(priority.order())]
     }
 }
 

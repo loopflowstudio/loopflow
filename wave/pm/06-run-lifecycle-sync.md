@@ -2,11 +2,13 @@
 asana_id: '1213718325464924'
 linear_id: 6b50d03b-e50b-4048-83f6-bcaa5445657d
 ---
-# 07: Item lifecycle comments and completion
+# 06: Item lifecycle comments and completion
 
 **Finish line:** PR open, run failure, and merge can comment on or complete the specific ingested PM item because the run retains stable roadmap-item identity after `ingest`.
 
 Wave-level PM import/export now happens automatically at PR-oriented run start/end. The missing piece is item identity: `ingest` moves a numbered roadmap file into `scratch/`, and the run currently loses the durable link needed to look up `id_for(provider)` later.
+
+**Open design question:** Push scope — should lifecycle comments push the whole item state or just the event payload (PR URL, error message)? Event-only is simpler and avoids accidentally overwriting human edits in the PM tool.
 
 Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
 
@@ -44,8 +46,8 @@ Best-effort: if a PM API call fails, log a warning and continue. Never block wav
 
 - PM sync failures must not affect wave execution.
 - Stable item identity must survive `ingest` moving files into `scratch/`.
-- No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter/run metadata.
-- Reuse the existing provider client methods; do not create a second PM transport path for lifecycle events.
+- No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter (`id_for(provider)` on `RoadmapItemDocument`) / run metadata.
+- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`); do not create a second PM transport path for lifecycle events.
 
 ## Done when
 

@@ -18,8 +18,7 @@ The PM architecture now centers on provider roles, a shared seam, and a single s
 - `rust/loopflow/src/lfd/pm/asana.rs` and `rust/loopflow/src/lfd/pm/linear.rs` are the concrete transport adapters — both implement the full `PmProvider` trait with rate-limit retry and noop-update filtering via `PmTextUpdate`
 - `RoadmapItemFrontmatter` uses per-provider ID fields (`asana_id`, `linear_id`) with `id_for(provider)` and `set_id(provider, id)` dispatch, enabling multi-provider linking without a second frontmatter shape
 - `lf ops auth ...`, `lfq auth ...`, provider-token storage, and HTTP auth routes handle Asana OAuth and Linear API-key flows
-- `rust/loopflow/src/ops/pm.rs` owns role-aware bootstrap/status/import/sync orchestration (`rw_provider` plus `export_providers`) and writes wave YAML/frontmatter through the shared helpers
-- `rust/loopflow/src/ops/export.rs` pushes local roadmap state to every configured provider role and can create missing provider projects
+- `rust/loopflow/src/ops/pm.rs` owns all PM orchestration: `pm_init` (bootstrap), `pm_pull` (remote-wins refresh), `pm_status` (sync state), `pm_import` (wave creation from PM), and `pm_sync` (bidirectional sync). Writes wave YAML/frontmatter through the shared helpers
 - `WaveExecutor::execute()` already imports from the read/write provider at the start of PR-oriented runs and exports back to the configured providers when those runs finish
 
 Future items should deepen that path instead of creating a second one.
@@ -39,8 +38,7 @@ Future items should deepen that path instead of creating a second one.
 
 ## Goals
 
-- Thin `import-pm` / `export-pm` step wrappers and a `pm-sync` flow expose the existing mechanical ops commands to normal flows
-- `lf ops pm pull` gives a deterministic remote-wins refresh surface that `ingest` and future step wrappers can build on
+- Thin step wrappers and a `pm-sync` flow expose ops commands (`pm_pull`, `pm_init`, `pm_status`) to normal flows
 - `ingest` refreshes from PM before picking the next item when a wave is linked
 - Runs retain stable roadmap-item identity so PR open/failure/merge can comment on or complete the specific linked PM item
 - Notion can join the provider-role model without bypassing the shared `PmProvider` seam or frontmatter helpers
@@ -53,7 +51,7 @@ Future items should deepen that path instead of creating a second one.
 - **Repo-default export providers may be too broad.** If some waves need to opt out of mirrored exports, add an explicit per-wave override instead of special-casing execution.
 - **Live provider round-trips still need manual verification.** Automated tests cover the Rust behavior, but real Linear/Asana credentials and hosted projects are still the only way to prove the full sync path.
 - **Notion block model complexity.** Notion's rich content model is far more structured than Asana/Linear descriptions. The first pass intentionally keeps it simple (paragraph blocks), but round-trip fidelity will need more work if users start editing descriptions in Notion.
-- **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set.
+- **Credential/config drift is user-facing.** PM flows will feel broken unless missing workspace/team configuration points to the exact knob the user needs to set. Error messages for `pm init`/`pm pull` are better than before but misconfigured `linear.team` or `asana.workspace` values are still a setup footgun — the failure mode is an opaque API error rather than a "run `lf ops auth configure linear` first" pointer.
 - **Linear `completed_state_id` not cached.** Each `complete_item` call makes two API requests. Acceptable for wave-scale usage but would need caching at higher volumes.
 - **Linear team auto-creation.** `resolve_team_id` creates a "Loopflow" team if none exists. Could surprise users who don't expect team creation.
 

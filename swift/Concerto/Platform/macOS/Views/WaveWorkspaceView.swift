@@ -34,12 +34,10 @@ struct WaveWorkspaceView: View {
             }
 
             if selectedTab == .terminal {
-                if repoState.terminalWorkspaceStore.selectedSession != nil {
-                    TerminalWorkspaceView()
-                } else {
-                    ProgressView("Loading terminal session…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                TerminalWorkspaceView(
+                    waveId: wave.id,
+                    onBackToWork: { selectedTab = .work }
+                )
             } else {
                 WaveDetailPanel(wave: wave)
                     .id(wave.id)
@@ -54,7 +52,7 @@ struct WaveWorkspaceView: View {
             guard let sessionId,
                   repoState.consumeAutoPresentTerminal(for: wave.id) else { return }
             selectedTab = .terminal
-            repoState.selectTerminalSession(sessionId)
+            repoState.selectTerminalSession(sessionId, waveId: wave.id)
         }
         .onChange(of: wave.id) { _, _ in
             selectedTab = .work
@@ -76,9 +74,9 @@ struct WaveWorkspaceView: View {
         Button {
             selectedTab = tab
             if tab == .terminal, let session = terminalSession {
-                repoState.selectTerminalSession(session.id)
+                repoState.selectTerminalSession(session.id, waveId: wave.id)
             } else if tab == .work {
-                repoState.selectTerminalSession(nil)
+                repoState.selectTerminalSession(nil, waveId: wave.id)
             }
         } label: {
             Label(label, systemImage: systemImage)

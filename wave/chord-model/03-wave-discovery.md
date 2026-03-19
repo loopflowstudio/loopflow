@@ -1,3 +1,6 @@
+---
+linear_id: e4bced9c-17a1-4cde-bf4a-ea8496e00bc5
+---
 # 03: Wave Discovery and Root Chord
 
 **Finish line:** lfd discovers waves from `wave/` on disk, reconciles against the store, and runs them. Concerto auto-creates a root chord on launch with membership derived from discovered waves.

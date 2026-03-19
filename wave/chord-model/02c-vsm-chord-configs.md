@@ -13,6 +13,10 @@ Depends on:
 
 Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Governance waves need graceful skip behavior when their scan can't reach an expected data source.
 
+Open design questions from the governance flow build:
+- **`tend/scan` consuming sN outputs:** Does tend/scan pull (run the sN scans inline) or read (assume governance flows ran recently and consume their outputs)? Affects whether tend and governance flows are coupled or independent.
+- **Interactive flag on `review-chord`:** Is interactivity baked into the step or inherited from flow context? Matters because governance flows are headless (no human) while tend is interactive.
+
 ## The shape
 
 ```

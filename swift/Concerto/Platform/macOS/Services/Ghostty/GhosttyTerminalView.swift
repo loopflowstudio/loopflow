@@ -89,6 +89,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     private var _markedText = NSMutableAttributedString()
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
+    private var _didInsertText = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -254,25 +255,18 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
-        // Use interpretKeyEvents for IME support
+        // Use interpretKeyEvents for IME support.
+        // If insertText fires, it sends text via ghostty_surface_text —
+        // skip the manual ghostty_surface_key below to avoid double input.
+        _didInsertText = false
         interpretKeyEvents([event])
+
+        if _didInsertText { return }
 
         // For non-IME keys, send directly to Ghostty
         if _markedRange.location == NSNotFound {
-            var key = translateKey(event)
-
-            // For control combinations, don't include text
-            let mods = event.modifierFlags
-            if mods.contains(.control) || mods.contains(.command) {
-                _ = ghostty_surface_key(surface, key)
-            } else if let chars = event.characters, !chars.isEmpty {
-                chars.withCString { textPtr in
-                    key.text = textPtr
-                    _ = ghostty_surface_key(surface, key)
-                }
-            } else {
-                _ = ghostty_surface_key(surface, key)
-            }
+            let key = translateKey(event)
+            _ = ghostty_surface_key(surface, key)
         }
     }
 
@@ -324,6 +318,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     func insertText(_ string: Any, replacementRange: NSRange) {
         guard let surface else { return }
 
+        _didInsertText = true
         unmarkText()
 
         let text: String

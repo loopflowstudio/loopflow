@@ -646,6 +646,7 @@ public actor EventService {
 
     public func disconnect() async {
         intentionallyDisconnected = true
+        pathMonitor.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)

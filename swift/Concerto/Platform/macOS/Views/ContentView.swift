@@ -267,6 +267,11 @@ struct ContentView: View {
             handleFocusPane(.next)
         case .focusPreviousPane:
             handleFocusPane(.previous)
+<<<<<<< HEAD
+=======
+        case .snapHalf, .snapThird, .snapQuarter:
+            break // Phase 3
+>>>>>>> 55cd605c (lf commit: implement)
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -329,10 +334,28 @@ struct ContentView: View {
     private func handleMultiplexerSplit(axis: SplitAxis) {
         guard let context = multiplexerContext() else { return }
 
+<<<<<<< HEAD
         _ = repoState.multiplexerStore.splitPane(
             context.focusedPane.id,
             axis: axis,
             newPaneType: splitPaneType(for: context.focusedPane),
+=======
+        if context.routesToTerminal {
+            Task {
+                do {
+                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).split(axis)
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        _ = repoState.multiplexerStore.splitPane(
+            context.focusedPane.id,
+            axis: axis,
+            newPaneType: nextOuterPaneType(after: context.focusedPane.type),
+>>>>>>> 55cd605c (lf commit: implement)
             for: context.waveId
         )
     }
@@ -340,34 +363,88 @@ struct ContentView: View {
     private func handleClosePane() {
         guard let context = multiplexerContext() else { return }
 
+<<<<<<< HEAD
         if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
            let sessionName = closedPane.config.terminalSessionName {
             TmuxSessionRegistry.shared.killSession(named: sessionName)
         }
+=======
+        if context.routesToTerminal {
+            Task {
+                do {
+                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).closeFocusedThing()
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        _ = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId)
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     private func handleNewShell() {
         guard let context = multiplexerContext() else { return }
+<<<<<<< HEAD
         _ = repoState.multiplexerStore.splitPane(
             context.focusedPane.id,
             axis: .horizontal,
             newPaneType: .terminal,
             for: context.waveId
         )
+=======
+
+        Task {
+            do {
+                try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).createWindow()
+            } catch {
+                repoState.errorMessage = error.localizedDescription
+            }
+        }
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     private func handleFocusPane(_ direction: FocusDirection) {
         guard let context = multiplexerContext() else { return }
+<<<<<<< HEAD
         repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
     }
 
     private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
               (wave.worktreePath ?? wave.api.localWorktree) != nil,
+=======
+
+        if context.routesToTerminal {
+            Task {
+                do {
+                    let tmux = TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath)
+                    switch direction {
+                    case .next:
+                        try await tmux.selectNextWindow()
+                    case .previous:
+                        try await tmux.selectPreviousWindow()
+                    }
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
+    }
+
+    private func multiplexerContext() -> (waveId: String, worktreePath: String, focusedPane: PaneState, routesToTerminal: Bool)? {
+        guard let wave = repoState.selectedWave,
+              let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
+>>>>>>> 55cd605c (lf commit: implement)
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
+<<<<<<< HEAD
         return MultiplexerContext(
             waveId: wave.id,
             focusedPane: focusedPane
@@ -381,14 +458,36 @@ struct ContentView: View {
     private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
         switch paneType {
         case .terminal, .launchpad:
+=======
+        let routesToTerminal = focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
+        return (wave.id, worktreePath, focusedPane, routesToTerminal)
+    }
+
+    private func nextOuterPaneType(after paneType: PaneType) -> PaneType {
+        switch paneType {
+        case .terminal:
+>>>>>>> 55cd605c (lf commit: implement)
             .markdown
         case .markdown:
             .diff
         case .diff:
             .launchpad
+<<<<<<< HEAD
         }
     }
 
+=======
+        case .launchpad:
+            .markdown
+        }
+    }
+
+    private func isTerminalResponder(_ responder: Any?) -> Bool {
+        guard let responder else { return false }
+        return String(describing: type(of: responder)).contains("GhosttyMetalView")
+    }
+
+>>>>>>> 55cd605c (lf commit: implement)
     private func openIDEForSelectedWave() {
         performLauncherAction(failureLabel: "open Cursor") { launcher, worktreeURL in
             try launcher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)

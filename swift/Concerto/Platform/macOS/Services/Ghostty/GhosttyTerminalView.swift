@@ -682,6 +682,7 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     return ["env", envPrefix, command].joined(separator: " ")
 }
 
+<<<<<<< HEAD
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
@@ -733,6 +734,8 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
+=======
+>>>>>>> 55cd605c (lf commit: implement)
 private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"

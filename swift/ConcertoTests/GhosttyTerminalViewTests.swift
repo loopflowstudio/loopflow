@@ -1,5 +1,8 @@
 import Testing
+<<<<<<< HEAD
 import AppKit
+=======
+>>>>>>> 55cd605c (lf commit: implement)
 @testable import Concerto
 
 @Suite("Ghostty terminal command")
@@ -28,6 +31,7 @@ struct GhosttyTerminalViewTests {
     func returnsNilWithoutCommand() {
         #expect(buildGhosttyShellCommand(argv: [], env: ["RLM_DEPTH": "1"]) == nil)
     }
+<<<<<<< HEAD
 
     @Test("control-modified control characters fall through to key handling")
     func controlCharactersFallThroughToKeyHandling() {
@@ -93,4 +97,6 @@ struct GhosttyTerminalViewTests {
         #expect(ghosttyKeyText(characters: "a", modifiers: [.command]) == nil)
         #expect(ghosttyKeyText(characters: nil, modifiers: []) == nil)
     }
+=======
+>>>>>>> 55cd605c (lf commit: implement)
 }

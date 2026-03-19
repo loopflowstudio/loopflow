@@ -12,11 +12,15 @@ struct WaveWorkspaceView: View {
 
     var body: some View {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 55cd605c (lf commit: implement)
         MultiplexerView(
             waveId: wave.id,
             worktreePath: wave.worktreePath ?? wave.api.localWorktree
         )
         .id(wave.id)
+<<<<<<< HEAD
 =======
         VStack(spacing: 0) {
             if hasTerminal {
@@ -79,5 +83,7 @@ struct WaveWorkspaceView: View {
         }
         .buttonStyle(.plain)
 >>>>>>> eb790e5f (concerto: stabilize bundled daemon terminal handoff)
+=======
+>>>>>>> 55cd605c (lf commit: implement)
     }
 }

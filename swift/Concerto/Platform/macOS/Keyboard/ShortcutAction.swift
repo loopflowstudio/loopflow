@@ -112,6 +112,12 @@ enum ShortcutAction: Hashable {
     case newShellPane
     case focusNextPane
     case focusPreviousPane
+<<<<<<< HEAD
+=======
+    case snapHalf
+    case snapThird
+    case snapQuarter
+>>>>>>> 55cd605c (lf commit: implement)
 
     // Tabs
     case switchToCurrentTab
@@ -238,14 +244,22 @@ enum ShortcutCatalog {
 
         // Multiplexer
         ShortcutBinding(
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
+=======
+            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command], allowsRepeat: false),
+>>>>>>> 55cd605c (lf commit: implement)
             action: .splitVertical,
             label: "Split vertical",
             category: .multiplexer,
             requiresWave: true
         ),
         ShortcutBinding(
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
+=======
+            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command, .shift], allowsRepeat: false),
+>>>>>>> 55cd605c (lf commit: implement)
             action: .splitHorizontal,
             label: "Split horizontal",
             category: .multiplexer,
@@ -266,14 +280,22 @@ enum ShortcutCatalog {
             requiresWave: true
         ),
         ShortcutBinding(
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command, .option], allowsRepeat: false),
+=======
+            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command], allowsRepeat: false),
+>>>>>>> 55cd605c (lf commit: implement)
             action: .focusNextPane,
             label: "Focus next pane",
             category: .multiplexer,
             requiresWave: true
         ),
         ShortcutBinding(
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command, .option], allowsRepeat: false),
+=======
+            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command], allowsRepeat: false),
+>>>>>>> 55cd605c (lf commit: implement)
             action: .focusPreviousPane,
             label: "Focus previous pane",
             category: .multiplexer,
@@ -351,4 +373,12 @@ extension Notification.Name {
     static let viewWavePR = Notification.Name("viewWavePR")
     static let switchToCurrentTab = Notification.Name("switchToCurrentTab")
     static let switchToRunsTab = Notification.Name("switchToRunsTab")
+
+    // Multiplexer
+    static let splitVertical = Notification.Name("splitVertical")
+    static let splitHorizontal = Notification.Name("splitHorizontal")
+    static let closePane = Notification.Name("closePane")
+    static let newShellPane = Notification.Name("newShellPane")
+    static let focusNextPane = Notification.Name("focusNextPane")
+    static let focusPreviousPane = Notification.Name("focusPreviousPane")
 }

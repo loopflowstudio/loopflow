@@ -17,6 +17,7 @@ public enum PaneType: String, Codable, Sendable {
 
 public struct PaneConfig: Codable, Sendable, Equatable {
     public var filePath: String?
+<<<<<<< HEAD
     public var terminalSessionName: String?
     public var launchCommand: String?
 
@@ -28,6 +29,11 @@ public struct PaneConfig: Codable, Sendable, Equatable {
         self.filePath = filePath
         self.terminalSessionName = terminalSessionName
         self.launchCommand = launchCommand
+=======
+
+    public init(filePath: String? = nil) {
+        self.filePath = filePath
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     public static let empty = PaneConfig()
@@ -49,6 +55,16 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     case leaf(PaneState)
     case split(SplitAxis, first: LayoutNode, second: LayoutNode, ratio: Double)
 
+<<<<<<< HEAD
+=======
+    public var id: String {
+        switch self {
+        case .leaf(let pane): pane.id
+        case .split(_, let first, _, _): "split-\(first.id)"
+        }
+    }
+
+>>>>>>> 55cd605c (lf commit: implement)
     public static func defaultLayout() -> LayoutNode {
         .leaf(PaneState(type: .terminal))
     }
@@ -80,6 +96,7 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
+<<<<<<< HEAD
     private func containsPane(_ paneId: String) -> Bool {
         pane(for: paneId) != nil
     }
@@ -91,6 +108,8 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         return false
     }
 
+=======
+>>>>>>> 55cd605c (lf commit: implement)
     /// Replace the leaf with the given paneId with a split containing the original and a new pane.
     public func splitting(_ paneId: String, axis: SplitAxis, newPane: PaneState, ratio: Double = 0.5) -> LayoutNode {
         switch self {
@@ -135,6 +154,7 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
+<<<<<<< HEAD
     /// Replace a leaf pane while preserving the surrounding tree shape.
     public func replacingPane(_ paneId: String, with pane: PaneState) -> LayoutNode {
         switch self {
@@ -151,12 +171,15 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
+=======
+>>>>>>> 55cd605c (lf commit: implement)
     /// Update the split ratio for the split that directly contains a pane.
     public func updatingRatio(containing paneId: String, ratio: Double) -> LayoutNode {
         switch self {
         case .leaf:
             return self
         case .split(let axis, let first, let second, let currentRatio):
+<<<<<<< HEAD
             if first.isLeaf(paneId) || second.isLeaf(paneId) {
                 return .split(axis, first: first, second: second, ratio: ratio)
             }
@@ -173,16 +196,35 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                               ratio: currentRatio)
             }
             return self
+=======
+            let firstContains = first.pane(for: paneId) != nil
+            let secondContains = second.pane(for: paneId) != nil
+            if firstContains || secondContains {
+                return .split(axis, first: first, second: second, ratio: ratio)
+            }
+            return .split(axis,
+                          first: first.updatingRatio(containing: paneId, ratio: currentRatio),
+                          second: second.updatingRatio(containing: paneId, ratio: currentRatio),
+                          ratio: currentRatio)
+>>>>>>> 55cd605c (lf commit: implement)
         }
     }
 
     /// Find the next pane after the given paneId in tree order.
     public func nextPane(after paneId: String) -> PaneState? {
+<<<<<<< HEAD
         adjacentPane(to: paneId, offset: 1)
+=======
+        let panes = allPanes
+        guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
+        let nextIndex = (index + 1) % panes.count
+        return panes[nextIndex]
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     /// Find the previous pane before the given paneId in tree order.
     public func previousPane(before paneId: String) -> PaneState? {
+<<<<<<< HEAD
         adjacentPane(to: paneId, offset: -1)
     }
 
@@ -191,6 +233,12 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
         let neighborIndex = (index + offset + panes.count) % panes.count
         return panes[neighborIndex]
+=======
+        let panes = allPanes
+        guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
+        let prevIndex = (index - 1 + panes.count) % panes.count
+        return panes[prevIndex]
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     // MARK: - Codable

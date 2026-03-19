@@ -27,12 +27,17 @@ public final class MultiplexerStore {
         if let existing = layoutsByWave[waveId] {
             return existing
         }
+<<<<<<< HEAD
         let defaultLayout = assignTerminalSessions(in: LayoutNode.defaultLayout(), for: waveId)
+=======
+        let defaultLayout = LayoutNode.defaultLayout()
+>>>>>>> 55cd605c (lf commit: implement)
         layoutsByWave[waveId] = defaultLayout
         return defaultLayout
     }
 
     public func focusedPaneId(for waveId: String) -> String? {
+<<<<<<< HEAD
         let layout = layout(for: waveId)
         let id = focusedPaneByWave[waveId]
         if let id, layout.pane(for: id) != nil {
@@ -45,12 +50,28 @@ public final class MultiplexerStore {
         let layout = layout(for: waveId)
         guard let id = focusedPaneId(for: waveId) else { return nil }
         return layout.pane(for: id)
+=======
+        let id = focusedPaneByWave[waveId]
+        if let id, layout(for: waveId).pane(for: id) != nil {
+            return id
+        }
+        return layout(for: waveId).firstPane?.id
+    }
+
+    public func focusedPane(for waveId: String) -> PaneState? {
+        guard let id = focusedPaneId(for: waveId) else { return nil }
+        return layout(for: waveId).pane(for: id)
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     // MARK: - Mutations
 
     public func setLayout(_ layout: LayoutNode, for waveId: String) {
+<<<<<<< HEAD
         layoutsByWave[waveId] = assignTerminalSessions(in: layout, for: waveId)
+=======
+        layoutsByWave[waveId] = layout
+>>>>>>> 55cd605c (lf commit: implement)
         reconcileFocus(for: waveId)
         persist()
     }
@@ -67,7 +88,17 @@ public final class MultiplexerStore {
         newPaneType: PaneType,
         for waveId: String
     ) -> PaneState {
+<<<<<<< HEAD
         let newPane = makePane(type: newPaneType, for: waveId)
+=======
+        if newPaneType == .terminal, let terminalPane = layout(for: waveId).allPanes.first(where: { $0.type == .terminal }) {
+            focusedPaneByWave[waveId] = terminalPane.id
+            persist()
+            return terminalPane
+        }
+
+        let newPane = PaneState(type: newPaneType)
+>>>>>>> 55cd605c (lf commit: implement)
         let current = layout(for: waveId)
         let updated = current.splitting(paneId, axis: axis, newPane: newPane)
         layoutsByWave[waveId] = updated
@@ -79,6 +110,10 @@ public final class MultiplexerStore {
     public func closePane(_ paneId: String, for waveId: String) -> PaneState? {
         let current = layout(for: waveId)
         guard let closedPane = current.pane(for: paneId) else { return nil }
+<<<<<<< HEAD
+=======
+        guard closedPane.type != .terminal else { return nil }
+>>>>>>> 55cd605c (lf commit: implement)
 
         if let updated = current.removing(paneId) {
             layoutsByWave[waveId] = updated
@@ -86,7 +121,10 @@ public final class MultiplexerStore {
         } else {
             layoutsByWave.removeValue(forKey: waveId)
             focusedPaneByWave.removeValue(forKey: waveId)
+<<<<<<< HEAD
             removePersistedLayout(for: waveId)
+=======
+>>>>>>> 55cd605c (lf commit: implement)
         }
         persist()
         return closedPane
@@ -98,6 +136,7 @@ public final class MultiplexerStore {
         persist()
     }
 
+<<<<<<< HEAD
     public func replacePane(
         _ paneId: String,
         with newPaneType: PaneType,
@@ -119,6 +158,8 @@ public final class MultiplexerStore {
         return replacement
     }
 
+=======
+>>>>>>> 55cd605c (lf commit: implement)
     public func moveFocus(_ direction: FocusDirection, for waveId: String) {
         guard let current = focusedPaneId(for: waveId) else { return }
         let layout = layout(for: waveId)
@@ -136,6 +177,7 @@ public final class MultiplexerStore {
     public func removeWave(_ waveId: String) {
         layoutsByWave.removeValue(forKey: waveId)
         focusedPaneByWave.removeValue(forKey: waveId)
+<<<<<<< HEAD
         removePersistedLayout(for: waveId)
         persist()
     }
@@ -147,6 +189,13 @@ public final class MultiplexerStore {
             guard pane.type == .terminal else { return nil }
             return pane.config.terminalSessionName
         }
+=======
+        persist()
+    }
+
+    public func terminalPane(for waveId: String) -> PaneState? {
+        layout(for: waveId).allPanes.first(where: { $0.type == .terminal })
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     // MARK: - Persistence
@@ -184,9 +233,13 @@ public final class MultiplexerStore {
         guard layoutsByWave[waveId] == nil, let repoKey else { return }
         let key = storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout")
         guard let data = userDefaults.data(forKey: key) else { return }
+<<<<<<< HEAD
         if let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) {
             layoutsByWave[waveId] = assignTerminalSessions(in: decoded, for: waveId)
         }
+=======
+        layoutsByWave[waveId] = try? JSONDecoder().decode(LayoutNode.self, from: data)
+>>>>>>> 55cd605c (lf commit: implement)
     }
 
     private func reconcileFocus(for waveId: String) {
@@ -203,6 +256,7 @@ public final class MultiplexerStore {
         }
         return "multiplexer.\(suffix).\(repoKey)"
     }
+<<<<<<< HEAD
 
     private func makePane(type: PaneType, for waveId: String) -> PaneState {
         let paneId = UUID().uuidString
@@ -231,6 +285,8 @@ public final class MultiplexerStore {
         guard let repoKey else { return }
         userDefaults.removeObject(forKey: storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout"))
     }
+=======
+>>>>>>> 55cd605c (lf commit: implement)
 }
 
 public enum FocusDirection: Sendable {

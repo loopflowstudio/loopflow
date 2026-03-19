@@ -155,6 +155,7 @@ It should not need its own launch shim or a private interpretation of how loopfl
 lfd does three things. All three are listen-and-react, not request-response.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 1. Watch
 =======
 - triggers and scheduling
@@ -180,6 +181,13 @@ Filesystem, git state, shared runtime store → emit events.
 =======
 - emitting structured lifecycle events when the shared runtime store is available
 >>>>>>> ca80052f (lf commit: implement)
+=======
+### 1. Watch
+
+Filesystem, git state, shared runtime store → emit events.
+
+`lf` writes structured lifecycle events into the store. lfd watches the store and fans out events over WebSocket. Concerto subscribes and mirrors. No polling, no refresh endpoints.
+>>>>>>> 55cd605c (lf commit: implement)
 
 ### 2. React
 

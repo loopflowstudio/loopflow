@@ -48,6 +48,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         title
         description
+        sortOrder
         state {
           type
         }
@@ -266,7 +267,7 @@ impl PmProvider for LinearClient {
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         let mut after = None;
-        let mut items = Vec::new();
+        let mut issues = Vec::new();
 
         loop {
             let response: ProjectIssuesData = self
@@ -280,16 +281,19 @@ impl PmProvider for LinearClient {
                 )
                 .await?;
 
-            let issues = response.project.issues;
-            for issue in issues.nodes {
-                items.push(issue.into_pm_item(items.len() as u32));
+            let page = response.project.issues;
+            issues.extend(page.nodes);
+
+            if !page.page_info.has_next_page {
+                issues.sort_by(|left, right| left.sort_order.total_cmp(&right.sort_order));
+                return Ok(issues
+                    .into_iter()
+                    .enumerate()
+                    .map(|(rank, issue)| issue.into_pm_item(rank as u32))
+                    .collect());
             }
 
-            if !issues.page_info.has_next_page {
-                return Ok(items);
-            }
-
-            after = issues.page_info.end_cursor;
+            after = page.page_info.end_cursor;
         }
     }
 
@@ -428,6 +432,8 @@ struct IssueNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(rename = "sortOrder", default)]
+    sort_order: f64,
     #[serde(default)]
     state: Option<WorkflowStateRef>,
 }
@@ -735,7 +741,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_paginates_and_assigns_rank_by_response_order() {
+    async fn list_items_paginates_and_assigns_rank_by_sort_order() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
@@ -748,12 +754,14 @@ mod tests {
                                         "id": "issue-1",
                                         "title": "First",
                                         "description": "one",
+                                        "sortOrder": 30.0,
                                         "state": { "type": "backlog" }
                                     },
                                     {
                                         "id": "issue-2",
                                         "title": "Second",
                                         "description": "two",
+                                        "sortOrder": 10.0,
                                         "state": { "type": "completed" }
                                     }
                                 ],
@@ -777,6 +785,7 @@ mod tests {
                                         "id": "issue-3",
                                         "title": "Third",
                                         "description": null,
+                                        "sortOrder": 20.0,
                                         "state": { "type": "unstarted" }
                                     }
                                 ],
@@ -806,23 +815,23 @@ mod tests {
             items,
             vec![
                 PmItem {
-                    id: "issue-1".to_string(),
-                    name: "First".to_string(),
-                    description: "one".to_string(),
-                    rank: 0,
-                    completed: false,
-                },
-                PmItem {
                     id: "issue-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    rank: 1,
+                    rank: 0,
                     completed: true,
                 },
                 PmItem {
                     id: "issue-3".to_string(),
                     name: "Third".to_string(),
                     description: "".to_string(),
+                    rank: 1,
+                    completed: false,
+                },
+                PmItem {
+                    id: "issue-1".to_string(),
+                    name: "First".to_string(),
+                    description: "one".to_string(),
                     rank: 2,
                     completed: false,
                 },

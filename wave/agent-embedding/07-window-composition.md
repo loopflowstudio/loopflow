@@ -10,7 +10,7 @@ linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 
 The multiplexer milestone (this PR) shipped the core: recursive binary split tree, per-wave layout persistence, tmux session management, Ghostty embedding, and keyboard shortcuts. Shell panes work. Phase 1 is the layout engine plus shell panes.
 
-The pane routing spec (`scratch/pane-routing-spec.md`) establishes the model going forward:
+The pane routing spec establishes the model going forward:
 
 - **One terminal pane per wave**, backed by one tmux session
 - tmux owns all inner shell splitting (panes, windows, tabs)
@@ -143,6 +143,7 @@ The existing `07-window-composition.md` was written around lfd-owned terminal se
 - **Diff parsing**: Raw `git diff` output needs parsing into file-level hunks. Can use `Process` + string parsing, or a library. Start simple.
 - **Command dispatch timing**: When terminal has focus, Ghostty captures most key events. Need to intercept pane commands before Ghostty sees them. The existing `performKeyEquivalent` override in `GhosttyMetalView` already handles Cmd+C/V — extend it for pane commands.
 - **Focus visual clarity**: If the user can't tell whether they're in outer-pane mode or terminal mode, shared shortcuts will feel random. The focus indicator design is load-bearing.
+- **Focus detection drift**: Shortcut routing depends on accurate Ghostty responder detection. If Ghostty's `performKeyEquivalent` behavior changes, terminal-vs-outer dispatch could silently break. Pin focus detection with tests.
 
 ## Done when
 

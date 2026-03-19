@@ -2,154 +2,81 @@
 asana_id: '1213718096104955'
 linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 ---
-# 06: Window Composition
+# 06: Window Composition — Polish
 
-**Finish line:** Concerto is a native pane compositor where one terminal pane (backed by tmux) lives alongside native markdown, diff, and launchpad panes. One command vocabulary manages both layers.
+**Finish line:** The multiplexer panes are rich enough to stay open. Markdown has a file picker, diff shows unified hunks, splitting offers a type choice, and directional focus works across the whole layout.
 
 ## Context
 
-The multiplexer milestone (this PR) shipped the core: recursive binary split tree, per-wave layout persistence, tmux session management, Ghostty embedding, and keyboard shortcuts. Shell panes work. Phase 1 is the layout engine plus shell panes.
+The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and four pane types (terminal, markdown, diff, launchpad). Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
 
-The pane routing spec establishes the model going forward:
+Current pane state:
+- **Terminal:** Fully functional — Ghostty embedding, tmux-backed splits, session lifecycle
+- **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no FSEvents
+- **Diff:** Shows `git diff --stat main...HEAD`. No per-file unified diff, no file list sidebar
+- **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
-- **One terminal pane per wave**, backed by one tmux session
-- tmux owns all inner shell splitting (panes, windows, tabs)
-- Concerto owns the outer pane tree (terminal + native panes)
-- One semantic command vocabulary dispatches to the right layer based on focus
-
-This item covers the native pane types and the command dispatch system.
+Current shortcuts: `Cmd+D` split vertical, `Cmd+Shift+D` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Enter` new shell, `Cmd+←/→` focus next/previous pane.
 
 ## What to build
 
-### 1. Markdown viewer pane
+### 1. Pane type picker
 
-Read-only file viewer for wave and scratch content.
+When splitting, a popover lets you choose the new pane type. Currently splits always create a terminal pane.
 
-- Scoped to `wave/<wave-id>/` and `scratch/` in the worktree
-- File picker sidebar (tree of matching markdown files)
-- Renders markdown with syntax highlighting via `Typography.code()` for code blocks
-- Watches files for changes (FSEvents), re-renders on save
-- No editing, no LSP, no git integration — pure viewer
-- Opens from: file picker, or clicking a path reference in another pane (later)
+- Small popover at the split point
+- Options: Terminal (grayed if one exists), Markdown, Diff, Launchpad
+- Default: terminal if none exists, otherwise markdown
 
-This replaces the old `TerminalContextSidebar` content. Wave identity, current work items, and roadmap state are all viewable in `wave/<id>/README.md` and `scratch/` — no need for a dedicated sidebar chrome.
+### 2. Markdown file picker
 
-### 2. Diff viewer pane
+Add a sidebar or top bar to the markdown pane for browsing files.
 
-Shows the branch diff against main.
+- Tree of markdown files in `wave/<wave-id>/` and `scratch/`
+- Click to open. Current file highlighted
+- FSEvents watcher to re-render on external save
 
-- Runs `git diff main...HEAD` in the worktree via `Process`
-- File list sidebar, unified diff view with syntax highlighting
-- Refreshes on focus or manual trigger
-- Read-only — for reviewing what changed, not editing
-- Truncates large diffs (>500 lines per file) with "show more" expansion
+### 3. Unified diff viewer
 
-### 3. Launchpad pane
+Replace `--stat` with a proper diff display.
 
-Quick-launch buttons for external tools.
+- File list sidebar (from `git diff --name-only main...HEAD`)
+- Click file to see unified diff with syntax highlighting
+- Truncate large hunks (>500 lines) with "show more"
+- Refresh on focus or manual trigger
 
-- Open in Cursor (existing `TerminalLauncher.openInIDE`)
-- Open in Codex app
-- Open in OpenCode GUI
-- Reveal in Finder
-- Open GitHub PR (if wave has one)
-- Small pane — works well as a narrow sidebar or quarter-screen
-- Also shows wave identity: name, branch, status, worktree path
+### 4. Directional focus
 
-### 4. Pane type picker
+Replace next/previous with spatial navigation.
 
-When splitting a pane, a picker lets you choose what type the new pane is.
+- `Cmd+←/→/↑/↓` for directional focus across outer panes
+- When terminal is focused, directional focus routes to `tmux select-pane`
+- Requires knowing which pane is spatially adjacent (the layout tree has this info)
 
-- Appears as a small popover at the split point
-- Options: Terminal (only if no terminal pane exists), Markdown, Diff, Launchpad
-- Terminal option is grayed out if a terminal pane already exists in the wave's layout
-- Default for Cmd-Shift-Enter: always terminal if possible, otherwise markdown
+### 5. Resize and zoom
 
-### 5. Semantic command dispatch
+- `Cmd+Option+←/→/↑/↓` resize the split boundary
+- `Cmd+Shift+Z` zoom focused pane (toggle full-size)
+- When terminal is focused, resize/zoom routes to tmux
 
-One command vocabulary, routed by focus context.
+### 6. Snap hotkeys and named layouts
 
-```swift
-enum PaneCommand: String, Codable {
-    case splitVertical
-    case splitHorizontal
-    case closeFocus
-    case focusLeft, focusRight, focusUp, focusDown
-    case resizeLeft, resizeRight, resizeUp, resizeDown
-    case zoomFocus
-    case newTab
-}
+`snapHalf`, `snapThird`, `snapQuarter` actions already exist in `ShortcutAction` but aren't wired.
 
-func dispatch(_ command: PaneCommand, focus: FocusContext) {
-    switch focus {
-    case .outerPane(_, let kind) where kind != .terminal:
-        outerPaneManager.handle(command)
-    case .terminal:
-        tmuxBridge.handle(command)
-    default:
-        outerPaneManager.handle(command)
-    }
-}
-```
+- `Cmd+1/2/3/4` for quarter/third/half/full on focused outer pane
+- Named layouts per workflow: "build" (terminal + markdown), "review" (terminal + diff), "full" (terminal only)
+- Layout presets stored per wave alongside the current split tree
 
-Terminal-focused translations:
-- `splitVertical` → `tmux split-window -h`
-- `splitHorizontal` → `tmux split-window -v`
-- `focusLeft/Right/Up/Down` → `tmux select-pane -L/-R/-U/-D`
-- `resizeLeft/Right/Up/Down` → `tmux resize-pane -L/-R/-U/-D <step>`
-- `zoomFocus` → `tmux resize-pane -Z`
-- `newTab` → `tmux new-window`
-- `closeFocus` → `tmux kill-pane` or `tmux kill-window`
+### 7. Visual polish
 
-### 6. Terminal pane invariants
-
-- Exactly one terminal pane per wave
-- Terminal pane cannot be duplicated in the outer tree
-- Closing the terminal pane either: disallows close, or replaces with a new terminal pane
-- tmux session survives Concerto crashes; on relaunch, detect and reattach
-- Concerto does not map outer leaves to tmux windows or panes — tmux owns that
-
-### 7. Polish
-
-- Drag-to-resize split boundaries in the outer tree
-- Snap hotkeys: Cmd-1/2/3/4 for quarter/third/half/full on focused outer pane
-- Named layouts per wave or per workflow (build, review, tend)
-- Cross-pane interaction: click file path in terminal → opens in markdown viewer (later: editor)
-- Visual focus indicators: which outer pane is active, whether terminal has keyboard focus
-
-## What this replaces
-
-The existing `07-window-composition.md` was written around lfd-owned terminal sessions and multiple terminal panes in the split tree. This rewrite reflects the new model:
-
-- Terminal sessions are local tmux, not lfd-managed
-- One terminal pane per wave, not N shell panes
-- tmux owns inner splitting, Concerto owns outer splitting
-- Command dispatch is focus-aware, not layer-specific
-
-## Implementation order
-
-1. Markdown viewer pane content (file picker + renderer)
-2. Diff viewer pane content (git diff display)
-3. Launchpad pane content (external tool buttons)
-4. Pane type picker on split
-5. Semantic command dispatch with tmux bridge
-6. Directional focus (left/right/up/down instead of next/previous)
-7. Resize and zoom
-8. Named layouts and snap hotkeys
-
-## Risks
-
-- **Markdown rendering quality**: SwiftUI doesn't have a built-in markdown renderer with syntax highlighting. May need AttributedString parsing or a lightweight WebView. Start with basic AttributedString, upgrade if needed.
-- **Diff parsing**: Raw `git diff` output needs parsing into file-level hunks. Can use `Process` + string parsing, or a library. Start simple.
-- **Command dispatch timing**: When terminal has focus, Ghostty captures most key events. Need to intercept pane commands before Ghostty sees them. The existing `performKeyEquivalent` override in `GhosttyMetalView` already handles Cmd+C/V — extend it for pane commands.
-- **Focus visual clarity**: If the user can't tell whether they're in outer-pane mode or terminal mode, shared shortcuts will feel random. The focus indicator design is load-bearing.
-- **Focus detection drift**: Shortcut routing depends on accurate Ghostty responder detection. If Ghostty's `performKeyEquivalent` behavior changes, terminal-vs-outer dispatch could silently break. Pin focus detection with tests.
+- Drag-to-resize split boundaries
+- Focus ring that clearly shows which layer is active (outer pane border vs terminal focus)
+- Cross-pane interaction: click a file path in terminal → open in markdown viewer (later)
 
 ## Done when
 
-- Markdown viewer shows wave/scratch content with file picker
-- Diff viewer shows branch diff with file list
-- Launchpad has working buttons for Cursor, Finder, and PR
 - Splitting offers a pane type choice
-- Same shortcut splits outer pane or tmux pane depending on focus
-- Focus indicators clearly show which layer is active
+- Markdown pane has a file picker and watches for changes
+- Diff pane shows unified hunks per file
+- Directional focus works across outer and terminal panes
+- At least one named layout preset works

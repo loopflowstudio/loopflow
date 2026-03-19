@@ -1,3 +1,6 @@
+---
+linear_id: b854c1c9-b49f-47f6-be6f-381f7c7cb1b0
+---
 # 02: Real CLI Executor
 
 **Finish line:** when `lfd` decides a run should start, it supervises a normal `lf <flow-or-step>` process in the correct worktree and environment instead of executing flows through a second bespoke daemon executor.

@@ -2,7 +2,7 @@
 interactive: true
 requires: scratch/<slug>.md (elaborated design from kickoff)
 produces: scratch/<slug>.md (revised to match user intent)
-default_agent: codex
+default_agent: claude
 action_style: exploratory
 ---
 Reshape the AI-elaborated design into the human's actual intent.

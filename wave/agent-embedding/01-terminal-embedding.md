@@ -11,12 +11,16 @@ Stop competing on chat. Claude Code, Cursor, Windsurf, OpenCode — all ahead on
 
 The agent runs in a real terminal. Concerto provides: which wave this session belongs to, what the wave's current focus is, recent history, related attention items, and queue pressure. The human sees the terminal plus the context that makes it meaningful.
 
+## Foundation in place
+
+`lfd` now persists `TerminalSession` records with typed lifecycle state (pending/attached/running/completed/cancelled), exposes `/v0/terminal-sessions/*` HTTP routes, and emits session updates through the event hub. LoopflowCore has `TerminalWorkspaceStore` and `LocalWaveService` consuming those routes and events. The daemon-side plumbing for session binding and lifecycle tracking exists — what's missing is the Ghostty view embedding and native UI surfaces.
+
 ## What to build
 
 1. **Ghostty terminal view.** Embedded terminal component in Concerto. A coding session opens a terminal pane with the agent running inside. Full terminal emulation — not a chat widget.
 2. **Wave context sidebar.** Next to the terminal: which wave, current work item, recent PRs, active attention items, and queue state. Updates live as the session progresses.
-3. **Session → wave binding.** When a session starts, it's bound to a wave. The terminal opens in the wave's worktree. The agent gets the wave's area, direction, and flow context.
-4. **Multi-session.** Multiple terminals, multiple waves, tiled or tabbed. The conductor running three agents at once — coherent because each is bound to a wave with context.
+3. **Session → wave binding.** Wire through the existing `TerminalSession` model — when a session starts, it's bound to a wave. The terminal opens in the wave's worktree. The agent gets the wave's area, direction, and flow context. `lfd` already tracks this binding; Concerto needs to present it.
+4. **Multi-session.** Multiple terminals, multiple waves, tiled or tabbed. The conductor running three agents at once — coherent because each is bound to a wave with context. `lfd` already supports concurrent sessions with independent lifecycle.
 
 ## Done when
 

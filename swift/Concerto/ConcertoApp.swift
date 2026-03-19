@@ -90,7 +90,15 @@ private enum VoiceInputWarmup {
 
 private enum AppRuntime {
     static var isAutomatedTest: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let processInfo = ProcessInfo.processInfo
+        let environment = processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil ||
+            environment["CONCERTO_UI_TEST_MODE"] != nil {
+            return true
+        }
+
+        let arguments = processInfo.arguments
+        return arguments.contains("-ui-test-mode") || arguments.contains("--snapshot")
     }
 }
 

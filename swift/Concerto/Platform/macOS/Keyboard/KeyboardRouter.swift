@@ -99,8 +99,15 @@ final class KeyboardRouter {
         handler: (ShortcutAction) -> Void
     ) -> Bool {
         switch mode {
-        case .textEditing, .terminal, .commandPalette:
+        case .textEditing, .commandPalette:
             return false
+        case .terminal:
+            return handleTerminalShortcut(
+                key: key,
+                modifiers: modifiers,
+                isRepeat: isRepeat,
+                handler: handler
+            )
         case .helpOverlay:
             return handleHelpOverlayKey(key: key, modifiers: modifiers)
         case .global:
@@ -119,6 +126,25 @@ final class KeyboardRouter {
             handler(binding.action)
             return true
         }
+    }
+
+    private func handleTerminalShortcut(
+        key: ShortcutKey,
+        modifiers: NSEvent.ModifierFlags,
+        isRepeat: Bool,
+        handler: (ShortcutAction) -> Void
+    ) -> Bool {
+        guard let binding = findShortcut(key: key, modifiers: modifiers),
+              binding.category == .multiplexer else {
+            return false
+        }
+
+        if isRepeat && !binding.gesture.allowsRepeat {
+            return true
+        }
+
+        handler(binding.action)
+        return true
     }
 
     func resolveMode(
@@ -337,4 +363,3 @@ enum KeyboardMode: Equatable {
     case helpOverlay
     case global
 }
-

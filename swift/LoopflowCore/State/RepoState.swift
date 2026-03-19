@@ -83,6 +83,7 @@ public final class RepoState {
     public var currentRepo: URL? {
         didSet {
             terminalWorkspaceStore.configure(repoKey: currentRepo?.path())
+            multiplexerStore.configure(repoKey: currentRepo?.path())
         }
     }
     public var repoTarget: RepoTarget?
@@ -96,6 +97,7 @@ public final class RepoState {
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
     public let terminalWorkspaceStore = TerminalWorkspaceStore()
+    public let multiplexerStore = MultiplexerStore()
     public let authProviderStore = AuthProviderStore()
     public let secretsProviderStore = SecretsProviderStore()
     private var sessionStates: [String: SessionState] = [:]

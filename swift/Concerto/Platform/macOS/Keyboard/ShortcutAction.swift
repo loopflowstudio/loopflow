@@ -76,6 +76,7 @@ struct ChordBinding {
 enum ShortcutCategory: String, CaseIterable {
     case navigation = "Navigation"
     case waveActions = "Wave Actions"
+    case multiplexer = "Multiplexer"
     case tools = "Tools"
     case tabs = "Tabs"
     case global = "Global"
@@ -103,6 +104,17 @@ enum ShortcutAction: Hashable {
     case openIDE
     case openFinder
     case viewPR
+
+    // Multiplexer
+    case splitVertical
+    case splitHorizontal
+    case closePane
+    case newShellPane
+    case focusNextPane
+    case focusPreviousPane
+    case snapHalf
+    case snapThird
+    case snapQuarter
 
     // Tabs
     case switchToCurrentTab
@@ -227,6 +239,50 @@ enum ShortcutCatalog {
             requiresWave: true
         ),
 
+        // Multiplexer
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command], allowsRepeat: false),
+            action: .splitVertical,
+            label: "Split vertical",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command, .shift], allowsRepeat: false),
+            action: .splitHorizontal,
+            label: "Split horizontal",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("w"), modifiers: [.command], allowsRepeat: false),
+            action: .closePane,
+            label: "Close pane",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .keyCode(ShortcutCatalog.returnKeyCode), modifiers: [.command, .shift], allowsRepeat: false),
+            action: .newShellPane,
+            label: "New shell",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command], allowsRepeat: false),
+            action: .focusNextPane,
+            label: "Focus next pane",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command], allowsRepeat: false),
+            action: .focusPreviousPane,
+            label: "Focus previous pane",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+
         // Tabs
         ShortcutBinding(
             gesture: ShortcutGesture(key: .character("1"), modifiers: [], allowsRepeat: false),
@@ -298,4 +354,12 @@ extension Notification.Name {
     static let viewWavePR = Notification.Name("viewWavePR")
     static let switchToCurrentTab = Notification.Name("switchToCurrentTab")
     static let switchToRunsTab = Notification.Name("switchToRunsTab")
+
+    // Multiplexer
+    static let splitVertical = Notification.Name("splitVertical")
+    static let splitHorizontal = Notification.Name("splitHorizontal")
+    static let closePane = Notification.Name("closePane")
+    static let newShellPane = Notification.Name("newShellPane")
+    static let focusNextPane = Notification.Name("focusNextPane")
+    static let focusPreviousPane = Notification.Name("focusPreviousPane")
 }

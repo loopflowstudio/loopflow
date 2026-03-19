@@ -4,111 +4,151 @@ linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 ---
 # 06: Window Composition
 
-**Finish line:** Concerto is a native Swift window compositor for development work. Terminals, diff viewers, file editors, wave configs, and queue/portfolio surfaces compose into layouts the way tmux composes terminal panes, but with native UI where it matters.
+**Finish line:** Concerto is a native pane compositor where one terminal pane (backed by tmux) lives alongside native markdown, diff, and launchpad panes. One command vocabulary manages both layers.
 
 ## Context
 
-The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. `TerminalWorkspaceStore` now also persists tab ordering and selection per repo, and `lfd` exposes attach/start/cancel endpoints plus durable `terminal_sessions` rows. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch. It also needs to stay compatible with the transport upgrade tracked in `wave/lfd/`: grow around session identity and workspace state, not around today's local launch-spec shim.
+The multiplexer milestone (this PR) shipped the core: recursive binary split tree, per-wave layout persistence, tmux session management, Ghostty embedding, and keyboard shortcuts. Shell panes work. Phase 1 is the layout engine plus shell panes.
 
-Tmux solves a real problem: manage multiple panes of work in one screen, persist layouts across sessions, switch contexts fast. Developers live in it because nothing else gives that level of control over window composition.
+The pane routing spec (`scratch/pane-routing-spec.md`) establishes the model going forward:
 
-But tmux is limited to terminals. Everything is text. Diffs are text. Config editing is text. A native compositor can do what tmux does and more — native diff views with syntax highlighting, visual wave config editors, file trees with semantic awareness, and queue/calibration surfaces that stay first-class instead of becoming terminal output.
+- **One terminal pane per wave**, backed by one tmux session
+- tmux owns all inner shell splitting (panes, windows, tabs)
+- Concerto owns the outer pane tree (terminal + native panes)
+- One semantic command vocabulary dispatches to the right layer based on focus
 
-The question isn't "can we replace tmux" — it's "what would tmux be if it had access to native UI and understood the development workflow?"
-
-## Feature comparison: tmux vs Concerto compositor
-
-| Capability | tmux | Concerto target |
-|-----------|------|-----------------|
-| Split panes | Terminal only | Terminal + native views |
-| Pane types | All terminals | Terminal, diff, file editor, wave config, attention queue, portfolio, calibration |
-| Layouts | Manual splits, saved configs | Named layouts per workflow (build, review, tend, debug) |
-| Session persistence | Across disconnects | Across app launches, bound to wave + terminal-session state |
-| Context switching | `prefix + window number` | Wave-aware — switch wave, layout follows |
-| Pane communication | Pipes, copy-paste | Semantic — select text in diff, opens in editor at that line |
-| Search | Terminal scrollback | Cross-pane — search finds results in terminal, queue, and files |
-| Status bar | Customizable text | Wave status, attention pressure, active flow step |
+This item covers the native pane types and the command dispatch system.
 
 ## What to build
 
-1. **Pane types.** Each pane is a native SwiftUI view:
-   - **Terminal** — promote the existing Ghostty / `TerminalSession` integration from tabs to panes; no freeform shell model separate from `lfd`
-   - **Diff viewer** — side-by-side or unified, syntax highlighted, reviewable
-   - **File editor** — native text editor with syntax highlighting (or embedded editor component)
-   - **Wave config** — visual editor for wave YAML (direction picker, area file browser, flow step list)
-   - **Attention queue** — the conductor's human checkpoint surface
-   - **Portfolio** — multi-wave overview
-   - **Calibration** — structured chord review view
+### 1. Markdown viewer pane
 
-2. **Layout system.** Panes compose into layouts:
-   - Horizontal/vertical splits, resizable, nestable (like tmux)
-   - Named layouts saved per wave or per workflow
-   - Default layouts: `build` (terminal + files + queue context), `review` (diff + terminal), `tend` (portfolio + attention queue + calibration), `debug` (terminal + terminal + log viewer)
-   - Promote the existing tabbed terminal workspace into split layouts instead of replacing it with a second workspace stack
+Read-only file viewer for wave and scratch content.
 
-3. **Wave-aware context switching.** The tmux session concept, but bound to waves:
-   - Each wave has a foreground workspace — the selected run, its layout, its terminal session, its open files
-   - Switch wave = switch the foreground run context for that wave
-   - Multiple waves visible simultaneously in split layouts (the conductor view)
-   - Background runs for the same wave remain real; the compositor is choosing what to foreground, not asserting exclusivity in the daemon
+- Scoped to `wave/<wave-id>/` and `scratch/` in the worktree
+- File picker sidebar (tree of matching markdown files)
+- Renders markdown with syntax highlighting via `Typography.code()` for code blocks
+- Watches files for changes (FSEvents), re-renders on save
+- No editing, no LSP, no git integration — pure viewer
+- Opens from: file picker, or clicking a path reference in another pane (later)
 
-4. **Cross-pane interaction.** Panes aren't isolated — they understand each other:
-   - Click a file path in terminal → opens in file editor pane
-   - Click a PR reference in queue/review UI → opens in diff viewer pane
-   - Select a block in queue → terminal pane shows that wave's session
-   - Drag a file from file tree → opens where you drop it
+This replaces the old `TerminalContextSidebar` content. Wave identity, current work items, and roadmap state are all viewable in `wave/<id>/README.md` and `scratch/` — no need for a dedicated sidebar chrome.
 
-5. **Keyboard-driven.** tmux users live on the keyboard. Concerto should be equally fast:
-   - Leader key (like tmux prefix) for pane management
-   - Pane navigation (hjkl or arrow keys)
-   - Quick switcher (fuzzy find waves, files, attention items)
-   - All pane operations available without mouse
+### 2. Diff viewer pane
 
-6. **Session persistence.** Survive app restart:
-   - Layout state persisted
-   - Terminal panes restore around existing terminal-session ids; do not invent pane-local terminal identity
-   - Open files and scroll positions restored
-   - Wave context maintained
-   - Foreground-run selection is restored as product state, without collapsing multiple runs into one daemon concept
+Shows the branch diff against main.
 
-## Design guidance from tmux study
+- Runs `git diff main...HEAD` in the worktree via `Process`
+- File list sidebar, unified diff view with syntax highlighting
+- Refreshes on focus or manual trigger
+- Read-only — for reviewing what changed, not editing
+- Truncates large diffs (>500 lines per file) with "show more" expansion
 
-### What to borrow from tmux
+### 3. Launchpad pane
 
-**Layout as data, not just view state.** tmux encodes split hierarchies as compact strings (`120x40,0,0{60x40,0,0,5,59x40,61,0,6}`) that serialize the full tree. iTerm2 parses these to build its `NSSplitView` hierarchy on attach. Concerto should similarly serialize layout trees — not just tab order, but split directions, sizes, and pane types — so layout persistence and wave-context switching are data operations.
+Quick-launch buttons for external tools.
 
-**Session identity above compositor identity.** tmux sessions have stable IDs; windows and panes are subordinate. Concerto's composition should work the same way: `TerminalSession` IDs and wave/run IDs are the stable anchors. Pane positions and split ratios are compositor state that can change without affecting session identity.
+- Open in Cursor (existing `TerminalLauncher.openInIDE`)
+- Open in Codex app
+- Open in OpenCode GUI
+- Reveal in Finder
+- Open GitHub PR (if wave has one)
+- Small pane — works well as a narrow sidebar or quarter-screen
+- Also shows wave identity: name, branch, status, worktree path
 
-**Independent active-pane per client.** tmux lets each attached client independently select which pane is active. In a Concerto split layout, this means focus/selection is a per-view-instance concern, not a session-level concern. Two split terminal panes showing different sessions can each have independent focus.
+### 4. Pane type picker
 
-### What to avoid from tmux
+When splitting a pane, a picker lets you choose what type the new pane is.
 
-**Pane as runtime identity.** tmux pane IDs are runtime primitives — they gate input routing, size negotiation, and process lifecycle. Concerto panes should be pure compositor constructs. The runtime primitives are `TerminalSession` and `WaveRun`. If Concerto creates a split view showing two terminals, that's two pane views wrapping two session references, not two new runtime identities.
+- Appears as a small popover at the split point
+- Options: Terminal (only if no terminal pane exists), Markdown, Diff, Launchpad
+- Terminal option is grayed out if a terminal pane already exists in the wave's layout
+- Default for Cmd-Shift-Enter: always terminal if possible, otherwise markdown
 
-**Universal terminal assumption.** tmux's every pane is a terminal. Concerto's value is that panes can be native views (diff, queue, calibration) that understand their content semantically. Don't force native panes through a terminal abstraction.
+### 5. Semantic command dispatch
 
-### iTerm2 as reference client
+One command vocabulary, routed by focus context.
 
-iTerm2's tmux integration is the most mature example of a rich native GUI consuming tmux sessions. Key patterns:
-- **Tab affinity** — which tmux windows group into one native window is persisted as tmux session variables and restored on reconnect. Concerto needs equivalent persistence for which sessions/views group into a layout.
-- **Outstanding-resize counter** — prevents feedback loops during resize. Concerto will face the same problem when split panes resize affects terminal sessions.
-- **Pending-request watermark** — iTerm2 tracks outstanding async commands and delays UI construction until all respond. Concerto should similarly batch initial state loading before rendering a layout.
+```swift
+enum PaneCommand: String, Codable {
+    case splitVertical
+    case splitHorizontal
+    case closeFocus
+    case focusLeft, focusRight, focusUp, focusDown
+    case resizeLeft, resizeRight, resizeUp, resizeDown
+    case zoomFocus
+    case newTab
+}
 
-### Mosh insight for composition
+func dispatch(_ command: PaneCommand, focus: FocusContext) {
+    switch focus {
+    case .outerPane(_, let kind) where kind != .terminal:
+        outerPaneManager.handle(command)
+    case .terminal:
+        tmuxBridge.handle(command)
+    default:
+        outerPaneManager.handle(command)
+    }
+}
+```
 
-Mosh's state-sync model (sync screen snapshot, not replay bytes) is relevant for composition. When switching wave context, Concerto doesn't need to replay terminal history — it needs the current screen state. If `lfd` later exposes a `capture-pane` equivalent (current terminal grid as text), layout switching can show instant content without streaming replay.
+Terminal-focused translations:
+- `splitVertical` → `tmux split-window -h`
+- `splitHorizontal` → `tmux split-window -v`
+- `focusLeft/Right/Up/Down` → `tmux select-pane -L/-R/-U/-D`
+- `resizeLeft/Right/Up/Down` → `tmux resize-pane -L/-R/-U/-D <step>`
+- `zoomFocus` → `tmux resize-pane -Z`
+- `newTab` → `tmux new-window`
+- `closeFocus` → `tmux kill-pane` or `tmux kill-window`
 
-## Open questions
+### 6. Terminal pane invariants
 
-- How should saved layouts interact with the current `TerminalWorkspaceStore` ordering and selection model? (Guidance: layouts should reference sessions by ID, and `TerminalWorkspaceStore` remains the authority for per-repo session ordering. Layouts compose over that — they describe spatial arrangement, not session lifecycle.)
-- What is the right restore story for running Ghostty surfaces that currently only survive inside one app process? (Guidance: once `lfd` owns PTYs (item 04), Ghostty views just reattach to daemon sessions on restore. Before that, local Ghostty processes die with the app — persist the layout tree, recreate shells on restart.)
-- Which panes must work for remote repos before remote PTY transport exists, and which stay local-only? (Guidance: queue, portfolio, calibration, and diff panes work for any repo with an `lfd` HTTP connection. Terminal panes need either local Ghostty or daemon PTY transport. Keep the pane type roster split along that line.)
-- How much tmux-style keyboard vocabulary helps vs confuses in a native macOS app? (Guidance: leader-key + hjkl for pane navigation is natural for tmux/vim users. But Concerto is a macOS app — Cmd-based shortcuts should also work. Offer both, don't force one.)
+- Exactly one terminal pane per wave
+- Terminal pane cannot be duplicated in the outer tree
+- Closing the terminal pane either: disallows close, or replaces with a new terminal pane
+- tmux session survives Concerto crashes; on relaunch, detect and reattach
+- Concerto does not map outer leaves to tmux windows or panes — tmux owns that
+
+### 7. Polish
+
+- Drag-to-resize split boundaries in the outer tree
+- Snap hotkeys: Cmd-1/2/3/4 for quarter/third/half/full on focused outer pane
+- Named layouts per wave or per workflow (build, review, tend)
+- Cross-pane interaction: click file path in terminal → opens in markdown viewer (later: editor)
+- Visual focus indicators: which outer pane is active, whether terminal has keyboard focus
+
+## What this replaces
+
+The existing `07-window-composition.md` was written around lfd-owned terminal sessions and multiple terminal panes in the split tree. This rewrite reflects the new model:
+
+- Terminal sessions are local tmux, not lfd-managed
+- One terminal pane per wave, not N shell panes
+- tmux owns inner splitting, Concerto owns outer splitting
+- Command dispatch is focus-aware, not layer-specific
+
+## Implementation order
+
+1. Markdown viewer pane content (file picker + renderer)
+2. Diff viewer pane content (git diff display)
+3. Launchpad pane content (external tool buttons)
+4. Pane type picker on split
+5. Semantic command dispatch with tmux bridge
+6. Directional focus (left/right/up/down instead of next/previous)
+7. Resize and zoom
+8. Named layouts and snap hotkeys
+
+## Risks
+
+- **Markdown rendering quality**: SwiftUI doesn't have a built-in markdown renderer with syntax highlighting. May need AttributedString parsing or a lightweight WebView. Start with basic AttributedString, upgrade if needed.
+- **Diff parsing**: Raw `git diff` output needs parsing into file-level hunks. Can use `Process` + string parsing, or a library. Start simple.
+- **Command dispatch timing**: When terminal has focus, Ghostty captures most key events. Need to intercept pane commands before Ghostty sees them. The existing `performKeyEquivalent` override in `GhosttyMetalView` already handles Cmd+C/V — extend it for pane commands.
+- **Focus visual clarity**: If the user can't tell whether they're in outer-pane mode or terminal mode, shared shortcuts will feel random. The focus indicator design is load-bearing.
 
 ## Done when
 
-- At least 3 pane types working (terminal, diff viewer, attention queue)
-- Layouts are saveable and switchable
-- Wave context switching updates all panes
-- Keyboard navigation works for all pane operations
-- A tmux user can do their core workflow without reaching for tmux
+- Markdown viewer shows wave/scratch content with file picker
+- Diff viewer shows branch diff with file list
+- Launchpad has working buttons for Cursor, Finder, and PR
+- Splitting offers a pane type choice
+- Same shortcut splits outer pane or tmux pane depending on focus
+- Focus indicators clearly show which layer is active

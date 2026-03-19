@@ -42,13 +42,7 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        let envPrefix = env
-            .sorted { $0.key < $1.key }
-            .map { key, value in "\(key)=\(shellEscape(value))" }
-            .joined(separator: " ")
-        let command = argv.map(shellEscape).joined(separator: " ")
-        let fullCommand = [envPrefix, command].filter { !$0.isEmpty }.joined(separator: " ")
-        return fullCommand.isEmpty ? nil : fullCommand
+        buildGhosttyShellCommand(argv: argv, env: env)
     }
 }
 
@@ -606,11 +600,6 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 }
 
-private func shellEscape(_ value: String) -> String {
-    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
-}
-
 #else
 
 // Stub view when GhosttyKit is not available
@@ -652,3 +641,24 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
+
+func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? {
+    let command = argv.map(shellEscape).joined(separator: " ")
+    guard !command.isEmpty else { return nil }
+
+    let envPrefix = env
+        .sorted { $0.key < $1.key }
+        .map { key, value in "\(key)=\(shellEscape(value))" }
+        .joined(separator: " ")
+
+    if envPrefix.isEmpty {
+        return command
+    }
+
+    return ["env", envPrefix, command].joined(separator: " ")
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
+}

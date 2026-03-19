@@ -201,6 +201,38 @@ struct KeyboardRouterTests {
         #expect(mode == .terminal)
     }
 
+    @Test("terminal mode still routes multiplexer shortcuts")
+    func terminalModeRoutesMultiplexerShortcuts() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .character("d"),
+            modifiers: [.command],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.splitVertical])
+    }
+
+    @Test("terminal mode ignores non-multiplexer shortcuts")
+    func terminalModeIgnoresNonMultiplexerShortcuts() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .character("k"),
+            modifiers: [.command],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(!handled)
+        #expect(actions.isEmpty)
+    }
+
     @Test("Help overlay mode only handles dismiss keys")
     func helpOverlayDismissKeys() {
         let router = KeyboardRouter()

@@ -250,6 +250,20 @@ struct ContentView: View {
             openFinderForSelectedWave()
         case .viewPR:
             openPRForSelectedWave()
+        case .splitVertical:
+            handleMultiplexerSplit(axis: .horizontal)
+        case .splitHorizontal:
+            handleMultiplexerSplit(axis: .vertical)
+        case .closePane:
+            handleClosePane()
+        case .newShellPane:
+            handleNewShell()
+        case .focusNextPane:
+            handleFocusPane(.next)
+        case .focusPreviousPane:
+            handleFocusPane(.previous)
+        case .snapHalf, .snapThird, .snapQuarter:
+            break // Phase 3
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -307,6 +321,109 @@ struct ContentView: View {
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
             try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
         }
+    }
+
+    private func handleMultiplexerSplit(axis: SplitAxis) {
+        guard let context = multiplexerContext() else { return }
+
+        if context.routesToTerminal {
+            Task {
+                do {
+                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).split(axis)
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        _ = repoState.multiplexerStore.splitPane(
+            context.focusedPane.id,
+            axis: axis,
+            newPaneType: nextOuterPaneType(after: context.focusedPane.type),
+            for: context.waveId
+        )
+    }
+
+    private func handleClosePane() {
+        guard let context = multiplexerContext() else { return }
+
+        if context.routesToTerminal {
+            Task {
+                do {
+                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).closeFocusedThing()
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        _ = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId)
+    }
+
+    private func handleNewShell() {
+        guard let context = multiplexerContext() else { return }
+
+        Task {
+            do {
+                try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).createWindow()
+            } catch {
+                repoState.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func handleFocusPane(_ direction: FocusDirection) {
+        guard let context = multiplexerContext() else { return }
+
+        if context.routesToTerminal {
+            Task {
+                do {
+                    let tmux = TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath)
+                    switch direction {
+                    case .next:
+                        try await tmux.selectNextWindow()
+                    case .previous:
+                        try await tmux.selectPreviousWindow()
+                    }
+                } catch {
+                    repoState.errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
+    }
+
+    private func multiplexerContext() -> (waveId: String, worktreePath: String, focusedPane: PaneState, routesToTerminal: Bool)? {
+        guard let wave = repoState.selectedWave,
+              let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
+              let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
+            return nil
+        }
+
+        let routesToTerminal = focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
+        return (wave.id, worktreePath, focusedPane, routesToTerminal)
+    }
+
+    private func nextOuterPaneType(after paneType: PaneType) -> PaneType {
+        switch paneType {
+        case .terminal:
+            .markdown
+        case .markdown:
+            .diff
+        case .diff:
+            .launchpad
+        case .launchpad:
+            .markdown
+        }
+    }
+
+    private func isTerminalResponder(_ responder: Any?) -> Bool {
+        guard let responder else { return false }
+        return String(describing: type(of: responder)).contains("GhosttyMetalView")
     }
 
     private func openIDEForSelectedWave() {

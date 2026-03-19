@@ -114,30 +114,47 @@ It should not need its own launch shim or a private interpretation of how loopfl
 2. `03-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against that same store
 3. `04-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
 
-## Boundaries
+## Three roles
 
-### `lfd` owns
+lfd does three things. All three are listen-and-react, not request-response.
 
-- triggers and scheduling
-- run creation policy
-- process supervision
-- persistence and event fanout
-- optional PTY supervision later
-- worktree / session attachment semantics
-- reconciliation of waves, runs, sessions, and outcomes
+### 1. Watch
 
-### `lf` owns
+Filesystem, git state, shared runtime store → emit events.
 
-- flow expansion
-- step execution
-- prompt/runtime semantics
-- emitting structured lifecycle events when the shared runtime store is available
+`lf` writes structured lifecycle events into the store. lfd watches the store and fans out events over WebSocket. Concerto subscribes and mirrors. No polling, no refresh endpoints.
 
-### Concerto owns
+### 2. React
 
-- foregrounding one run for a selected wave
-- presenting terminal, work, queue, and portfolio surfaces
-- applying calm serialized UX where the product wants it
+Triggers fire, cron ticks, CI fails → lfd spawns `lf` runs. Same mechanism as a human typing `lf build` in a shell — lfd just types it automatically.
+
+### 3. Sync
+
+External world (GitHub webhooks, PM providers, OAuth flows) → update local state and emit events. Auth is the one flow where lfd genuinely brokers something `lf` can't (OAuth callbacks need a server).
+
+### What this means for the API
+
+Most of the current HTTP surface disappears. If the user runs `lf` commands in a shell:
+
+- No `POST /waves/{id}/run` — they ran `lf build`
+- No `POST /waves/{id}/stop` — they hit Ctrl-C
+- No `POST /waves/{id}/land` — they ran `lf ops land`
+- No `POST /waves/{id}/next` — they ran `lf ops next`
+- No `PATCH /waves/{id}` — they edited the yaml
+- No `POST /terminal-sessions/*` — Concerto manages tmux locally
+
+What stays:
+- **WebSocket event stream** — the primary interface. `connected` event carries full state snapshot (waves, attention, terminal sessions, worktrees, runs). Every mutation emits an event. Concerto never needs to GET.
+- **Auth flows** — `POST /auth/{provider}` stays because OAuth needs a server
+- **Content pulls** — diff content, log replay, usage analytics. State is pushed, content is pulled on demand.
+
+### Boundaries
+
+**lfd owns**: watching, reacting, syncing. Triggers, scheduling, process supervision, persistence, event fanout, external integrations.
+
+**`lf` owns**: flow expansion, step execution, structured lifecycle events.
+
+**Concerto owns**: tmux session management (local shells), pane layout, rendering the event stream into a workspace UI.
 
 ## Milestones
 

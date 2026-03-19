@@ -1,3 +1,6 @@
+---
+linear_id: a35cd281-86f1-4c10-85a0-20690e713965
+---
 # 02: Concerto Release UI
 
 **Finish line:** Concerto shows repo release targets and lets a human trigger a release with a patch/minor/major choice from the app.

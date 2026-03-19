@@ -1,3 +1,6 @@
+---
+linear_id: 1b95c418-7f43-4ecd-96a8-b042e086f858
+---
 # 01: tmux Architecture Study
 
 **Status: complete.** Design guidance propagated into items 02, 03, 04, and `agent-embedding/06`.

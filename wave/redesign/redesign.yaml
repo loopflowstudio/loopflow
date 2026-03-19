@@ -1,10 +1,12 @@
 flow: tend
 mode: manual
 area:
-  - wave/chord-model/
-  - wave/agent-embedding/
+- wave/chord-model/
+- wave/agent-embedding/
 direction:
-  - care
-  - clarity
+- care
+- clarity
 pm:
   asana_project: '1213718558946552'
+  provider: linear
+  linear_project: 3260c1a4-a5ce-47e3-80b9-cfe9fd67087d

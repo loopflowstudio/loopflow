@@ -1,3 +1,6 @@
+---
+linear_id: dba6c46e-5ba0-422a-9ad0-0a4f2dd09e57
+---
 # 03: Auto-Send on Silence
 
 **Finish line:** In continuous voice mode, speak a message, pause, and Concerto sends it automatically; when the agent finishes, listening resumes without extra taps.

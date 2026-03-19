@@ -1,6 +1,6 @@
 ---
 asana_id: '1213717741074343'
-linear_id: 549b8142-0a7d-4588-aa28-4f245ffaa72b
+linear_id: 3a939a72-81a5-4653-891a-8918ddb95234
 ---
 # 06: Team Auth Mode
 

@@ -8,7 +8,8 @@ use tracing::warn;
 
 use crate::engine::config::AsanaConfig;
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult, RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    RATE_LIMIT_RETRIES,
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
@@ -188,6 +189,21 @@ impl PmProvider for AsanaClient {
         let workspace = self.resolve_workspace().await?;
         let team = self.resolve_team_for_project_bootstrap(&workspace).await?;
         self.create_project_for_team(&team, name, description).await
+    }
+
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
+        let path = format!("/teams/{team_id}/projects");
+        let response: AsanaResponse<Vec<AsanaProjectNode>> = self
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", "name")]))
+            .await?;
+        Ok(response
+            .data
+            .into_iter()
+            .map(|p| PmProject {
+                id: p.gid,
+                name: p.name,
+            })
+            .collect())
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -376,6 +392,12 @@ pub struct AsanaWorkspace {
 
 #[derive(Debug, Clone, Deserialize)]
 struct AsanaTeam {
+    gid: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct AsanaProjectNode {
     gid: String,
     name: String,
 }

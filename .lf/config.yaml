@@ -5,7 +5,7 @@ branch_names:
   schema: "{user}.{name}.{ts}"
 
 pm:
-  provider: asana
+  provider: linear
 
 internal:
   use_rust: true

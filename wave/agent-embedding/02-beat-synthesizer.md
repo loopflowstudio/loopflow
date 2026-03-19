@@ -1,8 +1,7 @@
 ---
-asana_id: '1213718096104795'
-linear_id: 197904a5-23aa-41c2-afc4-edc1b078d2e5
+linear_id: 0ce5a1bd-f5ee-425b-8dae-325ea09d4e56
 ---
-# 04: Beat Synthesizer
+# Beat Synthesizer
 
 **Finish line:** A Concerto view where you program a chord's rhythm — assign waves to beat slots in a sequencer grid, visualize the pattern, and run it. The chord's own tend flow is the downbeat.
 
@@ -25,10 +24,10 @@ The number of beats is configurable per chord (default: 8). The pattern repeats 
 
 ## Interaction (v1)
 
-- Pick number of beats — generates default grid (tend + all active waves)
-- Running state shows a playhead moving across the beats
-- Read-only grid visualization — see what's scheduled on each beat
-- Silent waves visible but grayed out
+* Pick number of beats — generates default grid (tend + all active waves)
+* Running state shows a playhead moving across the beats
+* Read-only grid visualization — see what's scheduled on each beat
+* Silent waves visible but grayed out
 
 The full grid editor (drag waves into cells, click to toggle) comes later.
 The data model supports arbitrary per-beat wave assignments from day one —

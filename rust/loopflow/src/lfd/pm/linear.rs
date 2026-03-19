@@ -7,7 +7,8 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmResult, RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -24,8 +25,8 @@ const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
   }
 }"#;
 
-const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!) {
-  teamCreate(input: { name: $name }) {
+const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: String!) {
+  teamCreate(input: { name: $name, key: $key }) {
     team {
       id
     }
@@ -47,6 +48,8 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         title
         description
+        prioritySortOrder
+        sortOrder
         state {
           type
         }
@@ -89,6 +92,17 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
       id
       name
       type
+    }
+  }
+}"#;
+
+const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: String!) {
+  team(id: $teamId) {
+    projects {
+      nodes {
+        id
+        name
+      }
     }
   }
 }"#;
@@ -146,10 +160,11 @@ impl LinearClient {
         }
 
         // Create the team
+        let key = team_key_from_name(DEFAULT_LOOPFLOW_TEAM_NAME);
         let response: TeamCreateData = self
             .graphql(
                 CREATE_TEAM_MUTATION,
-                json!({ "name": DEFAULT_LOOPFLOW_TEAM_NAME }),
+                json!({ "name": DEFAULT_LOOPFLOW_TEAM_NAME, "key": key }),
             )
             .await?;
         Ok(response.team_create.team.id)
@@ -220,6 +235,7 @@ impl LinearClient {
 impl PmProvider for LinearClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
+        let description = linear_project_description(description);
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
@@ -234,9 +250,25 @@ impl PmProvider for LinearClient {
         Ok(response.project_create.project.id)
     }
 
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
+        let response: TeamProjectsData = self
+            .graphql(LIST_TEAM_PROJECTS_QUERY, json!({ "teamId": team_id }))
+            .await?;
+        Ok(response
+            .team
+            .projects
+            .nodes
+            .into_iter()
+            .map(|p| PmProject {
+                id: p.id,
+                name: p.name,
+            })
+            .collect())
+    }
+
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         let mut after = None;
-        let mut items = Vec::new();
+        let mut issues = Vec::new();
 
         loop {
             let response: ProjectIssuesData = self
@@ -250,16 +282,23 @@ impl PmProvider for LinearClient {
                 )
                 .await?;
 
-            let issues = response.project.issues;
-            for issue in issues.nodes {
-                items.push(issue.into_pm_item(items.len() as u32));
+            let page = response.project.issues;
+            issues.extend(page.nodes);
+
+            if !page.page_info.has_next_page {
+                issues.sort_by(|left, right| {
+                    left.priority_sort_order
+                        .total_cmp(&right.priority_sort_order)
+                        .then_with(|| left.sort_order.total_cmp(&right.sort_order))
+                });
+                return Ok(issues
+                    .into_iter()
+                    .enumerate()
+                    .map(|(rank, issue)| issue.into_pm_item(rank as u32))
+                    .collect());
             }
 
-            if !issues.page_info.has_next_page {
-                return Ok(items);
-            }
-
-            after = issues.page_info.end_cursor;
+            after = page.page_info.end_cursor;
         }
     }
 
@@ -343,6 +382,25 @@ struct GraphqlResponse {
 #[derive(Debug, Deserialize)]
 struct GraphqlError {
     message: String,
+    #[serde(default)]
+    extensions: Option<GraphqlErrorExtensions>,
+}
+
+impl GraphqlError {
+    fn display_message(&self) -> &str {
+        self.extensions
+            .as_ref()
+            .and_then(|extensions| extensions.user_presentable_message.as_deref())
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or(&self.message)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphqlErrorExtensions {
+    #[serde(default)]
+    user_presentable_message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -379,6 +437,10 @@ struct IssueNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(rename = "prioritySortOrder", default)]
+    priority_sort_order: f64,
+    #[serde(rename = "sortOrder", default)]
+    sort_order: f64,
     #[serde(default)]
     state: Option<WorkflowStateRef>,
 }
@@ -473,6 +535,27 @@ struct TeamCreatePayload {
     team: IdNode,
 }
 
+#[derive(Deserialize)]
+struct TeamProjectsData {
+    team: TeamWithProjects,
+}
+
+#[derive(Deserialize)]
+struct TeamWithProjects {
+    projects: ProjectsConnection,
+}
+
+#[derive(Deserialize)]
+struct ProjectsConnection {
+    nodes: Vec<ProjectNode>,
+}
+
+#[derive(Deserialize)]
+struct ProjectNode {
+    id: String,
+    name: String,
+}
+
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
     let status = response.status();
     let body = response
@@ -485,11 +568,11 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
 
     if let Some(error) = parsed.errors.first() {
         if status.is_success() {
-            return Err(PmError::Message(error.message.clone()));
+            return Err(PmError::Message(error.display_message().to_string()));
         }
         return Err(PmError::Message(format!(
             "linear request failed with status {status}: {}",
-            error.message
+            error.display_message()
         )));
     }
 
@@ -511,6 +594,63 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
 
     serde_json::from_value(data)
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
+}
+
+/// Derive a Linear team key from a name: uppercase letters, max 5 chars.
+/// "Loopflow" → "LF", "My Team" → "MT".
+fn team_key_from_name(name: &str) -> String {
+    let key: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    if key.is_empty() {
+        "LF".to_string()
+    } else {
+        key[..key.len().min(5)].to_string()
+    }
+}
+
+fn linear_project_description(description: &str) -> String {
+    let summary = first_meaningful_paragraph(description);
+    if summary.is_empty() {
+        return String::new();
+    }
+
+    const MAX_DESCRIPTION_LEN: usize = 255;
+    let mut truncated = String::new();
+    for ch in summary.chars().take(MAX_DESCRIPTION_LEN) {
+        truncated.push(ch);
+    }
+    truncated
+}
+
+fn first_meaningful_paragraph(description: &str) -> String {
+    let mut lines = description.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let mut paragraph = vec![trimmed];
+        while let Some(next_line) = lines.peek() {
+            let trimmed = next_line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            if trimmed.starts_with('#') {
+                lines.next();
+                break;
+            }
+            paragraph.push(trimmed);
+            lines.next();
+        }
+
+        return paragraph.join(" ");
+    }
+
+    String::new()
 }
 
 #[cfg(test)]
@@ -567,7 +707,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_paginates_and_assigns_rank_by_response_order() {
+    async fn create_project_uses_short_summary_for_long_readme_descriptions() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({
+                "data": {
+                    "projectCreate": {
+                        "project": { "id": "project-123" }
+                    }
+                }
+            }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .create_project(
+                "Wave PM",
+                "## Vision\n\nLoopflow syncs with the PM tools teams already use.\n\n## Strategy\n\nThis paragraph should not become the summary.",
+            )
+            .await
+            .expect("create project should succeed");
+
+        let requests = requests.lock().await;
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
+            json!({
+                "query": CREATE_PROJECT_MUTATION,
+                "variables": {
+                    "name": "Wave PM",
+                    "description": "Loopflow syncs with the PM tools teams already use.",
+                    "teamId": "team-9"
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn list_items_paginates_and_assigns_rank_by_priority_sort_order() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
@@ -580,12 +761,16 @@ mod tests {
                                         "id": "issue-1",
                                         "title": "First",
                                         "description": "one",
+                                        "prioritySortOrder": 30.0,
+                                        "sortOrder": 30.0,
                                         "state": { "type": "backlog" }
                                     },
                                     {
                                         "id": "issue-2",
                                         "title": "Second",
                                         "description": "two",
+                                        "prioritySortOrder": 10.0,
+                                        "sortOrder": 10.0,
                                         "state": { "type": "completed" }
                                     }
                                 ],
@@ -609,6 +794,8 @@ mod tests {
                                         "id": "issue-3",
                                         "title": "Third",
                                         "description": null,
+                                        "prioritySortOrder": 20.0,
+                                        "sortOrder": 20.0,
                                         "state": { "type": "unstarted" }
                                     }
                                 ],
@@ -638,23 +825,23 @@ mod tests {
             items,
             vec![
                 PmItem {
-                    id: "issue-1".to_string(),
-                    name: "First".to_string(),
-                    description: "one".to_string(),
-                    rank: 0,
-                    completed: false,
-                },
-                PmItem {
                     id: "issue-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    rank: 1,
+                    rank: 0,
                     completed: true,
                 },
                 PmItem {
                     id: "issue-3".to_string(),
                     name: "Third".to_string(),
                     description: "".to_string(),
+                    rank: 1,
+                    completed: false,
+                },
+                PmItem {
+                    id: "issue-1".to_string(),
+                    name: "First".to_string(),
+                    description: "one".to_string(),
                     rank: 2,
                     completed: false,
                 },
@@ -1005,15 +1192,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_graphql_response_prefers_user_presentable_messages() {
+        let message = parse_linear_error_message(
+            StatusCode::BAD_REQUEST,
+            &json!({
+                "errors": [{
+                    "message": "Argument Validation Error",
+                    "extensions": {
+                        "userPresentableMessage": "description must be shorter than or equal to 255 characters."
+                    }
+                }]
+            })
+            .to_string(),
+        );
+
+        assert_eq!(
+            message,
+            "linear request failed with status 400 Bad Request: description must be shorter than or equal to 255 characters."
+        );
+    }
+
     fn parse_linear_error_message(status: StatusCode, body: &str) -> String {
         let response: GraphqlResponse =
             serde_json::from_str(body).expect("graphql response should parse");
         if let Some(error) = response.errors.first() {
             return format!(
                 "linear request failed with status {status}: {}",
-                error.message
+                error.display_message()
             );
         }
         panic!("expected graphql error message")
+    }
+
+    #[test]
+    fn linear_project_description_skips_headings_and_truncates() {
+        let summary = linear_project_description(
+            "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
+        );
+        assert_eq!(summary, "This is the first paragraph.".to_string());
+
+        let long = "a".repeat(300);
+        let summary = linear_project_description(&long);
+        assert_eq!(summary.len(), 255);
+
+        assert_eq!(linear_project_description(""), "");
     }
 }

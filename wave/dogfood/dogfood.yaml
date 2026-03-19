@@ -1,12 +1,14 @@
 flow: ship-wave
 mode: manual
 area:
-  - rust/loopflow/src/lfd/
-  - python/loopflow/
-  - swift/
-  - docker/
+- rust/loopflow/src/lfd/
+- python/loopflow/
+- swift/
+- docker/
 direction:
-  - care
-  - reliability
+- care
+- reliability
 pm:
   asana_project: '1213718081100756'
+  provider: linear
+  linear_project: 0377a5da-47b7-411b-9075-da0b834b1019

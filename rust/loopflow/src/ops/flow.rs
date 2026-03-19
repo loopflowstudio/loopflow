@@ -183,17 +183,6 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             Ok(())
         }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
-        OpsCommand::Export { wave, dry_run } => {
-            crate::ops::export(
-                repo,
-                &crate::ops::ExportOptions {
-                    wave: wave.clone(),
-                    dry_run: *dry_run,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
         | OpsCommand::Wt { .. }

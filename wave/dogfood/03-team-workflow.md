@@ -1,3 +1,6 @@
+---
+linear_id: e26a973c-fa10-446a-8de7-74e1685d1e96
+---
 # 03: Team Workflow
 
 **Finish line:** Two people can connect to the same lfd instance and collaborate on waves without stepping on each other.

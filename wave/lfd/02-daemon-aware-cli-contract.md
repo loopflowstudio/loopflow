@@ -1,3 +1,6 @@
+---
+linear_id: b00f983a-47b2-4ea8-b357-e45e0d183aa3
+---
 # 01: Daemon-Aware CLI Contract
 
 **Finish line:** `lf` can run normally in a plain shell, but when it detects an `lfd`-managed environment it emits structured lifecycle events that let `lfd` track runs, sessions, waits, and outcomes without scraping terminal output.

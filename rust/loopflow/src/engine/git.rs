@@ -53,6 +53,38 @@ fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn find_worktree_for_branch(repo: &Path, branch: &str) -> Result<Option<PathBuf>, GitError> {
+    let output = run_git(repo, &["worktree", "list", "--porcelain"])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git worktree list --porcelain".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut current_path: Option<PathBuf> = None;
+
+    for line in stdout.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(PathBuf::from(path.trim()));
+            continue;
+        }
+
+        if let Some(worktree_branch) = line.strip_prefix("branch ") {
+            let worktree_branch = worktree_branch
+                .trim()
+                .strip_prefix("refs/heads/")
+                .unwrap_or(worktree_branch.trim());
+            if worktree_branch == branch {
+                return Ok(current_path);
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 fn run_gh(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
     Ok(Command::new("gh").args(args).current_dir(repo).output()?)
 }
@@ -156,6 +188,21 @@ pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), 
             return Ok(());
         }
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if stderr.contains(&format!("no branch named '{old_name}'")) {
+            if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
+                let fallback_command =
+                    format!("git -C {} branch -m {}", worktree.display(), new_name);
+                let fallback = run_git(&worktree, &["branch", "-m", new_name])?;
+                if fallback.status.success() {
+                    return Ok(());
+                }
+
+                return Err(GitError::CommandFailed {
+                    command: fallback_command,
+                    stderr: String::from_utf8_lossy(&fallback.stderr).to_string(),
+                });
+            }
+        }
         let lock_failed = stderr.contains("could not lock config file");
         if lock_failed && attempt < 2 {
             thread::sleep(Duration::from_millis(25));
@@ -836,6 +883,33 @@ mod tests {
             current_branch(repo.path()).unwrap(),
             Some("new-name".to_string())
         );
+    }
+
+    #[test]
+    fn git_branch_rename_after_worktree_move() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        checkout_new_branch(repo.path(), "feature-old").expect("create feature branch");
+        checkout(repo.path(), "main").expect("back to main");
+
+        let wt_path = repo.path().parent().unwrap().join("feature-old-worktree");
+        git_stdout(
+            repo.path(),
+            &["worktree", "add", wt_path.to_str().unwrap(), "feature-old"],
+        )
+        .expect("create worktree");
+
+        let moved_wt = repo.path().parent().unwrap().join("feature-new-worktree");
+        worktree_move(repo.path(), &wt_path, &moved_wt).expect("move worktree");
+
+        branch_rename(repo.path(), "feature-old", "feature-new").expect("rename branch");
+        assert_eq!(
+            current_branch(&moved_wt).unwrap(),
+            Some("feature-new".to_string())
+        );
+
+        worktree_remove(repo.path(), &moved_wt).expect("remove worktree");
     }
 
     #[test]

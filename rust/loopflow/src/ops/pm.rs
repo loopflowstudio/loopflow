@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::Path;
 
 use crate::engine::config::load_config_or_default;
@@ -339,9 +340,7 @@ pub fn pm_init(
     options: &PmInitOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmInitResult> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(pm_init_async(repo, options, progress))
+    block_on_pm(pm_init_async(repo, options, progress))
 }
 
 async fn pm_init_async(
@@ -362,8 +361,7 @@ async fn pm_init_async(
     let provider_kind = resolve_provider(repo, &wave)?;
     write_pm_provider_to_wave_yaml(repo, &wave, provider_kind)?;
 
-    let project_name = read_wave_project_name(repo, &wave)?;
-    let description = read_wave_project_description(repo, &wave)?;
+    let (project_name, description) = read_wave_project_metadata(repo, &wave)?;
     let mut local_items = read_local_roadmap_items(&wave_dir)?;
     let bootstrap = BootstrapArgs {
         repo,
@@ -402,9 +400,7 @@ pub fn pm_status(
     options: &PmStatusOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmStatusResult> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(pm_status_async(repo, options, progress))
+    block_on_pm(pm_status_async(repo, options, progress))
 }
 
 async fn pm_status_async(
@@ -534,13 +530,9 @@ async fn bootstrap_read_write_provider(
         pending_remote_creates.push((index, local_title));
     }
 
-    let pending_remote_creates = if provider_prefers_reverse_create_order(ctx.provider) {
-        pending_remote_creates.into_iter().rev().collect::<Vec<_>>()
-    } else {
-        pending_remote_creates
-    };
-
-    for (index, local_title) in pending_remote_creates {
+    // Both supported PM providers append new items, so create from the bottom up
+    // to preserve the local roadmap order.
+    for (index, local_title) in pending_remote_creates.into_iter().rev() {
         create_remote_for_local_item(
             args.wave_dir,
             &mut local_items[index],
@@ -556,10 +548,7 @@ async fn bootstrap_read_write_provider(
             continue;
         }
         let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
-        let rendered = remote_item_to_document(remote_item, ctx.provider)
-            .render()
-            .map_err(pm_to_ops)?;
-        std::fs::write(args.wave_dir.join(&filename), rendered)?;
+        write_remote_item(&args.wave_dir.join(&filename), remote_item, ctx.provider)?;
         created_local.push(filename);
     }
 
@@ -600,27 +589,21 @@ async fn ensure_project(
     Ok(project_id)
 }
 
-fn read_wave_project_name(repo: &Path, wave: &str) -> OpsResult<String> {
+fn read_wave_project_metadata(repo: &Path, wave: &str) -> OpsResult<(String, String)> {
     let readme_path = repo.join("wave").join(wave).join("README.md");
     let content = match std::fs::read_to_string(&readme_path) {
         Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(title_case(wave)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((title_case(wave), String::new()));
+        }
         Err(err) => return Err(err.into()),
     };
-    Ok(match extract_heading(&content) {
-        Some(title) => title.to_string(),
-        None => title_case(wave),
-    })
-}
-
-fn read_wave_project_description(repo: &Path, wave: &str) -> OpsResult<String> {
-    let readme_path = repo.join("wave").join(wave).join("README.md");
-    let content = match std::fs::read_to_string(&readme_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
-        Err(err) => return Err(err.into()),
-    };
-    Ok(body_without_heading(&content).trim().to_string())
+    Ok((
+        extract_heading(&content)
+            .map(str::to_string)
+            .unwrap_or_else(|| title_case(wave)),
+        body_without_heading(&content).trim().to_string(),
+    ))
 }
 
 fn write_local_item(wave_dir: &Path, item: &LocalRoadmapItem) -> OpsResult<()> {
@@ -679,11 +662,19 @@ fn count_linked_items(items: &[LocalRoadmapItem], provider: PmProviderKind) -> u
 }
 
 fn next_remote_filename(wave_dir: &Path, rank: u32, title: &str) -> String {
+    next_item_filename(rank, title, |filename| !wave_dir.join(filename).exists())
+}
+
+fn next_item_filename(
+    rank: u32,
+    title: &str,
+    mut is_available: impl FnMut(&str) -> bool,
+) -> String {
     let slug = slugify(title);
     let mut prefix = rank;
     loop {
         let filename = format!("{:02}-{slug}.md", prefix + 1);
-        if !wave_dir.join(&filename).exists() {
+        if is_available(&filename) {
             return filename;
         }
         prefix += 1;
@@ -703,32 +694,14 @@ fn overwrite_local_wave_from_remote(
 
     let mut used_filenames = HashSet::new();
     for (index, remote_item) in remote_items.iter().enumerate() {
-        let filename =
-            next_remote_filename_for_pull(index as u32, &remote_item.name, &used_filenames);
+        let filename = next_item_filename(index as u32, &remote_item.name, |filename| {
+            !used_filenames.contains(filename)
+        });
         used_filenames.insert(filename.clone());
-        let rendered = remote_item_to_document(remote_item, provider)
-            .render()
-            .map_err(pm_to_ops)?;
-        std::fs::write(wave_dir.join(filename), rendered)?;
+        write_remote_item(&wave_dir.join(filename), remote_item, provider)?;
     }
 
     Ok(removed)
-}
-
-fn next_remote_filename_for_pull(
-    rank: u32,
-    title: &str,
-    used_filenames: &HashSet<String>,
-) -> String {
-    let slug = slugify(title);
-    let mut prefix = rank;
-    loop {
-        let filename = format!("{:02}-{slug}.md", prefix + 1);
-        if !used_filenames.contains(&filename) {
-            return filename;
-        }
-        prefix += 1;
-    }
 }
 
 fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
@@ -760,9 +733,7 @@ pub fn pm_import(
     options: &PmImportOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmImportResult> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(pm_import_async(repo, options, progress))
+    block_on_pm(pm_import_async(repo, options, progress))
 }
 
 async fn pm_import_async(
@@ -824,10 +795,7 @@ async fn pm_import_async(
                 continue; // additive only — skip existing
             }
             let filename = next_remote_filename(&wave_dir, remote_item.rank, &remote_item.name);
-            let rendered = remote_item_to_document(remote_item, provider_kind)
-                .render()
-                .map_err(pm_to_ops)?;
-            std::fs::write(wave_dir.join(&filename), rendered)?;
+            write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
             items_created += 1;
         }
 
@@ -847,9 +815,7 @@ pub fn pm_sync(
     options: &PmSyncOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmSyncResult> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(pm_sync_async(repo, options, progress))
+    block_on_pm(pm_sync_async(repo, options, progress))
 }
 
 pub fn pm_pull(
@@ -857,9 +823,7 @@ pub fn pm_pull(
     options: &PmPullOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmPullResult> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(pm_pull_async(repo, options, progress))
+    block_on_pm(pm_pull_async(repo, options, progress))
 }
 
 async fn pm_pull_async(
@@ -971,7 +935,7 @@ async fn pm_sync_async(
 
                 let local_changed = local_title != base_title || local_doc.body != base_doc.body;
                 let remote_changed =
-                    remote_title != base_title || remote_description(remote_item) != base_doc.body;
+                    remote_title != base_title || render_remote_body(remote_item) != base_doc.body;
 
                 if local_changed && remote_changed {
                     progress.status(&format!("  conflict: {}", local_file));
@@ -994,10 +958,8 @@ async fn pm_sync_async(
                     pushed.push(local_file.clone());
                 } else if remote_changed {
                     // Pull remote → local
-                    let doc = remote_item_to_document(remote_item, provider_kind);
                     let path = wave_dir.join(local_file);
-                    let rendered = doc.render().map_err(pm_to_ops)?;
-                    std::fs::write(&path, rendered)?;
+                    write_remote_item(&path, remote_item, provider_kind)?;
                     progress.status(&format!("  pulled {local_file}"));
                     pulled.push(local_file.clone());
                 }
@@ -1031,14 +993,12 @@ async fn pm_sync_async(
 
             // Not in base, exists remotely — new remote item, pull
             (None, None, Some(remote_item)) => {
-                let doc = remote_item_to_document(remote_item, provider_kind);
                 let filename = format!(
                     "{:02}-{}.md",
                     remote_item.rank + 1,
                     slugify(&remote_item.name)
                 );
-                let rendered = doc.render().map_err(pm_to_ops)?;
-                std::fs::write(wave_dir.join(&filename), rendered)?;
+                write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
                 progress.status(&format!("  pulled (new) {filename}"));
                 pulled.push(filename);
             }
@@ -1047,7 +1007,7 @@ async fn pm_sync_async(
             (Some(base_doc), None, Some(remote_item)) => {
                 let remote_changed = Some(remote_item.name.as_str())
                     != extract_heading(&base_doc.body)
-                    || remote_description(remote_item) != base_doc.body;
+                    || render_remote_body(remote_item) != base_doc.body;
                 if remote_changed {
                     progress.status(&format!(
                         "  conflict (deleted locally, changed remotely): {pm_id}"
@@ -1159,8 +1119,12 @@ fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapIt
     }
 }
 
-fn remote_description(item: &PmItem) -> String {
-    render_remote_body(item)
+fn write_remote_item(path: &Path, item: &PmItem, provider: PmProviderKind) -> OpsResult<()> {
+    let rendered = remote_item_to_document(item, provider)
+        .render()
+        .map_err(pm_to_ops)?;
+    std::fs::write(path, rendered)?;
+    Ok(())
 }
 
 fn render_remote_body(item: &PmItem) -> String {
@@ -1249,8 +1213,10 @@ pub(crate) fn title_case(slug: &str) -> String {
         .join(" ")
 }
 
-fn provider_prefers_reverse_create_order(provider: PmProviderKind) -> bool {
-    matches!(provider, PmProviderKind::Asana | PmProviderKind::Linear)
+fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
+    rt.block_on(future)
 }
 
 fn pm_to_ops(err: PmError) -> OpsError {

@@ -91,7 +91,7 @@ jobs:
         run: xcodegen generate
         working-directory: swift
       - name: Run Concerto UI tests
-        run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+        run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | cat
         timeout-minutes: 10
         working-directory: swift
 

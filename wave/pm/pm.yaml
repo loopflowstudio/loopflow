@@ -1,4 +1,4 @@
-flow: build-or-silent
+flow: ship-wave
 area:
 - rust/loopflow/src/ops/
 - rust/loopflow/src/lf/

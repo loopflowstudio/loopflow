@@ -3,7 +3,7 @@ asana_id: '1213751601331180'
 linear_id: b0795b6d-e133-41db-8155-6a553d4cbd21
 notion_id: 32af8f99-3d81-8156-a053-fc22fb6bb807
 ---
-# 06: Item lifecycle comments and completion
+# 07: Item lifecycle comments and completion
 
 **Finish line:** PR open, run failure, and merge can comment on or complete the specific ingested PM item because the run retains stable roadmap-item identity after `ingest`.
 

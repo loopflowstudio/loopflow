@@ -8,3 +8,5 @@ direction:
 - clarity
 pm:
   asana_project: '1213718081058007'
+  provider: linear
+  linear_project: 42804753-123b-4b75-b89f-9aa037061a75

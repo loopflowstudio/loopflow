@@ -300,7 +300,8 @@ pm:
 ```
 
 ```bash
-lf ops pm init --wave pm   # connect/create projects, link items, write IDs
+lf ops pm init pm          # connect/create one wave project, link items, write IDs
+lf ops pm init --all       # bootstrap every wave/ project on the shared PM team
 lf ops pm status           # show linked waves and local/remote counts
 ```
 

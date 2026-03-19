@@ -25,15 +25,15 @@ const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
   }
 }"#;
 
-const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!) {
-  teamCreate(input: { name: $name }) {
+const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: String!) {
+  teamCreate(input: { name: $name, key: $key }) {
     team {
       id
     }
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: String!) {
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String, $teamId: String!) {
   projectCreate(input: { name: $name, description: $description, teamIds: [$teamId] }) {
     project {
       id
@@ -158,10 +158,11 @@ impl LinearClient {
         }
 
         // Create the team
+        let key = team_key_from_name(DEFAULT_LOOPFLOW_TEAM_NAME);
         let response: TeamCreateData = self
             .graphql(
                 CREATE_TEAM_MUTATION,
-                json!({ "name": DEFAULT_LOOPFLOW_TEAM_NAME }),
+                json!({ "name": DEFAULT_LOOPFLOW_TEAM_NAME, "key": key }),
             )
             .await?;
         Ok(response.team_create.team.id)
@@ -232,6 +233,7 @@ impl LinearClient {
 impl PmProvider for LinearClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
+        let description = linear_project_description(description);
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
@@ -371,6 +373,25 @@ struct GraphqlResponse {
 #[derive(Debug, Deserialize)]
 struct GraphqlError {
     message: String,
+    #[serde(default)]
+    extensions: Option<GraphqlErrorExtensions>,
+}
+
+impl GraphqlError {
+    fn display_message(&self) -> &str {
+        self.extensions
+            .as_ref()
+            .and_then(|extensions| extensions.user_presentable_message.as_deref())
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or(&self.message)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphqlErrorExtensions {
+    #[serde(default)]
+    user_presentable_message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -534,11 +555,11 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
 
     if let Some(error) = parsed.errors.first() {
         if status.is_success() {
-            return Err(PmError::Message(error.message.clone()));
+            return Err(PmError::Message(error.display_message().to_string()));
         }
         return Err(PmError::Message(format!(
             "linear request failed with status {status}: {}",
-            error.message
+            error.display_message()
         )));
     }
 
@@ -560,6 +581,63 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
 
     serde_json::from_value(data)
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
+}
+
+/// Derive a Linear team key from a name: uppercase letters, max 5 chars.
+/// "Loopflow" → "LF", "My Team" → "MT".
+fn team_key_from_name(name: &str) -> String {
+    let key: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    if key.is_empty() {
+        "LF".to_string()
+    } else {
+        key[..key.len().min(5)].to_string()
+    }
+}
+
+fn linear_project_description(description: &str) -> Option<String> {
+    let summary = first_meaningful_paragraph(description);
+    if summary.is_empty() {
+        return None;
+    }
+
+    const MAX_DESCRIPTION_LEN: usize = 255;
+    let mut truncated = String::new();
+    for ch in summary.chars().take(MAX_DESCRIPTION_LEN) {
+        truncated.push(ch);
+    }
+    Some(truncated)
+}
+
+fn first_meaningful_paragraph(description: &str) -> String {
+    let mut lines = description.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let mut paragraph = vec![trimmed];
+        while let Some(next_line) = lines.peek() {
+            let trimmed = next_line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            if trimmed.starts_with('#') {
+                lines.next();
+                break;
+            }
+            paragraph.push(trimmed);
+            lines.next();
+        }
+
+        return paragraph.join(" ");
+    }
+
+    String::new()
 }
 
 #[cfg(test)]
@@ -609,6 +687,47 @@ mod tests {
                 "variables": {
                     "name": "Wave PM",
                     "description": "Ship the Linear client",
+                    "teamId": "team-9"
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn create_project_uses_short_summary_for_long_readme_descriptions() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({
+                "data": {
+                    "projectCreate": {
+                        "project": { "id": "project-123" }
+                    }
+                }
+            }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .create_project(
+                "Wave PM",
+                "## Vision\n\nLoopflow syncs with the PM tools teams already use.\n\n## Strategy\n\nThis paragraph should not become the summary.",
+            )
+            .await
+            .expect("create project should succeed");
+
+        let requests = requests.lock().await;
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
+            json!({
+                "query": CREATE_PROJECT_MUTATION,
+                "variables": {
+                    "name": "Wave PM",
+                    "description": "Loopflow syncs with the PM tools teams already use.",
                     "teamId": "team-9"
                 }
             })
@@ -1054,15 +1173,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_graphql_response_prefers_user_presentable_messages() {
+        let message = parse_linear_error_message(
+            StatusCode::BAD_REQUEST,
+            &json!({
+                "errors": [{
+                    "message": "Argument Validation Error",
+                    "extensions": {
+                        "userPresentableMessage": "description must be shorter than or equal to 255 characters."
+                    }
+                }]
+            })
+            .to_string(),
+        );
+
+        assert_eq!(
+            message,
+            "linear request failed with status 400 Bad Request: description must be shorter than or equal to 255 characters."
+        );
+    }
+
     fn parse_linear_error_message(status: StatusCode, body: &str) -> String {
         let response: GraphqlResponse =
             serde_json::from_str(body).expect("graphql response should parse");
         if let Some(error) = response.errors.first() {
             return format!(
                 "linear request failed with status {status}: {}",
-                error.message
+                error.display_message()
             );
         }
         panic!("expected graphql error message")
+    }
+
+    #[test]
+    fn linear_project_description_skips_headings_and_truncates() {
+        let summary = linear_project_description(
+            "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
+        );
+        assert_eq!(summary, Some("This is the first paragraph.".to_string()));
+
+        let long = "a".repeat(300);
+        let summary = linear_project_description(&long).expect("summary");
+        assert_eq!(summary.len(), 255);
     }
 }

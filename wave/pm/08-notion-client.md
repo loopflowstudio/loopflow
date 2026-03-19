@@ -1,6 +1,6 @@
 ---
 asana_id: '1213717741038313'
-linear_id: 9147c3a0-8f29-4d0c-b16f-d0ac3a5e72e5
+linear_id: 8bffe88d-84fe-41c5-ab75-348541fbb735
 ---
 # 08: Notion client
 

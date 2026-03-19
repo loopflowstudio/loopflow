@@ -10,3 +10,5 @@ direction:
 - simplicity
 pm:
   asana_project: '1213718081105094'
+  provider: linear
+  linear_project: 8798de51-ec44-45d0-989d-ea66f720a640

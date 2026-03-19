@@ -37,11 +37,11 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 
 ```
 wave/infra/
-├── README.md              # Vision, strategy, goals, risks
-├── 01-daemon-integrity.md # First piece of work
-├── 03-golden-tests.md     # Third piece of work
-├── 04-daemon-coverage.md
-└── 05-security.md
+├── README.md               # Vision, strategy, goals, risks
+├── p0-fix-crash-loop.md   # Broken / unblock-now work
+├── p1-daemon-integrity.md # Clear next step
+├── p2-golden-tests.md     # Big "when not if" work
+└── p3-security-research.md
 ```
 
 The `wave/` directory is the source of truth for what to build. `lfd` reads it; `update-wave` writes it.
@@ -75,22 +75,30 @@ The README is the wave's north star. Agents read it before every iteration to st
 
 ### Writing Items
 
-Items are numbered markdown files. The numeric prefix sets processing order:
+Items are bucketed markdown files. The prefix sets shared priority:
 
 ```
-01-daemon-integrity.md    # processed first
-03-golden-tests.md        # processed after all 01-* items
-04-daemon-coverage.md     # processed after all 03-* items
+p0-fix-crash-loop.md    # broken or blocked; fix first
+p1-daemon-integrity.md  # clear next step
+p2-golden-tests.md      # committed later
+p3-security-research.md # speculative
 ```
 
-All items sharing a prefix are in the same stage. Stages process in order — all `01-*` items complete before any `03-*` item starts.
+Bucket meanings:
+
+- **`p0-*`** — the current codebase is broken and needs to be fixed before forward progress
+- **`p1-*`** — the clear next step
+- **`p2-*`** — a big idea that is "when, not if"
+- **`p3-*`** — speculative work
+
+`ingest` picks from the highest-priority non-empty bucket first. Within a bucket, exact ordering is intentionally loose.
 
 Each item needs:
 
 **A finish line.** One sentence, verifiable. Put it right after the title:
 
 ```markdown
-# 01: Daemon Data Integrity
+# Daemon Data Integrity
 
 **Finish line:** SQLite migrations are transactional, resource leaks
 are bounded, and the webhook endpoint is safe by default.
@@ -151,9 +159,9 @@ Two paths to wave content:
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The design session can produce a `wave/infra/README.md` and numbered items. Once these files exist in your repo, Concerto and lfq pick them up.
+The design session can produce a `wave/infra/README.md` and bucketed items. Once these files exist in your repo, Concerto and lfq pick them up.
 
-**Write by hand.** Sometimes a text editor is faster. Create `wave/<name>/README.md`, add numbered items, push. The structure is simple enough to write directly.
+**Write by hand.** Sometimes a text editor is faster. Create `wave/<name>/README.md`, add bucketed items, push. The structure is simple enough to write directly.
 
 ---
 
@@ -165,7 +173,7 @@ When a wave runs, it cycles through four phases:
 ingest → kickoff → build → update-wave → [loop]
 ```
 
-**ingest** picks the lowest-numbered item from `wave/<name>/` and moves it to `scratch/`.
+**ingest** picks the highest-priority item from `wave/<name>/` and moves it to `scratch/`.
 
 **kickoff** elaborates the item into an actionable design — alternatives considered, research done, success and failure imagined.
 
@@ -254,14 +262,14 @@ A `wave/billing/` directory for a billing rewrite:
 **Items** are scoped to one PR each:
 
 ```
-01-usage-events.md       → Event capture and storage
-01-metering-api.md       → Public metering endpoint
-03-invoice-generation.md → Monthly invoice calculation
-04-migration-shim.md     → Legacy API compatibility layer
-05-cleanup.md            → Remove old billing code
+p1-usage-events.md       → Event capture and storage
+p1-metering-api.md       → Public metering endpoint
+p2-invoice-generation.md → Monthly invoice calculation
+p2-migration-shim.md     → Legacy API compatibility layer
+p3-cleanup.md            → Remove old billing code
 ```
 
-The two `01-*` items run in the same stage (parallel-safe). When both ship, `03-invoice-generation.md` starts. The wave loops until the backlog is empty.
+The two `p1-*` items are both legitimate next steps. `ingest` picks from the highest-priority non-empty bucket first, then keeps looping until the backlog is empty.
 
 ---
 

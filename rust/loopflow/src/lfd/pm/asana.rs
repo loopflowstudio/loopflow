@@ -2,19 +2,23 @@ use async_trait::async_trait;
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
 use crate::engine::config::AsanaConfig;
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
     RATE_LIMIT_RETRIES,
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const TASK_FIELDS: &str = "name,notes,completed";
+const TASK_FIELDS: &str = "name,notes,completed,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
+const TASK_PRIORITY_FIELDS: &str = "custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
+const PROJECT_PRIORITY_FIELD_FIELDS: &str =
+    "custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+const PRIORITY_FIELD_NAME: &str = "Priority";
 
 #[derive(Debug, Clone)]
 pub struct AsanaClient {
@@ -181,6 +185,81 @@ impl AsanaClient {
             .await?;
         Ok(response.data.gid)
     }
+
+    async fn priority_field_for_project(
+        &self,
+        project_id: &str,
+    ) -> PmResult<Option<AsanaPriorityField>> {
+        let path = format!("/projects/{project_id}/custom_field_settings");
+        let response: AsanaResponse<Vec<AsanaCustomFieldSetting>> = self
+            .send_json(|| {
+                self.request(
+                    Method::GET,
+                    &path,
+                    &[("opt_fields", PROJECT_PRIORITY_FIELD_FIELDS)],
+                )
+            })
+            .await?;
+
+        Ok(response
+            .data
+            .into_iter()
+            .find_map(|setting| AsanaPriorityField::from_metadata(setting.custom_field)))
+    }
+
+    async fn ensure_priority_field_for_project(
+        &self,
+        project_id: &str,
+    ) -> PmResult<AsanaPriorityField> {
+        if let Some(field) = self.priority_field_for_project(project_id).await? {
+            return Ok(field);
+        }
+
+        let body = json!({
+            "data": {
+                "custom_field": {
+                    "name": PRIORITY_FIELD_NAME,
+                    "resource_subtype": "enum",
+                    "enum_options": [
+                        { "name": "P0" },
+                        { "name": "P1" },
+                        { "name": "P2" },
+                        { "name": "P3" }
+                    ]
+                }
+            }
+        });
+        let path = format!("/projects/{project_id}/addCustomFieldSetting");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::POST, &path, &[]).json(&body))
+            .await?;
+
+        self.priority_field_for_project(project_id)
+            .await?
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "asana project {project_id} is missing a priority custom field after creation"
+                ))
+            })
+    }
+
+    async fn priority_field_for_task(&self, item_id: &str) -> PmResult<AsanaPriorityField> {
+        let path = task_path(item_id);
+        let response: AsanaResponse<AsanaTaskDetails> = self
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", TASK_PRIORITY_FIELDS)]))
+            .await?;
+
+        response
+            .data
+            .custom_fields
+            .into_iter()
+            .find_map(AsanaPriorityField::from_value)
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "asana task {item_id} is missing a priority custom field"
+                ))
+            })
+    }
 }
 
 #[async_trait]
@@ -210,6 +289,7 @@ impl PmProvider for AsanaClient {
         let path = format!("/projects/{project_id}/tasks");
         let mut offset = None;
         let mut items = Vec::new();
+        let mut response_index = 0usize;
 
         loop {
             let page_offset = offset.clone();
@@ -224,24 +304,39 @@ impl PmProvider for AsanaClient {
                 .await?;
 
             for task in response.data {
-                items.push(task.into_pm_item(items.len() as u32));
+                items.push((response_index, task.into_pm_item()));
+                response_index += 1;
             }
 
             offset = response.next_page.and_then(|page| page.offset);
             if offset.is_none() {
-                return Ok(items);
+                items.sort_by(|left, right| {
+                    left.1
+                        .priority
+                        .order()
+                        .cmp(&right.1.priority.order())
+                        .then_with(|| left.0.cmp(&right.0))
+                });
+                return Ok(items.into_iter().map(|(_, item)| item).collect());
             }
         }
     }
 
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-        let body = AsanaRequest {
-            data: CreateTaskRequest {
-                name: &item.name,
-                notes: &item.description,
-                projects: [project_id],
-            },
-        };
+        let priority_field = self.ensure_priority_field_for_project(project_id).await?;
+        let priority_field_id = priority_field.gid.clone();
+        let priority_option_id = priority_field.option_gid(item.priority).to_string();
+        let mut data = Map::new();
+        data.insert("name".to_string(), json!(item.name));
+        data.insert("notes".to_string(), json!(item.description));
+        data.insert("projects".to_string(), json!([project_id]));
+        data.insert(
+            "custom_fields".to_string(),
+            json!({
+                priority_field_id: priority_option_id,
+            }),
+        );
+        let body = json!({ "data": data });
 
         let response: AsanaResponse<AsanaGid> = self
             .send_json(|| self.request(Method::POST, "/tasks", &[]).json(&body))
@@ -250,13 +345,32 @@ impl PmProvider for AsanaClient {
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let Some(update) = update.text_update() else {
+        if update.is_noop() {
             return Ok(());
-        };
+        }
 
-        let body = AsanaRequest {
-            data: UpdateTaskRequest::from(update),
-        };
+        let mut data = Map::new();
+        if let Some(text_update) = update.text_update() {
+            if let Some(name) = text_update.name {
+                data.insert("name".to_string(), json!(name));
+            }
+            if let Some(description) = text_update.description {
+                data.insert("notes".to_string(), json!(description));
+            }
+        }
+        if let Some(priority) = update.priority {
+            let field = self.priority_field_for_task(item_id).await?;
+            let field_id = field.gid.clone();
+            let option_id = field.option_gid(priority).to_string();
+            data.insert(
+                "custom_fields".to_string(),
+                json!({
+                    field_id: option_id,
+                }),
+            );
+        }
+
+        let body = json!({ "data": data });
         let path = task_path(item_id);
         let _: AsanaResponse<Value> = self
             .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
@@ -305,38 +419,18 @@ struct CreateTeamRequest<'a> {
 }
 
 #[derive(Serialize)]
-struct CreateTaskRequest<'a> {
-    name: &'a str,
-    notes: &'a str,
-    projects: [&'a str; 1],
-}
-
-#[derive(Serialize)]
 struct UpdateTaskRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    notes: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     completed: Option<bool>,
+    #[serde(skip_serializing)]
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a> UpdateTaskRequest<'a> {
     fn completed() -> Self {
         Self {
-            name: None,
-            notes: None,
             completed: Some(true),
-        }
-    }
-}
-
-impl<'a> From<super::PmTextUpdate<'a>> for UpdateTaskRequest<'a> {
-    fn from(update: super::PmTextUpdate<'a>) -> Self {
-        Self {
-            name: update.name,
-            notes: update.description,
-            completed: None,
+            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -365,6 +459,14 @@ struct AsanaTask {
     notes: String,
     #[serde(default)]
     completed: bool,
+    #[serde(default)]
+    custom_fields: Vec<AsanaCustomFieldValue>,
+}
+
+#[derive(Deserialize)]
+struct AsanaTaskDetails {
+    #[serde(default)]
+    custom_fields: Vec<AsanaCustomFieldValue>,
 }
 
 #[derive(Deserialize)]
@@ -373,13 +475,116 @@ struct AsanaGid {
 }
 
 impl AsanaTask {
-    fn into_pm_item(self, rank: u32) -> PmItem {
+    fn into_pm_item(self) -> PmItem {
+        let priority = self.priority_bucket();
         PmItem {
             id: self.gid,
             name: self.name,
             description: self.notes,
-            rank,
+            priority,
             completed: self.completed,
+        }
+    }
+
+    fn priority_bucket(&self) -> PriorityBucket {
+        self.custom_fields
+            .iter()
+            .find_map(AsanaPriorityField::priority_from_value)
+            .unwrap_or(PriorityBucket::P3)
+    }
+}
+
+#[derive(Clone, Deserialize)]
+struct AsanaCustomFieldValue {
+    gid: String,
+    #[serde(default)]
+    resource_subtype: String,
+    #[serde(default)]
+    enum_value: Option<AsanaEnumOption>,
+    #[serde(default)]
+    enum_options: Vec<AsanaEnumOption>,
+}
+
+#[derive(Clone, Deserialize)]
+struct AsanaCustomFieldSetting {
+    custom_field: AsanaCustomFieldMetadata,
+}
+
+#[derive(Clone, Deserialize)]
+struct AsanaCustomFieldMetadata {
+    gid: String,
+    #[serde(default)]
+    resource_subtype: String,
+    #[serde(default)]
+    enum_options: Vec<AsanaEnumOption>,
+}
+
+#[derive(Clone, Deserialize)]
+struct AsanaEnumOption {
+    gid: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct AsanaPriorityField {
+    gid: String,
+    p0_option: String,
+    p1_option: String,
+    p2_option: String,
+    p3_option: String,
+}
+
+impl AsanaPriorityField {
+    fn from_metadata(field: AsanaCustomFieldMetadata) -> Option<Self> {
+        if field.resource_subtype != "enum" {
+            return None;
+        }
+
+        let mut p0_option = None;
+        let mut p1_option = None;
+        let mut p2_option = None;
+        let mut p3_option = None;
+
+        for option in field.enum_options {
+            match PriorityBucket::from_semantic_label(&option.name) {
+                Some(PriorityBucket::P0) => p0_option = Some(option.gid),
+                Some(PriorityBucket::P1) => p1_option = Some(option.gid),
+                Some(PriorityBucket::P2) => p2_option = Some(option.gid),
+                Some(PriorityBucket::P3) => p3_option = Some(option.gid),
+                None => {}
+            }
+        }
+
+        Some(Self {
+            gid: field.gid,
+            p0_option: p0_option?,
+            p1_option: p1_option?,
+            p2_option: p2_option?,
+            p3_option: p3_option?,
+        })
+    }
+
+    fn from_value(field: AsanaCustomFieldValue) -> Option<Self> {
+        Self::from_metadata(AsanaCustomFieldMetadata {
+            gid: field.gid,
+            resource_subtype: field.resource_subtype,
+            enum_options: field.enum_options,
+        })
+    }
+
+    fn priority_from_value(field: &AsanaCustomFieldValue) -> Option<PriorityBucket> {
+        Self::from_value(field.clone())?;
+        let current = field.enum_value.as_ref()?;
+        PriorityBucket::from_semantic_label(&current.name)
+    }
+
+    fn option_gid(&self, priority: PriorityBucket) -> &str {
+        match priority {
+            PriorityBucket::P0 => &self.p0_option,
+            PriorityBucket::P1 => &self.p1_option,
+            PriorityBucket::P2 => &self.p2_option,
+            PriorityBucket::P3 => &self.p3_option,
         }
     }
 }
@@ -635,14 +840,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_collects_all_pages_and_assigns_rank_by_response_order() {
+    async fn list_items_collects_all_pages_and_maps_priority_buckets() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
                     "data": [
-                        { "gid": "task-1", "name": "First", "notes": "one", "completed": false },
-                        { "gid": "task-2", "name": "Second", "notes": "two", "completed": true }
+                        {
+                            "gid": "task-1",
+                            "name": "First",
+                            "notes": "one",
+                            "completed": false,
+                            "custom_fields": [{
+                                "gid": "field-priority",
+                                "name": "Priority",
+                                "resource_subtype": "enum",
+                                "enum_value": { "gid": "opt-p2", "name": "Medium" },
+                                "enum_options": [
+                                    { "gid": "opt-p0", "name": "Urgent" },
+                                    { "gid": "opt-p1", "name": "High" },
+                                    { "gid": "opt-p2", "name": "Medium" },
+                                    { "gid": "opt-p3", "name": "Low" }
+                                ]
+                            }]
+                        },
+                        {
+                            "gid": "task-2",
+                            "name": "Second",
+                            "notes": "two",
+                            "completed": true,
+                            "custom_fields": [{
+                                "gid": "field-priority",
+                                "name": "Priority",
+                                "resource_subtype": "enum",
+                                "enum_value": { "gid": "opt-p0", "name": "Urgent" },
+                                "enum_options": [
+                                    { "gid": "opt-p0", "name": "Urgent" },
+                                    { "gid": "opt-p1", "name": "High" },
+                                    { "gid": "opt-p2", "name": "Medium" },
+                                    { "gid": "opt-p3", "name": "Low" }
+                                ]
+                            }]
+                        }
                     ],
                     "next_page": { "offset": "cursor-2" }
                 }),
@@ -651,7 +890,24 @@ mod tests {
                 StatusCode::OK,
                 json!({
                     "data": [
-                        { "gid": "task-3", "name": "Third", "notes": "three", "completed": false }
+                        {
+                            "gid": "task-3",
+                            "name": "Third",
+                            "notes": "three",
+                            "completed": false,
+                            "custom_fields": [{
+                                "gid": "field-priority",
+                                "name": "Priority",
+                                "resource_subtype": "enum",
+                                "enum_value": { "gid": "opt-p1", "name": "High" },
+                                "enum_options": [
+                                    { "gid": "opt-p0", "name": "Urgent" },
+                                    { "gid": "opt-p1", "name": "High" },
+                                    { "gid": "opt-p2", "name": "Medium" },
+                                    { "gid": "opt-p3", "name": "Low" }
+                                ]
+                            }]
+                        }
                     ],
                     "next_page": null
                 }),
@@ -673,24 +929,24 @@ mod tests {
             items,
             vec![
                 PmItem {
-                    id: "task-1".to_string(),
-                    name: "First".to_string(),
-                    description: "one".to_string(),
-                    rank: 0,
-                    completed: false,
-                },
-                PmItem {
                     id: "task-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    rank: 1,
+                    priority: PriorityBucket::P0,
                     completed: true,
                 },
                 PmItem {
                     id: "task-3".to_string(),
                     name: "Third".to_string(),
                     description: "three".to_string(),
-                    rank: 2,
+                    priority: PriorityBucket::P1,
+                    completed: false,
+                },
+                PmItem {
+                    id: "task-1".to_string(),
+                    name: "First".to_string(),
+                    description: "one".to_string(),
+                    priority: PriorityBucket::P2,
                     completed: false,
                 },
             ]
@@ -698,22 +954,61 @@ mod tests {
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].path, "/projects/project-123/tasks");
-        assert_eq!(
-            requests[0].query.as_deref(),
-            Some("opt_fields=name%2Cnotes%2Ccompleted")
-        );
-        assert_eq!(
-            requests[1].query.as_deref(),
-            Some("opt_fields=name%2Cnotes%2Ccompleted&offset=cursor-2")
-        );
+        assert!(requests[0]
+            .query
+            .as_deref()
+            .expect("query")
+            .starts_with("opt_fields="));
+        assert!(requests[1]
+            .query
+            .as_deref()
+            .expect("query")
+            .contains("offset=cursor-2"));
     }
 
     #[tokio::test]
     async fn create_update_complete_and_comment_map_to_asana_endpoints() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
+                StatusCode::OK,
+                json!({
+                    "data": [{
+                        "custom_field": {
+                            "gid": "field-priority",
+                            "name": "Priority",
+                            "resource_subtype": "enum",
+                            "enum_options": [
+                                { "gid": "opt-p0", "name": "P0" },
+                                { "gid": "opt-p1", "name": "P1" },
+                                { "gid": "opt-p2", "name": "P2" },
+                                { "gid": "opt-p3", "name": "P3" }
+                            ]
+                        }
+                    }]
+                }),
+            ),
+            json_response(
                 StatusCode::CREATED,
                 json!({ "data": { "gid": "task-123" } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "custom_fields": [{
+                            "gid": "field-priority",
+                            "name": "Priority",
+                            "resource_subtype": "enum",
+                            "enum_value": { "gid": "opt-p0", "name": "P0" },
+                            "enum_options": [
+                                { "gid": "opt-p0", "name": "P0" },
+                                { "gid": "opt-p1", "name": "P1" },
+                                { "gid": "opt-p2", "name": "P2" },
+                                { "gid": "opt-p3", "name": "P3" }
+                            ]
+                        }]
+                    }
+                }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-123" } })),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-123" } })),
@@ -732,7 +1027,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the HTTP adapter".to_string(),
-                    rank: 7,
+                    priority: PriorityBucket::P0,
                 },
             )
             .await
@@ -743,7 +1038,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Asana client".to_string()),
                     description: Some("Build the HTTP adapter and tests".to_string()),
-                    rank: Some(0),
+                    priority: Some(PriorityBucket::P1),
                 },
             )
             .await
@@ -759,51 +1054,86 @@ mod tests {
 
         assert_eq!(item_id, "task-123");
         let requests = requests.lock().await;
-        assert_eq!(requests.len(), 4);
+        assert_eq!(requests.len(), 6);
 
-        assert_eq!(requests[0].method, "POST");
-        assert_eq!(requests[0].path, "/tasks");
+        assert_eq!(requests[0].method, "GET");
         assert_eq!(
-            serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
-            json!({
-                "data": {
-                    "name": "Implement client",
-                    "notes": "Build the HTTP adapter",
-                    "projects": ["project-123"]
-                }
-            })
+            requests[0].path,
+            "/projects/project-123/custom_field_settings"
         );
-
-        assert_eq!(requests[1].method, "PUT");
-        assert_eq!(requests[1].path, "/tasks/task-123");
+        assert_eq!(requests[1].method, "POST");
+        assert_eq!(requests[1].path, "/tasks");
         assert_eq!(
             serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
             json!({
                 "data": {
-                    "name": "Implement Asana client",
-                    "notes": "Build the HTTP adapter and tests"
+                    "name": "Implement client",
+                    "notes": "Build the HTTP adapter",
+                    "projects": ["project-123"],
+                    "custom_fields": {
+                        "field-priority": "opt-p0"
+                    }
                 }
             })
         );
 
-        assert_eq!(requests[2].method, "PUT");
+        assert_eq!(requests[2].method, "GET");
         assert_eq!(requests[2].path, "/tasks/task-123");
+        assert_eq!(requests[3].method, "PUT");
+        assert_eq!(requests[3].path, "/tasks/task-123");
         assert_eq!(
-            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
+            serde_json::from_str::<Value>(&requests[3].body).expect("json body"),
+            json!({
+                "data": {
+                    "name": "Implement Asana client",
+                    "notes": "Build the HTTP adapter and tests",
+                    "custom_fields": {
+                        "field-priority": "opt-p1"
+                    }
+                }
+            })
+        );
+
+        assert_eq!(requests[4].method, "PUT");
+        assert_eq!(requests[4].path, "/tasks/task-123");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[4].body).expect("json body"),
             json!({ "data": { "completed": true } })
         );
 
-        assert_eq!(requests[3].method, "POST");
-        assert_eq!(requests[3].path, "/tasks/task-123/stories");
+        assert_eq!(requests[5].method, "POST");
+        assert_eq!(requests[5].path, "/tasks/task-123/stories");
         assert_eq!(
-            serde_json::from_str::<Value>(&requests[3].body).expect("json body"),
+            serde_json::from_str::<Value>(&requests[5].body).expect("json body"),
             json!({ "data": { "text": "Shipped in v0.9.9" } })
         );
     }
 
     #[tokio::test]
-    async fn update_item_skips_rank_only_updates() {
-        let (base_url, requests) = test_server::spawn(Vec::new()).await;
+    async fn update_item_sends_priority_only_updates() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "custom_fields": [{
+                            "gid": "field-priority",
+                            "name": "Priority",
+                            "resource_subtype": "enum",
+                            "enum_value": { "gid": "opt-p0", "name": "Urgent" },
+                            "enum_options": [
+                                { "gid": "opt-p0", "name": "Urgent" },
+                                { "gid": "opt-p1", "name": "High" },
+                                { "gid": "opt-p2", "name": "Medium" },
+                                { "gid": "opt-p3", "name": "Low" }
+                            ]
+                        }]
+                    }
+                }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-123" } })),
+        ])
+        .await;
         let client = AsanaClient::with_base_url(
             "secret-token".to_string(),
             AsanaConfig::default(),
@@ -816,18 +1146,48 @@ mod tests {
                 &PmItemUpdate {
                     name: None,
                     description: None,
-                    rank: Some(1),
+                    priority: Some(PriorityBucket::P2),
                 },
             )
             .await
-            .expect("rank-only update should no-op");
+            .expect("priority-only update should succeed");
 
-        assert!(requests.lock().await.is_empty());
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/tasks/task-123");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
+            json!({
+                "data": {
+                    "custom_fields": {
+                        "field-priority": "opt-p2"
+                    }
+                }
+            })
+        );
     }
 
     #[tokio::test]
     async fn retries_after_rate_limit_response() {
         let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": [{
+                        "custom_field": {
+                            "gid": "field-priority",
+                            "name": "Priority",
+                            "resource_subtype": "enum",
+                            "enum_options": [
+                                { "gid": "opt-p0", "name": "P0" },
+                                { "gid": "opt-p1", "name": "P1" },
+                                { "gid": "opt-p2", "name": "P2" },
+                                { "gid": "opt-p3", "name": "P3" }
+                            ]
+                        }
+                    }]
+                }),
+            ),
             response(
                 StatusCode::TOO_MANY_REQUESTS,
                 vec![("retry-after", "0")],
@@ -851,14 +1211,14 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the HTTP adapter".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::P1,
                 },
             )
             .await
             .expect("request should succeed after retry");
 
         assert_eq!(item_id, "task-123");
-        assert_eq!(requests.lock().await.len(), 2);
+        assert_eq!(requests.lock().await.len(), 3);
     }
 
     #[tokio::test]

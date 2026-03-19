@@ -129,3 +129,25 @@ include!(concat!(env!("OUT_DIR"), "/builtin_flow_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_directions.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_direction_groups.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WAVE_AUTHORING_DOC: &str = include_str!("../../../../docs/wave-authoring.md");
+
+    #[test]
+    fn bucketed_priority_guidance_is_embedded_in_prompts_and_docs() {
+        let update_wave = get_builtin_step("update-wave").expect("update-wave prompt");
+        let ingest = get_builtin_step("ingest").expect("ingest prompt");
+        let design = get_builtin_step("design").expect("design prompt");
+
+        assert!(update_wave.contains("p0-*.md"));
+        assert!(update_wave.contains("p3-*"));
+        assert!(ingest.contains("highest-priority non-empty bucket"));
+        assert!(design.contains("p0-*.md"));
+        assert!(WAVE_AUTHORING_DOC.contains("p0-fix-crash-loop.md"));
+        assert!(WAVE_AUTHORING_DOC.contains("p1-daemon-integrity.md"));
+        assert!(!WAVE_AUTHORING_DOC.contains("all `01-*` items complete"));
+    }
+}

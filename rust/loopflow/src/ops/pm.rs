@@ -8,12 +8,12 @@ use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
-    RoadmapItemFrontmatter,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, PriorityBucket,
+    RoadmapItemDocument, RoadmapItemFrontmatter,
 };
 use crate::lfd::store::open_store;
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::ingest::{list_numbered_items, WaveItem};
+use crate::ops::ingest::{list_wave_items, parse_wave_item_filename, WaveItem};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
 
@@ -246,7 +246,7 @@ struct BootstrapArgs<'a> {
 
 fn read_local_roadmap_items(wave_dir: &Path) -> OpsResult<Vec<LocalRoadmapItem>> {
     let mut items = Vec::new();
-    for item in list_numbered_items(wave_dir)? {
+    for item in list_wave_items(wave_dir)? {
         let path = wave_dir.join(&item.filename);
         let content = std::fs::read_to_string(&path)?;
         items.push(LocalRoadmapItem {
@@ -261,6 +261,10 @@ fn local_item_title(item: &LocalRoadmapItem) -> String {
     extract_heading(&item.doc.body)
         .map(str::to_string)
         .unwrap_or_else(|| title_case(&item.item.slug))
+}
+
+fn local_item_priority(item: &LocalRoadmapItem) -> PriorityBucket {
+    item.item.priority_bucket().unwrap_or(PriorityBucket::P1)
 }
 
 fn project_key(provider: PmProviderKind) -> &'static str {
@@ -548,7 +552,8 @@ async fn bootstrap_read_write_provider(
         if matched_remote_ids.contains(&remote_item.id) {
             continue;
         }
-        let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
+        let filename =
+            next_remote_filename(args.wave_dir, remote_item.priority, &remote_item.name, None);
         write_remote_item(&args.wave_dir.join(&filename), remote_item, ctx.provider)?;
         created_local.push(filename);
     }
@@ -627,6 +632,19 @@ fn apply_remote_match(
     if update_body {
         local_item.doc.body = render_remote_body(remote_item);
     }
+
+    let filename = next_remote_filename(
+        wave_dir,
+        remote_item.priority,
+        &remote_item.name,
+        Some(local_item.item.filename.as_str()),
+    );
+    if filename != local_item.item.filename {
+        let old_path = wave_dir.join(&local_item.item.filename);
+        std::fs::remove_file(&old_path)?;
+        local_item.item =
+            parse_wave_item_filename(&filename).expect("generated roadmap filename should parse");
+    }
     write_local_item(wave_dir, local_item)
 }
 
@@ -646,7 +664,7 @@ async fn create_remote_for_local_item(
                 description: body_without_heading(&local_item.doc.body)
                     .trim()
                     .to_string(),
-                rank: local_item.item.prefix,
+                priority: local_item_priority(local_item),
             },
         )
         .await
@@ -662,23 +680,37 @@ fn count_linked_items(items: &[LocalRoadmapItem], provider: PmProviderKind) -> u
         .count()
 }
 
-fn next_remote_filename(wave_dir: &Path, rank: u32, title: &str) -> String {
-    next_item_filename(rank, title, |filename| !wave_dir.join(filename).exists())
+fn next_remote_filename(
+    wave_dir: &Path,
+    priority: PriorityBucket,
+    title: &str,
+    current_filename: Option<&str>,
+) -> String {
+    next_item_filename(priority, title, |filename| {
+        current_filename.is_some_and(|current| current == filename)
+            || !wave_dir.join(filename).exists()
+    })
 }
 
 fn next_item_filename(
-    rank: u32,
+    priority: PriorityBucket,
     title: &str,
     mut is_available: impl FnMut(&str) -> bool,
 ) -> String {
     let slug = slugify(title);
-    let mut prefix = rank;
+    let prefix = priority.filename_prefix();
+    let filename = format!("{prefix}-{slug}.md");
+    if is_available(&filename) {
+        return filename;
+    }
+
+    let mut suffix = 2;
     loop {
-        let filename = format!("{:02}-{slug}.md", prefix + 1);
+        let filename = format!("{prefix}-{slug}-{suffix}.md");
         if is_available(&filename) {
             return filename;
         }
-        prefix += 1;
+        suffix += 1;
     }
 }
 
@@ -687,15 +719,15 @@ fn overwrite_local_wave_from_remote(
     remote_items: &[PmItem],
     provider: PmProviderKind,
 ) -> OpsResult<usize> {
-    let local_files = list_numbered_items(wave_dir)?;
+    let local_files = list_wave_items(wave_dir)?;
     let removed = local_files.len();
     for item in local_files {
         std::fs::remove_file(wave_dir.join(item.filename))?;
     }
 
     let mut used_filenames = HashSet::new();
-    for (index, remote_item) in remote_items.iter().enumerate() {
-        let filename = next_item_filename(index as u32, &remote_item.name, |filename| {
+    for remote_item in remote_items {
+        let filename = next_item_filename(remote_item.priority, &remote_item.name, |filename| {
             !used_filenames.contains(filename)
         });
         used_filenames.insert(filename.clone());
@@ -795,7 +827,8 @@ async fn pm_import_async(
             if existing_ids.contains(&remote_item.id) {
                 continue; // additive only — skip existing
             }
-            let filename = next_remote_filename(&wave_dir, remote_item.rank, &remote_item.name);
+            let filename =
+                next_remote_filename(&wave_dir, remote_item.priority, &remote_item.name, None);
             write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
             items_created += 1;
         }
@@ -929,18 +962,21 @@ async fn pm_sync_async(
 
         match (base, local, remote) {
             // Exists in all three — check for changes
-            (Some(base_doc), Some((local_file, local_doc)), Some(remote_item)) => {
-                let base_title = extract_heading(&base_doc.body);
-                let local_title = extract_heading(&local_doc.body);
+            (Some(base_item), Some(local_item), Some(remote_item)) => {
+                let base_title = extract_heading(&base_item.doc.body);
+                let local_title = extract_heading(&local_item.doc.body);
                 let remote_title = Some(remote_item.name.as_str());
 
-                let local_changed = local_title != base_title || local_doc.body != base_doc.body;
-                let remote_changed =
-                    remote_title != base_title || render_remote_body(remote_item) != base_doc.body;
+                let local_changed = local_title != base_title
+                    || local_item.doc.body != base_item.doc.body
+                    || !base_and_local_priorities_match(base_item, local_item);
+                let remote_changed = remote_title != base_title
+                    || render_remote_body(remote_item) != base_item.doc.body
+                    || !base_and_remote_priorities_match(base_item, remote_item);
 
                 if local_changed && remote_changed {
-                    progress.status(&format!("  conflict: {}", local_file));
-                    conflicts.push(local_file.clone());
+                    progress.status(&format!("  conflict: {}", local_item.item.filename));
+                    conflicts.push(local_item.item.filename.clone());
                 } else if local_changed {
                     // Push local → remote
                     let name = local_title.unwrap_or(&remote_item.name);
@@ -949,66 +985,76 @@ async fn pm_sync_async(
                             pm_id,
                             &PmItemUpdate {
                                 name: Some(name.to_string()),
-                                description: Some(local_doc.body.clone()),
-                                rank: None,
+                                description: Some(
+                                    body_without_heading(&local_item.doc.body)
+                                        .trim()
+                                        .to_string(),
+                                ),
+                                priority: Some(local_item_priority(local_item)),
                             },
                         )
                         .await
                         .map_err(pm_to_ops)?;
-                    progress.status(&format!("  pushed {}", local_file));
-                    pushed.push(local_file.clone());
+                    progress.status(&format!("  pushed {}", local_item.item.filename));
+                    pushed.push(local_item.item.filename.clone());
                 } else if remote_changed {
                     // Pull remote → local
-                    let path = wave_dir.join(local_file);
-                    write_remote_item(&path, remote_item, provider_kind)?;
-                    progress.status(&format!("  pulled {local_file}"));
-                    pulled.push(local_file.clone());
+                    let mut updated_local = local_item.clone();
+                    apply_remote_match(
+                        &wave_dir,
+                        &mut updated_local,
+                        provider_kind,
+                        remote_item,
+                        true,
+                    )?;
+                    progress.status(&format!("  pulled {}", updated_local.item.filename));
+                    pulled.push(updated_local.item.filename.clone());
                 }
                 // else: no-op
             }
 
             // Not in base, exists locally — new local item, push
-            (None, Some((local_file, local_doc)), None) => {
-                let name = extract_heading(&local_doc.body).unwrap_or("untitled");
+            (None, Some(local_item), None) => {
+                let name = extract_heading(&local_item.doc.body).unwrap_or("untitled");
                 let new_id = ctx
                     .client
                     .create_item(
                         &ctx.project,
                         &PmItemCreate {
                             name: name.to_string(),
-                            description: local_doc.body.clone(),
-                            rank: 0,
+                            description: body_without_heading(&local_item.doc.body)
+                                .trim()
+                                .to_string(),
+                            priority: local_item_priority(local_item),
                         },
                     )
                     .await
                     .map_err(pm_to_ops)?;
 
                 // Write pm_id back to file
-                let mut updated_doc = local_doc.clone();
+                let mut updated_doc = local_item.doc.clone();
                 updated_doc.frontmatter.set_id(provider_kind, new_id);
                 let rendered = updated_doc.render().map_err(pm_to_ops)?;
-                std::fs::write(wave_dir.join(local_file), rendered)?;
-                progress.status(&format!("  pushed (new) {local_file}"));
-                pushed.push(local_file.clone());
+                std::fs::write(wave_dir.join(&local_item.item.filename), rendered)?;
+                progress.status(&format!("  pushed (new) {}", local_item.item.filename));
+                pushed.push(local_item.item.filename.clone());
             }
 
             // Not in base, exists remotely — new remote item, pull
             (None, None, Some(remote_item)) => {
-                let filename = format!(
-                    "{:02}-{}.md",
-                    remote_item.rank + 1,
-                    slugify(&remote_item.name)
-                );
+                let filename =
+                    next_remote_filename(&wave_dir, remote_item.priority, &remote_item.name, None);
                 write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
                 progress.status(&format!("  pulled (new) {filename}"));
                 pulled.push(filename);
             }
 
             // In base, deleted locally, unchanged remotely — archive remote
-            (Some(base_doc), None, Some(remote_item)) => {
+            (Some(base_item), None, Some(remote_item)) => {
                 let remote_changed = Some(remote_item.name.as_str())
-                    != extract_heading(&base_doc.body)
-                    || render_remote_body(remote_item) != base_doc.body;
+                    != extract_heading(&base_item.doc.body)
+                    || render_remote_body(remote_item) != base_item.doc.body
+                    || !base_and_remote_priorities_match(base_item, remote_item);
                 if remote_changed {
                     progress.status(&format!(
                         "  conflict (deleted locally, changed remotely): {pm_id}"
@@ -1024,24 +1070,29 @@ async fn pm_sync_async(
             }
 
             // In base, unchanged locally, deleted remotely — delete local
-            (Some(base_doc), Some((local_file, local_doc)), None) => {
-                let local_changed = local_doc.body != base_doc.body;
+            (Some(base_item), Some(local_item), None) => {
+                let local_changed = local_item.doc.body != base_item.doc.body
+                    || !base_and_local_priorities_match(base_item, local_item);
                 if local_changed {
                     progress.status(&format!(
-                        "  conflict (changed locally, deleted remotely): {local_file}"
+                        "  conflict (changed locally, deleted remotely): {}",
+                        local_item.item.filename
                     ));
-                    conflicts.push(local_file.clone());
+                    conflicts.push(local_item.item.filename.clone());
                 } else {
-                    std::fs::remove_file(wave_dir.join(local_file))?;
-                    progress.status(&format!("  deleted {local_file}"));
-                    pulled.push(local_file.clone());
+                    std::fs::remove_file(wave_dir.join(&local_item.item.filename))?;
+                    progress.status(&format!("  deleted {}", local_item.item.filename));
+                    pulled.push(local_item.item.filename.clone());
                 }
             }
 
             // Already exists in both local and remote but wasn't in base — both new
-            (None, Some((local_file, _)), Some(_)) => {
-                progress.status(&format!("  conflict (new on both sides): {local_file}"));
-                conflicts.push(local_file.clone());
+            (None, Some(local_item), Some(_)) => {
+                progress.status(&format!(
+                    "  conflict (new on both sides): {}",
+                    local_item.item.filename
+                ));
+                conflicts.push(local_item.item.filename.clone());
             }
 
             // In base but gone from both — already reconciled
@@ -1067,7 +1118,7 @@ fn read_base_items(
     main_branch: &str,
     wave: &str,
     provider: PmProviderKind,
-) -> OpsResult<HashMap<String, RoadmapItemDocument>> {
+) -> OpsResult<HashMap<String, LocalRoadmapItem>> {
     let wave_path = format!("wave/{wave}");
     let files = list_tree(repo, main_branch, &wave_path)
         .map_err(|err| OpsError::Message(format!("failed to list base wave files: {err}")))?;
@@ -1077,13 +1128,16 @@ fn read_base_items(
         if !filename.ends_with(".md") || filename.eq_ignore_ascii_case("README.md") {
             continue;
         }
+        let Some(item) = parse_wave_item_filename(&filename) else {
+            continue;
+        };
         let file_path = format!("{wave_path}/{filename}");
         if let Some(content) = show_file(repo, main_branch, &file_path)
             .map_err(|err| OpsError::Message(format!("failed to read base file: {err}")))?
         {
             if let Ok(doc) = RoadmapItemDocument::parse(&content) {
                 if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    items.insert(pm_id.to_string(), doc);
+                    items.insert(pm_id.to_string(), LocalRoadmapItem { item, doc });
                 }
             }
         }
@@ -1094,15 +1148,15 @@ fn read_base_items(
 fn read_local_items(
     wave_dir: &Path,
     provider: PmProviderKind,
-) -> OpsResult<HashMap<String, (String, RoadmapItemDocument)>> {
-    let items = list_numbered_items(wave_dir).unwrap_or_default();
+) -> OpsResult<HashMap<String, LocalRoadmapItem>> {
+    let items = list_wave_items(wave_dir).unwrap_or_default();
     let mut result = HashMap::new();
     for item in items {
         let path = wave_dir.join(&item.filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(doc) = RoadmapItemDocument::parse(&content) {
                 if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    result.insert(pm_id.to_string(), (item.filename.clone(), doc));
+                    result.insert(pm_id.to_string(), LocalRoadmapItem { item, doc });
                 }
             }
         }
@@ -1128,6 +1182,14 @@ fn write_remote_item(path: &Path, item: &PmItem, provider: PmProviderKind) -> Op
     Ok(())
 }
 
+fn base_and_local_priorities_match(base: &LocalRoadmapItem, local: &LocalRoadmapItem) -> bool {
+    local_item_priority(base) == local_item_priority(local)
+}
+
+fn base_and_remote_priorities_match(base: &LocalRoadmapItem, remote: &PmItem) -> bool {
+    local_item_priority(base) == remote.priority
+}
+
 fn render_remote_body(item: &PmItem) -> String {
     let heading = format!("# {}\n", item.name);
     if item.description.is_empty() {
@@ -1137,21 +1199,30 @@ fn render_remote_body(item: &PmItem) -> String {
     }
 }
 
-/// Extract the first `# ` heading, stripping any `NN:` or `NN-` prefix.
+/// Extract the first `# ` heading, stripping any roadmap priority or legacy prefix.
 pub(crate) fn extract_heading(body: &str) -> Option<&str> {
     for line in body.lines() {
         if let Some(heading) = line.strip_prefix("# ") {
             let heading = heading.trim();
             if !heading.is_empty() {
-                return Some(strip_number_prefix(heading));
+                return Some(strip_roadmap_prefix(heading));
             }
         }
     }
     None
 }
 
-/// Strip a leading `NN:` or `NN-` prefix from a heading.
-fn strip_number_prefix(heading: &str) -> &str {
+/// Strip a leading `NN:`/`NN-` or `P0:`/`P0-` prefix from a heading.
+fn strip_roadmap_prefix(heading: &str) -> &str {
+    if heading.len() >= 3 {
+        let prefix = &heading[..2];
+        if PriorityBucket::from_filename_prefix(prefix).is_some()
+            && matches!(heading.as_bytes().get(2), Some(b':') | Some(b'-'))
+        {
+            return heading[3..].trim_start();
+        }
+    }
+
     let bytes = heading.as_bytes();
     let mut i = 0;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
@@ -1331,7 +1402,7 @@ mod tests {
             id: "item-42".to_string(),
             name: "Build the thing".to_string(),
             description: "Some details here.".to_string(),
-            rank: 0,
+            priority: PriorityBucket::P1,
             completed: false,
         };
 
@@ -1348,7 +1419,7 @@ mod tests {
             id: "item-1".to_string(),
             name: "Empty".to_string(),
             description: String::new(),
-            rank: 0,
+            priority: PriorityBucket::P3,
             completed: false,
         };
 
@@ -1357,10 +1428,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_heading_strips_number_prefix() {
+    fn extract_heading_strips_roadmap_prefixes() {
         assert_eq!(
             extract_heading("# 03: Linear client\n\nSome description"),
             Some("Linear client")
+        );
+        assert_eq!(
+            extract_heading("# P1: Bucketed client\n\nSome description"),
+            Some("Bucketed client")
         );
         assert_eq!(
             extract_heading("# No prefix here\n"),
@@ -1430,12 +1505,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_read_write_provider_preserves_local_body_and_uses_remote_rank() {
+    async fn bootstrap_read_write_provider_preserves_local_body_and_uses_remote_priority() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("01-existing.md"),
+            wave_dir.join("p2-existing.md"),
             "# Existing task\n\nLocal body stays put.\n",
         )
         .expect("write local item");
@@ -1457,14 +1532,14 @@ mod tests {
                         id: "lin-1".to_string(),
                         name: "Existing task".to_string(),
                         description: "Remote body should not replace local.".to_string(),
-                        rank: 0,
+                        priority: PriorityBucket::P1,
                         completed: false,
                     },
                     PmItem {
                         id: "lin-2".to_string(),
                         name: "Second task".to_string(),
                         description: "Imported from remote.".to_string(),
-                        rank: 1,
+                        priority: PriorityBucket::P2,
                         completed: false,
                     },
                 ],
@@ -1477,15 +1552,15 @@ mod tests {
             .await
             .expect("bootstrap succeeds");
 
-        assert_eq!(result.created_local, vec!["02-second-task.md"]);
+        assert_eq!(result.created_local, vec!["p2-second-task.md"]);
 
-        let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
+        let existing = std::fs::read_to_string(wave_dir.join("p1-existing-task.md")).expect("read");
         assert!(existing.contains("linear_id: lin-1"));
         assert!(existing.contains("Local body stays put."));
         assert!(!existing.contains("Remote body should not replace local."));
 
         let imported =
-            std::fs::read_to_string(wave_dir.join("02-second-task.md")).expect("read imported");
+            std::fs::read_to_string(wave_dir.join("p2-second-task.md")).expect("read imported");
         assert!(imported.contains("linear_id: lin-2"));
         assert!(imported.contains("# Second task"));
         assert!(imported.contains("Imported from remote."));
@@ -1496,9 +1571,9 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
+        std::fs::write(wave_dir.join("p1-first.md"), "# First\n").expect("write first");
+        std::fs::write(wave_dir.join("p1-second.md"), "# Second\n").expect("write second");
+        std::fs::write(wave_dir.join("p2-third.md"), "# Third\n").expect("write third");
 
         let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
         let progress = crate::ops::NullProgress;
@@ -1528,11 +1603,11 @@ mod tests {
         let created = created.lock().expect("created lock").clone();
         assert_eq!(created, vec!["Third", "Second", "First"]);
 
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p1-first.md")).expect("read");
         assert!(created_order.contains("linear_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p1-second.md")).expect("read");
         assert!(created_order.contains("linear_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p2-third.md")).expect("read");
         assert!(created_order.contains("linear_id: lin-1"));
     }
 
@@ -1541,9 +1616,9 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
+        std::fs::write(wave_dir.join("p1-first.md"), "# First\n").expect("write first");
+        std::fs::write(wave_dir.join("p1-second.md"), "# Second\n").expect("write second");
+        std::fs::write(wave_dir.join("p2-third.md"), "# Third\n").expect("write third");
 
         let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
         let progress = crate::ops::NullProgress;
@@ -1573,35 +1648,35 @@ mod tests {
         let created = created.lock().expect("created lock").clone();
         assert_eq!(created, vec!["Third", "Second", "First"]);
 
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p1-first.md")).expect("read");
         assert!(created_order.contains("asana_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p1-second.md")).expect("read");
         assert!(created_order.contains("asana_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
+        let created_order = std::fs::read_to_string(wave_dir.join("p2-third.md")).expect("read");
         assert!(created_order.contains("asana_id: lin-1"));
     }
 
     #[test]
-    fn overwrite_local_wave_from_remote_rewrites_local_files_in_remote_order() {
+    fn overwrite_local_wave_from_remote_rewrites_local_files_by_priority_bucket() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-local-first.md"), "# Local first\n").expect("write");
-        std::fs::write(wave_dir.join("02-local-second.md"), "# Local second\n").expect("write");
+        std::fs::write(wave_dir.join("p1-local-first.md"), "# Local first\n").expect("write");
+        std::fs::write(wave_dir.join("p2-local-second.md"), "# Local second\n").expect("write");
 
         let remote_items = vec![
             PmItem {
                 id: "lin-2".to_string(),
                 name: "Remote second".to_string(),
                 description: "Pulled from PM.".to_string(),
-                rank: 1,
+                priority: PriorityBucket::P2,
                 completed: false,
             },
             PmItem {
                 id: "lin-1".to_string(),
                 name: "Remote first".to_string(),
                 description: "Higher priority.".to_string(),
-                rank: 0,
+                priority: PriorityBucket::P0,
                 completed: false,
             },
         ];
@@ -1611,15 +1686,15 @@ mod tests {
                 .expect("pull should rewrite local files");
 
         assert_eq!(removed, 2);
-        assert!(!wave_dir.join("01-local-first.md").exists());
-        assert!(!wave_dir.join("02-local-second.md").exists());
+        assert!(!wave_dir.join("p1-local-first.md").exists());
+        assert!(!wave_dir.join("p2-local-second.md").exists());
 
-        let first = std::fs::read_to_string(wave_dir.join("01-remote-second.md")).expect("read");
-        assert!(first.contains("linear_id: lin-2"));
-        assert!(first.contains("# Remote second"));
-
-        let second = std::fs::read_to_string(wave_dir.join("02-remote-first.md")).expect("read");
+        let second = std::fs::read_to_string(wave_dir.join("p0-remote-first.md")).expect("read");
         assert!(second.contains("linear_id: lin-1"));
         assert!(second.contains("# Remote first"));
+
+        let first = std::fs::read_to_string(wave_dir.join("p2-remote-second.md")).expect("read");
+        assert!(first.contains("linear_id: lin-2"));
+        assert!(first.contains("# Remote second"));
     }
 }

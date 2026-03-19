@@ -53,7 +53,7 @@ Design docs for already-shipped work and other purely historical content can be 
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
 1. Write `wave/<wave>/README.md` — the anchor that survives when plans change. Vision, strategy, goals, risks, metrics. **No roadmap tables or phase lists** — the item files are the roadmap.
-2. Write numbered item files (`01-name.md`, `02-name.md`, ...) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
+2. Write bucketed item files (`p0-fix-broken-build.md`, `p1-next-step.md`, `p2-big-rock.md`, `p3-speculative-bet.md`) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 
 ### README.md
 
@@ -78,21 +78,30 @@ If the README has any of these, delete them.
 
 ### Items
 
-Roadmaps are made up of items. Each item is a numbered file (`01-*.md`, `02-*.md`, ...) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+Roadmaps are made up of items. Each item is a bucketed file (`p0-*.md`, `p1-*.md`, `p2-*.md`, `p3-*.md`) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+
+**The filename prefix carries the shared priority meaning:**
+
+- `p0-*` — the codebase is broken or blocked; fix this before forward progress
+- `p1-*` — the clear next step
+- `p2-*` — a committed later bet; "when, not if"
+- `p3-*` — speculative work
+
+Prompts should speak in those meanings. Remote tools may say `Urgent/High/Medium/Low` or `P0/P1/P2/P3`; local wave files use the shared bucket prefixes.
 
 **Every item must open with a bold finish line.** What's true when this item is done that isn't true now? Make it specific enough that you know when you've crossed it.
 
 ```markdown
-# 01: Audit Breakdown
+# Audit Breakdown
 
 **Finish line:** `lf implement` shows separate token rows for scratch, wave, and docs.
 ```
 
-### Sequencing principles
+### Bucket principles
 
-- **Frontload the risk.** Start with the thing you need to try to see if it works. Don't pre-build infrastructure before you've proven the core idea.
-- **Sequence by learning, not dependencies.** What are you most uncertain about? Build that first.
-- **Defer abstractions.** Build the concrete thing, then extract the pattern.
+- **Use the smallest bucket that is honest.** Don't inflate work into `p0` just to force it to the front.
+- **Frontload the risk.** The most uncertain concrete deliverable usually belongs in `p1`, not buried behind fake staging.
+- **Keep buckets semantic, not numeric theater.** Don't recreate `01/02/03` inside a bucket. Within-bucket ordering is intentionally loose.
 - **Encode uncertainty.** Each item should state what you expect to learn and what might change.
 
 ## Coherence

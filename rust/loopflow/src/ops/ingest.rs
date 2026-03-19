@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::engine::worktrees::main_repo_root;
+use crate::lfd::pm::PriorityBucket;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
@@ -17,10 +18,10 @@ pub struct IngestResult {
     pub dest: PathBuf,
 }
 
-/// Fast-path ingest: pick the lowest-numbered wave item and move it to scratch/.
+/// Fast-path ingest: pick the highest-priority roadmap item and move it to scratch/.
 ///
-/// Returns Ok if exactly one file has the lowest numeric prefix.
-/// Returns Err if: no wave found, no items, or multiple items share the lowest prefix.
+/// Bucketed files (`p0-*` through `p3-*`) take precedence over legacy numbered files.
+/// Within the same bucket or stage, the fast path uses filename order.
 pub fn ingest(
     repo: &Path,
     options: &IngestOptions,
@@ -39,31 +40,15 @@ pub fn ingest(
         )));
     }
 
-    let items = list_numbered_items(&wave_dir)?;
+    let items = list_wave_items(&wave_dir)?;
 
     if items.is_empty() {
         return Err(OpsError::Message(format!(
-            "no numbered items in wave/{wave}/"
+            "no roadmap items in wave/{wave}/"
         )));
     }
 
-    let min_prefix = items
-        .iter()
-        .map(|i| i.prefix)
-        .min()
-        .expect("items is non-empty");
-    let lowest: Vec<&WaveItem> = items.iter().filter(|i| i.prefix == min_prefix).collect();
-
-    if lowest.len() > 1 {
-        let names: Vec<&str> = lowest.iter().map(|i| i.filename.as_str()).collect();
-        return Err(OpsError::Message(format!(
-            "multiple items with prefix {:02}: {}",
-            min_prefix,
-            names.join(", ")
-        )));
-    }
-
-    let item = lowest[0];
+    let item = items.first().expect("items is non-empty");
     let scratch_dir = repo.join("scratch");
     std::fs::create_dir_all(&scratch_dir)?;
 
@@ -88,15 +73,30 @@ pub fn ingest(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WaveItemOrder {
+    Bucket(PriorityBucket),
+    LegacyStage(u32),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct WaveItem {
     pub filename: String,
-    pub prefix: u32,
+    pub order: WaveItemOrder,
     pub slug: String,
 }
 
-/// List numbered .md files in a wave directory, skipping README.md.
-pub(crate) fn list_numbered_items(dir: &Path) -> OpsResult<Vec<WaveItem>> {
+impl WaveItem {
+    pub fn priority_bucket(&self) -> Option<PriorityBucket> {
+        match self.order {
+            WaveItemOrder::Bucket(bucket) => Some(bucket),
+            WaveItemOrder::LegacyStage(_) => None,
+        }
+    }
+}
+
+/// List roadmap item files in a wave directory, skipping README.md.
+pub(crate) fn list_wave_items(dir: &Path) -> OpsResult<Vec<WaveItem>> {
     let mut items = Vec::new();
 
     let entries = std::fs::read_dir(dir)?;
@@ -111,32 +111,47 @@ pub(crate) fn list_numbered_items(dir: &Path) -> OpsResult<Vec<WaveItem>> {
             continue;
         }
 
-        if let Some(item) = parse_numbered_item(&name) {
+        if let Some(item) = parse_wave_item_filename(&name) {
             items.push(item);
         }
     }
 
-    items.sort_by_key(|i| i.prefix);
+    items.sort_by(|left, right| {
+        order_rank(left.order)
+            .cmp(&order_rank(right.order))
+            .then_with(|| left.filename.cmp(&right.filename))
+    });
     Ok(items)
 }
 
-/// Parse "02-mac-mini-dogfood.md" into prefix=2, slug="mac-mini-dogfood".
-fn parse_numbered_item(filename: &str) -> Option<WaveItem> {
+pub(crate) fn parse_wave_item_filename(filename: &str) -> Option<WaveItem> {
     let stem = filename.strip_suffix(".md")?;
     let dash_pos = stem.find('-')?;
-    let prefix_str = &stem[..dash_pos];
-    let prefix: u32 = prefix_str.parse().ok()?;
+    let prefix = &stem[..dash_pos];
     let slug = &stem[dash_pos + 1..];
 
     if slug.is_empty() {
         return None;
     }
 
+    let order = if let Some(bucket) = PriorityBucket::from_filename_prefix(prefix) {
+        WaveItemOrder::Bucket(bucket)
+    } else {
+        WaveItemOrder::LegacyStage(prefix.parse().ok()?)
+    };
+
     Some(WaveItem {
         filename: filename.to_string(),
-        prefix,
+        order,
         slug: slug.to_string(),
     })
+}
+
+fn order_rank(order: WaveItemOrder) -> (u8, u32) {
+    match order {
+        WaveItemOrder::Bucket(bucket) => (0, bucket.order().into()),
+        WaveItemOrder::LegacyStage(stage) => (1, stage),
+    }
 }
 
 #[cfg(test)]
@@ -146,66 +161,70 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn parse_numbered_item_basic() {
-        let item = parse_numbered_item("01-setup.md").unwrap();
-        assert_eq!(item.prefix, 1);
+    fn parse_wave_item_filename_parses_bucketed_files() {
+        let item = parse_wave_item_filename("p1-setup.md").expect("bucketed item");
+        assert_eq!(item.priority_bucket(), Some(PriorityBucket::P1));
         assert_eq!(item.slug, "setup");
     }
 
     #[test]
-    fn parse_numbered_item_multi_dash() {
-        let item = parse_numbered_item("02-mac-mini-dogfood.md").unwrap();
-        assert_eq!(item.prefix, 2);
+    fn parse_wave_item_filename_parses_legacy_numbered_files() {
+        let item = parse_wave_item_filename("02-mac-mini-dogfood.md").expect("legacy item");
+        assert_eq!(item.order, WaveItemOrder::LegacyStage(2));
         assert_eq!(item.slug, "mac-mini-dogfood");
     }
 
     #[test]
-    fn parse_numbered_item_rejects_readme() {
-        assert!(parse_numbered_item("README.md").is_none());
+    fn parse_wave_item_filename_rejects_readme() {
+        assert!(parse_wave_item_filename("README.md").is_none());
     }
 
     #[test]
-    fn parse_numbered_item_rejects_non_numeric() {
-        assert!(parse_numbered_item("abc-setup.md").is_none());
+    fn parse_wave_item_filename_rejects_unknown_prefix() {
+        assert!(parse_wave_item_filename("backlog-setup.md").is_none());
     }
 
     #[test]
-    fn parse_numbered_item_rejects_no_slug() {
-        assert!(parse_numbered_item("01-.md").is_none());
+    fn parse_wave_item_filename_rejects_no_slug() {
+        assert!(parse_wave_item_filename("p1-.md").is_none());
     }
 
     #[test]
-    fn list_numbered_items_filters_readme() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("README.md"), "# Wave").unwrap();
-        std::fs::write(dir.path().join("01-first.md"), "# First").unwrap();
-        std::fs::write(dir.path().join("02-second.md"), "# Second").unwrap();
-        std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
+    fn list_wave_items_filters_readme_and_sorts_bucketed_before_legacy() {
+        let dir = TempDir::new().expect("temp dir");
+        std::fs::write(dir.path().join("README.md"), "# Wave").expect("write readme");
+        std::fs::write(dir.path().join("03-third.md"), "# Third").expect("write third");
+        std::fs::write(dir.path().join("p2-later.md"), "# Later").expect("write later");
+        std::fs::write(dir.path().join("p0-broken.md"), "# Broken").expect("write broken");
+        std::fs::write(dir.path().join("notes.txt"), "ignored").expect("write notes");
 
-        let items = list_numbered_items(dir.path()).unwrap();
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].prefix, 1);
-        assert_eq!(items[1].prefix, 2);
+        let items = list_wave_items(dir.path()).expect("list wave items");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.filename.as_str())
+                .collect::<Vec<_>>(),
+            vec!["p0-broken.md", "p2-later.md", "03-third.md"]
+        );
     }
 
     #[test]
-    fn ingest_single_lowest() {
-        let dir = TempDir::new().unwrap();
+    fn ingest_prefers_bucketed_items() {
+        let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
 
-        // Set up git repo so resolve_wave_name works
         std::process::Command::new("git")
             .args(["init", "-b", "main"])
             .current_dir(repo)
             .output()
-            .unwrap();
+            .expect("git init");
 
-        // Create wave directory
         let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).unwrap();
-        std::fs::write(wave_dir.join("README.md"), "# Test").unwrap();
-        std::fs::write(wave_dir.join("01-first.md"), "# First item").unwrap();
-        std::fs::write(wave_dir.join("02-second.md"), "# Second item").unwrap();
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("README.md"), "# Test").expect("write readme");
+        std::fs::write(wave_dir.join("01-legacy.md"), "# Legacy").expect("write legacy");
+        std::fs::write(wave_dir.join("p1-next.md"), "# Next").expect("write p1");
+        std::fs::write(wave_dir.join("p0-broken.md"), "# Broken").expect("write p0");
 
         let result = ingest(
             repo,
@@ -214,31 +233,32 @@ mod tests {
             },
             &NullProgress,
         )
-        .unwrap();
+        .expect("ingest succeeds");
 
         assert_eq!(result.wave, "test-wave");
-        assert_eq!(result.slug, "first");
-        assert!(result.dest.ends_with("scratch/test-wave-first.md"));
+        assert_eq!(result.slug, "broken");
+        assert!(result.dest.ends_with("scratch/test-wave-broken.md"));
         assert!(result.dest.exists());
-        assert!(!wave_dir.join("01-first.md").exists());
-        assert!(wave_dir.join("02-second.md").exists());
+        assert!(!wave_dir.join("p0-broken.md").exists());
+        assert!(wave_dir.join("p1-next.md").exists());
+        assert!(wave_dir.join("01-legacy.md").exists());
     }
 
     #[test]
-    fn ingest_multiple_same_prefix_errors() {
-        let dir = TempDir::new().unwrap();
+    fn ingest_uses_filename_order_within_the_same_bucket() {
+        let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
 
         std::process::Command::new("git")
             .args(["init", "-b", "main"])
             .current_dir(repo)
             .output()
-            .unwrap();
+            .expect("git init");
 
         let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).unwrap();
-        std::fs::write(wave_dir.join("01-first.md"), "# A").unwrap();
-        std::fs::write(wave_dir.join("01-second.md"), "# B").unwrap();
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("p1-alpha.md"), "# Alpha").expect("write alpha");
+        std::fs::write(wave_dir.join("p1-beta.md"), "# Beta").expect("write beta");
 
         let result = ingest(
             repo,
@@ -246,27 +266,27 @@ mod tests {
                 wave: Some("test-wave".to_string()),
             },
             &NullProgress,
-        );
+        )
+        .expect("ingest succeeds");
 
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("multiple items with prefix 01"));
+        assert_eq!(result.slug, "alpha");
+        assert!(!wave_dir.join("p1-alpha.md").exists());
+        assert!(wave_dir.join("p1-beta.md").exists());
     }
 
     #[test]
     fn ingest_empty_wave_errors() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
 
         std::process::Command::new("git")
             .args(["init", "-b", "main"])
             .current_dir(repo)
             .output()
-            .unwrap();
+            .expect("git init");
 
         let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).unwrap();
-        std::fs::write(wave_dir.join("README.md"), "# Test").unwrap();
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
 
         let result = ingest(
             repo,
@@ -277,7 +297,9 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("no numbered items"));
+        assert_eq!(
+            result.expect_err("empty wave should error").to_string(),
+            "no roadmap items in wave/test-wave/"
+        );
     }
 }

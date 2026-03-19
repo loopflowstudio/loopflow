@@ -7,6 +7,65 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum PriorityBucket {
+    P0,
+    P1,
+    P2,
+    P3,
+}
+
+impl PriorityBucket {
+    pub fn filename_prefix(self) -> &'static str {
+        match self {
+            Self::P0 => "p0",
+            Self::P1 => "p1",
+            Self::P2 => "p2",
+            Self::P3 => "p3",
+        }
+    }
+
+    pub fn semantic_label(self) -> &'static str {
+        match self {
+            Self::P0 => "P0",
+            Self::P1 => "P1",
+            Self::P2 => "P2",
+            Self::P3 => "P3",
+        }
+    }
+
+    pub fn order(self) -> u8 {
+        match self {
+            Self::P0 => 0,
+            Self::P1 => 1,
+            Self::P2 => 2,
+            Self::P3 => 3,
+        }
+    }
+
+    pub fn from_filename_prefix(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "p0" => Some(Self::P0),
+            "p1" => Some(Self::P1),
+            "p2" => Some(Self::P2),
+            "p3" => Some(Self::P3),
+            _ => None,
+        }
+    }
+
+    pub fn from_semantic_label(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "p0" | "urgent" => Some(Self::P0),
+            "p1" | "high" => Some(Self::P1),
+            "p2" | "medium" => Some(Self::P2),
+            "p3" | "low" => Some(Self::P3),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -44,7 +103,7 @@ pub struct PmItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub rank: u32,
+    pub priority: PriorityBucket,
     pub completed: bool,
 }
 
@@ -52,7 +111,7 @@ pub struct PmItem {
 pub struct PmItemCreate {
     pub name: String,
     pub description: String,
-    pub rank: u32,
+    pub priority: PriorityBucket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -62,7 +121,7 @@ pub struct PmItemUpdate {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub rank: Option<u32>,
+    pub priority: Option<PriorityBucket>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +140,10 @@ impl PmItemUpdate {
             name: self.name.as_deref(),
             description: self.description.as_deref(),
         })
+    }
+
+    pub(crate) fn is_noop(&self) -> bool {
+        self.name.is_none() && self.description.is_none() && self.priority.is_none()
     }
 }
 
@@ -353,7 +416,7 @@ mod tests {
     #[test]
     fn pm_item_update_text_update_skips_rank_only_changes() {
         let update = PmItemUpdate {
-            rank: Some(1),
+            priority: Some(PriorityBucket::P1),
             ..PmItemUpdate::default()
         };
 
@@ -365,7 +428,7 @@ mod tests {
         let update = PmItemUpdate {
             name: Some("Ship Linear".to_string()),
             description: Some("Build the GraphQL client".to_string()),
-            rank: Some(1),
+            priority: Some(PriorityBucket::P1),
         };
 
         assert_eq!(
@@ -375,5 +438,36 @@ mod tests {
                 description: Some("Build the GraphQL client"),
             })
         );
+    }
+
+    #[test]
+    fn pm_item_update_is_noop_only_without_text_or_priority_changes() {
+        assert!(PmItemUpdate::default().is_noop());
+        assert!(!PmItemUpdate {
+            priority: Some(PriorityBucket::P2),
+            ..PmItemUpdate::default()
+        }
+        .is_noop());
+    }
+
+    #[test]
+    fn priority_bucket_parses_native_and_shared_labels() {
+        assert_eq!(
+            PriorityBucket::from_semantic_label("urgent"),
+            Some(PriorityBucket::P0)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("High"),
+            Some(PriorityBucket::P1)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("p2"),
+            Some(PriorityBucket::P2)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("LOW"),
+            Some(PriorityBucket::P3)
+        );
+        assert_eq!(PriorityBucket::from_semantic_label("later"), None);
     }
 }

@@ -2,19 +2,19 @@
 asana_id: '1213718096104955'
 linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 ---
-# 06: Window Composition
+# 03: Window Composition
 
 **Finish line:** Concerto is a native Swift window compositor for development work. Terminals, diff viewers, file editors, wave configs, and queue/portfolio surfaces compose into layouts the way tmux composes terminal panes, but with native UI where it matters.
 
 ## Context
 
-The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. `TerminalWorkspaceStore` now also persists tab ordering and selection per repo, and `lfd` exposes attach/start/cancel endpoints plus durable `terminal_sessions` rows. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch. It also needs to stay compatible with the transport upgrade tracked in `wave/lfd/`: grow around session identity and workspace state, not around today's local launch-spec shim.
+The terminal-embedding milestone shipped the first workspace: `WaveWorkspaceView` routes to native work view by default, with an additive terminal tab backed by stable `TerminalSession` ids and `TerminalWorkspaceStore`. Wave context lives beside the terminal instead of inside a chat transcript. `TerminalWorkspaceStore` persists tab ordering and selection per repo, and `lfd` exposes attach/start/cancel endpoints plus durable `terminal_sessions` rows. Window composition should grow from that seam — promoting the existing tabbed model into split layouts — not restart the workspace model from scratch. It also needs to stay compatible with the transport upgrade tracked in `wave/lfd/`: grow around session identity and workspace state, not around today's local launch-spec shim.
 
 Tmux solves a real problem: manage multiple panes of work in one screen, persist layouts across sessions, switch contexts fast. Developers live in it because nothing else gives that level of control over window composition.
 
 But tmux is limited to terminals. Everything is text. Diffs are text. Config editing is text. A native compositor can do what tmux does and more — native diff views with syntax highlighting, visual wave config editors, file trees with semantic awareness, and queue/calibration surfaces that stay first-class instead of becoming terminal output.
 
-The question isn't “can we replace tmux” — it's “what would tmux be if it had access to native UI and understood the development workflow?”
+The question isn't "can we replace tmux" — it's "what would tmux be if it had access to native UI and understood the development workflow?"
 
 ## Feature comparison: tmux vs Concerto compositor
 
@@ -101,7 +101,7 @@ Mosh's state-sync model (sync screen snapshot, not replay bytes) is relevant for
 ## Open questions
 
 - How should saved layouts interact with the current `TerminalWorkspaceStore` ordering and selection model? (Guidance: layouts should reference sessions by ID, and `TerminalWorkspaceStore` remains the authority for per-repo session ordering. Layouts compose over that — they describe spatial arrangement, not session lifecycle.)
-- What is the right restore story for running Ghostty surfaces that currently only survive inside one app process? (Guidance: once `lfd` owns PTYs (item 04), Ghostty views just reattach to daemon sessions on restore. Before that, local Ghostty processes die with the app — persist the layout tree, recreate shells on restart.)
+- What is the right restore story for running Ghostty surfaces that currently only survive inside one app process? (Guidance: once `lfd` owns PTYs (`wave/lfd/` item 04), Ghostty views just reattach to daemon sessions on restore. Before that, local Ghostty processes die with the app — persist the layout tree, recreate shells on restart.)
 - Which panes must work for remote repos before remote PTY transport exists, and which stay local-only? (Guidance: queue, portfolio, calibration, and diff panes work for any repo with an `lfd` HTTP connection. Terminal panes need either local Ghostty or daemon PTY transport. Keep the pane type roster split along that line.)
 - How much tmux-style keyboard vocabulary helps vs confuses in a native macOS app? (Guidance: leader-key + hjkl for pane navigation is natural for tmux/vim users. But Concerto is a macOS app — Cmd-based shortcuts should also work. Offer both, don't force one.)
 

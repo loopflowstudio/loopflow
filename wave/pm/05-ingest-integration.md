@@ -17,13 +17,13 @@ linear_id: 53651936-b71f-45fa-a28c-c21c942bca78
 
 This keeps PM planning authoritative without inventing a second sync path. Reprioritize items, update descriptions, add new items, delete stale ones — `ingest` should pick up the latest state before it decides what to move into `scratch/`.
 
-## Context from the priority-bucket redo
+## Current state
 
-Ingest is now bucket-aware: `p0-*` through `p3-*` files take precedence over legacy numbered files, and the highest-priority non-empty bucket is picked first (filename order within a bucket). The PM pull must write bucketed filenames so that post-refresh ingest picks the right item.
+Ingest is bucket-aware: `p0-*` through `p3-*` files take precedence over legacy numbered files, and the highest-priority non-empty bucket is picked first (filename order within a bucket). The PM pull must write bucketed filenames so that post-refresh ingest picks the right item.
 
-Legacy numbered roadmap files still work as a fallback during the transition. Items without an explicit bucket prefix default to shared `P1` meaning when syncing to PM. These assumptions were made in the priority-bucket redo and should be preserved here.
+Legacy numbered roadmap files still work as a fallback. Items without an explicit bucket prefix default to shared `P1` meaning when syncing to PM.
 
-Asana priority mapping relies on custom-field option names being semantically recognizable (`P0`/`P1`/`P2`/`P3` or `Urgent`/`High`/`Medium`/`Low`). Unexpected labels from Asana may need follow-up handling in the pull path.
+Asana priority mapping relies on custom-field option names being semantically recognizable (`P0`/`P1`/`P2`/`P3` or `Urgent`/`High`/`Medium`/`Low`). Unexpected labels may need follow-up handling in the pull path.
 
 ## Constraints
 

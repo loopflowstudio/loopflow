@@ -25,7 +25,7 @@ Notion should come after the shared planning model is corrected and after its do
 
 ## Prereqs
 
-- Item 07: bucketed priority model across prompts, ingest, Asana, and Linear
+- ~~Bucketed priority model across prompts, ingest, Asana, and Linear~~ — shipped
 - Item 08: OAuth-only PM auth
 - Item 09: Notion README sync
 - Item 10: Notion supporting-doc import

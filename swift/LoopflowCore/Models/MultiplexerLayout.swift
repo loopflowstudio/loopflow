@@ -97,6 +97,9 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     private func containsPane(_ paneId: String) -> Bool {
         pane(for: paneId) != nil
     }
@@ -108,8 +111,11 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         return false
     }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     /// Replace the leaf with the given paneId with a split containing the original and a new pane.
     public func splitting(_ paneId: String, axis: SplitAxis, newPane: PaneState, ratio: Double = 0.5) -> LayoutNode {
         switch self {
@@ -180,6 +186,7 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
             return self
         case .split(let axis, let first, let second, let currentRatio):
 <<<<<<< HEAD
+<<<<<<< HEAD
             if first.isLeaf(paneId) || second.isLeaf(paneId) {
                 return .split(axis, first: first, second: second, ratio: ratio)
             }
@@ -207,11 +214,30 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                           second: second.updatingRatio(containing: paneId, ratio: currentRatio),
                           ratio: currentRatio)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            if first.isLeaf(paneId) || second.isLeaf(paneId) {
+                return .split(axis, first: first, second: second, ratio: ratio)
+            }
+            if first.containsPane(paneId) {
+                return .split(axis,
+                              first: first.updatingRatio(containing: paneId, ratio: ratio),
+                              second: second,
+                              ratio: currentRatio)
+            }
+            if second.containsPane(paneId) {
+                return .split(axis,
+                              first: first,
+                              second: second.updatingRatio(containing: paneId, ratio: ratio),
+                              ratio: currentRatio)
+            }
+            return self
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
         }
     }
 
     /// Find the next pane after the given paneId in tree order.
     public func nextPane(after paneId: String) -> PaneState? {
+<<<<<<< HEAD
 <<<<<<< HEAD
         adjacentPane(to: paneId, offset: 1)
 =======
@@ -220,15 +246,22 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         let nextIndex = (index + 1) % panes.count
         return panes[nextIndex]
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        adjacentPane(to: paneId, offset: 1)
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     }
 
     /// Find the previous pane before the given paneId in tree order.
     public func previousPane(before paneId: String) -> PaneState? {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
         adjacentPane(to: paneId, offset: -1)
     }
 
     private func adjacentPane(to paneId: String, offset: Int) -> PaneState? {
+<<<<<<< HEAD
         let panes = allPanes
         guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
         let neighborIndex = (index + offset + panes.count) % panes.count
@@ -239,6 +272,12 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         let prevIndex = (index - 1 + panes.count) % panes.count
         return panes[prevIndex]
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        let panes = allPanes
+        guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
+        let neighborIndex = (index + offset + panes.count) % panes.count
+        return panes[neighborIndex]
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     }
 
     // MARK: - Codable

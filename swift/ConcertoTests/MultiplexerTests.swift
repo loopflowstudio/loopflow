@@ -100,6 +100,9 @@ struct MultiplexerLayoutTests {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     @Test("updating ratio changes the split that contains the target pane")
     func updateRatioContainingPane() {
         let paneA = PaneState(type: .terminal)
@@ -123,6 +126,7 @@ struct MultiplexerLayoutTests {
         #expect(nestedRatio == 0.8)
     }
 
+<<<<<<< HEAD
     @Test("layout round-trips through JSON")
     func codable() throws {
         let paneA = PaneState(
@@ -134,6 +138,8 @@ struct MultiplexerLayoutTests {
             )
         )
 =======
+=======
+>>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     @Test("layout round-trips through JSON")
     func codable() throws {
         let paneA = PaneState(id: "a", type: .terminal)

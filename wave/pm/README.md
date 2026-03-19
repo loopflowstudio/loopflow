@@ -16,12 +16,12 @@ Loopflow syncs with the planning tools teams already use. Near-term, that means 
 The PM architecture still centers on provider roles, a shared seam, and a single set of file formats:
 
 - `rust/loopflow/src/lfd/pm/mod.rs` owns the provider-agnostic language (`PmProviderKind`, `PmConfig`, `PmItem*`, `PmProvider`, `PmTextUpdate`, `RoadmapItemDocument`), shared retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`), and the shared test server (`test_server` module)
-- `rust/loopflow/src/lfd/pm/asana.rs` and `rust/loopflow/src/lfd/pm/linear.rs` are the concrete transport adapters; the next redo should make them prove the new bucketed-priority model before Notion joins the same seam
+- `rust/loopflow/src/lfd/pm/asana.rs` and `rust/loopflow/src/lfd/pm/linear.rs` are the concrete transport adapters; both now carry `PriorityBucket` through their native vocabularies (Asana custom-field labels, Linear native priorities)
 - `RoadmapItemFrontmatter` remains the place for per-provider item IDs via `id_for(provider)` / `set_id(provider, id)`
 - `rust/loopflow/src/ops/pm.rs` remains the orchestration layer for `pm_init`, `pm_pull`, `pm_status`, `pm_import`, and `pm_sync`
 - `WaveExecutor::execute()` already imports from the read/write provider at PR-oriented run start and exports back to configured providers at the end; future work should keep using that lifecycle instead of inventing a second sync path
 
-The next design step is to stop treating roadmap planning as a single exact queue. Prompts, ingest, and provider sync should all assume four semantic priority buckets and then translate that meaning into the native language of each PM tool.
+Prompts, ingest, and provider sync now assume four semantic priority buckets (`P0`–`P3`) and translate that meaning into the native language of each PM tool. The next steps are wiring ingest to auto-refresh from PM before picking, cleaning up auth to OAuth-only, and then bringing Notion in as the doc-native provider.
 
 ### Invariants
 
@@ -35,18 +35,17 @@ The next design step is to stop treating roadmap planning as a single exact queu
 
 ## Goals
 
-- Redo roadmap planning around four priority buckets instead of exact numeric ordering
-- Update prompt guidance and `ingest` so waves naturally write and consume bucketed priorities
-- Make the new model work cleanly with Asana and Linear before touching Notion integration
+- Wire ingest auto-refresh from PM so `lf ingest` sees the latest remote state before picking
+- Complete item lifecycle comments (PR open, run failure, merge → comment/complete on PM item)
 - Move PM auth toward OAuth-only browser-connect flows
 - Add Notion README sync and supporting-doc import after the shared model is proven
 - Add Notion task parity only after the prereqs above land
 
 ## Risks
 
-- **The current queue model leaks everywhere.** Built-in prompts, docs, ingest, tests, and PM sync all still talk like roadmap items are `01-*`, `02-*`, etc. The redo will touch more surfaces than the data model alone.
-- **Within-bucket choice is unresolved.** The immediate goal is binning, not exact ordering. Multiple `P1` items are fine for now, but anything that assumes a deterministic total order will need a follow-up rule.
-- **Provider vocabulary differs.** Asana likely wants a custom field, Linear wants native `Urgent/High/Medium/Low`, and Notion will likely want a select property. The shared meaning is portable; the labels are not.
+- **Within-bucket choice is unresolved.** The bucket model is landed, but multiple items in the same bucket use filename order as a local fast path. Anything that assumes a deterministic total order will need a follow-up rule.
+- **Asana label recognition is brittle.** Priority mapping relies on custom-field option names being semantically recognizable (`P0`/`P1`/`P2`/`P3` or `Urgent`/`High`/`Medium`/`Low`). Unexpected labels will need follow-up.
+- **Legacy numbered files coexist with bucketed files.** Ingest prefers bucketed files but still reads numbered items as a fallback. Mixed local states need to behave well during transition.
 - **Notion block model complexity remains real.** README sync looks high value, but page/block round-tripping is structurally more complex than Asana/Linear task sync.
 - **Credential drift is user-facing.** PM flows will still feel broken until the auth cleanup removes mixed setup paths and points users at the right browser-based connect flow.
 

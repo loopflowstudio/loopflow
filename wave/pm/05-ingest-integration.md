@@ -6,16 +6,24 @@ linear_id: 53651936-b71f-45fa-a28c-c21c942bca78
 
 **Finish line:** `ingest` refreshes from the PM tracker before picking the next item when the wave has a `pm` block.
 
-`lf ops pm pull` now exists as the deterministic remote-wins refresh (`ops/pm.rs::pm_pull`). The executor imports from the read/write provider at PR-oriented run start. But `lf ops ingest` still works off whatever currently happens to be in `wave/`. Manual roadmap pickup should see the same state the executor would see.
+`lf ops pm pull` exists as the deterministic remote-wins refresh (`ops/pm.rs::pm_pull`). The executor imports from the read/write provider at PR-oriented run start. But `lf ops ingest` still works off whatever currently happens to be in `wave/`. Manual roadmap pickup should see the same state the executor would see.
 
 ## What to build
 
 1. Resolve the wave name and PM config as `ingest` already does for the filesystem lookup (`ops/ingest.rs::ingest`).
 2. If a read/write PM provider is configured in the wave's `pm` block, call `pm_pull` to refresh local items from remote priority order.
-3. After the refresh, run the existing `list_numbered_items` / move-to-`scratch/` logic against the updated wave directory.
+3. After the refresh, run the existing `list_wave_items` / move-to-`scratch/` logic against the updated wave directory.
 4. Warn and continue on PM pull failure — the local roadmap is still better than blocking work.
 
 This keeps PM planning authoritative without inventing a second sync path. Reprioritize items, update descriptions, add new items, delete stale ones — `ingest` should pick up the latest state before it decides what to move into `scratch/`.
+
+## Context from the priority-bucket redo
+
+Ingest is now bucket-aware: `p0-*` through `p3-*` files take precedence over legacy numbered files, and the highest-priority non-empty bucket is picked first (filename order within a bucket). The PM pull must write bucketed filenames so that post-refresh ingest picks the right item.
+
+Legacy numbered roadmap files still work as a fallback during the transition. Items without an explicit bucket prefix default to shared `P1` meaning when syncing to PM. These assumptions were made in the priority-bucket redo and should be preserved here.
+
+Asana priority mapping relies on custom-field option names being semantically recognizable (`P0`/`P1`/`P2`/`P3` or `Urgent`/`High`/`Medium`/`Low`). Unexpected labels from Asana may need follow-up handling in the pull path.
 
 ## Constraints
 

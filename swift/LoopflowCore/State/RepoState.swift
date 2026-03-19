@@ -835,6 +835,7 @@ public final class RepoState {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
         focusTerminalSession(id, waveId: waveId)
     }
@@ -861,6 +862,10 @@ public final class RepoState {
     public func selectTerminalSession(_ id: String?) {
         focusTerminalSession(id)
 >>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
+=======
+    public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
+        focusTerminalSession(id, waveId: waveId)
+>>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
     }
 
     /// Navigate to a terminal session from the attention queue.
@@ -869,8 +874,8 @@ public final class RepoState {
         focusTerminalSession(sessionId, autoPresent: true)
     }
 
-    private func focusTerminalSession(_ sessionId: String?, autoPresent: Bool = false) {
-        terminalWorkspaceStore.select(sessionId)
+    private func focusTerminalSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
+        terminalWorkspaceStore.select(sessionId, waveId: waveId)
         guard let sessionId,
               let session = terminalWorkspaceStore.sessionsById[sessionId] else {
             return

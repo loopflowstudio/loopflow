@@ -6,47 +6,47 @@ import LoopflowCore
 
 @MainActor
 final class TmuxSession {
-    let baseName: String
+    let sessionName: String
     let worktreePath: String
 
     init(waveId: String, worktreePath: String) {
-        self.baseName = "lf-\(waveId)"
+        self.sessionName = "lf-\(waveId)"
         self.worktreePath = worktreePath
     }
 
     func ensureBaseSession() async throws {
-        guard !(await sessionExists(baseName)) else { return }
-        try await run("tmux", "new-session", "-d", "-s", baseName, "-c", worktreePath)
-        try await run("tmux", "set-option", "-t", baseName, "status", "off")
+        guard !(await sessionExists(sessionName)) else { return }
+        try await run("tmux", "new-session", "-d", "-s", sessionName, "-c", worktreePath)
+        try await run("tmux", "set-option", "-t", sessionName, "status", "off")
     }
 
     func attachCommand() -> [String] {
-        ["tmux", "attach-session", "-t", baseName]
+        ["tmux", "attach-session", "-t", sessionName]
     }
 
     func split(_ axis: SplitAxis) async throws {
         try await ensureBaseSession()
         switch axis {
         case .horizontal:
-            try await run("tmux", "split-window", "-h", "-c", worktreePath, "-t", baseName)
+            try await run("tmux", "split-window", "-h", "-c", worktreePath, "-t", sessionName)
         case .vertical:
-            try await run("tmux", "split-window", "-v", "-c", worktreePath, "-t", baseName)
+            try await run("tmux", "split-window", "-v", "-c", worktreePath, "-t", sessionName)
         }
     }
 
     func createWindow() async throws {
         try await ensureBaseSession()
-        try await run("tmux", "new-window", "-c", worktreePath, "-t", baseName)
+        try await run("tmux", "new-window", "-c", worktreePath, "-t", sessionName)
     }
 
     func selectNextWindow() async throws {
         try await ensureBaseSession()
-        try await run("tmux", "select-window", "-n", "-t", baseName)
+        try await run("tmux", "select-window", "-n", "-t", sessionName)
     }
 
     func selectPreviousWindow() async throws {
         try await ensureBaseSession()
-        try await run("tmux", "select-window", "-p", "-t", baseName)
+        try await run("tmux", "select-window", "-p", "-t", sessionName)
     }
 
     func closeFocusedThing() async throws {
@@ -54,13 +54,13 @@ final class TmuxSession {
 
         let paneCount = try await currentWindowPaneCount()
         if paneCount > 1 {
-            try await run("tmux", "kill-pane", "-t", baseName)
+            try await run("tmux", "kill-pane", "-t", sessionName)
             return
         }
 
         let windowCount = try await sessionWindowCount()
         guard windowCount > 1 else { return }
-        try await run("tmux", "kill-window", "-t", baseName)
+        try await run("tmux", "kill-window", "-t", sessionName)
     }
 
     func sessionExists(_ name: String) async -> Bool {
@@ -73,28 +73,21 @@ final class TmuxSession {
     }
 
     private func currentWindowPaneCount() async throws -> Int {
-        let output = try await runOutput(
-            "tmux",
-            "display-message",
-            "-p",
-            "-t",
-            baseName,
-            "#{window_panes}"
-        )
-        guard let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            throw TmuxError.unexpectedOutput(output)
-        }
-        return count
+        try await displayMessageCount("#{window_panes}")
     }
 
     private func sessionWindowCount() async throws -> Int {
+        try await displayMessageCount("#{session_windows}")
+    }
+
+    private func displayMessageCount(_ format: String) async throws -> Int {
         let output = try await runOutput(
             "tmux",
             "display-message",
             "-p",
             "-t",
-            baseName,
-            "#{session_windows}"
+            sessionName,
+            format
         )
         guard let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw TmuxError.unexpectedOutput(output)
@@ -103,14 +96,14 @@ final class TmuxSession {
     }
 
     private func run(_ args: String...) async throws {
-        _ = try await runOutput(args)
+        _ = try await runCommand(args)
     }
 
     private func runOutput(_ args: String...) async throws -> String {
-        try await runOutput(args)
+        try await runCommand(args)
     }
 
-    private func runOutput(_ args: [String]) async throws -> String {
+    private func runCommand(_ args: [String]) async throws -> String {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()

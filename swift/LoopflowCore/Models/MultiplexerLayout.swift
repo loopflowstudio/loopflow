@@ -79,6 +79,17 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
+    private func containsPane(_ paneId: String) -> Bool {
+        pane(for: paneId) != nil
+    }
+
+    private func isLeaf(_ paneId: String) -> Bool {
+        if case .leaf(let pane) = self {
+            return pane.id == paneId
+        }
+        return false
+    }
+
     /// Replace the leaf with the given paneId with a split containing the original and a new pane.
     public func splitting(_ paneId: String, axis: SplitAxis, newPane: PaneState, ratio: Double = 0.5) -> LayoutNode {
         switch self {
@@ -129,32 +140,40 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         case .leaf:
             return self
         case .split(let axis, let first, let second, let currentRatio):
-            let firstContains = first.pane(for: paneId) != nil
-            let secondContains = second.pane(for: paneId) != nil
-            if firstContains || secondContains {
+            if first.isLeaf(paneId) || second.isLeaf(paneId) {
                 return .split(axis, first: first, second: second, ratio: ratio)
             }
-            return .split(axis,
-                          first: first.updatingRatio(containing: paneId, ratio: currentRatio),
-                          second: second.updatingRatio(containing: paneId, ratio: currentRatio),
-                          ratio: currentRatio)
+            if first.containsPane(paneId) {
+                return .split(axis,
+                              first: first.updatingRatio(containing: paneId, ratio: ratio),
+                              second: second,
+                              ratio: currentRatio)
+            }
+            if second.containsPane(paneId) {
+                return .split(axis,
+                              first: first,
+                              second: second.updatingRatio(containing: paneId, ratio: ratio),
+                              ratio: currentRatio)
+            }
+            return self
         }
     }
 
     /// Find the next pane after the given paneId in tree order.
     public func nextPane(after paneId: String) -> PaneState? {
-        let panes = allPanes
-        guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
-        let nextIndex = (index + 1) % panes.count
-        return panes[nextIndex]
+        adjacentPane(to: paneId, offset: 1)
     }
 
     /// Find the previous pane before the given paneId in tree order.
     public func previousPane(before paneId: String) -> PaneState? {
+        adjacentPane(to: paneId, offset: -1)
+    }
+
+    private func adjacentPane(to paneId: String, offset: Int) -> PaneState? {
         let panes = allPanes
         guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
-        let prevIndex = (index - 1 + panes.count) % panes.count
-        return panes[prevIndex]
+        let neighborIndex = (index + offset + panes.count) % panes.count
+        return panes[neighborIndex]
     }
 
     // MARK: - Codable

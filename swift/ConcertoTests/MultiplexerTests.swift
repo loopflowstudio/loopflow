@@ -99,6 +99,29 @@ struct MultiplexerLayoutTests {
         #expect(afterRemove.pane(for: paneC.id) != nil)
     }
 
+    @Test("updating ratio changes the split that contains the target pane")
+    func updateRatioContainingPane() {
+        let paneA = PaneState(type: .terminal)
+        let paneB = PaneState(type: .diff)
+        let paneC = PaneState(type: .markdown)
+
+        let nested = LayoutNode.split(.vertical, first: .leaf(paneB), second: .leaf(paneC), ratio: 0.25)
+        let layout = LayoutNode.split(.horizontal, first: .leaf(paneA), second: nested, ratio: 0.5)
+        let updated = layout.updatingRatio(containing: paneC.id, ratio: 0.8)
+
+        guard case .split(_, _, let updatedNested, let outerRatio) = updated else {
+            Issue.record("expected outer split")
+            return
+        }
+        guard case .split(_, _, _, let nestedRatio) = updatedNested else {
+            Issue.record("expected nested split")
+            return
+        }
+
+        #expect(outerRatio == 0.5)
+        #expect(nestedRatio == 0.8)
+    }
+
     @Test("layout round-trips through JSON")
     func codable() throws {
         let paneA = PaneState(id: "a", type: .terminal)

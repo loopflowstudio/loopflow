@@ -16,6 +16,13 @@ struct ContentView: View {
     @State private var toastDismissTask: Task<Void, Never>?
     @Environment(\.palette) private var palette
 
+    private struct MultiplexerContext {
+        let waveId: String
+        let worktreePath: String
+        let focusedPane: PaneState
+        let routesToTerminal: Bool
+    }
+
     var body: some View {
         @Bindable var repoState = repoState
         NavigationSplitView {
@@ -327,13 +334,7 @@ struct ContentView: View {
         guard let context = multiplexerContext() else { return }
 
         if context.routesToTerminal {
-            Task {
-                do {
-                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).split(axis)
-                } catch {
-                    repoState.errorMessage = error.localizedDescription
-                }
-            }
+            performTmuxAction(context) { try await $0.split(axis) }
             return
         }
 
@@ -349,13 +350,7 @@ struct ContentView: View {
         guard let context = multiplexerContext() else { return }
 
         if context.routesToTerminal {
-            Task {
-                do {
-                    try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).closeFocusedThing()
-                } catch {
-                    repoState.errorMessage = error.localizedDescription
-                }
-            }
+            performTmuxAction(context) { try await $0.closeFocusedThing() }
             return
         }
 
@@ -364,31 +359,19 @@ struct ContentView: View {
 
     private func handleNewShell() {
         guard let context = multiplexerContext() else { return }
-
-        Task {
-            do {
-                try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).createWindow()
-            } catch {
-                repoState.errorMessage = error.localizedDescription
-            }
-        }
+        performTmuxAction(context) { try await $0.createWindow() }
     }
 
     private func handleFocusPane(_ direction: FocusDirection) {
         guard let context = multiplexerContext() else { return }
 
         if context.routesToTerminal {
-            Task {
-                do {
-                    let tmux = TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath)
-                    switch direction {
-                    case .next:
-                        try await tmux.selectNextWindow()
-                    case .previous:
-                        try await tmux.selectPreviousWindow()
-                    }
-                } catch {
-                    repoState.errorMessage = error.localizedDescription
+            performTmuxAction(context) { tmux in
+                switch direction {
+                case .next:
+                    try await tmux.selectNextWindow()
+                case .previous:
+                    try await tmux.selectPreviousWindow()
                 }
             }
             return
@@ -397,15 +380,32 @@ struct ContentView: View {
         repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
     }
 
-    private func multiplexerContext() -> (waveId: String, worktreePath: String, focusedPane: PaneState, routesToTerminal: Bool)? {
+    private func performTmuxAction(
+        _ context: MultiplexerContext,
+        action: @escaping (TmuxSession) async throws -> Void
+    ) {
+        Task {
+            do {
+                try await action(TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath))
+            } catch {
+                repoState.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
               let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
-        let routesToTerminal = focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
-        return (wave.id, worktreePath, focusedPane, routesToTerminal)
+        return MultiplexerContext(
+            waveId: wave.id,
+            worktreePath: worktreePath,
+            focusedPane: focusedPane,
+            routesToTerminal: focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
+        )
     }
 
     private func nextOuterPaneType(after paneType: PaneType) -> PaneType {

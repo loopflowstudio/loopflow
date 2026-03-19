@@ -60,6 +60,12 @@ tmux uses pure filesystem permissions on the socket directory. No cryptographic 
 
 WezTerm proved that local, SSH, Unix socket, and TLS connections can all implement the same spawn/pane interface. The `lf` → `lfd` event contract should be transport-agnostic from day one: define events as typed messages, let the delivery mechanism vary (HTTP for now, socket later, remote transport eventually) without changing the event schema.
 
+## Key consumers
+
+### `lf` calling the attention API
+
+When `lf` hits `WaitInteractive` for a checkpoint step, it should `POST /attention` with the appropriate context (step name, terminal session ID, design path). When the step completes, it should `POST /attention/{id}/resolve`. The HTTP routes already exist — the daemon-aware CLI contract is what lets `lf` discover and authenticate to them.
+
 ## Open questions
 
 - Should event delivery go over HTTP, a unix socket, stdio side channel, or some combination? (Guidance: HTTP is simplest for v0 since `lfd` already has an HTTP server. Stdio side channel is worth considering for daemon-spawned processes where `lfd` owns the PTY.)

@@ -5,7 +5,7 @@ notion_id: 32af8f99-3d81-81bd-ab89-f9303b2a1563
 ---
 # 06: Wave Mutation
 
-**Finish line:** The chord-wave's `wave/mutate` step can modify wave configuration through a structured mutation API. Direction, area, flow, agent, work items, triggers, and lifecycle are all mutable. Mutations are logged and reversible.
+**Finish line:** The chord-wave's `apply` step can modify wave configuration through a structured mutation API. Direction, area, flow, agent, work items, triggers, and lifecycle are all mutable. Mutations are logged and reversible.
 
 ## Context
 
@@ -32,7 +32,7 @@ The folded `signals` work changes the pressure behind these levers. Stall detect
 
 3. **Reversibility.** Store enough prior state to revert an individual mutation cleanly.
 
-4. **Mutate-step integration.** `wave/mutate` uses the mutation API for both automatic governance mutations and human-amended follow-up changes. Review artifacts keep enough mutation context attached to amend or revert cleanly.
+4. **Apply-step integration.** `apply-chord` uses the mutation API for both auto-applied changes and human-gated proposals. Human-review items keep the proposed mutation attached so approval can execute the same payload.
 
 5. **Pressure-to-mutation mapping.** Capture how common chord signals turn into mutation candidates:
    - repeated algedonic incidents → flow or scope change
@@ -44,6 +44,6 @@ The folded `signals` work changes the pressure behind these levers. Stall detect
 - The mutation API accepts and executes all planned lever types
 - Every mutation is logged with actor, rationale, and previous value
 - Mutations are individually revertible
-- `wave/mutate` uses the API for both automatic and human-amended changes
-- At least one real mutation has been applied by the redesign chord-wave's garden flow
+- `apply-chord` uses the API for both auto and human-gated changes
+- At least one real mutation has been applied by the redesign chord-wave's tend flow
 - Repeated stall or algedonic pressure can be expressed as structured mutation proposals without a separate signal subsystem

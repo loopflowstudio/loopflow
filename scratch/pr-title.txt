@@ -1,1 +1,0 @@
-concerto: keep embedded Ghostty typing on the key-event path

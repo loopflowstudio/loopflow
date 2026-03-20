@@ -120,9 +120,9 @@ def main():
     wave_yaml.write_text(yaml.dump(wave_config, default_flow_style=False))
     print(f"Wrote pm block to wave/{wave_name}/{wave_name}.yaml")
 
-    print(f"\nReady. Run:")
-    print(f"  lf op export {wave_name} --dry-run")
-    print(f"  lf op export {wave_name}")
+    print("\nReady. Run:")
+    print(f"  lf ops export {wave_name} --dry-run")
+    print(f"  lf ops export {wave_name}")
 
 
 def asana_get(headers: dict, path: str) -> list:

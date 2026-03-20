@@ -48,11 +48,6 @@ final class TmuxSession {
         }
     }
 
-    func kill() async throws {
-        try Self.killSessionIfExists(named: sessionName)
-        registry.untrack(sessionName: sessionName)
-    }
-
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
         do {
             _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])
@@ -101,7 +96,6 @@ final class TmuxSession {
 
 enum TmuxError: LocalizedError {
     case commandFailed(String, status: Int32, detail: String)
-    case unexpectedOutput(String)
 
     var errorDescription: String? {
         switch self {
@@ -110,8 +104,6 @@ enum TmuxError: LocalizedError {
                 return "tmux command failed (\(status)): \(cmd)"
             }
             return "tmux command failed (\(status)): \(cmd)\n\(detail)"
-        case .unexpectedOutput(let output):
-            return "Unexpected tmux output: \(output)"
         }
     }
 }

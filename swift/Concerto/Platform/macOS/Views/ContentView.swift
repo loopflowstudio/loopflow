@@ -18,7 +18,6 @@ struct ContentView: View {
 
     private struct MultiplexerContext {
         let waveId: String
-        let worktreePath: String
         let focusedPane: PaneState
     }
 
@@ -268,8 +267,6 @@ struct ContentView: View {
             handleFocusPane(.next)
         case .focusPreviousPane:
             handleFocusPane(.previous)
-        case .snapHalf, .snapThird, .snapQuarter:
-            break // Phase 3
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -366,14 +363,13 @@ struct ContentView: View {
 
     private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
-              let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
+              (wave.worktreePath ?? wave.api.localWorktree) != nil,
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
         return MultiplexerContext(
             waveId: wave.id,
-            worktreePath: worktreePath,
             focusedPane: focusedPane
         )
     }

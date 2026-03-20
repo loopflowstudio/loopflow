@@ -49,13 +49,6 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     case leaf(PaneState)
     case split(SplitAxis, first: LayoutNode, second: LayoutNode, ratio: Double)
 
-    public var id: String {
-        switch self {
-        case .leaf(let pane): pane.id
-        case .split(_, let first, _, _): "split-\(first.id)"
-        }
-    }
-
     public static func defaultLayout() -> LayoutNode {
         .leaf(PaneState(type: .terminal))
     }

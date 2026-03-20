@@ -33,16 +33,18 @@ public final class MultiplexerStore {
     }
 
     public func focusedPaneId(for waveId: String) -> String? {
+        let layout = layout(for: waveId)
         let id = focusedPaneByWave[waveId]
-        if let id, layout(for: waveId).pane(for: id) != nil {
+        if let id, layout.pane(for: id) != nil {
             return id
         }
-        return layout(for: waveId).firstPane?.id
+        return layout.firstPane?.id
     }
 
     public func focusedPane(for waveId: String) -> PaneState? {
+        let layout = layout(for: waveId)
         guard let id = focusedPaneId(for: waveId) else { return nil }
-        return layout(for: waveId).pane(for: id)
+        return layout.pane(for: id)
     }
 
     // MARK: - Mutations
@@ -136,10 +138,6 @@ public final class MultiplexerStore {
         focusedPaneByWave.removeValue(forKey: waveId)
         removePersistedLayout(for: waveId)
         persist()
-    }
-
-    public func terminalPane(for waveId: String) -> PaneState? {
-        layout(for: waveId).allPanes.first(where: { $0.type == .terminal })
     }
 
     public func terminalSessionNames(for waveId: String) -> [String] {

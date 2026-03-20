@@ -1,4 +1,0 @@
-module Tokenizers {
-header "Tokenizers-Swift.h"
-export *
-}

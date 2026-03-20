@@ -176,7 +176,7 @@ struct MultiplexerStoreTests {
 
         #expect(store.layout(for: "wave-1").allPanes.count == 2)
         #expect(store.focusedPaneId(for: "wave-1") == newPane.id)
-        #expect(store.terminalPane(for: "wave-1")?.id == original.id)
+        #expect(store.layout(for: "wave-1").allPanes.first(where: { $0.type == .terminal })?.id == original.id)
     }
 
     @Test("terminal split creates a second terminal with its own tmux session")

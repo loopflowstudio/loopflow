@@ -13,6 +13,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
@@ -51,6 +52,11 @@ const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
 const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
+const NOTION_OAUTH_AUTHORIZE_URL: &str = "https://api.notion.com/v1/oauth/authorize";
+const NOTION_OAUTH_TOKEN_URL: &str = "https://api.notion.com/v1/oauth/token";
+const NOTION_OAUTH_REDIRECT_URI: &str = "http://localhost:19223/oauth/callback";
+const NOTION_CLIENT_ID_ENV: &str = "NOTION_CLIENT_ID";
+const NOTION_CLIENT_SECRET_ENV: &str = "NOTION_CLIENT_SECRET";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -73,6 +79,7 @@ pub enum Provider {
     OpenCodeZen,
     Asana,
     Linear,
+    Notion,
     Doppler,
 }
 
@@ -85,11 +92,12 @@ impl Provider {
             Self::OpenCodeZen => "opencodezen",
             Self::Asana => "asana",
             Self::Linear => "linear",
+            Self::Notion => "notion",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 7] {
+    pub fn all() -> [Self; 8] {
         [
             Self::GitHub,
             Self::Claude,
@@ -97,6 +105,7 @@ impl Provider {
             Self::OpenCodeZen,
             Self::Asana,
             Self::Linear,
+            Self::Notion,
             Self::Doppler,
         ]
     }
@@ -109,6 +118,7 @@ impl Provider {
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Asana => "Asana",
             Self::Linear => "Linear",
+            Self::Notion => "Notion",
             Self::Doppler => "Doppler",
         }
     }
@@ -120,7 +130,7 @@ impl Provider {
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
             Self::Asana => Some("ASANA_ACCESS_TOKEN"),
             Self::Linear => Some("LINEAR_API_KEY"),
-            Self::GitHub | Self::Doppler => None,
+            Self::GitHub | Self::Notion | Self::Doppler => None,
         }
     }
 
@@ -154,6 +164,7 @@ impl FromStr for Provider {
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "asana" => Ok(Self::Asana),
             "linear" | "lin" => Ok(Self::Linear),
+            "notion" => Ok(Self::Notion),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -607,6 +618,10 @@ struct LinearOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
 }
 
+struct NotionOAuthBroker {
+    completed_token: Arc<Mutex<Option<ProviderToken>>>,
+}
+
 #[derive(Debug, Clone)]
 struct LinearOAuthApp {
     client_id: String,
@@ -618,6 +633,38 @@ struct LinearOAuthApp {
 struct LinearOAuthTokenResponse {
     access_token: String,
     expires_in: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct NotionOAuthApp {
+    client_id: String,
+    client_secret: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionOAuthTokenResponse {
+    access_token: String,
+    bot_id: Option<String>,
+    workspace_name: Option<String>,
+    workspace_id: Option<String>,
+    duplicated_template_id: Option<String>,
+    owner: Option<NotionOAuthOwner>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionOAuthOwner {
+    user: Option<NotionOAuthOwnerUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionOAuthOwnerUser {
+    person: Option<NotionOAuthOwnerPerson>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionOAuthOwnerPerson {
+    email: Option<String>,
 }
 
 impl LinearOAuthBroker {
@@ -858,6 +905,243 @@ impl AuthBroker for LinearOAuthBroker {
             return Ok(AuthStatus::Expired);
         }
         Ok(AuthStatus::Active { login: None })
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        *self.completed_token.lock().await = None;
+        Ok(())
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        self.completed_token.lock().await.clone()
+    }
+}
+
+impl NotionOAuthBroker {
+    fn new() -> Self {
+        Self {
+            completed_token: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn oauth_app() -> Result<NotionOAuthApp, AuthError> {
+        let client_id = read_nonempty_env(NOTION_CLIENT_ID_ENV).ok_or_else(|| {
+            AuthError::CommandUnavailable {
+                provider: Provider::Notion,
+                command: format!(
+                    "set {NOTION_CLIENT_ID_ENV} and {NOTION_CLIENT_SECRET_ENV} to enable Notion OAuth"
+                ),
+            }
+        })?;
+        let client_secret = read_nonempty_env(NOTION_CLIENT_SECRET_ENV).ok_or_else(|| {
+            AuthError::CommandUnavailable {
+                provider: Provider::Notion,
+                command: format!(
+                    "set {NOTION_CLIENT_ID_ENV} and {NOTION_CLIENT_SECRET_ENV} to enable Notion OAuth"
+                ),
+            }
+        })?;
+        Ok(NotionOAuthApp {
+            client_id,
+            client_secret,
+        })
+    }
+
+    fn build_authorization_url(app: &NotionOAuthApp, state: &str) -> String {
+        let mut url = Url::parse(NOTION_OAUTH_AUTHORIZE_URL)
+            .expect("notion oauth authorize URL should parse");
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("client_id", &app.client_id);
+            pairs.append_pair("redirect_uri", NOTION_OAUTH_REDIRECT_URI);
+            pairs.append_pair("response_type", "code");
+            pairs.append_pair("owner", "user");
+            pairs.append_pair("state", state);
+        }
+        url.to_string()
+    }
+
+    async fn exchange_code(
+        &self,
+        app: &NotionOAuthApp,
+        code: &str,
+    ) -> Result<ProviderToken, AuthError> {
+        let response = reqwest::Client::new()
+            .post(NOTION_OAUTH_TOKEN_URL)
+            .basic_auth(&app.client_id, Some(&app.client_secret))
+            .json(&json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": NOTION_OAUTH_REDIRECT_URI,
+            }))
+            .send()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Notion,
+                message: err.to_string(),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|err| AuthError::OAuthRequest {
+                    provider: Provider::Notion,
+                    message: err.to_string(),
+                })?;
+            let message = oauth_error_message(body.as_ref())
+                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
+            if status == reqwest::StatusCode::BAD_REQUEST
+                || status == reqwest::StatusCode::UNAUTHORIZED
+            {
+                return Err(AuthError::CodeExchangeRejected {
+                    provider: Provider::Notion,
+                    message,
+                });
+            }
+            return Err(AuthError::OAuthRequest {
+                provider: Provider::Notion,
+                message: format!("HTTP {status}: {message}"),
+            });
+        }
+
+        let payload = response
+            .json::<NotionOAuthTokenResponse>()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Notion,
+                message: format!("failed to decode token response: {err}"),
+            })?;
+
+        let login = payload
+            .owner
+            .and_then(|owner| owner.user)
+            .and_then(|user| user.person.and_then(|person| person.email).or(user.name))
+            .or(payload.workspace_name)
+            .or(payload.workspace_id)
+            .or(payload.bot_id)
+            .or(payload.duplicated_template_id)
+            .filter(|value| !value.trim().is_empty());
+
+        Ok(ProviderToken {
+            provider: Provider::Notion.as_str().to_string(),
+            access_token: payload.access_token,
+            refresh_token: None,
+            expires_at: None,
+            login,
+            updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
+        })
+    }
+}
+
+#[async_trait]
+impl AuthBroker for NotionOAuthBroker {
+    fn provider(&self) -> Provider {
+        Provider::Notion
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        let app = Self::oauth_app()?;
+        let state = Uuid::new_v4().to_string();
+        let verification_uri = Self::build_authorization_url(&app, &state);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:19223").map_err(|err| {
+            AuthError::OAuthRequest {
+                provider: Provider::Notion,
+                message: format!("failed to bind localhost:19223 for OAuth callback: {err}"),
+            }
+        })?;
+        listener.set_nonblocking(true).ok();
+        let listener =
+            tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Notion,
+                message: format!("failed to create async listener: {err}"),
+            })?;
+
+        let completed_token = self.completed_token.clone();
+        let monitor = tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(15 * 60);
+            loop {
+                if Instant::now() >= deadline {
+                    return Err(AuthError::CommandFailed {
+                        provider: Provider::Notion,
+                        message: "notion OAuth timed out".to_string(),
+                    });
+                }
+                let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
+                let (stream, _) = match accept {
+                    Ok(Ok(conn)) => conn,
+                    Ok(Err(_)) | Err(_) => continue,
+                };
+
+                let (mut reader, mut writer) = stream.into_split();
+                let mut buf = vec![0u8; 4096];
+                let n = match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let code = extract_oauth_code_from_request(&request);
+
+                let response_body = if code.is_some() {
+                    "Authenticated! You can close this tab."
+                } else {
+                    "Authentication failed — no code found."
+                };
+                let http_response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
+                );
+                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes())
+                    .await;
+                let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
+
+                let Some(code) = code else {
+                    continue;
+                };
+
+                let broker = NotionOAuthBroker::new();
+                match broker.exchange_code(&app, &code).await {
+                    Ok(token) => {
+                        *completed_token.lock().await = Some(token);
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        return Err(AuthError::CommandFailed {
+                            provider: Provider::Notion,
+                            message: err.to_string(),
+                        });
+                    }
+                }
+            }
+        });
+
+        let response = AuthFlowResponse {
+            provider: Provider::Notion,
+            verification_uri_complete: Some(verification_uri.clone()),
+            verification_uri,
+            user_code: None,
+            expires_in: Some(15 * 60),
+        };
+
+        Ok(AuthFlowHandle::new(response, monitor))
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        let token = self.completed_token.lock().await;
+        let Some(token) = token.as_ref() else {
+            return Ok(AuthStatus::None);
+        };
+        if token
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now_unix())
+        {
+            return Ok(AuthStatus::Expired);
+        }
+        Ok(AuthStatus::Active {
+            login: token.login.clone(),
+        })
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
@@ -1257,10 +1541,11 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
     [
         Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>,
         Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>,
+        Arc::new(NotionOAuthBroker::new()) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -2326,7 +2611,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Linear | Provider::Doppler => {
+        Provider::Asana | Provider::Linear | Provider::Notion | Provider::Doppler => {
             Err(TokenRefreshError::MissingToken { provider })
         }
     }
@@ -2622,6 +2907,7 @@ mod tests {
         assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
         assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
         assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!("notion".parse::<Provider>(), Ok(Provider::Notion));
         assert!("gemini".parse::<Provider>().is_err());
     }
 
@@ -2633,6 +2919,7 @@ mod tests {
         assert!(Provider::OpenCodeZen.api_key_bills_per_token());
         assert!(!Provider::Asana.api_key_bills_per_token());
         assert!(!Provider::Linear.api_key_bills_per_token());
+        assert!(!Provider::Notion.api_key_bills_per_token());
     }
 
     #[test]

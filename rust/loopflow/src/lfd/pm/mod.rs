@@ -1,5 +1,7 @@
 pub mod asana;
 pub mod linear;
+pub mod notion;
+pub mod notion_blocks;
 
 use std::time::Duration;
 
@@ -90,6 +92,7 @@ impl PriorityBucket {
 pub enum PmProviderKind {
     Asana,
     Linear,
+    Notion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +102,8 @@ pub struct PmConfig {
     pub asana_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notion_project: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +117,7 @@ impl PmConfig {
         match provider {
             PmProviderKind::Asana => self.asana_project.as_deref(),
             PmProviderKind::Linear => self.linear_project.as_deref(),
+            PmProviderKind::Notion => self.notion_project.as_deref(),
         }
     }
 }
@@ -184,17 +190,20 @@ pub struct RoadmapItemFrontmatter {
     pub asana_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notion_id: Option<String>,
 }
 
 impl RoadmapItemFrontmatter {
     fn is_empty(&self) -> bool {
-        self.asana_id.is_none() && self.linear_id.is_none()
+        self.asana_id.is_none() && self.linear_id.is_none() && self.notion_id.is_none()
     }
 
     pub fn id_for(&self, provider: PmProviderKind) -> Option<&str> {
         match provider {
             PmProviderKind::Asana => self.asana_id.as_deref(),
             PmProviderKind::Linear => self.linear_id.as_deref(),
+            PmProviderKind::Notion => self.notion_id.as_deref(),
         }
     }
 
@@ -202,6 +211,7 @@ impl RoadmapItemFrontmatter {
         match provider {
             PmProviderKind::Asana => self.asana_id = Some(id),
             PmProviderKind::Linear => self.linear_id = Some(id),
+            PmProviderKind::Notion => self.notion_id = Some(id),
         }
     }
 
@@ -209,6 +219,7 @@ impl RoadmapItemFrontmatter {
         match provider {
             PmProviderKind::Asana => self.asana_id = None,
             PmProviderKind::Linear => self.linear_id = None,
+            PmProviderKind::Notion => self.notion_id = None,
         }
     }
 }
@@ -247,10 +258,10 @@ impl RoadmapItemDocument {
     }
 }
 
-const RATE_LIMIT_RETRIES: u8 = 3;
+pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
 const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
 
-fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
+pub(crate) fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
     headers
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|value| value.to_str().ok())
@@ -495,13 +506,19 @@ mod tests {
         let mut frontmatter = RoadmapItemFrontmatter {
             asana_id: Some("asa-1".to_string()),
             linear_id: Some("lin-1".to_string()),
+            notion_id: Some("not-1".to_string()),
         };
 
         frontmatter.clear_id(PmProviderKind::Asana);
         assert_eq!(frontmatter.asana_id, None);
         assert_eq!(frontmatter.linear_id.as_deref(), Some("lin-1"));
+        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
 
         frontmatter.clear_id(PmProviderKind::Linear);
         assert_eq!(frontmatter.linear_id, None);
+        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
+
+        frontmatter.clear_id(PmProviderKind::Notion);
+        assert_eq!(frontmatter.notion_id, None);
     }
 }

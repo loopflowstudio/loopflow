@@ -7,6 +7,7 @@ use crate::engine::git::{get_default_branch, list_tree, show_file};
 use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
+use crate::lfd::pm::notion::NotionClient;
 use crate::lfd::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, PriorityBucket,
     RoadmapItemDocument, RoadmapItemFrontmatter,
@@ -136,13 +137,27 @@ async fn build_client_with_team(
     let config = load_config_or_default(Some(repo));
     let client: Box<dyn PmProvider> = match provider {
         PmProviderKind::Asana => {
-            let token = resolve_provider_token("asana", "ASANA_ACCESS_TOKEN").await?;
+            let token = resolve_provider_token(
+                "asana",
+                Some("ASANA_ACCESS_TOKEN"),
+                "lf ops auth configure asana",
+            )
+            .await?;
             Box::new(AsanaClient::new(token, config.asana.clone()))
         }
         PmProviderKind::Linear => {
-            let token = resolve_provider_token("linear", "LINEAR_API_KEY").await?;
+            let token = resolve_provider_token(
+                "linear",
+                Some("LINEAR_API_KEY"),
+                "lf ops auth configure linear",
+            )
+            .await?;
             let effective_team = team_id.or_else(|| config.linear.team.clone());
             Box::new(LinearClient::new(token, effective_team))
+        }
+        PmProviderKind::Notion => {
+            let token = resolve_provider_token("notion", None, "lf ops auth notion").await?;
+            Box::new(NotionClient::new(token, config.notion.clone()))
         }
     };
     Ok(client)
@@ -191,11 +206,17 @@ fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     Ok(())
 }
 
-async fn resolve_provider_token(provider: &str, env_name: &str) -> OpsResult<String> {
-    if let Ok(token) = std::env::var(env_name) {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
+async fn resolve_provider_token(
+    provider: &str,
+    env_name: Option<&str>,
+    auth_hint: &str,
+) -> OpsResult<String> {
+    if let Some(env_name) = env_name {
+        if let Ok(token) = std::env::var(env_name) {
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
         }
     }
 
@@ -208,7 +229,7 @@ async fn resolve_provider_token(provider: &str, env_name: &str) -> OpsResult<Str
         .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "No {provider} credential found. Run `lf ops auth configure {provider}`."
+                "No {provider} credential found. Run `{auth_hint}`."
             ))
         })?;
 
@@ -274,6 +295,7 @@ fn project_key(provider: PmProviderKind) -> &'static str {
     match provider {
         PmProviderKind::Asana => "asana_project",
         PmProviderKind::Linear => "linear_project",
+        PmProviderKind::Notion => "notion_project",
     }
 }
 
@@ -1259,6 +1281,7 @@ mod tests {
         let doc = remote_item_to_document(&item, PmProviderKind::Linear);
         assert_eq!(doc.frontmatter.linear_id.as_deref(), Some("item-42"));
         assert_eq!(doc.frontmatter.asana_id, None);
+        assert_eq!(doc.frontmatter.notion_id, None);
         assert!(doc.body.starts_with("# Build the thing\n"));
         assert!(doc.body.contains("Some details here."));
     }

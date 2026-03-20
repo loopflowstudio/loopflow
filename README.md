@@ -309,6 +309,7 @@ lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf ops auth status   # local provider auth for lf steps and ops
 lf ops auth asana    # connect Asana locally for `lf ops` / step integrations
+lf ops auth notion   # connect Notion locally for `lf ops` / step integrations
 lf ops auth configure linear  # store Linear API key locally for `lf ops` / step integrations
 lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
 lfq auth github      # connect GitHub in your browser
@@ -317,6 +318,7 @@ lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth asana       # connect Asana with OAuth
 lfq auth linear      # store Linear API key
+lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens

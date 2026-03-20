@@ -156,6 +156,19 @@ struct MultiplexerStoreTests {
         MultiplexerStore(userDefaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
     }
 
+    private func makeWave(id: String = "wave-1") -> WaveViewModel {
+        WaveViewModel(
+            api: Wave(
+                id: id,
+                name: "Demo Wave",
+                repo: "/tmp/repo",
+                flow: "build",
+                direction: [],
+                area: ["."]
+            )
+        )
+    }
+
     @Test("default layout for unknown wave is a single terminal")
     @MainActor
     func defaultForUnknownWave() {
@@ -164,6 +177,21 @@ struct MultiplexerStoreTests {
         #expect(layout.allPanes.count == 1)
         #expect(layout.allPanes.first?.type == .terminal)
         #expect(layout.allPanes.first?.config.terminalSessionName == "lf-wave-1-\(layout.allPanes.first?.id ?? "")")
+    }
+
+    @Test("workspace default layout uses roadmap runs and terminal panes")
+    @MainActor
+    func workspaceDefaultLayout() {
+        let store = makeStore()
+        let wave = makeWave()
+        let layout = store.layout(for: wave)
+        let paneTypes = layout.allPanes.map(\.type)
+
+        #expect(layout.allPanes.count == 3)
+        #expect(paneTypes.contains(.roadmap))
+        #expect(paneTypes.contains(.runs))
+        #expect(paneTypes.contains(.terminal))
+        #expect(store.pane(ofType: .terminal, for: wave.id)?.config.terminalSessionName?.hasPrefix("lf-\(wave.id)-") == true)
     }
 
     @Test("split creates new pane and focuses it")

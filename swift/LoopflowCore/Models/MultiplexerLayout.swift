@@ -13,6 +13,10 @@ public enum PaneType: String, Codable, Sendable {
     case markdown
     case diff
     case launchpad
+    case roadmap
+    case readme
+    case runs
+    case launcher
 }
 
 public struct PaneConfig: Codable, Sendable, Equatable {

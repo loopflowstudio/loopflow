@@ -11,8 +11,8 @@ struct PaletteAction: Identifiable {
     let icon: String
     let action: () -> Void
 
-    init(_ title: String, icon: String, shortcut: String? = nil, action: @escaping () -> Void) {
-        self.id = title.lowercased().replacingOccurrences(of: " ", with: "-")
+    init(_ title: String, id: String? = nil, icon: String, shortcut: String? = nil, action: @escaping () -> Void) {
+        self.id = id ?? title.lowercased().replacingOccurrences(of: " ", with: "-")
         self.title = title
         self.icon = icon
         self.shortcut = shortcut
@@ -251,4 +251,3 @@ private struct ActionRow: View {
     .padding(Spacing.xxxl + Spacing.sm)
     .background(Color.gray.opacity(0.3))
 }
-

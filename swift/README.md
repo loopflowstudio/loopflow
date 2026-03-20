@@ -152,25 +152,14 @@ Repo windows now open into a queue view when no wave is selected:
 - Code review items offer `Ship`; step failures offer `Retry`
 - Empty queues show `Nothing needs you. Waves are running.`
 
-## Terminal Workspace
+## Wave Workspace
 
-Selected waves now open a workspace-first detail view. Embedded terminals are additive, not a takeover:
+Selected waves now open into a multiplexer workspace:
 
-- The work view stays the default surface for the selected wave
-- A Ghostty-backed Terminal tab appears only when that wave has an active terminal session
-- Fresh terminal sessions auto-open that Terminal tab once for the selected wave
-- The terminal tab keeps wave context, queue pressure, recent runs, and quick actions in a sidebar
-- Switching back to Work returns to the native wave detail/session path without destroying the terminal surface
-- Remote repos stay on the queue/detail path until terminal embedding grows a remote transport
-
-
-## Wave Detail: Current + Runs
-
-Wave detail now has two tabs:
-
-- **Current** — active run state, output, commit/diff context, and run actions (`Land`, `Next`)
-- **Runs** — historical run list with PR state, plus:
-  - **Combine**: merge multiple open PRs into one
+- Default panes show **Roadmap**, **Runs**, and a Ghostty-backed **Terminal**
+- Cmd+K switches waves and opens or focuses panes like **README** and **Launcher**
+- Waves without worktrees still keep roadmap/readme/runs panes available; only terminal-style panes show a worktree placeholder
+- Interactive sessions still take over the workspace when a flow needs input
 
 ## Session quote replies (macOS)
 

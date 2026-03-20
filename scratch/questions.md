@@ -1,13 +1,7 @@
 # Questions
 
-## Missing wave directory
+## Assumptions taken in this implementation
 
-`wave/lfd/` does not exist. The worktree name `loopflow.lfd` implies wave `lfd`, but no matching wave plan was found.
-
-Available waves: `agent-embedding`, `chord-model`, `concerto`, `dogfood`, `pm`, `redesign`, `trust`.
-
-**Decision needed:** Should a `wave/lfd/` plan be created, or should this worktree target an existing wave?
-
-## WaveExecutor follow-on timing
-
-The design scopes out refactoring WaveExecutor to spawn `lf` instead of agents directly. This is the big payoff — it eliminates flow logic duplication. But it's a larger change that should land after the event contract is proven. Worth tracking as a fast follow.
+- Added first-class `run.*` / `step.*` daemon events instead of forcing journal imports through the existing `wave_*` / `agent_*` vocabulary.
+- Kept the journal root fixed at `<worktree>/.lf/runtime/runs/<run_id>/...` for v1. There is no alternate root override yet.
+- Journal emission currently wraps normal `lf` CLI invocations in wave worktrees. `lfd` observes them by polling known wave repos for sibling worktrees and replaying new journal lines into the event hub.

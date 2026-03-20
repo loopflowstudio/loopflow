@@ -107,6 +107,7 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
+- The direct-key typing path uses `NSTextInputContext.selectedKeyboardInputSource` containing `inputmethod` to detect IME keyboards; unusual input sources may route incorrectly until validated with broader CJK and third-party input methods
 - Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state until the shared-store contract replaces that path
 >>>>>>> ca80052f (lf commit: implement)
 - The product surface foregrounds one run per selected wave even though the runtime acknowledges many-run waves; portfolio and lifecycle work should not assume single-run exclusivity

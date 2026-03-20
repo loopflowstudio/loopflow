@@ -141,7 +141,7 @@ mod tests {
         let update_wave = get_builtin_step("update-wave").expect("update-wave prompt");
         let ingest = get_builtin_step("ingest").expect("ingest prompt");
         let design = get_builtin_step("design").expect("design prompt");
-        let scan_waves = get_builtin_step("scan-waves").expect("scan-waves prompt");
+        let scan_waves = get_builtin_step("garden/scan").expect("garden/scan prompt");
         let split_wave = get_builtin_step("split-wave").expect("split-wave prompt");
 
         assert!(update_wave.contains("1-fix-broken-build.md"));

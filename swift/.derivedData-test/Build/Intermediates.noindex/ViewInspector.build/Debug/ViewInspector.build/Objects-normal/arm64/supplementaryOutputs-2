@@ -1,0 +1,58 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/AccessibilityModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AccessibilityModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AccessibilityModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AccessibilityModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AccessibilityModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AccessibilityModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/AnimationModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AnimationModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AnimationModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AnimationModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AnimationModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/AnimationModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/ConfigurationModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ConfigurationModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ConfigurationModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ConfigurationModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ConfigurationModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ConfigurationModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/CustomStyleModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/CustomStyleModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/CustomStyleModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/CustomStyleModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/CustomStyleModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/CustomStyleModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/EnvironmentModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EnvironmentModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EnvironmentModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EnvironmentModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EnvironmentModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EnvironmentModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/EventsModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EventsModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EventsModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EventsModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EventsModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/EventsModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/GestureModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/GestureModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/GestureModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/GestureModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/GestureModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/GestureModifiers.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/Modifiers/InteractionModifiers.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/InteractionModifiers.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/InteractionModifiers.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/InteractionModifiers.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/InteractionModifiers.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/InteractionModifiers.swiftdeps"
+  }
+}

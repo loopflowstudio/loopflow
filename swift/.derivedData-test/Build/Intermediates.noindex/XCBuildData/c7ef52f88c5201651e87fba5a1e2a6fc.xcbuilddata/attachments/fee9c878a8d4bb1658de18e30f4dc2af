@@ -1,0 +1,9 @@
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/LogitsProcessor.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/LogitsWarper.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/RepetitionPenaltyWarper.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TemperatureLogitsWarper.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TopKLogitsWarper.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TopPLogitsWarper.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/MLMultiArray+Utils.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/MLShapedArray+Utils.swift
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/Math.swift

@@ -1,5 +1,5 @@
-// Wave multiplexer — recursive split layout with one outer terminal pane and native companion panes.
-// Concerto owns the outer layout; tmux owns shell subdivision inside the terminal pane.
+// Wave multiplexer — recursive split layout with native panes and pane-scoped tmux-backed terminals.
+// Concerto owns the layout; each terminal pane attaches to its own tmux session.
 
 import AppKit
 import SwiftUI
@@ -140,7 +140,7 @@ private struct PaneContainerView: View {
         case .diff:
             DiffPaneView(worktreePath: worktreePath)
         case .launchpad:
-            LaunchpadPaneView(waveId: waveId, worktreePath: worktreePath)
+            LaunchpadPaneView(pane: pane, waveId: waveId, worktreePath: worktreePath)
         }
     }
 
@@ -176,6 +176,7 @@ private struct TerminalPaneView: View {
     let waveId: String
     let worktreePath: String
 
+    @Environment(RepoState.self) private var repoState
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
     @State private var tmuxReady = false
     @State private var errorMessage: String?
@@ -191,7 +192,7 @@ private struct TerminalPaneView: View {
             } else if tmuxReady {
                 GhosttyTerminalView(
                     workingDirectory: worktreePath,
-                    argv: TmuxSession(waveId: waveId, worktreePath: worktreePath).attachCommand(),
+                    argv: tmuxSession.attachCommand(),
                     sessionId: pane.id,
                     manager: ghosttyManager
                 )
@@ -202,14 +203,28 @@ private struct TerminalPaneView: View {
             }
         }
         .task(id: pane.id) {
-            let tmux = TmuxSession(waveId: waveId, worktreePath: worktreePath)
             do {
-                try await tmux.ensureBaseSession()
+                try await tmuxSession.ensureBaseSession(launchCommand: pane.config.launchCommand)
+                clearLaunchCommandIfNeeded()
                 tmuxReady = true
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private var tmuxSession: TmuxSession {
+        TmuxSession(
+            sessionName: pane.config.terminalSessionName ?? "lf-\(waveId)-\(pane.id)",
+            worktreePath: worktreePath
+        )
+    }
+
+    private func clearLaunchCommandIfNeeded() {
+        guard pane.config.launchCommand != nil else { return }
+        var config = pane.config
+        config.launchCommand = nil
+        repoState.multiplexerStore.updatePaneConfig(pane.id, config: config, for: waveId)
     }
 }
 
@@ -288,47 +303,99 @@ private struct DiffPaneView: View {
 }
 
 private struct LaunchpadPaneView: View {
+    let pane: PaneState
     let waveId: String
     let worktreePath: String
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
-
-    private let terminalLauncher = TerminalLauncher()
-    private let worktreeURL: URL
-
-    init(waveId: String, worktreePath: String) {
-        self.waveId = waveId
-        self.worktreePath = worktreePath
-        self.worktreeURL = URL(fileURLWithPath: worktreePath)
-    }
+    @State private var selectedStep = "design"
+    @State private var prompt = ""
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xl) {
-            Text("Open in…")
-                .font(Typography.sectionTitle())
-                .foregroundStyle(Color.loopflowBurgundy)
+    private var terminalLauncher: TerminalLauncher {
+        TerminalLauncher()
+    }
 
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                launchButton("Cursor", icon: "curlybraces") {
-                    try? terminalLauncher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)
+    private var worktreeURL: URL {
+        URL(fileURLWithPath: worktreePath)
+    }
+
+    private let loopflowSteps = [
+        "design",
+        "implement",
+        "debug",
+        "refine",
+        "review-design",
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    Text("Start in this split")
+                        .font(Typography.sectionTitle())
+                        .foregroundStyle(Color.loopflowBurgundy)
+                    Text("Launch a fresh shell or drop straight into an lf session.")
+                        .font(Typography.body())
+                        .foregroundStyle(palette.textSecondary)
                 }
-                launchButton("Finder", icon: "folder") {
-                    terminalLauncher.openInFinder(at: worktreeURL)
-                }
-                if let prURL = wave?.prURL {
-                    launchButton("Pull Request", icon: "arrow.triangle.pull") {
-                        NSWorkspace.shared.open(prURL)
+
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    Text("Loopflow session")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                        .textCase(.uppercase)
+
+                    Picker("Step", selection: $selectedStep) {
+                        ForEach(loopflowSteps, id: \.self) { step in
+                            Text(step).tag(step)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Prompt (optional)", text: $prompt, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+
+                    HStack(spacing: Spacing.sm) {
+                        launchButton("Launch lf session", icon: "sparkles") {
+                            launchInteractiveSession()
+                        }
+                        launchButton("Fresh shell", icon: "terminal") {
+                            launchTerminal(command: nil)
+                        }
                     }
                 }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Open in…")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                        .textCase(.uppercase)
+
+                    launchButton("Cursor", icon: "curlybraces") {
+                        try? terminalLauncher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)
+                    }
+                    launchButton("Finder", icon: "folder") {
+                        terminalLauncher.openInFinder(at: worktreeURL)
+                    }
+                    if let prURL = wave?.prURL {
+                        launchButton("Pull Request", icon: "arrow.triangle.pull") {
+                            NSWorkspace.shared.open(prURL)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .padding(Spacing.xl)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.surface)
     }
@@ -344,6 +411,29 @@ private struct LaunchpadPaneView: View {
         .buttonStyle(.plain)
         .background(palette.surfaceMuted.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
+    private func launchInteractiveSession() {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let session = InteractiveSession(
+            waveId: waveId,
+            step: selectedStep,
+            worktreePath: worktreePath,
+            prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
+        )
+        launchTerminal(command: session.command)
+    }
+
+    private func launchTerminal(command: String?) {
+        _ = repoState.multiplexerStore.replacePane(
+            pane.id,
+            with: .terminal,
+            config: PaneConfig(
+                terminalSessionName: pane.config.terminalSessionName,
+                launchCommand: command
+            ),
+            for: waveId
+        )
     }
 }
 

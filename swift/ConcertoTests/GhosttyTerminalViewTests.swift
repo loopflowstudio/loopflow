@@ -1,4 +1,5 @@
 import Testing
+import AppKit
 @testable import Concerto
 
 @Suite("Ghostty terminal command")
@@ -26,5 +27,28 @@ struct GhosttyTerminalViewTests {
     @Test("returns nil when there is no command to run")
     func returnsNilWithoutCommand() {
         #expect(buildGhosttyShellCommand(argv: [], env: ["RLM_DEPTH": "1"]) == nil)
+    }
+
+    @Test("control-modified control characters fall through to key handling")
+    func controlCharactersFallThroughToKeyHandling() {
+        #expect(ghosttyShouldHandleTextAsKeyEvent("\u{02}", modifiers: [.control]))
+        #expect(!ghosttyShouldHandleTextAsKeyEvent("\n", modifiers: []))
+        #expect(!ghosttyShouldHandleTextAsKeyEvent("a", modifiers: [.control]))
+    }
+
+    @Test("control and command shortcuts bypass interpretKeyEvents")
+    func controlAndCommandBypassInterpretKeyEvents() {
+        #expect(ghosttyShouldBypassInterpretKeyEvents(modifiers: [.control]))
+        #expect(ghosttyShouldBypassInterpretKeyEvents(modifiers: [.command]))
+        #expect(!ghosttyShouldBypassInterpretKeyEvents(modifiers: [.option]))
+        #expect(!ghosttyShouldBypassInterpretKeyEvents(modifiers: []))
+    }
+
+    @Test("printable key text is only attached without command or control")
+    func printableKeyTextRespectsModifiers() {
+        #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
+        #expect(ghosttyKeyText(characters: "a", modifiers: [.control]) == nil)
+        #expect(ghosttyKeyText(characters: "a", modifiers: [.command]) == nil)
+        #expect(ghosttyKeyText(characters: nil, modifiers: []) == nil)
     }
 }

@@ -1,0 +1,9 @@
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.o
+/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.o

@@ -1,0 +1,37 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/Concerto/Platform/iOS/MobileRootView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MobileRootView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MobileRootView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MobileRootView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MobileRootView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MobileRootView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/Concerto/Platform/macOS/Keyboard/KeyboardRouter.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/KeyboardRouter.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/KeyboardRouter.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/KeyboardRouter.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/KeyboardRouter.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/KeyboardRouter.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/Concerto/Platform/macOS/LocalShellCommandRunner.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LocalShellCommandRunner.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LocalShellCommandRunner.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LocalShellCommandRunner.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LocalShellCommandRunner.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LocalShellCommandRunner.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/Concerto/Views/LiveOutput.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LiveOutput.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LiveOutput.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LiveOutput.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LiveOutput.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/LiveOutput.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/Concerto/Views/MessageRow.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MessageRow.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MessageRow.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MessageRow.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MessageRow.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/Concerto.build/Objects-normal/arm64/MessageRow.swiftdeps"
+  }
+}

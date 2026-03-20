@@ -17,9 +17,17 @@ public enum PaneType: String, Codable, Sendable {
 
 public struct PaneConfig: Codable, Sendable, Equatable {
     public var filePath: String?
+    public var terminalSessionName: String?
+    public var launchCommand: String?
 
-    public init(filePath: String? = nil) {
+    public init(
+        filePath: String? = nil,
+        terminalSessionName: String? = nil,
+        launchCommand: String? = nil
+    ) {
         self.filePath = filePath
+        self.terminalSessionName = terminalSessionName
+        self.launchCommand = launchCommand
     }
 
     public static let empty = PaneConfig()
@@ -131,6 +139,22 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
             return .split(axis, first: first.updatingPane(paneId, config: config),
                           second: second.updatingPane(paneId, config: config),
                           ratio: ratio)
+        }
+    }
+
+    /// Replace a leaf pane while preserving the surrounding tree shape.
+    public func replacingPane(_ paneId: String, with pane: PaneState) -> LayoutNode {
+        switch self {
+        case .leaf(let current):
+            guard current.id == paneId else { return self }
+            return .leaf(pane)
+        case .split(let axis, let first, let second, let ratio):
+            return .split(
+                axis,
+                first: first.replacingPane(paneId, with: pane),
+                second: second.replacingPane(paneId, with: pane),
+                ratio: ratio
+            )
         }
     }
 

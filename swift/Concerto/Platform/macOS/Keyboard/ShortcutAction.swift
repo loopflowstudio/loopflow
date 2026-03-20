@@ -241,14 +241,14 @@ enum ShortcutCatalog {
 
         // Multiplexer
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
             action: .splitVertical,
             label: "Split vertical",
             category: .multiplexer,
             requiresWave: true
         ),
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("d"), modifiers: [.command, .shift], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
             action: .splitHorizontal,
             label: "Split horizontal",
             category: .multiplexer,
@@ -269,14 +269,14 @@ enum ShortcutCatalog {
             requiresWave: true
         ),
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command, .option], allowsRepeat: false),
             action: .focusNextPane,
             label: "Focus next pane",
             category: .multiplexer,
             requiresWave: true
         ),
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command, .option], allowsRepeat: false),
             action: .focusPreviousPane,
             label: "Focus previous pane",
             category: .multiplexer,

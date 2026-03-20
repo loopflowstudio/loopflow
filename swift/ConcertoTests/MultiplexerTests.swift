@@ -124,7 +124,14 @@ struct MultiplexerLayoutTests {
 
     @Test("layout round-trips through JSON")
     func codable() throws {
-        let paneA = PaneState(id: "a", type: .terminal)
+        let paneA = PaneState(
+            id: "a",
+            type: .terminal,
+            config: PaneConfig(
+                terminalSessionName: "lf-wave-a",
+                launchCommand: "lf design && lf ops commit --push"
+            )
+        )
         let paneB = PaneState(id: "b", type: .markdown, config: PaneConfig(filePath: "wave/test/README.md"))
         let layout = LayoutNode.split(.horizontal, first: .leaf(paneA), second: .leaf(paneB), ratio: 0.6)
 
@@ -134,6 +141,8 @@ struct MultiplexerLayoutTests {
         #expect(decoded.allPanes.count == 2)
         #expect(decoded.allPanes[0].id == "a")
         #expect(decoded.allPanes[0].type == .terminal)
+        #expect(decoded.allPanes[0].config.terminalSessionName == "lf-wave-a")
+        #expect(decoded.allPanes[0].config.launchCommand == "lf design && lf ops commit --push")
         #expect(decoded.allPanes[1].id == "b")
         #expect(decoded.allPanes[1].config.filePath == "wave/test/README.md")
     }
@@ -154,6 +163,7 @@ struct MultiplexerStoreTests {
         let layout = store.layout(for: "wave-1")
         #expect(layout.allPanes.count == 1)
         #expect(layout.allPanes.first?.type == .terminal)
+        #expect(layout.allPanes.first?.config.terminalSessionName == "lf-wave-1-\(layout.allPanes.first?.id ?? "")")
     }
 
     @Test("split creates new pane and focuses it")
@@ -167,6 +177,21 @@ struct MultiplexerStoreTests {
         #expect(store.layout(for: "wave-1").allPanes.count == 2)
         #expect(store.focusedPaneId(for: "wave-1") == newPane.id)
         #expect(store.terminalPane(for: "wave-1")?.id == original.id)
+    }
+
+    @Test("terminal split creates a second terminal with its own tmux session")
+    @MainActor
+    func splitTerminalCreatesDistinctSession() {
+        let store = makeStore()
+        let terminal = store.layout(for: "wave-1").firstPane!
+
+        let newPane = store.splitPane(terminal.id, axis: .horizontal, newPaneType: .terminal, for: "wave-1")
+
+        #expect(store.layout(for: "wave-1").allPanes.count == 2)
+        #expect(newPane.type == .terminal)
+        #expect(newPane.config.terminalSessionName == "lf-wave-1-\(newPane.id)")
+        #expect(terminal.config.terminalSessionName == "lf-wave-1-\(terminal.id)")
+        #expect(newPane.config.terminalSessionName != terminal.config.terminalSessionName)
     }
 
     @Test("closing a non-terminal pane keeps the terminal")
@@ -183,18 +208,18 @@ struct MultiplexerStoreTests {
         #expect(store.layout(for: "wave-1").allPanes.first?.type == .terminal)
     }
 
-    @Test("terminal pane cannot be closed")
+    @Test("closing one terminal pane preserves the others")
     @MainActor
-    func terminalCannotBeClosed() {
+    func closeOneTerminalPane() {
         let store = makeStore()
         let terminal = store.layout(for: "wave-1").firstPane!
-        _ = store.splitPane(terminal.id, axis: .horizontal, newPaneType: .diff, for: "wave-1")
+        let secondTerminal = store.splitPane(terminal.id, axis: .horizontal, newPaneType: .terminal, for: "wave-1")
 
         let closed = store.closePane(terminal.id, for: "wave-1")
 
-        #expect(closed == nil)
-        #expect(store.terminalPane(for: "wave-1")?.id == terminal.id)
-        #expect(store.layout(for: "wave-1").allPanes.count == 2)
+        #expect(closed?.id == terminal.id)
+        #expect(store.layout(for: "wave-1").allPanes.count == 1)
+        #expect(store.layout(for: "wave-1").allPanes.first?.id == secondTerminal.id)
     }
 
     @Test("wave layouts are independent")
@@ -208,6 +233,7 @@ struct MultiplexerStoreTests {
         #expect(store.layout(for: "wave-1").allPanes.count == 2)
         #expect(store.layout(for: "wave-2").allPanes.count == 1)
         #expect(store.layout(for: "wave-2").allPanes.first?.type == .terminal)
+        #expect(store.layout(for: "wave-1").firstPane?.config.terminalSessionName != store.layout(for: "wave-2").firstPane?.config.terminalSessionName)
     }
 
     @Test("focus cycles through panes")
@@ -224,5 +250,39 @@ struct MultiplexerStoreTests {
 
         store.moveFocus(.next, for: "w")
         #expect(store.focusedPaneId(for: "w") == paneB.id)
+    }
+
+    @Test("terminal session names are reported for a wave")
+    @MainActor
+    func terminalSessionNames() {
+        let store = makeStore()
+        let terminal = store.layout(for: "wave-1").firstPane!
+        let secondTerminal = store.splitPane(terminal.id, axis: .horizontal, newPaneType: .terminal, for: "wave-1")
+
+        #expect(Set(store.terminalSessionNames(for: "wave-1")) == [
+            "lf-wave-1-\(terminal.id)",
+            "lf-wave-1-\(secondTerminal.id)",
+        ])
+    }
+
+    @Test("replacing a launchpad with a terminal preserves pane id and assigns session")
+    @MainActor
+    func replacePaneWithTerminal() {
+        let store = makeStore()
+        let terminal = store.layout(for: "wave-1").firstPane!
+        let launchpad = store.splitPane(terminal.id, axis: .horizontal, newPaneType: .launchpad, for: "wave-1")
+
+        let replacement = store.replacePane(
+            launchpad.id,
+            with: .terminal,
+            config: PaneConfig(launchCommand: "lf design && lf ops commit --push"),
+            for: "wave-1"
+        )
+
+        #expect(replacement?.id == launchpad.id)
+        #expect(replacement?.type == .terminal)
+        #expect(replacement?.config.terminalSessionName == "lf-wave-1-\(launchpad.id)")
+        #expect(replacement?.config.launchCommand == "lf design && lf ops commit --push")
+        #expect(store.layout(for: "wave-1").pane(for: launchpad.id)?.type == .terminal)
     }
 }

@@ -20,7 +20,6 @@ struct ContentView: View {
         let waveId: String
         let worktreePath: String
         let focusedPane: PaneState
-        let routesToTerminal: Bool
     }
 
     var body: some View {
@@ -226,7 +225,7 @@ struct ContentView: View {
         case .deleteWave:
             guard let wave = repoState.selectedWave else { return }
             performWaveAction("delete wave") {
-                try await repoState.deleteWave(wave)
+                try await repoState.deleteWaveAndCleanupTmux(wave)
             }
         case .retryWave:
             guard let wave = repoState.selectedWave else { return }
@@ -333,15 +332,10 @@ struct ContentView: View {
     private func handleMultiplexerSplit(axis: SplitAxis) {
         guard let context = multiplexerContext() else { return }
 
-        if context.routesToTerminal {
-            performTmuxAction(context) { try await $0.split(axis) }
-            return
-        }
-
         _ = repoState.multiplexerStore.splitPane(
             context.focusedPane.id,
             axis: axis,
-            newPaneType: nextOuterPaneType(after: context.focusedPane.type),
+            newPaneType: splitPaneType(for: context.focusedPane),
             for: context.waveId
         )
     }
@@ -349,48 +343,25 @@ struct ContentView: View {
     private func handleClosePane() {
         guard let context = multiplexerContext() else { return }
 
-        if context.routesToTerminal {
-            performTmuxAction(context) { try await $0.closeFocusedThing() }
-            return
+        if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
+           let sessionName = closedPane.config.terminalSessionName {
+            TmuxSessionRegistry.shared.killSession(named: sessionName)
         }
-
-        _ = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId)
     }
 
     private func handleNewShell() {
         guard let context = multiplexerContext() else { return }
-        performTmuxAction(context) { try await $0.createWindow() }
+        _ = repoState.multiplexerStore.splitPane(
+            context.focusedPane.id,
+            axis: .horizontal,
+            newPaneType: .terminal,
+            for: context.waveId
+        )
     }
 
     private func handleFocusPane(_ direction: FocusDirection) {
         guard let context = multiplexerContext() else { return }
-
-        if context.routesToTerminal {
-            performTmuxAction(context) { tmux in
-                switch direction {
-                case .next:
-                    try await tmux.selectNextWindow()
-                case .previous:
-                    try await tmux.selectPreviousWindow()
-                }
-            }
-            return
-        }
-
         repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
-    }
-
-    private func performTmuxAction(
-        _ context: MultiplexerContext,
-        action: @escaping (TmuxSession) async throws -> Void
-    ) {
-        Task {
-            do {
-                try await action(TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath))
-            } catch {
-                repoState.errorMessage = error.localizedDescription
-            }
-        }
     }
 
     private func multiplexerContext() -> MultiplexerContext? {
@@ -403,27 +374,23 @@ struct ContentView: View {
         return MultiplexerContext(
             waveId: wave.id,
             worktreePath: worktreePath,
-            focusedPane: focusedPane,
-            routesToTerminal: focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
+            focusedPane: focusedPane
         )
     }
 
-    private func nextOuterPaneType(after paneType: PaneType) -> PaneType {
+    private func splitPaneType(for pane: PaneState) -> PaneType {
+        pane.type == .terminal ? .launchpad : nextCompanionPaneType(after: pane.type)
+    }
+
+    private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
         switch paneType {
-        case .terminal:
+        case .terminal, .launchpad:
             .markdown
         case .markdown:
             .diff
         case .diff:
             .launchpad
-        case .launchpad:
-            .markdown
         }
-    }
-
-    private func isTerminalResponder(_ responder: Any?) -> Bool {
-        guard let responder else { return false }
-        return String(describing: type(of: responder)).contains("GhosttyMetalView")
     }
 
     private func openIDEForSelectedWave() {

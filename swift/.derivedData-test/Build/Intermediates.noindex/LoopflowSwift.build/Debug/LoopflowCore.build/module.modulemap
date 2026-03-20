@@ -1,0 +1,4 @@
+framework module LoopflowCore {
+  header "LoopflowCore-Swift.h"
+  requires objc
+}

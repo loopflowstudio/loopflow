@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreText
+import AppKit
 import LoopflowCore
 
 extension AppearanceMode {
@@ -129,6 +130,24 @@ private func bootstrapConcertoApp() {
 }
 
 #if os(macOS)
+@MainActor
+private enum TmuxTerminationCleanup {
+    private static var observer: NSObjectProtocol?
+
+    static func install() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            TmuxSessionRegistry.shared.killAllSynchronously()
+        }
+    }
+}
+#endif
+
+#if os(macOS)
 @main
 struct ConcertoApp: App {
     @State private var portfolioService = PortfolioService()
@@ -141,6 +160,7 @@ struct ConcertoApp: App {
 
     init() {
         bootstrapConcertoApp()
+        TmuxTerminationCleanup.install()
     }
 
     var body: some Scene {

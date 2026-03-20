@@ -90,6 +90,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
     private var _didInsertText = false
+    private var _currentKeyEventModifiers: NSEvent.ModifierFlags = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -255,9 +256,24 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
+        if ghosttyShouldBypassInterpretKeyEvents(modifiers: event.modifierFlags) {
+            var key = translateKey(event)
+            if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
+                chars.withCString { textPtr in
+                    key.text = textPtr
+                    _ = ghostty_surface_key(surface, key)
+                }
+            } else {
+                _ = ghostty_surface_key(surface, key)
+            }
+            return
+        }
+
         // Use interpretKeyEvents for IME support.
         // If insertText fires, it sends text via ghostty_surface_text —
         // skip the manual ghostty_surface_key below to avoid double input.
+        _currentKeyEventModifiers = event.modifierFlags
+        defer { _currentKeyEventModifiers = [] }
         _didInsertText = false
         interpretKeyEvents([event])
 
@@ -265,8 +281,15 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
         // For non-IME keys, send directly to Ghostty
         if _markedRange.location == NSNotFound {
-            let key = translateKey(event)
-            _ = ghostty_surface_key(surface, key)
+            var key = translateKey(event)
+            if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
+                chars.withCString { textPtr in
+                    key.text = textPtr
+                    _ = ghostty_surface_key(surface, key)
+                }
+            } else {
+                _ = ghostty_surface_key(surface, key)
+            }
         }
     }
 
@@ -318,9 +341,6 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     func insertText(_ string: Any, replacementRange: NSRange) {
         guard let surface else { return }
 
-        _didInsertText = true
-        unmarkText()
-
         let text: String
         if let attrString = string as? NSAttributedString {
             text = attrString.string
@@ -330,9 +350,20 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
+        if ghosttyShouldHandleTextAsKeyEvent(text, modifiers: _currentKeyEventModifiers) {
+            return
+        }
+
+        _didInsertText = true
+        unmarkText()
+
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
+    }
+
+    override func doCommand(by selector: Selector) {
+        _ = selector
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -651,6 +682,24 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     }
 
     return ["env", envPrefix, command].joined(separator: " ")
+}
+
+func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
+    guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
+    guard text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first else { return false }
+    return scalar.value < 0x20
+}
+
+func ghosttyShouldBypassInterpretKeyEvents(modifiers: NSEvent.ModifierFlags) -> Bool {
+    !modifiers.intersection([.control, .command]).isEmpty
+}
+
+func ghosttyKeyText(characters: String?, modifiers: NSEvent.ModifierFlags) -> String? {
+    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
+    guard modifiers.intersection(controlLikeModifiers).isEmpty else { return nil }
+    guard let characters, !characters.isEmpty else { return nil }
+    return characters
 }
 
 private func shellEscape(_ value: String) -> String {

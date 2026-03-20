@@ -74,7 +74,7 @@ This should feel SSH-like in product terms even if the first transport is not li
 
 ### tmux lessons, applied
 
-The tmux architecture study (shipped, guidance propagated into remaining items and `agent-embedding/06`) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
+The tmux architecture study (shipped, see git history) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
 
 - **Monotonic, type-prefixed, never-reused IDs** for sessions and runs. tmux does this with `$session`, `@window`, `%pane`. Loopflow's `LfdId` scheme already fits.
 - **Server owns all persistent state.** Clients are disposable renderers. `lfd` owns run state, session state, scrollback buffers. Concerto reconstructs on reconnect.

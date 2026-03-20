@@ -1,1 +1,0 @@
-lfd: keep runtime journals out of strict worktree status

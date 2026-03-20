@@ -41,6 +41,7 @@ class TestWaveModel:
         assert wave.commits == []
         assert wave.diff_stat is None
         assert wave.flow_steps == []
+        assert wave.workers == 1
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)

@@ -34,8 +34,7 @@ use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
-    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
+    dispatch_or_enqueue_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, Event, LivePrState, LivePullRequestState,
@@ -931,35 +930,16 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
-            let activated = if listener_wave.serialized {
-                let enqueued = matches!(
-                    enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
-                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-                );
-                if enqueued {
-                    let _ = dispatch_wave_if_ready(
-                        &self.store,
-                        self,
-                        &self.scheduler,
-                        &self.event_hub,
-                        &listener_wave,
-                    )
-                    .await;
-                }
-                enqueued
-            } else {
-                spawn_immediate_activation(
-                    &self.store,
-                    self,
-                    &self.scheduler,
-                    &self.event_hub,
-                    &listener_wave,
-                    trigger.flow.clone(),
-                    envelope,
-                )
-                .await
-                .is_some()
-            };
+            let activated = dispatch_or_enqueue_activation(
+                &self.store,
+                self,
+                &self.scheduler,
+                &self.event_hub,
+                &listener_wave,
+                trigger.flow.clone(),
+                envelope,
+            )
+            .await;
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {
@@ -1987,7 +1967,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         };
         store
             .create_wave(&wave)
@@ -2044,7 +2024,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         }
     }
 
@@ -2231,7 +2211,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: true,
+            workers: 1,
         };
         store
             .create_wave(&target_wave)
@@ -2307,7 +2287,7 @@ mod tests {
         let source_wave = make_wave("source", repo.path(), "test-flow", WaveStatus::Running);
         let mut listener_wave =
             make_wave("listener", repo.path(), "test-flow", WaveStatus::Running);
-        listener_wave.serialized = true;
+        listener_wave.workers = 1;
         store
             .create_wave(&source_wave)
             .await

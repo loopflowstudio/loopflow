@@ -5,6 +5,10 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
+fn default_workers() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WaveStatus {
@@ -233,11 +237,9 @@ pub struct Wave {
     pub cycle_start_iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
-    /// When true, only one run at a time — activations queue and dispatch
-    /// sequentially. When false (default), triggers spawn runs immediately
-    /// and git coordinates concurrent execution.
-    #[serde(default)]
-    pub serialized: bool,
+    /// Maximum number of active runs this wave can have at once.
+    #[serde(default = "default_workers")]
+    pub workers: u32,
 }
 
 impl Wave {
@@ -255,7 +257,7 @@ impl Wave {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: default_workers(),
         }
     }
 
@@ -301,6 +303,10 @@ impl Wave {
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {
         self.created_at
+    }
+
+    pub fn workers(&self) -> u32 {
+        self.workers.max(1)
     }
 }
 

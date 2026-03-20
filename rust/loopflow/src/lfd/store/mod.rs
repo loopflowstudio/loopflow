@@ -189,6 +189,10 @@ impl Store {
         WaveStateStore::get_active_wave_run(self, wave_id).await
     }
 
+    pub async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::count_active_wave_runs(self, wave_id).await
+    }
+
     pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         WaveStateStore::get_latest_wave_run(self, wave_id).await
     }
@@ -661,6 +665,7 @@ pub trait WaveStateStore: Send + Sync {
     ) -> StoreResult<Vec<WaveRun>>;
     async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>>;
     async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
+    async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32>;
     async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
     async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
     async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
@@ -1036,6 +1041,16 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.get_active_wave_run(&wave_id)).await
             }
             StoreBackend::Postgres(store) => store.get_active_wave_run(wave_id).await,
+        }
+    }
+
+    async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.count_active_wave_runs(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.count_active_wave_runs(wave_id).await,
         }
     }
 
@@ -2227,7 +2242,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         }
     }
 

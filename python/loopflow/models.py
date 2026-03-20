@@ -74,6 +74,7 @@ class Wave(BaseModel):
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
     cron: Optional[str] = None
+    workers: int = 1
     direction: list[str]
     area: list[str]
     triggers: list[Trigger] = Field(default_factory=list)

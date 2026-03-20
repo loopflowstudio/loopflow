@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
+use super::{dispatch_or_enqueue_activation, ActivationEnvelope};
 use crate::engine::worktrees::worktree_path;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
@@ -58,16 +58,22 @@ async fn tick_loop_waves(
             continue;
         }
 
-        // Skip if there's already an active run or pending activation.
-        // Loop mode means "keep running whenever idle", so we only re-trigger
-        // when no runs are active.
-        if let Ok(Some(_)) = store.get_active_wave_run(wave.id()).await {
-            continue;
-        }
-        if let Ok(pending) = store.list_pending_activations(wave.id()).await {
-            if !pending.is_empty() {
+        let active_runs = match store.count_active_wave_runs(wave.id()).await {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!(wave_id = %wave.id(), error = %err, "failed to count active loop runs");
                 continue;
             }
+        };
+        let pending_count = match store.list_pending_activations(wave.id()).await {
+            Ok(pending) => pending.len() as u32,
+            Err(err) => {
+                tracing::error!(wave_id = %wave.id(), error = %err, "failed to list pending activations");
+                continue;
+            }
+        };
+        if active_runs + pending_count >= wave.workers() {
+            continue;
         }
 
         let worktree = worktree_path(Path::new(wave.repo()), wave.name());
@@ -111,20 +117,16 @@ async fn tick_loop_waves(
             "",
             "main",
         );
-        if wave.serialized {
-            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
-        } else {
-            let _ = spawn_immediate_activation(
-                store,
-                executor,
-                scheduler,
-                event_hub,
-                &wave,
-                Some(wave.primary_flow().to_string()),
-                envelope,
-            )
-            .await;
-        }
+        let _ = dispatch_or_enqueue_activation(
+            store,
+            executor,
+            scheduler,
+            event_hub,
+            &wave,
+            Some(wave.primary_flow().to_string()),
+            envelope,
+        )
+        .await;
     }
 }
 
@@ -166,7 +168,7 @@ mod tests {
             iteration,
             cycle_start_iteration,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         }
     }
 

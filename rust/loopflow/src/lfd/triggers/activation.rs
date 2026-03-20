@@ -52,6 +52,19 @@ async fn pause_wave_after_activation_conflict(
     event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
+async fn create_activation_run(
+    store: &SharedStore,
+    wave: &Wave,
+    run_id: &LfdId,
+    target_branch: Option<&str>,
+) -> anyhow::Result<WaveRun> {
+    if wave.workers() == 1 {
+        create_wave_run_with_id(store, wave, run_id, target_branch).await
+    } else {
+        create_parallel_wave_run(store, wave, run_id, target_branch).await
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ActivationEnvelope {
     pub wave_id: LfdId,
@@ -276,7 +289,7 @@ pub async fn spawn_immediate_activation(
     } else {
         Some(envelope.target_branch.as_str())
     };
-    let mut run = match create_parallel_wave_run(store, wave, &run_id, target).await {
+    let mut run = match create_activation_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -314,6 +327,47 @@ pub async fn spawn_immediate_activation(
     Some(run)
 }
 
+pub async fn dispatch_or_enqueue_activation(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
+    event_hub: &EventHub,
+    wave: &Wave,
+    flow_override: Option<String>,
+    envelope: ActivationEnvelope,
+) -> bool {
+    let active_runs = match store.count_active_wave_runs(wave.id()).await {
+        Ok(count) => count,
+        Err(err) => {
+            tracing::error!(
+                wave_id = %wave.id(),
+                error = %err,
+                "failed to count active wave runs"
+            );
+            return false;
+        }
+    };
+
+    if active_runs >= wave.workers() {
+        return matches!(
+            enqueue_pending_activation(store, event_hub, envelope).await,
+            Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+        );
+    }
+
+    spawn_immediate_activation(
+        store,
+        executor,
+        scheduler,
+        event_hub,
+        wave,
+        flow_override,
+        envelope,
+    )
+    .await
+    .is_some()
+}
+
 pub async fn dispatch_pending_activations(
     store: &SharedStore,
     executor: &WaveExecutor,
@@ -346,13 +400,14 @@ pub async fn dispatch_wave_if_ready(
     if scheduler.has_active_session(wave.id().as_str()) {
         return None;
     }
-    if store
-        .get_active_wave_run(wave.id())
-        .await
-        .ok()
-        .flatten()
-        .is_some()
-    {
+    let active_runs = match store.count_active_wave_runs(wave.id()).await {
+        Ok(count) => count,
+        Err(err) => {
+            tracing::error!(wave_id = %wave.id(), error = %err, "failed to count active wave runs");
+            return None;
+        }
+    };
+    if active_runs >= wave.workers() {
         return None;
     }
 
@@ -408,7 +463,7 @@ pub async fn dispatch_wave_if_ready(
     } else {
         Some(activation.target_branch.as_str())
     };
-    let mut run = match create_wave_run_with_id(store, wave, &run_id, target).await {
+    let mut run = match create_activation_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");
@@ -530,7 +585,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         };
         store.create_wave(&wave).await.expect("create wave");
         wave

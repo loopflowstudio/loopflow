@@ -101,6 +101,7 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    workers: Option<u32>,
     status: Option<String>,
     #[serde(default)]
     run: bool,
@@ -114,6 +115,7 @@ pub struct UpdateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    workers: Option<u32>,
     status: Option<String>,
     agent: Option<String>,
     step_agents: Option<std::collections::HashMap<String, String>>,
@@ -189,6 +191,7 @@ pub async fn create_wave_handler(
         flow,
         direction,
         area,
+        workers: requested_workers,
         status,
         run,
         serialized,
@@ -230,6 +233,17 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let cron_field = wave_config.as_ref().and_then(|c| c.cron.clone());
+    let workers = requested_workers
+        .or_else(|| wave_config.as_ref().and_then(|c| c.workers))
+        .or_else(|| {
+            if serialized {
+                Some(1)
+            } else {
+                wave_config.as_ref().and_then(|c| c.serialized).map(|_| 1)
+            }
+        })
+        .unwrap_or(1)
+        .max(1);
 
     let mut wave = Wave {
         id: id.clone(),
@@ -244,7 +258,7 @@ pub async fn create_wave_handler(
         iteration: 0,
         cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
-        serialized,
+        workers,
     };
     if let Some(status) = status {
         wave.status = WaveStatus::from_str(&status)
@@ -561,12 +575,15 @@ pub async fn update_wave_handler(
     if let Some(area) = payload.area {
         wave.area = area;
     }
+    if let Some(workers) = payload.workers {
+        wave.workers = workers.max(1);
+    }
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
-    if let Some(serialized) = payload.serialized {
-        wave.serialized = serialized;
+    if payload.serialized.is_some() {
+        wave.workers = 1;
     }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {
@@ -683,18 +700,16 @@ async fn start_wave_run(
     wave: &mut Wave,
     overrides: Option<RunWaveRequest>,
 ) -> Result<Option<WaveRun>, ApiError> {
-    if wave.serialized {
-        let active_run = state
-            .store
-            .get_active_wave_run(wave.id())
-            .await
-            .map_err(map_store_error)?;
-        if active_run.is_some() {
-            return Err(api_error(
-                StatusCode::PRECONDITION_FAILED,
-                "wave already running",
-            ));
-        }
+    let active_runs = state
+        .store
+        .count_active_wave_runs(wave.id())
+        .await
+        .map_err(map_store_error)?;
+    if active_runs >= wave.workers() {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "wave already at worker capacity",
+        ));
     }
 
     let mut flow_override = None;
@@ -1490,7 +1505,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         }
     }
 
@@ -1684,6 +1699,7 @@ mod tests {
                 flow: Some("build".to_string()),
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,
@@ -1723,6 +1739,7 @@ mod tests {
                 flow: Some("ship-roadmap".to_string()),
                 direction: None,
                 area: None,
+                workers: None,
                 status: Some("paused".to_string()),
                 run: false,
                 serialized: true,
@@ -1778,6 +1795,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,
@@ -1807,6 +1825,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                workers: None,
                 status: Some("paused".to_string()),
                 run: false,
                 serialized: false,
@@ -1836,6 +1855,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,
@@ -1851,6 +1871,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,
@@ -1892,6 +1913,7 @@ mod tests {
                 flow: Some("ship-roadmap".to_string()),
                 direction: Some(vec!["infra".to_string()]),
                 area: Some(vec!["src/".to_string()]),
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,
@@ -1947,6 +1969,7 @@ mod tests {
                 flow: None,
                 direction: None,
                 area: None,
+                workers: None,
                 status: None,
                 run: false,
                 serialized: false,

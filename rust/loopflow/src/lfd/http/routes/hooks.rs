@@ -800,7 +800,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         };
         state.store.create_wave(&wave).await.expect("create wave");
         let trigger = Trigger {

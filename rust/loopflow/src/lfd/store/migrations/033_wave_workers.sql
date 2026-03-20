@@ -1,0 +1,2 @@
+ALTER TABLE waves ADD COLUMN workers INTEGER NOT NULL DEFAULT 1;
+UPDATE waves SET workers = 1 WHERE workers < 1;

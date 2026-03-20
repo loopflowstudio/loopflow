@@ -225,7 +225,7 @@ impl PostgresStore {
             };
             let created_at = wave.created_at().map(|dt| dt.unix_timestamp()).unwrap_or(0);
 
-            let serialized: i32 = if wave.serialized { 1 } else { 0 };
+            let workers = wave.workers() as i32;
             let mode = wave.mode().as_str();
             let primary_flow = wave.primary_flow();
             let cron = wave.cron.as_deref();
@@ -243,7 +243,7 @@ impl PostgresStore {
                         &(wave.iteration() as i32),
                         &(wave.cycle_start_iteration() as i32),
                         &created_at,
-                        &serialized,
+                        &workers,
                         &mode,
                         &primary_flow.as_str(),
                         &cron,
@@ -1167,6 +1167,25 @@ impl PostgresStore {
                 )
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        self.with_client(|client| async move {
+            let statuses = [
+                WaveRunStatus::Pending.as_i32(),
+                WaveRunStatus::Running.as_i32(),
+                WaveRunStatus::Waiting.as_i32(),
+            ];
+            let count = client
+                .query_one(
+                    Self::sql(Query::CountActiveWaveRuns),
+                    &[&wave_id, &&statuses[..]],
+                )
+                .await?
+                .get::<_, i64>(0);
+            Ok(count.max(0) as u32)
         })
         .await
     }

@@ -20,7 +20,7 @@
   "open_pr_count": 1,
   "stack_count": 0,
   "has_stale_pr_state": false,
-  "serialized": false,
+  "workers": 1,
   "triggers": [
     {
       "id": "trig_001",

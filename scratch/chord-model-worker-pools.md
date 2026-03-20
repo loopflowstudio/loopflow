@@ -1,124 +1,123 @@
-# Worker Pools
+# Worker Pools & Planning Rhythm
 
-## Problem
+Design notes from conversation. Reshapes 02a (worker pools) and 02c (VSM chord configs).
 
-Waves have a binary `serialized: bool` — either one run at a time or unlimited concurrent runs. VSM's S3 (control) needs to tune concurrency per wave: "this wave can handle 3 parallel runs." Any wave with trigger-driven work benefits from bounded concurrency without being forced into single-threading.
+## The model
 
-The current default (`serialized: false`) means unlimited parallelism, which is uncontrolled. The safer default is bounded — every wave should have a finite worker count.
+Waves are the only primitive. A wave can have children, workers, a backlog — all optional. Chords emerge from composition, not from a distinct type.
 
-## Approach
+### Workers as capacity budget
 
-Replace `serialized: bool` with `workers: u32` on the `Wave` type and in wave YAML config. Default `workers: 1`. All dispatch paths count active runs against the limit.
+`workers: N` is a capacity cap on a wave. Intermediate waves in a chord tree split their budget among children and themselves:
 
-### Data model
-
-```rust
-// Wave struct — replace serialized: bool
-pub workers: u32,  // default 1, minimum 1
+```
+root: 10 workers total
+├── api: 6          (3 auth + 2 billing + 1 self)
+│   ├── api-auth: 3
+│   └── api-billing: 2
+├── frontend: 3
+└── docs: 1
 ```
 
-```yaml
-# wave/<name>/<name>.yaml
-flow: build-or-silent
-workers: 3
+Workers is a policy decision (s5-level, slow-changing), not recomputed each cycle. s3 can adjust it, but it's a stable cap, not a per-batch calculation.
+
+Intermediate nodes do work too — api keeps 1 worker for cross-cutting work that doesn't belong to either child.
+
+### Areas
+
+A chord's area is a superset of its children's areas. Children *can* overlap — that's what s2 coordination handles. The hard constraint: children stay within the parent's area.
+
+```
+api:           area: src/api/
+├── api-auth:    area: src/api/auth/, src/api/middleware/
+└── api-billing: area: src/api/billing/, src/api/middleware/
+# overlap on middleware is fine — s2 deconflicts at runtime
 ```
 
-Add `workers` to `WaveConfig` YAML parsing. Add `workers` to `WaveDto` HTTP response (replace `serialized: bool`). Add `workers` to Python `Wave` model. Add `workers` column to database, migration from `serialized`.
+### The planning flow
 
-### Dispatch logic
+The planning pass is an up/down traversal of the chord tree. It's a regular flow — any wave with children can run it.
 
-The binary routing (`if wave.serialized { enqueue } else { spawn_immediate }`) becomes a capacity check. All triggers use the same path:
+```
+up (leaves → root):  each chord scans
+                     parent sees children's scan output as input
+                     pure information, no side effects
 
-1. Count active runs for this wave (Pending + Running + Waiting status)
-2. If count < workers: spawn via `create_parallel_wave_run()` (per-run worktree)
-3. If count >= workers: enqueue as pending activation
+down (root → leaves): each chord governs
+                      children inherit parent's policy/constraints
+                      writes mutations — queue ordering, capacity, policy
 
-`dispatch_pending_activations()` does the same check — poll pending queue, spawn if under capacity. This replaces the current "check for any active run" gate.
-
-Special case for `workers: 1`: use `create_wave_run_with_id()` (shared worktree) to preserve the current serialized behavior where runs reuse the wave's worktree. This keeps branch continuity for serial waves.
-
-### New store query
-
-Add `CountActiveWaveRuns` query:
-
-```sql
-SELECT COUNT(*) FROM wave_runs
-WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
+commit:              one PR for the entire planning pass
 ```
 
-Replace `get_active_wave_run()` (returns Option<WaveRun>) with `count_active_wave_runs()` (returns u32) in the dispatch paths. Keep `get_active_wave_run()` for the wave-completion idle-check (needs to know if *any* run exists).
+Scan is each system's afferent channel (information flowing inward/upward). Govern is the efferent channel (decisions flowing outward/downward). Within each chord's scan or govern, the s-levels (s5, s4, s3, s2) run as steps — they're internal to the chord, not separate waves.
 
-### Trigger routing changes
+After the planning PR lands, workers fire across all waves with capacity.
 
-All four trigger sites (cron, watch, loop_ticker, wave-completion listener) currently branch on `wave.serialized`. Replace with:
+### Why not separate waves for s5–s2?
 
-```rust
-let active = store.count_active_wave_runs(wave.id()).await?;
-if active < wave.workers {
-    spawn_immediate_activation(...)
-} else {
-    enqueue_pending_activation(...)
-}
-```
+The earlier design (02c) had five member waves per chord with independent cron schedules. Problems:
 
-`spawn_immediate_activation()` already falls back to enqueue when the scheduler is at capacity — that stays. The worker-pool check is an additional gate before even trying.
+- **Planning levels aren't independent.** s2 needs s3's capacity decision, s3 needs s4's environmental read. Independent crons mean each level works with stale output from the others.
+- **PM noise.** Each wave needs a Linear project, backlog, README. Five waves per chord is overhead for what's really one planning process.
+- **No natural parallelism.** Planning is inherently serial — you never want two s4 scans racing. `workers > 1` is meaningless for governance.
 
-### Migration
+Instead: s5–s2 are steps within the planning flow. One wave, one PR, one reviewable decision.
 
-Database migration `019_wave_workers.sql`:
+### Why not s5 creating/destroying waves for parallelism?
 
-```sql
-ALTER TABLE waves ADD COLUMN workers INTEGER NOT NULL DEFAULT 1;
-UPDATE waves SET workers = 1;  -- all existing waves get workers=1
-```
+Ephemeral waves for batch parallelism have a global tick problem — you have to wait for the full planning cycle to create/destroy them. `workers: N` is immediate.
 
-Keep reading `serialized` from YAML for backwards compat during a transition period. `serialized: true` maps to `workers: 1`. `serialized: false` or absent also maps to `workers: 1` (new default — no unlimited mode).
+Also messes with PM — you want stable, named waves that humans track over time.
 
-The `serialized` column stays in the DB for one release cycle, then gets dropped. The Rust field gets `#[deprecated]` and is ignored in favor of `workers`.
+Wave splitting is a structural decision (s5, slow). Workers are operational capacity (s3, fast). Different timescales.
 
-### HTTP API
+### Two rhythms
 
-`CreateWaveRequest` and `UpdateWaveRequest` accept `workers: Option<u32>`. Still accept `serialized: bool` for backwards compat (maps to workers=1). `WaveDto` exposes `workers: u32` and drops `serialized: bool`.
+A chord has two rhythms:
 
-### Python model
+1. **Planning beat** (periodic): scan up → govern down → one PR
+2. **Worker batch** (triggered by planning): N workers fire against the queue, each producing its own PR
 
-Add `workers: int = 1` to `Wave` model. Remove `serialized` if it exists (it doesn't currently).
+The planning pass is itself `workers: 1` — always serial. The parallelism lives in the work phase.
 
-## Alternatives considered
+### Cadence is uniform, levels self-gate
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Keep `serialized` + add `max_concurrent` | Two fields for one concept | Confusing — which takes precedence? |
-| `workers: 0` means unlimited | Matches common convention | Every wave should have a finite limit. Unlimited is a footgun for agent systems. |
-| Workers as a runtime-only setting (not in YAML) | Less config surface | Wave YAML is the source of truth for wave behavior. Workers is a core property. |
-| Pool as a separate object | More flexible | Over-engineering. A wave *is* a pool of work. |
+The same up/down flow runs at every cadence. Levels with nothing to say pass through as no-ops:
 
-## Key decisions
+- Every 4h: s3/s2 mostly — queue reordering, capacity adjustment
+- Daily: s4 joins — CVEs, dependency updates
+- Weekly: s5 weighs in — policy shifts, area reorg
 
-**Default is 1, not "unlimited."** The old default (`serialized: false`) gave unlimited parallelism. The new default is 1 worker. This is a behavior change for non-serialized waves that never set `serialized: true`. Existing waves that relied on unlimited parallel runs will now serialize. This is intentional — unbounded concurrency is the wrong default for agent systems.
+No need to configure "s5 weekly, s4 daily" separately. One cron, all levels run, cheap levels are cheap.
 
-**Per-run worktrees for workers > 1.** When `workers > 1`, each run gets its own worktree (via `create_parallel_wave_run()`). When `workers == 1`, runs reuse the shared wave worktree (via `create_wave_run_with_id()`). This preserves the existing optimization for serial waves while supporting safe concurrency.
+### The root wave is not special
 
-**Count-based gating, not slot reservation.** Dispatch counts active runs and compares to the limit. No reservation or lock-ahead. If two triggers fire simultaneously, both might pass the count check and spawn, briefly exceeding the limit by 1. This is acceptable — the scheduler's global capacity limit provides a hard backstop, and the slight overshoot resolves naturally when one run completes.
+The root is just the wave at the top of the tree. It runs the planning flow because that's its flow. Any wave could run it if it had children. There's no "root wave" type.
 
-**Workers composes with all modes.** `loop` + `workers: 3` means 3 persistent loopers. `cron` + `workers: 3` means on schedule, launch up to 3. `flow` triggers respect the limit. No special-casing per mode.
+## What this changes
 
-## Scope
+### 02a (worker pools) — narrower but same mechanics
 
-- In scope: `workers` field on Wave, YAML parsing, dispatch changes, DB migration, HTTP API, Python model, backwards compat for `serialized`
-- Out of scope: dynamic worker pool resizing at runtime (S3 governance can update `workers` in YAML, but that takes effect on next activation), per-step concurrency limits, worker affinity/routing
+The `workers: N` implementation stays the same — replace `serialized: bool` with a capacity cap, dispatch counts active runs. But the framing changes:
 
-## Done when
+- Workers is a **budget that flows down the chord tree**, not just a per-wave config
+- Default `workers: 1` — unchanged
+- Primary consumer is leaf waves doing actual work, not governance
 
-- `workers: N` in wave YAML controls concurrent run capacity
-- Default is `workers: 1` (no unlimited mode)
-- Dispatch respects the limit: excess activations queue
-- `serialized: true` in YAML still works (maps to `workers: 1`)
-- A wave with `workers: 3` runs up to 3 concurrent activations
-- `cargo test --all` passes
-- Existing tests adapted (no `serialized` references in new code paths)
+### 02c (VSM chord configs) — replaced
 
-Advancing chord-model goals:
-> "Governance flows as the chord's reusable VSM lens (s5/s4/s3/s2 as separate flows)"
+Five independent governance waves with separate crons → one wave running a planning flow that traverses the chord tree. The s-levels are steps, not waves.
 
-Worker pools give S3 (control) a concrete lever: adjust `workers` based on observed wave health and capacity.
+### Governance flows — restructured
+
+The four `govern-*` flows (govern-identity, govern-intelligence, govern-control, govern-coordination) become scan/govern steps within the planning flow, not standalone flows on separate waves.
+
+Current steps (s5-scan, s5-assess, s4-scan, etc.) still useful — they're the building blocks. But they compose into a single planning flow, not four independent flows.
+
+## Open questions
+
+- How does the flow engine express the recursive traversal? Is it built into the planning flow, or does lfd manage the tree walk?
+- How does s3's capacity allocation get written? Mutation to child wave configs? A separate capacity file?
+- Does the planning flow need a new primitive for "run these steps at each node in tree order"?
+- Batch model vs pool model: autonomous work wants batch (plan → execute → plan). Interactive/garden wants pool (workers always running, human feeds queue). Same `workers: N` underneath, different initiation pattern. Is this just mode (cron vs loop)?

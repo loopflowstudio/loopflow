@@ -239,8 +239,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         lfd_config.github.clone(),
         cancel.clone(),
     );
-    let runtime_journal_handle =
-        loopflow::lfd::runtime_journal::spawn(store.clone(), event_hub.clone(), cancel.clone());
+    let journal_handle =
+        loopflow::lfd::journal::spawn(store.clone(), event_hub.clone(), cancel.clone());
 
     // Hourly output log pruning.
     {
@@ -347,7 +347,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for handle in loop_handles {
         let _ = handle.await;
     }
-    let _ = runtime_journal_handle.await;
+    let _ = journal_handle.await;
 
     Ok(())
 }

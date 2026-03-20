@@ -7,19 +7,19 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::{list_worktrees, main_repo_root, wave_name_from_worktree_and_main};
+use crate::journal::{events_path, read_events, runs_root, LfEvent};
 use crate::lfd::events::EventHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
-use crate::runtime::{read_meta, runs_root, RuntimeEvent};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Default)]
-struct RuntimeJournalObserver {
+struct LfObserver {
     line_cursors: HashMap<PathBuf, usize>,
 }
 
-impl RuntimeJournalObserver {
+impl LfObserver {
     async fn scan(&mut self, store: &SharedStore, event_hub: &EventHub) -> Result<(), String> {
         let repo_roots = store
             .list_waves(None)
@@ -69,8 +69,13 @@ impl RuntimeJournalObserver {
                 continue;
             }
 
-            if let Err(err) = read_meta(&path) {
-                debug!(error = %err, run_dir = %path.display(), "skipping invalid runtime journal");
+            let event_path = events_path(&path);
+            if !event_path.exists() {
+                continue;
+            }
+
+            if let Err(err) = read_events(&path) {
+                debug!(error = %err, run_dir = %path.display(), "skipping invalid journal");
                 continue;
             }
 
@@ -80,7 +85,7 @@ impl RuntimeJournalObserver {
     }
 
     fn replay_new_lines(&mut self, run_dir: &Path, event_hub: &EventHub) -> Result<(), String> {
-        let events_path = crate::runtime::events_path(run_dir);
+        let events_path = events_path(run_dir);
         if !events_path.exists() {
             return Ok(());
         }
@@ -94,55 +99,18 @@ impl RuntimeJournalObserver {
             if processed <= seen || line.trim().is_empty() {
                 continue;
             }
-            let event: RuntimeEvent = serde_json::from_str(line)
-                .map_err(|err| format!("invalid runtime event: {err}"))?;
-            event_hub.send(map_runtime_event(event));
+            let event: LfEvent = serde_json::from_str(line)
+                .map_err(|err| format!("invalid journal event: {err}"))?;
+            event_hub.send(Event::from(event));
         }
         self.line_cursors.insert(run_dir.to_path_buf(), processed);
         Ok(())
     }
 }
 
-fn map_runtime_event(event: RuntimeEvent) -> Event {
-    match event {
-        RuntimeEvent::RunStarted {
-            run_id,
-            command,
-            worktree,
-            wave_name,
-            flow,
-            step,
-            ..
-        } => Event::run_started(run_id, wave_name, worktree, command, flow, step),
-        RuntimeEvent::StepStarted {
-            run_id,
-            step,
-            index,
-            ..
-        } => Event::step_started(run_id, step, index),
-        RuntimeEvent::StepCompleted {
-            run_id,
-            step,
-            index,
-            exit_code,
-            ..
-        } => Event::step_completed(run_id, step, index, exit_code),
-        RuntimeEvent::RunWaiting { run_id, step, .. } => Event::run_waiting(run_id, step),
-        RuntimeEvent::RunCompleted {
-            run_id, exit_code, ..
-        } => Event::run_completed(run_id, exit_code),
-        RuntimeEvent::RunFailed {
-            run_id,
-            exit_code,
-            error,
-            ..
-        } => Event::run_failed(run_id, exit_code, error),
-    }
-}
-
 pub fn spawn(store: SharedStore, event_hub: EventHub, cancel: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut observer = RuntimeJournalObserver::default();
+        let mut observer = LfObserver::default();
         let mut interval = tokio::time::interval(POLL_INTERVAL);
         interval.tick().await;
 
@@ -151,7 +119,7 @@ pub fn spawn(store: SharedStore, event_hub: EventHub, cancel: CancellationToken)
                 _ = cancel.cancelled() => break,
                 _ = interval.tick() => {
                     if let Err(err) = observer.scan(&store, &event_hub).await {
-                        warn!(error = %err, "runtime journal scan failed");
+                        warn!(error = %err, "journal scan failed");
                     }
                 }
             }
@@ -161,46 +129,87 @@ pub fn spawn(store: SharedStore, event_hub: EventHub, cancel: CancellationToken)
 
 #[cfg(test)]
 mod tests {
-    use super::{map_runtime_event, RuntimeJournalObserver};
+    use super::LfObserver;
+    use crate::journal::{emit, LfEventFields, LfEventType, LfNode};
     use crate::lfd::events::EventHub;
-    use crate::runtime::{RunTarget, RuntimeEvent, RuntimeRun};
     use loopflow_test_support::TestRepo;
+    use time::OffsetDateTime;
 
-    #[test]
-    fn runtime_event_maps_to_client_event() {
-        let event = map_runtime_event(RuntimeEvent::RunCompleted {
-            run_id: "2b2a93a3-59fd-413a-a95a-c9fb41351d4e"
-                .parse()
-                .expect("uuid"),
-            timestamp: time::OffsetDateTime::now_utc(),
-            exit_code: 0,
-        });
-        let json = serde_json::to_value(&event).expect("serialize");
-        assert_eq!(json["type"], "run.completed");
-        assert_eq!(json["exit_code"], 0);
+    fn started_fields(
+        command: &[String],
+        worktree: &std::path::Path,
+        wave_name: &str,
+    ) -> LfEventFields {
+        LfEventFields {
+            wave_name: Some(wave_name.to_string()),
+            worktree: Some(worktree.display().to_string()),
+            command: Some(command.to_vec()),
+            ..LfEventFields::default()
+        }
     }
 
     #[test]
-    fn observer_replays_new_runtime_events() {
+    fn observer_replays_new_journal_events() {
         let repo = TestRepo::new();
         let worktree = repo.create_wave_worktree("observe");
-        let run = RuntimeRun::maybe_start(
+        let command = vec!["lf".to_string(), "build".to_string()];
+
+        emit(
             &worktree,
-            &["lf".to_string(), "build".to_string()],
-            RunTarget::flow("build"),
-        )
-        .expect("runtime run");
-        run.emit_step_started("implement", 0);
-        run.complete_success();
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(&command, &worktree, "observe"),
+        );
+        emit(
+            &worktree,
+            LfNode::Flow,
+            LfEventType::Started,
+            LfEventFields {
+                flow: Some("build".to_string()),
+                ..LfEventFields::default()
+            },
+        );
+        emit(
+            &worktree,
+            LfNode::Step,
+            LfEventType::Started,
+            LfEventFields {
+                step: Some("implement".to_string()),
+                index: Some(0),
+                ..LfEventFields::default()
+            },
+        );
+        emit(
+            &worktree,
+            LfNode::Step,
+            LfEventType::Completed,
+            LfEventFields {
+                step: Some("implement".to_string()),
+                index: Some(0),
+                ..LfEventFields::default()
+            },
+        );
+        emit(
+            &worktree,
+            LfNode::Flow,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
 
         let hub = EventHub::new(8);
         let mut rx = hub.subscribe();
-        let mut observer = RuntimeJournalObserver::default();
+        let mut observer = LfObserver::default();
         observer
             .scan_worktree(&worktree, &hub)
-            .expect("scan runtime worktree");
+            .expect("scan journal worktree");
 
-        let event_types = (0..3)
+        let event_types = (0..6)
             .map(|_| {
                 let event = rx.try_recv().expect("event");
                 let json = serde_json::to_value(&event).expect("serialize");
@@ -209,15 +218,52 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             event_types,
-            vec!["run.started", "step.started", "run.completed"]
+            vec![
+                "run.started",
+                "flow.started",
+                "step.started",
+                "step.completed",
+                "flow.completed",
+                "run.completed",
+            ]
         );
 
         observer
             .scan_worktree(&worktree, &hub)
-            .expect("rescan runtime worktree");
+            .expect("rescan journal worktree");
         assert!(
             rx.try_recv().is_err(),
             "no duplicate events after replay cursor"
         );
+    }
+
+    #[test]
+    fn journal_replay_preserves_original_timestamp() {
+        let timestamp = OffsetDateTime::parse(
+            "2026-03-20T18:30:45Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .expect("timestamp");
+        let event = crate::journal::LfEvent {
+            run_id: "2b2a93a3-59fd-413a-a95a-c9fb41351d4e"
+                .parse()
+                .expect("uuid"),
+            ts: timestamp,
+            node: LfNode::Run,
+            event: LfEventType::Completed,
+            wave_name: None,
+            worktree: None,
+            command: None,
+            flow: None,
+            step: None,
+            index: None,
+            error: None,
+            signal: None,
+        };
+
+        let mapped = crate::lfd::types::Event::from(event);
+        let json = serde_json::to_value(&mapped).expect("serialize");
+        assert_eq!(json["type"], "run.completed");
+        assert_eq!(json["timestamp"], "2026-03-20T18:30:45Z");
     }
 }

@@ -12,13 +12,13 @@ use crate::engine::{
     expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor, Flow,
     FlowAction,
 };
+use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::lfd::executor::{
     cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
 };
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};
-use crate::runtime::RuntimeRun;
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -27,16 +27,37 @@ use std::process::{Command, Stdio};
 const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
-pub fn run(
-    flow: &Flow,
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-    runtime: Option<&RuntimeRun>,
-) -> Result<()> {
+pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
-    run_steps(&items, message, cli, repo, runtime)
+    journal::emit(
+        repo,
+        LfNode::Flow,
+        LfEventType::Started,
+        LfEventFields {
+            flow: Some(flow.name.clone()),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run_steps(&items, message, cli, repo);
+    match &result {
+        Ok(_) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        ),
+        Err(err) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Errored,
+            LfEventFields {
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
 }
 
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -> Result<()> {
@@ -195,37 +216,17 @@ fn tree_prefix(index: usize, total: usize) -> &'static str {
     }
 }
 
-fn run_steps(
-    items: &[ConcreteItem],
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-    runtime: Option<&RuntimeRun>,
-) -> Result<()> {
+fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let total = items.len();
 
     for index in 0..total {
         let action = next_action(items, index);
         match action {
-            FlowAction::RunStep { step } => run_flow_step(
-                &step.step.name,
-                (index, total),
-                message,
-                cli,
-                repo,
-                runtime,
-                false,
-            )?,
+            FlowAction::RunStep { step } => {
+                run_flow_step(&step.step.name, (index, total), message, cli, repo, false)?
+            }
             FlowAction::WaitInteractive { step } => {
-                run_flow_step(
-                    &step.step.name,
-                    (index, total),
-                    message,
-                    cli,
-                    repo,
-                    runtime,
-                    true,
-                )?;
+                run_flow_step(&step.step.name, (index, total), message, cli, repo, true)?;
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
@@ -245,14 +246,14 @@ fn run_steps(
                 commit_step_work(repo, "and")?;
             }
             FlowAction::Xor { branch } => {
-                run_xor(&branch, message, cli, repo, runtime, index)?;
+                run_xor(&branch, message, cli, repo, index)?;
                 commit_step_work(repo, "xor")?;
             }
             FlowAction::Or { .. } => {
                 anyhow::bail!("or (multi-select) execution is not yet implemented");
             }
             FlowAction::Loop { body } => {
-                run_loop(&body, message, cli, repo, runtime)?;
+                run_loop(&body, message, cli, repo)?;
                 commit_step_work(repo, "loop")?;
             }
             FlowAction::Complete => break,
@@ -268,17 +269,11 @@ fn run_flow_step(
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
-    runtime: Option<&RuntimeRun>,
-    waiting: bool,
+    _waiting: bool,
 ) -> Result<()> {
     let (index, total) = progress;
     print_step_progress(index, total, step_name);
-    if waiting {
-        if let Some(runtime) = runtime {
-            runtime.emit_waiting(step_name);
-        }
-    }
-    run_step_with_runtime(runtime, step_name, index, || {
+    run_step_with_journal(repo, step_name, index, || {
         crate::lf::commands::run::run(Some(step_name), message, cli)?;
         commit_step_work(repo, step_name)?;
         Ok(())
@@ -298,19 +293,45 @@ fn print_step_progress(index: usize, total: usize, step_name: &str) {
     );
 }
 
-fn run_step_with_runtime(
-    runtime: Option<&RuntimeRun>,
+fn run_step_with_journal(
+    repo: &Path,
     step_name: &str,
     index: usize,
     run: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    if let Some(runtime) = runtime {
-        runtime.emit_step_started(step_name, index as u32);
-    }
-
+    journal::emit(
+        repo,
+        LfNode::Step,
+        LfEventType::Started,
+        LfEventFields {
+            step: Some(step_name.to_string()),
+            index: Some(index as u32),
+            ..LfEventFields::default()
+        },
+    );
     let result = run();
-    if let Some(runtime) = runtime {
-        runtime.emit_step_completed(step_name, index as u32, if result.is_ok() { 0 } else { 1 });
+    match &result {
+        Ok(_) => journal::emit(
+            repo,
+            LfNode::Step,
+            LfEventType::Completed,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(index as u32),
+                ..LfEventFields::default()
+            },
+        ),
+        Err(err) => journal::emit(
+            repo,
+            LfNode::Step,
+            LfEventType::Errored,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(index as u32),
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
     }
     result
 }
@@ -333,7 +354,6 @@ fn run_xor(
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
-    runtime: Option<&RuntimeRun>,
     index: usize,
 ) -> Result<String> {
     let colors = Colors::new();
@@ -372,7 +392,7 @@ fn run_xor(
     };
 
     let temp_step = write_xor_route_step(repo, &prompt)?;
-    let result = run_step_with_runtime(runtime, router_name, index, || {
+    let result = run_step_with_journal(repo, router_name, index, || {
         crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli)?;
         commit_step_work(repo, router_name)?;
         Ok(())
@@ -397,27 +417,14 @@ fn run_xor(
         .expect("selected path validated by read_xor_verdict");
 
     let sub_items = load_xor_path_items(xor_path, repo)?;
-    run_steps(&sub_items, message, cli, repo, runtime)?;
+    run_steps(&sub_items, message, cli, repo)?;
     Ok(selected)
 }
 
-fn run_loop(
-    loop_def: &ConcreteLoop,
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-    runtime: Option<&RuntimeRun>,
-) -> Result<()> {
+fn run_loop(loop_def: &ConcreteLoop, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     loop {
-        run_steps(&loop_def.steps, message, cli, repo, runtime)?;
-        let selected = run_xor(
-            &loop_def.exit,
-            message,
-            cli,
-            repo,
-            runtime,
-            loop_def.steps.len(),
-        )?;
+        run_steps(&loop_def.steps, message, cli, repo)?;
+        let selected = run_xor(&loop_def.exit, message, cli, repo, loop_def.steps.len())?;
         if selected == "done" {
             return Ok(());
         }

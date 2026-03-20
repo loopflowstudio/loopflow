@@ -7,7 +7,7 @@ linear_id: b854c1c9-b49f-47f6-be6f-381f7c7cb1b0
 
 ## Context
 
-The runtime journal contract is now implemented: `lf` writes `meta.json` + `events.jsonl` under `.lf/runtime/runs/<run_id>/` when running in a wave worktree, and `lfd` polls those journals at 1-second intervals to emit `run.*` / `step.*` events through the EventHub. Wave attribution is filesystem-derived (sibling worktree naming), fire-and-forget, and invisible to git.
+The runtime journal contract is now implemented: `lf` writes JSONL lifecycle events under `.lf/journal/runs/<run_id>/events.jsonl` when running in a wave worktree, and `lfd` polls those journals at 1-second intervals to emit `run.*`, `flow.*`, and `step.*` events through the EventHub. Wave attribution is filesystem-derived (sibling worktree naming), fire-and-forget, and invisible to git.
 
 The daemon still carries its own deep execution path in `WaveExecutor`. That creates semantic drift: the CLI and the daemon each have to know how flows run, how overrides resolve, how interactive waits behave, and how results map back into run state. The longer both paths coexist, the more bugs land in the seam between them.
 
@@ -15,7 +15,7 @@ The daemon still carries its own deep execution path in `WaveExecutor`. That cre
 
 ## What to build
 
-1. **Run startup via `lf`.** When `lfd` starts an automated run, spawn `lf <flow-or-step>` in the correct worktree. The spawned process will automatically write runtime journals (via `RuntimeRun::maybe_start()` in `runtime/mod.rs`), which `lfd` already knows how to ingest.
+1. **Run startup via `lf`.** When `lfd` starts an automated run, spawn `lf <flow-or-step>` in the correct worktree. The spawned process will automatically write runtime journals (via `journal::emit()` in `journal/mod.rs`), which `lfd` already knows how to ingest.
 
 2. **Environment injection.** Set `LFD_RUN_ID`, `LFD_WAVE_ID`, and `LFD_SESSION_ID` as env vars before exec. This lets `lf` correlate daemon-initiated runs with the daemon's own run records. The CLI's existing wave detection (filesystem-based) handles attribution; env vars add daemon correlation on top.
 
@@ -40,7 +40,7 @@ The daemon still carries its own deep execution path in `WaveExecutor`. That cre
 
 ## Design notes
 
-**Journal ingestion is already bidirectional.** Once daemon-spawned runs write journals the same way CLI runs do, the existing `runtime_journal::spawn()` loop picks them up automatically. The daemon gets step-level progress from its own spawned processes without parsing terminal output.
+**Journal ingestion is already bidirectional.** Once daemon-spawned runs write journals the same way CLI runs do, the existing `lfd::journal::spawn()` loop picks them up automatically. The daemon gets step-level progress from its own spawned processes without parsing terminal output.
 
 **Polling latency.** The current 1-second poll interval means daemon-spawned run visibility has ~1s lag. This is acceptable for v1 but may need to become push-based (inotify/kqueue) if latency matters for reactive scheduling.
 

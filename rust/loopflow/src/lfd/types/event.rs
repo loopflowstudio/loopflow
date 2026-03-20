@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::journal::{LfEvent, LfEventType, LfNode};
 use crate::lfd::id::LfdId;
 use crate::lfd::provider_auth::Provider;
 use crate::lfd::types::{agent::AgentStatus, AttentionItem, TerminalSession};
@@ -184,10 +185,33 @@ pub enum Event {
         wave_name: String,
         worktree: String,
         command: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        flow: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        step: Option<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "flow.started")]
+    FlowStarted {
+        run_id: LfdId,
+        flow: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "flow.completed")]
+    FlowCompleted {
+        run_id: LfdId,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "flow.errored")]
+    FlowErrored {
+        run_id: LfdId,
+        error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "flow.escalated")]
+    FlowEscalated {
+        run_id: LfdId,
+        signal: String,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -204,29 +228,44 @@ pub enum Event {
         run_id: LfdId,
         step: String,
         index: u32,
-        exit_code: i32,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    #[serde(rename = "run.waiting")]
-    RunWaiting {
+    #[serde(rename = "step.errored")]
+    StepErrored {
         run_id: LfdId,
         step: String,
+        index: u32,
+        error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "step.escalated")]
+    StepEscalated {
+        run_id: LfdId,
+        step: String,
+        index: u32,
+        signal: String,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
     #[serde(rename = "run.completed")]
     RunCompleted {
         run_id: LfdId,
-        exit_code: i32,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    #[serde(rename = "run.failed")]
-    RunFailed {
+    #[serde(rename = "run.errored")]
+    RunErrored {
         run_id: LfdId,
-        exit_code: i32,
         error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "run.escalated")]
+    RunEscalated {
+        run_id: LfdId,
+        signal: String,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -456,16 +495,43 @@ impl Event {
         wave_name: String,
         worktree: String,
         command: Vec<String>,
-        flow: Option<String>,
-        step: Option<String>,
     ) -> Self {
         Self::RunStarted {
             run_id,
             wave_name,
             worktree,
             command,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn flow_started(run_id: LfdId, flow: String) -> Self {
+        Self::FlowStarted {
+            run_id,
             flow,
-            step,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn flow_completed(run_id: LfdId) -> Self {
+        Self::FlowCompleted {
+            run_id,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn flow_errored(run_id: LfdId, error: String) -> Self {
+        Self::FlowErrored {
+            run_id,
+            error,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn flow_escalated(run_id: LfdId, signal: String) -> Self {
+        Self::FlowEscalated {
+            run_id,
+            signal,
             timestamp: Self::now(),
         }
     }
@@ -479,37 +545,54 @@ impl Event {
         }
     }
 
-    pub fn step_completed(run_id: LfdId, step: String, index: u32, exit_code: i32) -> Self {
+    pub fn step_completed(run_id: LfdId, step: String, index: u32) -> Self {
         Self::StepCompleted {
             run_id,
             step,
             index,
-            exit_code,
             timestamp: Self::now(),
         }
     }
 
-    pub fn run_waiting(run_id: LfdId, step: String) -> Self {
-        Self::RunWaiting {
+    pub fn step_errored(run_id: LfdId, step: String, index: u32, error: String) -> Self {
+        Self::StepErrored {
             run_id,
             step,
+            index,
+            error,
             timestamp: Self::now(),
         }
     }
 
-    pub fn run_completed(run_id: LfdId, exit_code: i32) -> Self {
+    pub fn step_escalated(run_id: LfdId, step: String, index: u32, signal: String) -> Self {
+        Self::StepEscalated {
+            run_id,
+            step,
+            index,
+            signal,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn run_completed(run_id: LfdId) -> Self {
         Self::RunCompleted {
             run_id,
-            exit_code,
             timestamp: Self::now(),
         }
     }
 
-    pub fn run_failed(run_id: LfdId, exit_code: i32, error: String) -> Self {
-        Self::RunFailed {
+    pub fn run_errored(run_id: LfdId, error: String) -> Self {
+        Self::RunErrored {
             run_id,
-            exit_code,
             error,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn run_escalated(run_id: LfdId, signal: String) -> Self {
+        Self::RunEscalated {
+            run_id,
+            signal,
             timestamp: Self::now(),
         }
     }
@@ -617,6 +700,115 @@ impl Event {
     }
 }
 
+impl From<LfEvent> for Event {
+    fn from(event: LfEvent) -> Self {
+        match (event.node, event.event) {
+            (LfNode::Run, LfEventType::Started) => Self::RunStarted {
+                run_id: event.run_id,
+                wave_name: event
+                    .wave_name
+                    .expect("run.started journal events must include wave_name"),
+                worktree: event
+                    .worktree
+                    .expect("run.started journal events must include worktree"),
+                command: event
+                    .command
+                    .expect("run.started journal events must include command"),
+                timestamp: event.ts,
+            },
+            (LfNode::Flow, LfEventType::Started) => Self::FlowStarted {
+                run_id: event.run_id,
+                flow: event
+                    .flow
+                    .expect("flow.started journal events must include flow"),
+                timestamp: event.ts,
+            },
+            (LfNode::Flow, LfEventType::Completed) => Self::FlowCompleted {
+                run_id: event.run_id,
+                timestamp: event.ts,
+            },
+            (LfNode::Flow, LfEventType::Errored) => Self::FlowErrored {
+                run_id: event.run_id,
+                error: event
+                    .error
+                    .expect("flow.errored journal events must include error"),
+                timestamp: event.ts,
+            },
+            (LfNode::Flow, LfEventType::Escalated) => Self::FlowEscalated {
+                run_id: event.run_id,
+                signal: event
+                    .signal
+                    .expect("flow.escalated journal events must include signal"),
+                timestamp: event.ts,
+            },
+            (LfNode::Step, LfEventType::Started) => Self::StepStarted {
+                run_id: event.run_id,
+                step: event
+                    .step
+                    .expect("step.started journal events must include step"),
+                index: event
+                    .index
+                    .expect("step.started journal events must include index"),
+                timestamp: event.ts,
+            },
+            (LfNode::Step, LfEventType::Completed) => Self::StepCompleted {
+                run_id: event.run_id,
+                step: event
+                    .step
+                    .expect("step.completed journal events must include step"),
+                index: event
+                    .index
+                    .expect("step.completed journal events must include index"),
+                timestamp: event.ts,
+            },
+            (LfNode::Step, LfEventType::Errored) => Self::StepErrored {
+                run_id: event.run_id,
+                step: event
+                    .step
+                    .expect("step.errored journal events must include step"),
+                index: event
+                    .index
+                    .expect("step.errored journal events must include index"),
+                error: event
+                    .error
+                    .expect("step.errored journal events must include error"),
+                timestamp: event.ts,
+            },
+            (LfNode::Step, LfEventType::Escalated) => Self::StepEscalated {
+                run_id: event.run_id,
+                step: event
+                    .step
+                    .expect("step.escalated journal events must include step"),
+                index: event
+                    .index
+                    .expect("step.escalated journal events must include index"),
+                signal: event
+                    .signal
+                    .expect("step.escalated journal events must include signal"),
+                timestamp: event.ts,
+            },
+            (LfNode::Run, LfEventType::Completed) => Self::RunCompleted {
+                run_id: event.run_id,
+                timestamp: event.ts,
+            },
+            (LfNode::Run, LfEventType::Errored) => Self::RunErrored {
+                run_id: event.run_id,
+                error: event
+                    .error
+                    .expect("run.errored journal events must include error"),
+                timestamp: event.ts,
+            },
+            (LfNode::Run, LfEventType::Escalated) => Self::RunEscalated {
+                run_id: event.run_id,
+                signal: event
+                    .signal
+                    .expect("run.escalated journal events must include signal"),
+                timestamp: event.ts,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,14 +887,14 @@ mod tests {
                 "wave".to_string(),
                 "/tmp/wt".to_string(),
                 vec!["lf".to_string(), "build".to_string()],
-                Some("build".to_string()),
-                None,
             ),
+            Event::flow_started(id(), "build".to_string()),
             Event::step_started(id(), "implement".to_string(), 0),
-            Event::step_completed(id(), "implement".to_string(), 0, 0),
-            Event::run_waiting(id(), "review".to_string()),
-            Event::run_completed(id(), 0),
-            Event::run_failed(id(), 1, "boom".to_string()),
+            Event::step_completed(id(), "implement".to_string(), 0),
+            Event::step_errored(id(), "review".to_string(), 1, "boom".to_string()),
+            Event::flow_completed(id()),
+            Event::run_completed(id()),
+            Event::run_errored(id(), "boom".to_string()),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
@@ -789,19 +981,22 @@ mod tests {
             "lfd".to_string(),
             "/tmp/repo.lfd".to_string(),
             vec!["lf".to_string(), "build".to_string()],
-            Some("build".to_string()),
-            None,
         );
         let json = serde_json::to_value(&event).expect("serialize");
         assert_eq!(json["type"], "run.started");
         assert_eq!(json["run_id"], "run-1");
         assert_eq!(json["wave_name"], "lfd");
-        assert_eq!(json["flow"], "build");
+        assert!(json.get("flow").is_none());
 
-        let step = Event::step_completed(test_id("run-1"), "implement".to_string(), 1, 0);
+        let flow = Event::flow_started(test_id("run-1"), "build".to_string());
+        let flow_json = serde_json::to_value(&flow).expect("serialize flow");
+        assert_eq!(flow_json["type"], "flow.started");
+        assert_eq!(flow_json["flow"], "build");
+
+        let step = Event::step_completed(test_id("run-1"), "implement".to_string(), 1);
         let step_json = serde_json::to_value(&step).expect("serialize step");
         assert_eq!(step_json["type"], "step.completed");
-        assert_eq!(step_json["exit_code"], 0);
+        assert!(step_json.get("exit_code").is_none());
     }
 
     #[test]

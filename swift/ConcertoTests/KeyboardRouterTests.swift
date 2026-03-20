@@ -249,6 +249,19 @@ struct KeyboardRouterTests {
         #expect(actions.isEmpty)
     }
 
+    @Test("help overlay takes priority over terminal focus")
+    func helpOverlayWinsOverTerminalFocus() {
+        let router = KeyboardRouter()
+
+        let mode = router.resolveMode(
+            firstResponder: GhosttyMetalViewStub(),
+            isCommandPaletteVisible: false,
+            isHelpOverlayVisible: true
+        )
+
+        #expect(mode == .helpOverlay)
+    }
+
     @Test("Help overlay mode only handles dismiss keys")
     func helpOverlayDismissKeys() {
         let router = KeyboardRouter()

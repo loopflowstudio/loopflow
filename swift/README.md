@@ -61,6 +61,10 @@ xcodebuild -scheme Concerto -destination 'platform=macOS' build
 
 Concerto embeds Ghostty for terminal functionality.
 
+- Ordinary typing stays on Ghostty's key-event path, so terminal apps see keystrokes instead of paste-like text injection
+- IME commit and explicit paste still use the text-input path
+- Concerto keeps only intentional pane-management shortcuts (`⌘\\`, `⇧⌘↩`, `⌥⌘←/→`) above the terminal surface
+
 ### Building Ghostty
 
 Ghostty must be built before the terminal works:

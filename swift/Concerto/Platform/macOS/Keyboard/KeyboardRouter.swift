@@ -152,6 +152,10 @@ final class KeyboardRouter {
         isCommandPaletteVisible: Bool,
         isHelpOverlayVisible: Bool
     ) -> KeyboardMode {
+        if isHelpOverlayVisible {
+            return .helpOverlay
+        }
+
         if isTextResponder(firstResponder) {
             return .textEditing
         }
@@ -162,10 +166,6 @@ final class KeyboardRouter {
 
         if isCommandPaletteVisible {
             return .commandPalette
-        }
-
-        if isHelpOverlayVisible {
-            return .helpOverlay
         }
 
         return .global

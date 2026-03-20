@@ -1,1 +1,1 @@
-pm: switch roadmap sync to semantic priority buckets
+pm: switch roadmap sync to semantic buckets and fresh init

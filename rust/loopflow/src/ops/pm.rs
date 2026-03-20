@@ -460,10 +460,7 @@ fn clear_provider_ids(wave_dir: &Path, provider: PmProviderKind) -> OpsResult<()
         let mut doc = RoadmapItemDocument::parse(&content).map_err(pm_to_ops)?;
         let had_id = doc.frontmatter.id_for(provider).is_some();
         if had_id {
-            match provider {
-                PmProviderKind::Asana => doc.frontmatter.asana_id = None,
-                PmProviderKind::Linear => doc.frontmatter.linear_id = None,
-            }
+            doc.frontmatter.clear_id(provider);
             let rendered = doc.render().map_err(pm_to_ops)?;
             std::fs::write(&path, rendered)?;
         }
@@ -1171,16 +1168,16 @@ fn strip_roadmap_prefix(heading: &str) -> &str {
 
 /// Return the body with the first `# ` heading line removed.
 pub(crate) fn body_without_heading(body: &str) -> &str {
-    for (i, line) in body.lines().enumerate() {
+    let mut offset = 0;
+    for line in body.lines() {
         if line.starts_with("# ") {
-            // Skip heading line and any immediately following blank line
-            let after_heading = &body[body.find(line).unwrap() + line.len()..];
+            let after_heading = &body[offset + line.len()..];
             return after_heading.strip_prefix('\n').unwrap_or(after_heading);
         }
-        // Only look at the first non-empty line
-        if i > 0 && !line.trim().is_empty() {
+        if !line.trim().is_empty() {
             break;
         }
+        offset += line.len() + 1;
     }
     body
 }
@@ -1310,6 +1307,14 @@ mod tests {
         assert_eq!(
             body_without_heading("No heading\nJust text"),
             "No heading\nJust text"
+        );
+    }
+
+    #[test]
+    fn body_without_heading_handles_leading_blank_lines() {
+        assert_eq!(
+            body_without_heading("\n# Title\n\nBody text."),
+            "\nBody text."
         );
     }
 

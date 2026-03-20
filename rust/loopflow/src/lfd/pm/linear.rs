@@ -336,7 +336,7 @@ impl PmProvider for LinearClient {
                     "projectId": project_id,
                     "title": item.name,
                     "description": item.description,
-                    "priority": linear_priority_value(item.priority),
+                    "priority": item.priority.linear_value(),
                 }),
             )
             .await?;
@@ -356,7 +356,7 @@ impl PmProvider for LinearClient {
                     "id": item_id,
                     "title": update.name.as_deref(),
                     "description": update.description.as_deref(),
-                    "priority": update.priority.map(linear_priority_value),
+                    "priority": update.priority.map(PriorityBucket::linear_value),
                 }),
             )
             .await?;
@@ -482,7 +482,7 @@ impl IssueNode {
             id: self.id,
             name: self.title,
             description: self.description.unwrap_or_default(),
-            priority: linear_priority_bucket(self.priority),
+            priority: PriorityBucket::from_linear_value(self.priority),
             completed,
         }
     }
@@ -622,33 +622,8 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
 }
 
-fn linear_priority_bucket(priority: i64) -> PriorityBucket {
-    match priority {
-        1 => PriorityBucket::Urgent,
-        2 => PriorityBucket::High,
-        3 => PriorityBucket::Medium,
-        4 => PriorityBucket::Low,
-        _ => PriorityBucket::Low,
-    }
-}
-
-fn linear_priority_value(priority: PriorityBucket) -> i64 {
-    match priority {
-        PriorityBucket::Urgent => 1,
-        PriorityBucket::High => 2,
-        PriorityBucket::Medium => 3,
-        PriorityBucket::Low => 4,
-    }
-}
-
 fn linear_priority_sort_key(priority: i64) -> i64 {
-    match priority {
-        1 => 0,
-        2 => 1,
-        3 => 2,
-        4 => 3,
-        _ => 4,
-    }
+    i64::from(PriorityBucket::from_linear_value(priority).order())
 }
 
 /// Derive a Linear team key from a name: uppercase letters, max 5 chars.

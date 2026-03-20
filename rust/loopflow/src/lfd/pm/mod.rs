@@ -36,6 +36,15 @@ impl PriorityBucket {
         }
     }
 
+    pub fn semantic_label(self) -> &'static str {
+        match self {
+            Self::Urgent => "Urgent",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
     pub fn from_filename_prefix(value: &str) -> Option<Self> {
         match value.trim() {
             "1" => Some(Self::Urgent),
@@ -53,6 +62,24 @@ impl PriorityBucket {
             "medium" | "med" => Some(Self::Medium),
             "low" => Some(Self::Low),
             _ => None,
+        }
+    }
+
+    pub fn from_linear_value(value: i64) -> Self {
+        match value {
+            1 => Self::Urgent,
+            2 => Self::High,
+            3 => Self::Medium,
+            _ => Self::Low,
+        }
+    }
+
+    pub fn linear_value(self) -> i64 {
+        match self {
+            Self::Urgent => 1,
+            Self::High => 2,
+            Self::Medium => 3,
+            Self::Low => 4,
         }
     }
 }
@@ -175,6 +202,13 @@ impl RoadmapItemFrontmatter {
         match provider {
             PmProviderKind::Asana => self.asana_id = Some(id),
             PmProviderKind::Linear => self.linear_id = Some(id),
+        }
+    }
+
+    pub fn clear_id(&mut self, provider: PmProviderKind) {
+        match provider {
+            PmProviderKind::Asana => self.asana_id = None,
+            PmProviderKind::Linear => self.linear_id = None,
         }
     }
 }
@@ -441,5 +475,33 @@ mod tests {
             Some(PriorityBucket::Low)
         );
         assert_eq!(PriorityBucket::from_semantic_label("later"), None);
+    }
+
+    #[test]
+    fn priority_bucket_round_trips_linear_values() {
+        assert_eq!(PriorityBucket::Urgent.linear_value(), 1);
+        assert_eq!(PriorityBucket::High.linear_value(), 2);
+        assert_eq!(PriorityBucket::Medium.linear_value(), 3);
+        assert_eq!(PriorityBucket::Low.linear_value(), 4);
+        assert_eq!(PriorityBucket::from_linear_value(1), PriorityBucket::Urgent);
+        assert_eq!(PriorityBucket::from_linear_value(2), PriorityBucket::High);
+        assert_eq!(PriorityBucket::from_linear_value(3), PriorityBucket::Medium);
+        assert_eq!(PriorityBucket::from_linear_value(4), PriorityBucket::Low);
+        assert_eq!(PriorityBucket::from_linear_value(99), PriorityBucket::Low);
+    }
+
+    #[test]
+    fn roadmap_item_frontmatter_clear_id_removes_selected_provider_only() {
+        let mut frontmatter = RoadmapItemFrontmatter {
+            asana_id: Some("asa-1".to_string()),
+            linear_id: Some("lin-1".to_string()),
+        };
+
+        frontmatter.clear_id(PmProviderKind::Asana);
+        assert_eq!(frontmatter.asana_id, None);
+        assert_eq!(frontmatter.linear_id.as_deref(), Some("lin-1"));
+
+        frontmatter.clear_id(PmProviderKind::Linear);
+        assert_eq!(frontmatter.linear_id, None);
     }
 }

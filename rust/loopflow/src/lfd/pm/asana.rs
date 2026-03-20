@@ -221,10 +221,10 @@ impl AsanaClient {
                     "name": PRIORITY_FIELD_NAME,
                     "resource_subtype": "enum",
                     "enum_options": [
-                        { "name": "Urgent" },
-                        { "name": "High" },
-                        { "name": "Medium" },
-                        { "name": "Low" }
+                        { "name": PriorityBucket::Urgent.semantic_label() },
+                        { "name": PriorityBucket::High.semantic_label() },
+                        { "name": PriorityBucket::Medium.semantic_label() },
+                        { "name": PriorityBucket::Low.semantic_label() }
                     ]
                 }
             }

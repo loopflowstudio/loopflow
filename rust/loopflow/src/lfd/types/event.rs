@@ -177,6 +177,60 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
+    // Runtime journal
+    #[serde(rename = "run.started")]
+    RunStarted {
+        run_id: LfdId,
+        wave_name: String,
+        worktree: String,
+        command: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flow: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        step: Option<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "step.started")]
+    StepStarted {
+        run_id: LfdId,
+        step: String,
+        index: u32,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "step.completed")]
+    StepCompleted {
+        run_id: LfdId,
+        step: String,
+        index: u32,
+        exit_code: i32,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "run.waiting")]
+    RunWaiting {
+        run_id: LfdId,
+        step: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "run.completed")]
+    RunCompleted {
+        run_id: LfdId,
+        exit_code: i32,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "run.failed")]
+    RunFailed {
+        run_id: LfdId,
+        exit_code: i32,
+        error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+
     // Agent
     AgentStarted {
         agent_id: LfdId,
@@ -397,6 +451,69 @@ impl Event {
         }
     }
 
+    pub fn run_started(
+        run_id: LfdId,
+        wave_name: String,
+        worktree: String,
+        command: Vec<String>,
+        flow: Option<String>,
+        step: Option<String>,
+    ) -> Self {
+        Self::RunStarted {
+            run_id,
+            wave_name,
+            worktree,
+            command,
+            flow,
+            step,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn step_started(run_id: LfdId, step: String, index: u32) -> Self {
+        Self::StepStarted {
+            run_id,
+            step,
+            index,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn step_completed(run_id: LfdId, step: String, index: u32, exit_code: i32) -> Self {
+        Self::StepCompleted {
+            run_id,
+            step,
+            index,
+            exit_code,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn run_waiting(run_id: LfdId, step: String) -> Self {
+        Self::RunWaiting {
+            run_id,
+            step,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn run_completed(run_id: LfdId, exit_code: i32) -> Self {
+        Self::RunCompleted {
+            run_id,
+            exit_code,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn run_failed(run_id: LfdId, exit_code: i32, error: String) -> Self {
+        Self::RunFailed {
+            run_id,
+            exit_code,
+            error,
+            timestamp: Self::now(),
+        }
+    }
+
     pub fn wave_waiting(
         wave_id: LfdId,
         wave_run_id: LfdId,
@@ -573,6 +690,19 @@ mod tests {
         let id = || LfdId::new();
         let events = vec![
             Event::wave_waiting(id(), id(), "step".to_string(), None, None, None),
+            Event::run_started(
+                id(),
+                "wave".to_string(),
+                "/tmp/wt".to_string(),
+                vec!["lf".to_string(), "build".to_string()],
+                Some("build".to_string()),
+                None,
+            ),
+            Event::step_started(id(), "implement".to_string(), 0),
+            Event::step_completed(id(), "implement".to_string(), 0, 0),
+            Event::run_waiting(id(), "review".to_string()),
+            Event::run_completed(id(), 0),
+            Event::run_failed(id(), 1, "boom".to_string()),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
@@ -650,6 +780,28 @@ mod tests {
         );
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("wave_id").is_none());
+    }
+
+    #[test]
+    fn runtime_events_use_dotted_type_names() {
+        let event = Event::run_started(
+            test_id("run-1"),
+            "lfd".to_string(),
+            "/tmp/repo.lfd".to_string(),
+            vec!["lf".to_string(), "build".to_string()],
+            Some("build".to_string()),
+            None,
+        );
+        let json = serde_json::to_value(&event).expect("serialize");
+        assert_eq!(json["type"], "run.started");
+        assert_eq!(json["run_id"], "run-1");
+        assert_eq!(json["wave_name"], "lfd");
+        assert_eq!(json["flow"], "build");
+
+        let step = Event::step_completed(test_id("run-1"), "implement".to_string(), 1, 0);
+        let step_json = serde_json::to_value(&step).expect("serialize step");
+        assert_eq!(step_json["type"], "step.completed");
+        assert_eq!(step_json["exit_code"], 0);
     }
 
     #[test]

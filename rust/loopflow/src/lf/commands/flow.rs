@@ -18,6 +18,7 @@ use crate::lfd::executor::{
     cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
 };
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};
+use crate::runtime::RuntimeRun;
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -26,10 +27,16 @@ use std::process::{Command, Stdio};
 const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
-pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+pub fn run(
+    flow: &Flow,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    runtime: Option<&RuntimeRun>,
+) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
-    run_steps(&items, message, cli, repo)
+    run_steps(&items, message, cli, repo, runtime)
 }
 
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -> Result<()> {
@@ -188,13 +195,19 @@ fn tree_prefix(index: usize, total: usize) -> &'static str {
     }
 }
 
-fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+fn run_steps(
+    items: &[ConcreteItem],
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    runtime: Option<&RuntimeRun>,
+) -> Result<()> {
     let total = items.len();
 
     for index in 0..total {
         let action = next_action(items, index);
         match action {
-            FlowAction::RunStep { step } | FlowAction::WaitInteractive { step } => {
+            FlowAction::RunStep { step } => {
                 let step_name = step.step.name.clone();
                 let colors = Colors::new();
                 eprintln!(
@@ -206,8 +219,32 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                     total = total,
                     name = step_name,
                 );
-                crate::lf::commands::run::run(Some(&step_name), message, cli)?;
-                commit_step_work(repo, &step_name)?;
+                run_step_with_runtime(runtime, &step_name, index, || {
+                    crate::lf::commands::run::run(Some(&step_name), message, cli)?;
+                    commit_step_work(repo, &step_name)?;
+                    Ok(())
+                })?;
+            }
+            FlowAction::WaitInteractive { step } => {
+                let step_name = step.step.name.clone();
+                let colors = Colors::new();
+                eprintln!(
+                    "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
+                    dim = colors.dim,
+                    reset = colors.reset,
+                    bold = colors.bold,
+                    current = index + 1,
+                    total = total,
+                    name = step_name,
+                );
+                if let Some(runtime) = runtime {
+                    runtime.emit_waiting(&step_name);
+                }
+                run_step_with_runtime(runtime, &step_name, index, || {
+                    crate::lf::commands::run::run(Some(&step_name), message, cli)?;
+                    commit_step_work(repo, &step_name)?;
+                    Ok(())
+                })?;
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
@@ -227,14 +264,14 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 commit_step_work(repo, "and")?;
             }
             FlowAction::Xor { branch } => {
-                run_xor(&branch, message, cli, repo)?;
+                run_xor(&branch, message, cli, repo, runtime, index)?;
                 commit_step_work(repo, "xor")?;
             }
             FlowAction::Or { .. } => {
                 anyhow::bail!("or (multi-select) execution is not yet implemented");
             }
             FlowAction::Loop { body } => {
-                run_loop(&body, message, cli, repo)?;
+                run_loop(&body, message, cli, repo, runtime)?;
                 commit_step_work(repo, "loop")?;
             }
             FlowAction::Complete => break,
@@ -242,6 +279,23 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
     }
 
     Ok(())
+}
+
+fn run_step_with_runtime(
+    runtime: Option<&RuntimeRun>,
+    step_name: &str,
+    index: usize,
+    run: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    if let Some(runtime) = runtime {
+        runtime.emit_step_started(step_name, index as u32);
+    }
+
+    let result = run();
+    if let Some(runtime) = runtime {
+        runtime.emit_step_completed(step_name, index as u32, if result.is_ok() { 0 } else { 1 });
+    }
+    result
 }
 
 /// Commit any uncommitted changes left by the previous step.
@@ -257,7 +311,14 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
 
 /// Run or-routing: execute a routing step, read the verdict, then run the
 /// selected sub-flow inline.
-fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<String> {
+fn run_xor(
+    xor_def: &ConcreteXor,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    runtime: Option<&RuntimeRun>,
+    index: usize,
+) -> Result<String> {
     let colors = Colors::new();
     let verdict_path = repo.join("scratch/route-xor.md");
 
@@ -294,11 +355,14 @@ fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path)
     };
 
     let temp_step = write_xor_route_step(repo, &prompt)?;
-    let result = crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli);
+    let result = run_step_with_runtime(runtime, router_name, index, || {
+        crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli)?;
+        commit_step_work(repo, router_name)?;
+        Ok(())
+    });
     drop(temp_step);
 
     result?;
-    commit_step_work(repo, router_name)?;
 
     let selected = read_xor_verdict(&verdict_path, xor_def).map_err(anyhow::Error::msg)?;
 
@@ -316,14 +380,27 @@ fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path)
         .expect("selected path validated by read_xor_verdict");
 
     let sub_items = load_xor_path_items(xor_path, repo)?;
-    run_steps(&sub_items, message, cli, repo)?;
+    run_steps(&sub_items, message, cli, repo, runtime)?;
     Ok(selected)
 }
 
-fn run_loop(loop_def: &ConcreteLoop, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+fn run_loop(
+    loop_def: &ConcreteLoop,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    runtime: Option<&RuntimeRun>,
+) -> Result<()> {
     loop {
-        run_steps(&loop_def.steps, message, cli, repo)?;
-        let selected = run_xor(&loop_def.exit, message, cli, repo)?;
+        run_steps(&loop_def.steps, message, cli, repo, runtime)?;
+        let selected = run_xor(
+            &loop_def.exit,
+            message,
+            cli,
+            repo,
+            runtime,
+            loop_def.steps.len(),
+        )?;
         if selected == "done" {
             return Ok(());
         }

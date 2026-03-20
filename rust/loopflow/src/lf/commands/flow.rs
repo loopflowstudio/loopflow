@@ -9,8 +9,8 @@ use crate::engine::fork::{
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
-    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteOr, ConcreteXor,
-    Flow, FlowAction,
+    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor, Flow,
+    FlowAction,
 };
 use crate::lf::output::Colors;
 use crate::lf::Cli;
@@ -84,60 +84,47 @@ fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>>
             }
             Ok(lines)
         }
-        ConcreteItem::Xor(xor_def) => render_xor_pipeline(xor_def, repo),
-        ConcreteItem::Or(or_def) => render_or_pipeline(or_def, repo),
+        ConcreteItem::Xor(xor_def) => render_branch_pipeline(
+            "xor",
+            xor_def
+                .router
+                .as_deref()
+                .unwrap_or(TEMP_XOR_ROUTE_STEP_NAME),
+            &xor_def.paths,
+            repo,
+        ),
+        ConcreteItem::Or(or_def) => render_branch_pipeline(
+            "or",
+            or_def.router.as_deref().unwrap_or("or-route"),
+            &or_def.paths,
+            repo,
+        ),
         ConcreteItem::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
     }
 }
 
-fn render_xor_pipeline(xor_def: &ConcreteXor, repo: &Path) -> Result<Vec<String>> {
-    let mut lines = Vec::new();
-    let router = xor_def
-        .router
-        .as_deref()
-        .unwrap_or(TEMP_XOR_ROUTE_STEP_NAME);
-    lines.push(format!("[xor via {router}]"));
-
-    let mut keys: Vec<&String> = xor_def.paths.keys().collect();
+fn render_branch_pipeline(
+    kind: &str,
+    router: &str,
+    paths: &std::collections::HashMap<String, crate::engine::XorPath>,
+    repo: &Path,
+) -> Result<Vec<String>> {
+    let mut lines = vec![format!("[{kind} via {router}]")];
+    let mut keys: Vec<&String> = paths.keys().collect();
     keys.sort();
 
     for (index, key) in keys.into_iter().enumerate() {
-        let path = xor_def
-            .paths
+        let path = paths
             .get(key)
-            .expect("or path key collected from map should exist");
+            .expect("branch path key collected from map should exist");
         let nested_items = load_xor_path_items(path, repo)?;
         let nested = render_pipeline_lines(&nested_items, repo)?;
-        let branch_prefix = tree_prefix(index, xor_def.paths.len());
+        let branch_prefix = tree_prefix(index, paths.len());
         if nested.is_empty() {
             lines.push(format!("{branch_prefix} {key}"));
             continue;
         }
 
-        let nested_chain = nested.join(" → ");
-        lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
-    }
-
-    Ok(lines)
-}
-
-fn render_or_pipeline(or_def: &ConcreteOr, repo: &Path) -> Result<Vec<String>> {
-    let mut lines = Vec::new();
-    let router = or_def.router.as_deref().unwrap_or("or-route");
-    lines.push(format!("[or via {router}]"));
-
-    let mut keys: Vec<&String> = or_def.paths.keys().collect();
-    keys.sort();
-
-    for (index, key) in keys.into_iter().enumerate() {
-        let path = or_def.paths.get(key).expect("or path key from map");
-        let nested_items = load_xor_path_items(path, repo)?;
-        let nested = render_pipeline_lines(&nested_items, repo)?;
-        let branch_prefix = tree_prefix(index, or_def.paths.len());
-        if nested.is_empty() {
-            lines.push(format!("{branch_prefix} {key}"));
-            continue;
-        }
         let nested_chain = nested.join(" → ");
         lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
     }
@@ -240,7 +227,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 commit_step_work(repo, "and")?;
             }
             FlowAction::Xor { branch } => {
-                run_or(&branch, message, cli, repo)?;
+                run_xor(&branch, message, cli, repo)?;
                 commit_step_work(repo, "xor")?;
             }
             FlowAction::Or { .. } => {
@@ -270,7 +257,7 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
 
 /// Run or-routing: execute a routing step, read the verdict, then run the
 /// selected sub-flow inline.
-fn run_or(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<String> {
+fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<String> {
     let colors = Colors::new();
     let verdict_path = repo.join("scratch/route-xor.md");
 
@@ -306,7 +293,7 @@ fn run_or(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) 
         )
     };
 
-    let temp_step = write_or_route_step(repo, &prompt)?;
+    let temp_step = write_xor_route_step(repo, &prompt)?;
     let result = crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli);
     drop(temp_step);
 
@@ -336,31 +323,31 @@ fn run_or(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) 
 fn run_loop(loop_def: &ConcreteLoop, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     loop {
         run_steps(&loop_def.steps, message, cli, repo)?;
-        let selected = run_or(&loop_def.exit, message, cli, repo)?;
+        let selected = run_xor(&loop_def.exit, message, cli, repo)?;
         if selected == "done" {
             return Ok(());
         }
     }
 }
 
-fn write_or_route_step(repo: &Path, prompt: &str) -> Result<OrRouteStepGuard> {
+fn write_xor_route_step(repo: &Path, prompt: &str) -> Result<XorRouteStepGuard> {
     let tmp_step_dir = repo.join(".lf/steps");
     std::fs::create_dir_all(&tmp_step_dir)?;
     let path = tmp_step_dir.join(format!("{TEMP_XOR_ROUTE_STEP_NAME}.md"));
     let original_content = std::fs::read_to_string(&path).ok();
     std::fs::write(&path, prompt)?;
-    Ok(OrRouteStepGuard {
+    Ok(XorRouteStepGuard {
         path,
         original_content,
     })
 }
 
-struct OrRouteStepGuard {
+struct XorRouteStepGuard {
     path: PathBuf,
     original_content: Option<String>,
 }
 
-impl Drop for OrRouteStepGuard {
+impl Drop for XorRouteStepGuard {
     fn drop(&mut self) {
         let result = match &self.original_content {
             Some(content) => std::fs::write(&self.path, content),
@@ -373,7 +360,7 @@ impl Drop for OrRouteStepGuard {
 
         if let Err(err) = result {
             eprintln!(
-                "failed to restore temporary or-route step {}: {}",
+                "failed to restore temporary xor-route step {}: {}",
                 self.path.display(),
                 err
             );
@@ -621,7 +608,7 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{render_pipeline_lines, write_or_route_step};
+    use super::{render_pipeline_lines, write_xor_route_step};
     use crate::engine::{ConcreteItem, Flow};
     use std::fs;
     use tempfile::tempdir;
@@ -633,7 +620,7 @@ mod tests {
         let step_path = temp.path().join(".lf/steps/xor-route.md");
 
         {
-            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            let _guard = write_xor_route_step(temp.path(), "temporary route prompt").unwrap();
             assert_eq!(
                 fs::read_to_string(&step_path).unwrap(),
                 "temporary route prompt"
@@ -655,7 +642,7 @@ mod tests {
         fs::write(&step_path, "existing route prompt").unwrap();
 
         {
-            let _guard = write_or_route_step(temp.path(), "temporary route prompt").unwrap();
+            let _guard = write_xor_route_step(temp.path(), "temporary route prompt").unwrap();
             assert_eq!(
                 fs::read_to_string(&step_path).unwrap(),
                 "temporary route prompt"

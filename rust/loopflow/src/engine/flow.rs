@@ -103,19 +103,12 @@ pub struct XorPath {
 }
 
 /// Multi-select branch: router picks 1+ paths, which run sequentially.
-/// Structurally identical to XorDef — the difference is execution semantics.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OrDef {
-    pub router: Option<String>,
-    pub paths: HashMap<String, XorPath>,
-}
+/// Structurally identical to `XorDef`; only execution semantics differ.
+pub type OrDef = XorDef;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteOr {
-    pub router: Option<String>,
-    pub paths: HashMap<String, XorPath>,
-    pub flow_parents: Vec<String>,
-}
+/// Multi-select branch with resolved flow context.
+/// Structurally identical to `ConcreteXor`; only execution semantics differ.
+pub type ConcreteOr = ConcreteXor;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
@@ -757,7 +750,7 @@ fn parse_xor_value(value: &Value) -> Result<FlowItem, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("xor must be mapping".to_string()))?;
-    parse_xor_map(map, "xor")
+    Ok(FlowItem::Xor(parse_xor_def(map, "xor")?))
 }
 
 fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -769,11 +762,6 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
         router: or_def.router,
         paths: or_def.paths,
     }))
-}
-
-fn parse_xor_map(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<FlowItem, LoadError> {
-    let xor_def = parse_xor_def(map, kind)?;
-    Ok(FlowItem::Xor(xor_def))
 }
 
 fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, LoadError> {
@@ -1104,13 +1092,7 @@ fn expand_with_chain(
                 }));
             }
             FlowItem::Or(or_def) => {
-                validate_xor_paths(
-                    &XorDef {
-                        router: or_def.router.clone(),
-                        paths: or_def.paths.clone(),
-                    },
-                    repo,
-                )?;
+                validate_xor_paths(or_def, repo)?;
                 items.push(ConcreteItem::Or(ConcreteOr {
                     router: or_def.router.clone(),
                     paths: or_def.paths.clone(),

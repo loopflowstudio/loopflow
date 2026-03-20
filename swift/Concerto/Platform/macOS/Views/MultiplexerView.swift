@@ -373,6 +373,9 @@ private struct RoadmapPaneView: View {
                 .background(palette.surface)
             }
         }
+        .task(id: waveId) {
+            repoState.loadWaveContent(for: waveId)
+        }
     }
 
     private func roadmapCard(_ item: RoadmapItem) -> some View {
@@ -503,6 +506,9 @@ private struct ReadmePaneView: View {
                 .background(palette.surface)
             }
         }
+        .task(id: waveId) {
+            repoState.loadWaveContent(for: waveId)
+        }
     }
 }
 
@@ -546,6 +552,9 @@ private struct RunsPaneView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(palette.surface)
+        .task(id: waveId) {
+            repoState.loadRuns(for: waveId)
+        }
     }
 }
 

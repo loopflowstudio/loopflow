@@ -70,6 +70,7 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     case split(SplitAxis, first: LayoutNode, second: LayoutNode, ratio: Double)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     public var id: String {
         switch self {
@@ -79,6 +80,8 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     public static func defaultLayout() -> LayoutNode {
         .leaf(PaneState(type: .terminal))
     }

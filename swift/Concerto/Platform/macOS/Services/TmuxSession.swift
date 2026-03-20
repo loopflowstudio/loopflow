@@ -146,6 +146,7 @@ final class TmuxSession {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
         do {
             _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])
@@ -174,6 +175,8 @@ final class TmuxSession {
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
         do {
             _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])
@@ -232,9 +235,12 @@ final class TmuxSession {
 enum TmuxError: LocalizedError {
     case commandFailed(String, status: Int32, detail: String)
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     case unexpectedOutput(String)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
 
     var errorDescription: String? {
         switch self {
@@ -244,10 +250,13 @@ enum TmuxError: LocalizedError {
             }
             return "tmux command failed (\(status)): \(cmd)\n\(detail)"
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         case .unexpectedOutput(let output):
             return "Unexpected tmux output: \(output)"
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
         }
     }
 }

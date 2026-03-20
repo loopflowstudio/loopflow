@@ -1,4 +1,0 @@
-module WhisperKit {
-header "WhisperKit-Swift.h"
-export *
-}

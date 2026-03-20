@@ -113,11 +113,14 @@ enum ShortcutAction: Hashable {
     case focusNextPane
     case focusPreviousPane
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     case snapHalf
     case snapThird
     case snapQuarter
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
 
     // Tabs
     case switchToCurrentTab
@@ -389,12 +392,4 @@ extension Notification.Name {
     static let viewWavePR = Notification.Name("viewWavePR")
     static let switchToCurrentTab = Notification.Name("switchToCurrentTab")
     static let switchToRunsTab = Notification.Name("switchToRunsTab")
-
-    // Multiplexer
-    static let splitVertical = Notification.Name("splitVertical")
-    static let splitHorizontal = Notification.Name("splitHorizontal")
-    static let closePane = Notification.Name("closePane")
-    static let newShellPane = Notification.Name("newShellPane")
-    static let focusNextPane = Notification.Name("focusNextPane")
-    static let focusPreviousPane = Notification.Name("focusPreviousPane")
 }

@@ -19,9 +19,12 @@ struct ContentView: View {
     private struct MultiplexerContext {
         let waveId: String
 <<<<<<< HEAD
+<<<<<<< HEAD
         let focusedPane: PaneState
 =======
         let worktreePath: String
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
         let focusedPane: PaneState
 <<<<<<< HEAD
         let routesToTerminal: Bool
@@ -277,10 +280,13 @@ struct ContentView: View {
         case .focusPreviousPane:
             handleFocusPane(.previous)
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         case .snapHalf, .snapThird, .snapQuarter:
             break // Phase 3
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -457,8 +463,12 @@ struct ContentView: View {
 
     private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
+<<<<<<< HEAD
               let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+              (wave.worktreePath ?? wave.api.localWorktree) != nil,
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }

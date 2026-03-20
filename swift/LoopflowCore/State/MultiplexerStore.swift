@@ -42,6 +42,7 @@ public final class MultiplexerStore {
 
     public func focusedPaneId(for waveId: String) -> String? {
 <<<<<<< HEAD
+<<<<<<< HEAD
         let layout = layout(for: waveId)
         let id = focusedPaneByWave[waveId]
         if let id, layout.pane(for: id) != nil {
@@ -55,17 +56,25 @@ public final class MultiplexerStore {
         guard let id = focusedPaneId(for: waveId) else { return nil }
         return layout.pane(for: id)
 =======
+=======
+        let layout = layout(for: waveId)
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
         let id = focusedPaneByWave[waveId]
-        if let id, layout(for: waveId).pane(for: id) != nil {
+        if let id, layout.pane(for: id) != nil {
             return id
         }
-        return layout(for: waveId).firstPane?.id
+        return layout.firstPane?.id
     }
 
     public func focusedPane(for waveId: String) -> PaneState? {
+        let layout = layout(for: waveId)
         guard let id = focusedPaneId(for: waveId) else { return nil }
+<<<<<<< HEAD
         return layout(for: waveId).pane(for: id)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        return layout.pane(for: id)
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     }
 
     // MARK: - Mutations
@@ -208,6 +217,7 @@ public final class MultiplexerStore {
         persist()
     }
 
+<<<<<<< HEAD
     public func terminalSessionNames(for waveId: String) -> [String] {
         ensureLoaded(waveId)
         guard let layout = layoutsByWave[waveId] else { return [] }
@@ -227,6 +237,8 @@ public final class MultiplexerStore {
 >>>>>>> 55cd605c (lf commit: implement)
     }
 
+=======
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     public func terminalSessionNames(for waveId: String) -> [String] {
         ensureLoaded(waveId)
         guard let layout = layoutsByWave[waveId] else { return [] }

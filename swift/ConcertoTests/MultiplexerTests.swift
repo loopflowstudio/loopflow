@@ -215,6 +215,7 @@ struct MultiplexerStoreTests {
         #expect(store.layout(for: "wave-1").allPanes.count == 2)
         #expect(store.focusedPaneId(for: "wave-1") == newPane.id)
 <<<<<<< HEAD
+<<<<<<< HEAD
         #expect(store.layout(for: "wave-1").allPanes.first(where: { $0.type == .terminal })?.id == original.id)
     }
 
@@ -234,6 +235,9 @@ struct MultiplexerStoreTests {
 =======
         #expect(store.terminalPane(for: "wave-1")?.id == original.id)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        #expect(store.layout(for: "wave-1").allPanes.first(where: { $0.type == .terminal })?.id == original.id)
+>>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     }
 
     @Test("terminal split creates a second terminal with its own tmux session")

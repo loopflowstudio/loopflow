@@ -7,6 +7,83 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum PriorityBucket {
+    Urgent,
+    High,
+    Medium,
+    Low,
+}
+
+impl PriorityBucket {
+    pub fn filename_prefix(self) -> &'static str {
+        match self {
+            Self::Urgent => "1",
+            Self::High => "2",
+            Self::Medium => "3",
+            Self::Low => "4",
+        }
+    }
+
+    pub fn order(self) -> u8 {
+        match self {
+            Self::Urgent => 0,
+            Self::High => 1,
+            Self::Medium => 2,
+            Self::Low => 3,
+        }
+    }
+
+    pub fn semantic_label(self) -> &'static str {
+        match self {
+            Self::Urgent => "Urgent",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
+    pub fn from_filename_prefix(value: &str) -> Option<Self> {
+        match value.trim() {
+            "1" => Some(Self::Urgent),
+            "2" => Some(Self::High),
+            "3" => Some(Self::Medium),
+            "4" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub fn from_semantic_label(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "urgent" => Some(Self::Urgent),
+            "high" => Some(Self::High),
+            "medium" | "med" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub fn from_linear_value(value: i64) -> Self {
+        match value {
+            1 => Self::Urgent,
+            2 => Self::High,
+            3 => Self::Medium,
+            _ => Self::Low,
+        }
+    }
+
+    pub fn linear_value(self) -> i64 {
+        match self {
+            Self::Urgent => 1,
+            Self::High => 2,
+            Self::Medium => 3,
+            Self::Low => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -44,7 +121,7 @@ pub struct PmItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub rank: u32,
+    pub priority: PriorityBucket,
     pub completed: bool,
 }
 
@@ -52,7 +129,7 @@ pub struct PmItem {
 pub struct PmItemCreate {
     pub name: String,
     pub description: String,
-    pub rank: u32,
+    pub priority: PriorityBucket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -62,25 +139,12 @@ pub struct PmItemUpdate {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub rank: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PmTextUpdate<'a> {
-    name: Option<&'a str>,
-    description: Option<&'a str>,
+    pub priority: Option<PriorityBucket>,
 }
 
 impl PmItemUpdate {
-    fn text_update(&self) -> Option<PmTextUpdate<'_>> {
-        if self.name.is_none() && self.description.is_none() {
-            return None;
-        }
-
-        Some(PmTextUpdate {
-            name: self.name.as_deref(),
-            description: self.description.as_deref(),
-        })
+    pub(crate) fn is_noop(&self) -> bool {
+        self.name.is_none() && self.description.is_none() && self.priority.is_none()
     }
 }
 
@@ -94,7 +158,18 @@ pub type PmResult<T> = Result<T, PmError>;
 
 #[async_trait]
 pub trait PmProvider: Send + Sync {
+    /// Create a new team/workspace. Returns the team ID.
+    async fn create_team(&self, name: &str) -> PmResult<String>;
+    /// Check whether a team named `name` already exists. Returns its ID if so.
+    async fn find_team(&self, name: &str) -> PmResult<Option<String>>;
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
+    /// Create a project inside a specific team. Used by init to target a freshly created team.
+    async fn create_project_in_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String>;
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
@@ -127,6 +202,13 @@ impl RoadmapItemFrontmatter {
         match provider {
             PmProviderKind::Asana => self.asana_id = Some(id),
             PmProviderKind::Linear => self.linear_id = Some(id),
+        }
+    }
+
+    pub fn clear_id(&mut self, provider: PmProviderKind) {
+        match provider {
+            PmProviderKind::Asana => self.asana_id = None,
+            PmProviderKind::Linear => self.linear_id = None,
         }
     }
 }
@@ -351,29 +433,75 @@ mod tests {
     }
 
     #[test]
-    fn pm_item_update_text_update_skips_rank_only_changes() {
+    fn pm_item_update_is_noop_skips_priority_only_changes() {
         let update = PmItemUpdate {
-            rank: Some(1),
+            priority: Some(PriorityBucket::High),
             ..PmItemUpdate::default()
         };
 
-        assert_eq!(update.text_update(), None);
+        assert!(!update.is_noop());
     }
 
     #[test]
-    fn pm_item_update_text_update_preserves_name_and_description() {
-        let update = PmItemUpdate {
-            name: Some("Ship Linear".to_string()),
-            description: Some("Build the GraphQL client".to_string()),
-            rank: Some(1),
+    fn pm_item_update_is_noop_only_without_text_or_priority_changes() {
+        assert!(PmItemUpdate::default().is_noop());
+        assert!(!PmItemUpdate {
+            priority: Some(PriorityBucket::Medium),
+            ..PmItemUpdate::default()
+        }
+        .is_noop());
+    }
+
+    #[test]
+    fn priority_bucket_parses_semantic_labels() {
+        assert_eq!(
+            PriorityBucket::from_semantic_label("urgent"),
+            Some(PriorityBucket::Urgent)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("High"),
+            Some(PriorityBucket::High)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("medium"),
+            Some(PriorityBucket::Medium)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("med"),
+            Some(PriorityBucket::Medium)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("LOW"),
+            Some(PriorityBucket::Low)
+        );
+        assert_eq!(PriorityBucket::from_semantic_label("later"), None);
+    }
+
+    #[test]
+    fn priority_bucket_round_trips_linear_values() {
+        assert_eq!(PriorityBucket::Urgent.linear_value(), 1);
+        assert_eq!(PriorityBucket::High.linear_value(), 2);
+        assert_eq!(PriorityBucket::Medium.linear_value(), 3);
+        assert_eq!(PriorityBucket::Low.linear_value(), 4);
+        assert_eq!(PriorityBucket::from_linear_value(1), PriorityBucket::Urgent);
+        assert_eq!(PriorityBucket::from_linear_value(2), PriorityBucket::High);
+        assert_eq!(PriorityBucket::from_linear_value(3), PriorityBucket::Medium);
+        assert_eq!(PriorityBucket::from_linear_value(4), PriorityBucket::Low);
+        assert_eq!(PriorityBucket::from_linear_value(99), PriorityBucket::Low);
+    }
+
+    #[test]
+    fn roadmap_item_frontmatter_clear_id_removes_selected_provider_only() {
+        let mut frontmatter = RoadmapItemFrontmatter {
+            asana_id: Some("asa-1".to_string()),
+            linear_id: Some("lin-1".to_string()),
         };
 
-        assert_eq!(
-            update.text_update(),
-            Some(PmTextUpdate {
-                name: Some("Ship Linear"),
-                description: Some("Build the GraphQL client"),
-            })
-        );
+        frontmatter.clear_id(PmProviderKind::Asana);
+        assert_eq!(frontmatter.asana_id, None);
+        assert_eq!(frontmatter.linear_id.as_deref(), Some("lin-1"));
+
+        frontmatter.clear_id(PmProviderKind::Linear);
+        assert_eq!(frontmatter.linear_id, None);
     }
 }

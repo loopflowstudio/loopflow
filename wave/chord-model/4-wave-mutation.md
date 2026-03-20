@@ -1,6 +1,6 @@
 ---
 asana_id: '1213718558900002'
-linear_id: d2421075-cad0-4b3d-8cd7-ad89631b987d
+linear_id: 98e766f3-8785-4bf2-9af1-8c23a93fad8e
 ---
 # 06: Wave Mutation
 

@@ -8,29 +8,28 @@ use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
-    RoadmapItemFrontmatter,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, PriorityBucket,
+    RoadmapItemDocument, RoadmapItemFrontmatter,
 };
 use crate::lfd::store::open_store;
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::ingest::{list_numbered_items, WaveItem};
+use crate::ops::ingest::{list_wave_items, parse_wave_item_filename, WaveItem};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
 
 // ── Options and results ─────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
-pub struct PmInitOptions {
-    pub wave: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmInitResult {
+    pub waves: Vec<PmInitWaveResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmInitResult {
+pub struct PmInitWaveResult {
     pub wave: String,
     pub provider: PmProviderKind,
     pub project_id: String,
-    pub linked: usize,
-    pub created: Vec<String>,
+    pub items: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +125,14 @@ fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
 }
 
 async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dyn PmProvider>> {
+    build_client_with_team(repo, provider, None).await
+}
+
+async fn build_client_with_team(
+    repo: &Path,
+    provider: PmProviderKind,
+    team_id: Option<String>,
+) -> OpsResult<Box<dyn PmProvider>> {
     let config = load_config_or_default(Some(repo));
     let client: Box<dyn PmProvider> = match provider {
         PmProviderKind::Asana => {
@@ -134,7 +141,8 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dy
         }
         PmProviderKind::Linear => {
             let token = resolve_provider_token("linear", "LINEAR_API_KEY").await?;
-            Box::new(LinearClient::new(token, config.linear.team.clone()))
+            let effective_team = team_id.or_else(|| config.linear.team.clone());
+            Box::new(LinearClient::new(token, effective_team))
         }
     };
     Ok(client)
@@ -235,18 +243,9 @@ struct LocalRoadmapItem {
     doc: RoadmapItemDocument,
 }
 
-struct BootstrapArgs<'a> {
-    repo: &'a Path,
-    wave: &'a str,
-    wave_dir: &'a Path,
-    project_name: &'a str,
-    description: &'a str,
-    progress: &'a dyn Progress,
-}
-
 fn read_local_roadmap_items(wave_dir: &Path) -> OpsResult<Vec<LocalRoadmapItem>> {
     let mut items = Vec::new();
-    for item in list_numbered_items(wave_dir)? {
+    for item in list_wave_items(wave_dir)? {
         let path = wave_dir.join(&item.filename);
         let content = std::fs::read_to_string(&path)?;
         items.push(LocalRoadmapItem {
@@ -261,6 +260,14 @@ fn local_item_title(item: &LocalRoadmapItem) -> String {
     extract_heading(&item.doc.body)
         .map(str::to_string)
         .unwrap_or_else(|| title_case(&item.item.slug))
+}
+
+fn local_item_priority(item: &LocalRoadmapItem) -> PriorityBucket {
+    item.item.priority_bucket().unwrap_or(PriorityBucket::High)
+}
+
+fn local_item_description(item: &LocalRoadmapItem) -> String {
+    body_without_heading(&item.doc.body).trim().to_string()
 }
 
 fn project_key(provider: PmProviderKind) -> &'static str {
@@ -336,64 +343,129 @@ pub(crate) fn write_pm_project_to_wave_yaml(
 
 // ── Bootstrap / status ─────────────────────────────────────────────
 
-pub fn pm_init(
-    repo: &Path,
-    options: &PmInitOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmInitResult> {
-    block_on_pm(pm_init_async(repo, options, progress))
+pub fn pm_init(repo: &Path, progress: &impl Progress) -> OpsResult<PmInitResult> {
+    block_on_pm(pm_init_async(repo, progress))
 }
 
-async fn pm_init_async(
-    repo: &Path,
-    options: &PmInitOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmInitResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let wave_dir = repo.join("wave").join(&wave);
-    if !wave_dir.is_dir() {
-        return Err(OpsError::Message(format!(
-            "wave directory not found: {}",
-            wave_dir.display()
-        )));
+async fn pm_init_async(repo: &Path, progress: &impl Progress) -> OpsResult<PmInitResult> {
+    let wave_root = repo.join("wave");
+    if !wave_root.is_dir() {
+        return Err(OpsError::Message("no wave/ directory found".to_string()));
     }
 
-    let provider_kind = resolve_provider(repo, &wave)?;
-    write_pm_provider_to_wave_yaml(repo, &wave, provider_kind)?;
+    let mut waves: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&wave_root)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            if let Some(name) = entry.file_name().to_str() {
+                waves.push(name.to_string());
+            }
+        }
+    }
+    waves.sort();
 
-    let (project_name, description) = read_wave_project_metadata(repo, &wave)?;
-    let mut local_items = read_local_roadmap_items(&wave_dir)?;
-    let bootstrap = BootstrapArgs {
-        repo,
-        wave: &wave,
-        wave_dir: &wave_dir,
-        project_name: &project_name,
-        description: &description,
-        progress,
-    };
+    if waves.is_empty() {
+        return Err(OpsError::Message("no waves found in wave/".to_string()));
+    }
 
-    let ctx = build_provider(repo, &wave, provider_kind).await?;
-    let rw_result = bootstrap_read_write_provider(&bootstrap, &mut local_items, ctx).await?;
+    // Resolve provider from first wave (all waves use the same provider for init).
+    let provider_kind = resolve_provider(repo, &waves[0])?;
+    let client = build_client(repo, provider_kind).await?;
 
-    let commit_message = format!("lf pm: bootstrap {wave}");
+    // Create a fresh team. If "Loopflow" already exists, use a timestamped name.
+    progress.status("creating PM team");
+    let team_id = create_fresh_team(&*client).await.map_err(pm_to_ops)?;
+
+    // Clear stale provider IDs from wave item frontmatter before creating fresh projects.
+    for wave in &waves {
+        let wave_dir = wave_root.join(wave);
+        clear_provider_ids(&wave_dir, provider_kind)?;
+    }
+
+    let mut results = Vec::new();
+    for wave in &waves {
+        let wave_dir = wave_root.join(wave);
+        write_pm_provider_to_wave_yaml(repo, wave, provider_kind)?;
+
+        let (project_name, description) = read_wave_project_metadata(repo, wave)?;
+        let mut local_items = read_local_roadmap_items(&wave_dir)?;
+
+        progress.status(&format!(
+            "creating {:?} project for wave/{wave}",
+            provider_kind
+        ));
+        let project_id = client
+            .create_project_in_team(&team_id, &project_name, &description)
+            .await
+            .map_err(pm_to_ops)?;
+        write_pm_project_to_wave_yaml(repo, wave, provider_kind, &project_id)?;
+
+        let ctx = PmContext {
+            client: build_client_with_team(repo, provider_kind, Some(team_id.clone())).await?,
+            provider: provider_kind,
+            project: project_id.clone(),
+        };
+
+        // Create all local items on the remote (reverse order to preserve sort).
+        let item_count = local_items.len();
+        for local_item in local_items.iter_mut().rev() {
+            let title = local_item_title(local_item);
+            create_remote_for_local_item(&wave_dir, local_item, &ctx, &project_id, &title).await?;
+        }
+
+        results.push(PmInitWaveResult {
+            wave: wave.clone(),
+            provider: provider_kind,
+            project_id,
+            items: item_count,
+        });
+    }
+
     let _ = crate::ops::commit_workflow(
         repo,
         &crate::ops::CommitOptions {
             add: true,
-            message: Some(commit_message),
+            message: Some("lf pm: init".to_string()),
             ..crate::ops::CommitOptions::for_task("pm")
         },
         progress,
     )?;
 
-    Ok(PmInitResult {
-        wave,
-        provider: rw_result.provider,
-        project_id: rw_result.project_id,
-        linked: rw_result.linked,
-        created: rw_result.created_local,
-    })
+    Ok(PmInitResult { waves: results })
+}
+
+const DEFAULT_TEAM_NAME: &str = "Waves";
+
+async fn create_fresh_team(client: &dyn PmProvider) -> crate::lfd::pm::PmResult<String> {
+    let existing = client.find_team(DEFAULT_TEAM_NAME).await?;
+    if existing.is_some() {
+        let now = time::OffsetDateTime::now_utc();
+        let timestamp = format!(
+            "{:04}-{:02}-{:02}",
+            now.year(),
+            now.month() as u8,
+            now.day()
+        );
+        let name = format!("{DEFAULT_TEAM_NAME} {timestamp}");
+        client.create_team(&name).await
+    } else {
+        client.create_team(DEFAULT_TEAM_NAME).await
+    }
+}
+
+fn clear_provider_ids(wave_dir: &Path, provider: PmProviderKind) -> OpsResult<()> {
+    for item in list_wave_items(wave_dir)? {
+        let path = wave_dir.join(&item.filename);
+        let content = std::fs::read_to_string(&path)?;
+        let mut doc = RoadmapItemDocument::parse(&content).map_err(pm_to_ops)?;
+        let had_id = doc.frontmatter.id_for(provider).is_some();
+        if had_id {
+            doc.frontmatter.clear_id(provider);
+            let rendered = doc.render().map_err(pm_to_ops)?;
+            std::fs::write(&path, rendered)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn pm_status(
@@ -472,124 +544,6 @@ async fn pm_status_async(
     Ok(PmStatusResult { waves: results })
 }
 
-#[derive(Debug, Clone)]
-struct BootstrapResult {
-    provider: PmProviderKind,
-    project_id: String,
-    linked: usize,
-    created_local: Vec<String>,
-}
-
-async fn bootstrap_read_write_provider(
-    args: &BootstrapArgs<'_>,
-    local_items: &mut [LocalRoadmapItem],
-    ctx: PmContext,
-) -> OpsResult<BootstrapResult> {
-    let project_id = ensure_project(
-        args.repo,
-        args.wave,
-        args.project_name,
-        args.description,
-        &ctx,
-        args.progress,
-    )
-    .await?;
-    let remote_items = ctx
-        .client
-        .list_items(&project_id)
-        .await
-        .map_err(pm_to_ops)?;
-    let remote_by_id = remote_items
-        .iter()
-        .map(|item| (item.id.as_str(), item))
-        .collect::<HashMap<_, _>>();
-    let mut remote_by_title = remote_items
-        .iter()
-        .map(|item| (normalize_title(&item.name), item))
-        .collect::<HashMap<_, _>>();
-    let mut matched_remote_ids = HashSet::new();
-    let mut created_local = Vec::new();
-    let mut pending_remote_creates = Vec::new();
-
-    for (index, local_item) in local_items.iter_mut().enumerate() {
-        let local_title = local_item_title(local_item);
-        let local_key = normalize_title(&local_title);
-        if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
-            if let Some(remote_item) = remote_by_id.get(pm_id) {
-                matched_remote_ids.insert(remote_item.id.clone());
-                apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
-                continue;
-            }
-        }
-
-        if let Some(remote_item) = remote_by_title.remove(&local_key) {
-            matched_remote_ids.insert(remote_item.id.clone());
-            apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
-            continue;
-        }
-
-        pending_remote_creates.push((index, local_title));
-    }
-
-    // Both supported PM providers append new items, so create from the bottom up
-    // to preserve the local roadmap order.
-    for (index, local_title) in pending_remote_creates.into_iter().rev() {
-        create_remote_for_local_item(
-            args.wave_dir,
-            &mut local_items[index],
-            &ctx,
-            &project_id,
-            &local_title,
-        )
-        .await?;
-    }
-
-    for remote_item in &remote_items {
-        if matched_remote_ids.contains(&remote_item.id) {
-            continue;
-        }
-        let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
-        write_remote_item(&args.wave_dir.join(&filename), remote_item, ctx.provider)?;
-        created_local.push(filename);
-    }
-
-    Ok(BootstrapResult {
-        provider: ctx.provider,
-        project_id,
-        linked: count_linked_items(local_items, ctx.provider) + created_local.len(),
-        created_local,
-    })
-}
-
-async fn ensure_project(
-    repo: &Path,
-    wave: &str,
-    project_name: &str,
-    description: &str,
-    ctx: &PmContext,
-    progress: &(impl Progress + ?Sized),
-) -> OpsResult<String> {
-    if !ctx.project.trim().is_empty() {
-        progress.status(&format!(
-            "using existing {:?} project {}",
-            ctx.provider, ctx.project
-        ));
-        return Ok(ctx.project.clone());
-    }
-
-    progress.status(&format!(
-        "creating {:?} project for wave/{wave}",
-        ctx.provider
-    ));
-    let project_id = ctx
-        .client
-        .create_project(project_name, description)
-        .await
-        .map_err(pm_to_ops)?;
-    write_pm_project_to_wave_yaml(repo, wave, ctx.provider, &project_id)?;
-    Ok(project_id)
-}
-
 fn read_wave_project_metadata(repo: &Path, wave: &str) -> OpsResult<(String, String)> {
     let readme_path = repo.join("wave").join(wave).join("README.md");
     let content = match std::fs::read_to_string(&readme_path) {
@@ -627,6 +581,19 @@ fn apply_remote_match(
     if update_body {
         local_item.doc.body = render_remote_body(remote_item);
     }
+
+    let filename = next_remote_filename(
+        wave_dir,
+        remote_item.priority,
+        &remote_item.name,
+        Some(local_item.item.filename.as_str()),
+    );
+    if filename != local_item.item.filename {
+        let old_path = wave_dir.join(&local_item.item.filename);
+        std::fs::remove_file(&old_path)?;
+        local_item.item =
+            parse_wave_item_filename(&filename).expect("generated roadmap filename should parse");
+    }
     write_local_item(wave_dir, local_item)
 }
 
@@ -643,10 +610,8 @@ async fn create_remote_for_local_item(
             project_id,
             &PmItemCreate {
                 name: title.to_string(),
-                description: body_without_heading(&local_item.doc.body)
-                    .trim()
-                    .to_string(),
-                rank: local_item.item.prefix,
+                description: local_item_description(local_item),
+                priority: local_item_priority(local_item),
             },
         )
         .await
@@ -655,30 +620,37 @@ async fn create_remote_for_local_item(
     write_local_item(wave_dir, local_item)
 }
 
-fn count_linked_items(items: &[LocalRoadmapItem], provider: PmProviderKind) -> usize {
-    items
-        .iter()
-        .filter(|item| item.doc.frontmatter.id_for(provider).is_some())
-        .count()
-}
-
-fn next_remote_filename(wave_dir: &Path, rank: u32, title: &str) -> String {
-    next_item_filename(rank, title, |filename| !wave_dir.join(filename).exists())
+fn next_remote_filename(
+    wave_dir: &Path,
+    priority: PriorityBucket,
+    title: &str,
+    current_filename: Option<&str>,
+) -> String {
+    next_item_filename(priority, title, |filename| {
+        current_filename.is_some_and(|current| current == filename)
+            || !wave_dir.join(filename).exists()
+    })
 }
 
 fn next_item_filename(
-    rank: u32,
+    priority: PriorityBucket,
     title: &str,
     mut is_available: impl FnMut(&str) -> bool,
 ) -> String {
     let slug = slugify(title);
-    let mut prefix = rank;
+    let prefix = priority.filename_prefix();
+    let filename = format!("{prefix}-{slug}.md");
+    if is_available(&filename) {
+        return filename;
+    }
+
+    let mut suffix = 2;
     loop {
-        let filename = format!("{:02}-{slug}.md", prefix + 1);
+        let filename = format!("{prefix}-{slug}-{suffix}.md");
         if is_available(&filename) {
             return filename;
         }
-        prefix += 1;
+        suffix += 1;
     }
 }
 
@@ -687,15 +659,15 @@ fn overwrite_local_wave_from_remote(
     remote_items: &[PmItem],
     provider: PmProviderKind,
 ) -> OpsResult<usize> {
-    let local_files = list_numbered_items(wave_dir)?;
+    let local_files = list_wave_items(wave_dir)?;
     let removed = local_files.len();
     for item in local_files {
         std::fs::remove_file(wave_dir.join(item.filename))?;
     }
 
     let mut used_filenames = HashSet::new();
-    for (index, remote_item) in remote_items.iter().enumerate() {
-        let filename = next_item_filename(index as u32, &remote_item.name, |filename| {
+    for remote_item in remote_items {
+        let filename = next_item_filename(remote_item.priority, &remote_item.name, |filename| {
             !used_filenames.contains(filename)
         });
         used_filenames.insert(filename.clone());
@@ -795,7 +767,8 @@ async fn pm_import_async(
             if existing_ids.contains(&remote_item.id) {
                 continue; // additive only — skip existing
             }
-            let filename = next_remote_filename(&wave_dir, remote_item.rank, &remote_item.name);
+            let filename =
+                next_remote_filename(&wave_dir, remote_item.priority, &remote_item.name, None);
             write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
             items_created += 1;
         }
@@ -929,18 +902,21 @@ async fn pm_sync_async(
 
         match (base, local, remote) {
             // Exists in all three — check for changes
-            (Some(base_doc), Some((local_file, local_doc)), Some(remote_item)) => {
-                let base_title = extract_heading(&base_doc.body);
-                let local_title = extract_heading(&local_doc.body);
+            (Some(base_item), Some(local_item), Some(remote_item)) => {
+                let base_title = extract_heading(&base_item.doc.body);
+                let local_title = extract_heading(&local_item.doc.body);
                 let remote_title = Some(remote_item.name.as_str());
 
-                let local_changed = local_title != base_title || local_doc.body != base_doc.body;
-                let remote_changed =
-                    remote_title != base_title || render_remote_body(remote_item) != base_doc.body;
+                let local_changed = local_title != base_title
+                    || local_item.doc.body != base_item.doc.body
+                    || !base_and_local_priorities_match(base_item, local_item);
+                let remote_changed = remote_title != base_title
+                    || render_remote_body(remote_item) != base_item.doc.body
+                    || !base_and_remote_priorities_match(base_item, remote_item);
 
                 if local_changed && remote_changed {
-                    progress.status(&format!("  conflict: {}", local_file));
-                    conflicts.push(local_file.clone());
+                    progress.status(&format!("  conflict: {}", local_item.item.filename));
+                    conflicts.push(local_item.item.filename.clone());
                 } else if local_changed {
                     // Push local → remote
                     let name = local_title.unwrap_or(&remote_item.name);
@@ -949,66 +925,70 @@ async fn pm_sync_async(
                             pm_id,
                             &PmItemUpdate {
                                 name: Some(name.to_string()),
-                                description: Some(local_doc.body.clone()),
-                                rank: None,
+                                description: Some(local_item_description(local_item)),
+                                priority: Some(local_item_priority(local_item)),
                             },
                         )
                         .await
                         .map_err(pm_to_ops)?;
-                    progress.status(&format!("  pushed {}", local_file));
-                    pushed.push(local_file.clone());
+                    progress.status(&format!("  pushed {}", local_item.item.filename));
+                    pushed.push(local_item.item.filename.clone());
                 } else if remote_changed {
                     // Pull remote → local
-                    let path = wave_dir.join(local_file);
-                    write_remote_item(&path, remote_item, provider_kind)?;
-                    progress.status(&format!("  pulled {local_file}"));
-                    pulled.push(local_file.clone());
+                    let mut updated_local = local_item.clone();
+                    apply_remote_match(
+                        &wave_dir,
+                        &mut updated_local,
+                        provider_kind,
+                        remote_item,
+                        true,
+                    )?;
+                    progress.status(&format!("  pulled {}", updated_local.item.filename));
+                    pulled.push(updated_local.item.filename.clone());
                 }
                 // else: no-op
             }
 
             // Not in base, exists locally — new local item, push
-            (None, Some((local_file, local_doc)), None) => {
-                let name = extract_heading(&local_doc.body).unwrap_or("untitled");
+            (None, Some(local_item), None) => {
+                let name = extract_heading(&local_item.doc.body).unwrap_or("untitled");
                 let new_id = ctx
                     .client
                     .create_item(
                         &ctx.project,
                         &PmItemCreate {
                             name: name.to_string(),
-                            description: local_doc.body.clone(),
-                            rank: 0,
+                            description: local_item_description(local_item),
+                            priority: local_item_priority(local_item),
                         },
                     )
                     .await
                     .map_err(pm_to_ops)?;
 
                 // Write pm_id back to file
-                let mut updated_doc = local_doc.clone();
+                let mut updated_doc = local_item.doc.clone();
                 updated_doc.frontmatter.set_id(provider_kind, new_id);
                 let rendered = updated_doc.render().map_err(pm_to_ops)?;
-                std::fs::write(wave_dir.join(local_file), rendered)?;
-                progress.status(&format!("  pushed (new) {local_file}"));
-                pushed.push(local_file.clone());
+                std::fs::write(wave_dir.join(&local_item.item.filename), rendered)?;
+                progress.status(&format!("  pushed (new) {}", local_item.item.filename));
+                pushed.push(local_item.item.filename.clone());
             }
 
             // Not in base, exists remotely — new remote item, pull
             (None, None, Some(remote_item)) => {
-                let filename = format!(
-                    "{:02}-{}.md",
-                    remote_item.rank + 1,
-                    slugify(&remote_item.name)
-                );
+                let filename =
+                    next_remote_filename(&wave_dir, remote_item.priority, &remote_item.name, None);
                 write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
                 progress.status(&format!("  pulled (new) {filename}"));
                 pulled.push(filename);
             }
 
             // In base, deleted locally, unchanged remotely — archive remote
-            (Some(base_doc), None, Some(remote_item)) => {
+            (Some(base_item), None, Some(remote_item)) => {
                 let remote_changed = Some(remote_item.name.as_str())
-                    != extract_heading(&base_doc.body)
-                    || render_remote_body(remote_item) != base_doc.body;
+                    != extract_heading(&base_item.doc.body)
+                    || render_remote_body(remote_item) != base_item.doc.body
+                    || !base_and_remote_priorities_match(base_item, remote_item);
                 if remote_changed {
                     progress.status(&format!(
                         "  conflict (deleted locally, changed remotely): {pm_id}"
@@ -1024,24 +1004,29 @@ async fn pm_sync_async(
             }
 
             // In base, unchanged locally, deleted remotely — delete local
-            (Some(base_doc), Some((local_file, local_doc)), None) => {
-                let local_changed = local_doc.body != base_doc.body;
+            (Some(base_item), Some(local_item), None) => {
+                let local_changed = local_item.doc.body != base_item.doc.body
+                    || !base_and_local_priorities_match(base_item, local_item);
                 if local_changed {
                     progress.status(&format!(
-                        "  conflict (changed locally, deleted remotely): {local_file}"
+                        "  conflict (changed locally, deleted remotely): {}",
+                        local_item.item.filename
                     ));
-                    conflicts.push(local_file.clone());
+                    conflicts.push(local_item.item.filename.clone());
                 } else {
-                    std::fs::remove_file(wave_dir.join(local_file))?;
-                    progress.status(&format!("  deleted {local_file}"));
-                    pulled.push(local_file.clone());
+                    std::fs::remove_file(wave_dir.join(&local_item.item.filename))?;
+                    progress.status(&format!("  deleted {}", local_item.item.filename));
+                    pulled.push(local_item.item.filename.clone());
                 }
             }
 
             // Already exists in both local and remote but wasn't in base — both new
-            (None, Some((local_file, _)), Some(_)) => {
-                progress.status(&format!("  conflict (new on both sides): {local_file}"));
-                conflicts.push(local_file.clone());
+            (None, Some(local_item), Some(_)) => {
+                progress.status(&format!(
+                    "  conflict (new on both sides): {}",
+                    local_item.item.filename
+                ));
+                conflicts.push(local_item.item.filename.clone());
             }
 
             // In base but gone from both — already reconciled
@@ -1067,7 +1052,7 @@ fn read_base_items(
     main_branch: &str,
     wave: &str,
     provider: PmProviderKind,
-) -> OpsResult<HashMap<String, RoadmapItemDocument>> {
+) -> OpsResult<HashMap<String, LocalRoadmapItem>> {
     let wave_path = format!("wave/{wave}");
     let files = list_tree(repo, main_branch, &wave_path)
         .map_err(|err| OpsError::Message(format!("failed to list base wave files: {err}")))?;
@@ -1077,14 +1062,15 @@ fn read_base_items(
         if !filename.ends_with(".md") || filename.eq_ignore_ascii_case("README.md") {
             continue;
         }
+        let Some(item) = parse_wave_item_filename(&filename) else {
+            continue;
+        };
         let file_path = format!("{wave_path}/{filename}");
         if let Some(content) = show_file(repo, main_branch, &file_path)
             .map_err(|err| OpsError::Message(format!("failed to read base file: {err}")))?
         {
-            if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    items.insert(pm_id.to_string(), doc);
-                }
+            if let Some((pm_id, local_item)) = linked_local_item(item, &content, provider) {
+                items.insert(pm_id, local_item);
             }
         }
     }
@@ -1094,20 +1080,28 @@ fn read_base_items(
 fn read_local_items(
     wave_dir: &Path,
     provider: PmProviderKind,
-) -> OpsResult<HashMap<String, (String, RoadmapItemDocument)>> {
-    let items = list_numbered_items(wave_dir).unwrap_or_default();
+) -> OpsResult<HashMap<String, LocalRoadmapItem>> {
+    let items = list_wave_items(wave_dir).unwrap_or_default();
     let mut result = HashMap::new();
     for item in items {
         let path = wave_dir.join(&item.filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    result.insert(pm_id.to_string(), (item.filename.clone(), doc));
-                }
+            if let Some((pm_id, local_item)) = linked_local_item(item, &content, provider) {
+                result.insert(pm_id, local_item);
             }
         }
     }
     Ok(result)
+}
+
+fn linked_local_item(
+    item: WaveItem,
+    content: &str,
+    provider: PmProviderKind,
+) -> Option<(String, LocalRoadmapItem)> {
+    let doc = RoadmapItemDocument::parse(content).ok()?;
+    let pm_id = doc.frontmatter.id_for(provider)?.to_string();
+    Some((pm_id, LocalRoadmapItem { item, doc }))
 }
 
 fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapItemDocument {
@@ -1128,6 +1122,14 @@ fn write_remote_item(path: &Path, item: &PmItem, provider: PmProviderKind) -> Op
     Ok(())
 }
 
+fn base_and_local_priorities_match(base: &LocalRoadmapItem, local: &LocalRoadmapItem) -> bool {
+    local_item_priority(base) == local_item_priority(local)
+}
+
+fn base_and_remote_priorities_match(base: &LocalRoadmapItem, remote: &PmItem) -> bool {
+    local_item_priority(base) == remote.priority
+}
+
 fn render_remote_body(item: &PmItem) -> String {
     let heading = format!("# {}\n", item.name);
     if item.description.is_empty() {
@@ -1137,21 +1139,21 @@ fn render_remote_body(item: &PmItem) -> String {
     }
 }
 
-/// Extract the first `# ` heading, stripping any `NN:` or `NN-` prefix.
+/// Extract the first `# ` heading, stripping any roadmap priority or legacy prefix.
 pub(crate) fn extract_heading(body: &str) -> Option<&str> {
     for line in body.lines() {
         if let Some(heading) = line.strip_prefix("# ") {
             let heading = heading.trim();
             if !heading.is_empty() {
-                return Some(strip_number_prefix(heading));
+                return Some(strip_roadmap_prefix(heading));
             }
         }
     }
     None
 }
 
-/// Strip a leading `NN:` or `NN-` prefix from a heading.
-fn strip_number_prefix(heading: &str) -> &str {
+/// Strip a leading `NN:`/`NN-` numeric prefix from a heading.
+fn strip_roadmap_prefix(heading: &str) -> &str {
     let bytes = heading.as_bytes();
     let mut i = 0;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
@@ -1166,16 +1168,16 @@ fn strip_number_prefix(heading: &str) -> &str {
 
 /// Return the body with the first `# ` heading line removed.
 pub(crate) fn body_without_heading(body: &str) -> &str {
-    for (i, line) in body.lines().enumerate() {
+    let mut offset = 0;
+    for line in body.lines() {
         if line.starts_with("# ") {
-            // Skip heading line and any immediately following blank line
-            let after_heading = &body[body.find(line).unwrap() + line.len()..];
+            let after_heading = &body[offset + line.len()..];
             return after_heading.strip_prefix('\n').unwrap_or(after_heading);
         }
-        // Only look at the first non-empty line
-        if i > 0 && !line.trim().is_empty() {
+        if !line.trim().is_empty() {
             break;
         }
+        offset += line.len() + 1;
     }
     body
 }
@@ -1227,88 +1229,7 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::pm::PmResult;
-    use async_trait::async_trait;
     use tempfile::TempDir;
-
-    #[derive(Debug)]
-    struct StaticProvider {
-        items: Vec<PmItem>,
-    }
-
-    #[derive(Debug)]
-    struct RecordingProvider {
-        created: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        next_id: std::sync::Arc<std::sync::Mutex<u32>>,
-    }
-
-    #[async_trait]
-    impl PmProvider for StaticProvider {
-        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("create_project should not be called in this test");
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("list_projects should not be called in this test");
-        }
-
-        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            Ok(self.items.clone())
-        }
-
-        async fn create_item(&self, _project_id: &str, _item: &PmItemCreate) -> PmResult<String> {
-            panic!("create_item should not be called in this test");
-        }
-
-        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
-            panic!("update_item should not be called in this test");
-        }
-
-        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("complete_item should not be called in this test");
-        }
-
-        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("comment should not be called in this test");
-        }
-    }
-
-    #[async_trait]
-    impl PmProvider for RecordingProvider {
-        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("create_project should not be called in this test");
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("list_projects should not be called in this test");
-        }
-
-        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            Ok(Vec::new())
-        }
-
-        async fn create_item(&self, _project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-            self.created
-                .lock()
-                .expect("created lock")
-                .push(item.name.clone());
-            let mut next_id = self.next_id.lock().expect("next_id lock");
-            *next_id += 1;
-            Ok(format!("lin-{}", *next_id))
-        }
-
-        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
-            panic!("update_item should not be called in this test");
-        }
-
-        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("complete_item should not be called in this test");
-        }
-
-        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("comment should not be called in this test");
-        }
-    }
 
     #[test]
     fn slugify_converts_name_to_filename_slug() {
@@ -1331,7 +1252,7 @@ mod tests {
             id: "item-42".to_string(),
             name: "Build the thing".to_string(),
             description: "Some details here.".to_string(),
-            rank: 0,
+            priority: PriorityBucket::High,
             completed: false,
         };
 
@@ -1348,7 +1269,7 @@ mod tests {
             id: "item-1".to_string(),
             name: "Empty".to_string(),
             description: String::new(),
-            rank: 0,
+            priority: PriorityBucket::Low,
             completed: false,
         };
 
@@ -1357,10 +1278,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_heading_strips_number_prefix() {
+    fn extract_heading_strips_roadmap_prefixes() {
         assert_eq!(
             extract_heading("# 03: Linear client\n\nSome description"),
             Some("Linear client")
+        );
+        assert_eq!(
+            extract_heading("# 2: Priority client\n\nSome description"),
+            Some("Priority client")
         );
         assert_eq!(
             extract_heading("# No prefix here\n"),
@@ -1382,6 +1307,14 @@ mod tests {
         assert_eq!(
             body_without_heading("No heading\nJust text"),
             "No heading\nJust text"
+        );
+    }
+
+    #[test]
+    fn body_without_heading_handles_leading_blank_lines() {
+        assert_eq!(
+            body_without_heading("\n# Title\n\nBody text."),
+            "\nBody text."
         );
     }
 
@@ -1429,179 +1362,27 @@ mod tests {
         assert!(wave_pm_is_enabled(repo, "pm"));
     }
 
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_preserves_local_body_and_uses_remote_rank() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("01-existing.md"),
-            "# Existing task\n\nLocal body stays put.\n",
-        )
-        .expect("write local item");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let ctx = PmContext {
-            client: Box::new(StaticProvider {
-                items: vec![
-                    PmItem {
-                        id: "lin-1".to_string(),
-                        name: "Existing task".to_string(),
-                        description: "Remote body should not replace local.".to_string(),
-                        rank: 0,
-                        completed: false,
-                    },
-                    PmItem {
-                        id: "lin-2".to_string(),
-                        name: "Second task".to_string(),
-                        description: "Imported from remote.".to_string(),
-                        rank: 1,
-                        completed: false,
-                    },
-                ],
-            }),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
-
-        let result = bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        assert_eq!(result.created_local, vec!["02-second-task.md"]);
-
-        let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
-        assert!(existing.contains("linear_id: lin-1"));
-        assert!(existing.contains("Local body stays put."));
-        assert!(!existing.contains("Remote body should not replace local."));
-
-        let imported =
-            std::fs::read_to_string(wave_dir.join("02-second-task.md")).expect("read imported");
-        assert!(imported.contains("linear_id: lin-2"));
-        assert!(imported.contains("# Second task"));
-        assert!(imported.contains("Imported from remote."));
-    }
-
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_creates_linear_items_in_reverse_local_order() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = RecordingProvider {
-            created: created.clone(),
-            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
-        };
-        let ctx = PmContext {
-            client: Box::new(provider),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
-
-        bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        let created = created.lock().expect("created lock").clone();
-        assert_eq!(created, vec!["Third", "Second", "First"]);
-
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-1"));
-    }
-
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_creates_asana_items_in_reverse_local_order() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = RecordingProvider {
-            created: created.clone(),
-            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
-        };
-        let ctx = PmContext {
-            client: Box::new(provider),
-            provider: PmProviderKind::Asana,
-            project: "proj-1".to_string(),
-        };
-
-        bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        let created = created.lock().expect("created lock").clone();
-        assert_eq!(created, vec!["Third", "Second", "First"]);
-
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-1"));
-    }
-
     #[test]
-    fn overwrite_local_wave_from_remote_rewrites_local_files_in_remote_order() {
+    fn overwrite_local_wave_from_remote_rewrites_local_files_by_priority_bucket() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-local-first.md"), "# Local first\n").expect("write");
-        std::fs::write(wave_dir.join("02-local-second.md"), "# Local second\n").expect("write");
+        std::fs::write(wave_dir.join("2-local-first.md"), "# Local first\n").expect("write");
+        std::fs::write(wave_dir.join("3-local-second.md"), "# Local second\n").expect("write");
 
         let remote_items = vec![
             PmItem {
                 id: "lin-2".to_string(),
                 name: "Remote second".to_string(),
                 description: "Pulled from PM.".to_string(),
-                rank: 1,
+                priority: PriorityBucket::Medium,
                 completed: false,
             },
             PmItem {
                 id: "lin-1".to_string(),
                 name: "Remote first".to_string(),
                 description: "Higher priority.".to_string(),
-                rank: 0,
+                priority: PriorityBucket::Urgent,
                 completed: false,
             },
         ];
@@ -1611,15 +1392,15 @@ mod tests {
                 .expect("pull should rewrite local files");
 
         assert_eq!(removed, 2);
-        assert!(!wave_dir.join("01-local-first.md").exists());
-        assert!(!wave_dir.join("02-local-second.md").exists());
+        assert!(!wave_dir.join("2-local-first.md").exists());
+        assert!(!wave_dir.join("3-local-second.md").exists());
 
-        let first = std::fs::read_to_string(wave_dir.join("01-remote-second.md")).expect("read");
-        assert!(first.contains("linear_id: lin-2"));
-        assert!(first.contains("# Remote second"));
-
-        let second = std::fs::read_to_string(wave_dir.join("02-remote-first.md")).expect("read");
+        let second = std::fs::read_to_string(wave_dir.join("1-remote-first.md")).expect("read");
         assert!(second.contains("linear_id: lin-1"));
         assert!(second.contains("# Remote first"));
+
+        let first = std::fs::read_to_string(wave_dir.join("3-remote-second.md")).expect("read");
+        assert!(first.contains("linear_id: lin-2"));
+        assert!(first.contains("# Remote second"));
     }
 }

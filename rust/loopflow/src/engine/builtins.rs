@@ -129,3 +129,31 @@ include!(concat!(env!("OUT_DIR"), "/builtin_flow_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_directions.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_direction_groups.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WAVE_AUTHORING_DOC: &str = include_str!("../../../../docs/wave-authoring.md");
+
+    #[test]
+    fn priority_guidance_is_embedded_in_prompts_and_docs() {
+        let update_wave = get_builtin_step("update-wave").expect("update-wave prompt");
+        let ingest = get_builtin_step("ingest").expect("ingest prompt");
+        let design = get_builtin_step("design").expect("design prompt");
+        let scan_waves = get_builtin_step("garden/scan").expect("garden/scan prompt");
+        let split_wave = get_builtin_step("split-wave").expect("split-wave prompt");
+
+        assert!(update_wave.contains("1-fix-broken-build.md"));
+        assert!(update_wave.contains("4-*"));
+        assert!(!update_wave.contains("numbered item files"));
+        assert!(ingest.contains("highest-priority non-empty level"));
+        assert!(design.contains("1-*.md"));
+        assert!(scan_waves.contains("1-*` through `4-*"));
+        assert!(!scan_waves.contains("All numbered item files"));
+        assert!(split_wave.contains("Bucketed roadmap files"));
+        assert!(WAVE_AUTHORING_DOC.contains("1-fix-crash-loop.md"));
+        assert!(WAVE_AUTHORING_DOC.contains("2-daemon-integrity.md"));
+        assert!(!WAVE_AUTHORING_DOC.contains("all `01-*` items complete"));
+    }
+}

@@ -8,7 +8,7 @@ use loopflow::lfd::pm::asana::AsanaClient;
 use loopflow::lfd::pm::linear::LinearClient;
 use loopflow::lfd::pm::{PmItem, PmProvider, PmProviderKind};
 use loopflow::lfd::store::open_store;
-use loopflow::ops::pm::{pm_init, PmInitOptions};
+use loopflow::ops::pm::pm_init;
 use loopflow::ops::NullProgress;
 use tempfile::TempDir;
 
@@ -22,16 +22,13 @@ fn main() -> Result<(), String> {
     init_git_repo(temp.path())?;
     write_test_repo(temp.path(), &name, provider)?;
 
-    let result = pm_init(
-        temp.path(),
-        &PmInitOptions {
-            wave: Some(name.clone()),
-        },
-        &NullProgress,
-    )
-    .map_err(|err| err.to_string())?;
+    let result = pm_init(temp.path(), &NullProgress).map_err(|err| err.to_string())?;
 
-    let items = fetch_remote_items(temp.path(), provider, &result.project_id)?;
+    let wave_result = result
+        .waves
+        .first()
+        .ok_or_else(|| "no wave results".to_string())?;
+    let items = fetch_remote_items(temp.path(), provider, &wave_result.project_id)?;
     let names = items
         .iter()
         .map(|item| item.name.as_str())
@@ -40,7 +37,7 @@ fn main() -> Result<(), String> {
 
     println!("provider: {provider:?}");
     println!("wave: {name}");
-    println!("project_id: {}", result.project_id);
+    println!("project_id: {}", wave_result.project_id);
     println!("remote order:");
     for (index, item) in items.iter().enumerate() {
         println!("  {}. {}", index + 1, item.name);

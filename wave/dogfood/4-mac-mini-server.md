@@ -1,5 +1,5 @@
 ---
-linear_id: 8efb6e1c-0da8-4b3c-af4e-771b4a9084b5
+linear_id: f7fc848b-b0b1-4895-a0f2-a84300147c4e
 ---
 # 01: Mac Mini Server
 

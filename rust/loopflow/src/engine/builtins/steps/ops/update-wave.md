@@ -53,7 +53,7 @@ Design docs for already-shipped work and other purely historical content can be 
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
 1. Write `wave/<wave>/README.md` — the anchor that survives when plans change. Vision, strategy, goals, risks, metrics. **No roadmap tables or phase lists** — the item files are the roadmap.
-2. Write numbered item files (`01-name.md`, `02-name.md`, ...) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
+2. Write priority item files (`1-fix-broken-build.md`, `2-next-step.md`, `3-big-rock.md`, `4-speculative-bet.md`) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 
 ### README.md
 
@@ -78,21 +78,28 @@ If the README has any of these, delete them.
 
 ### Items
 
-Roadmaps are made up of items. Each item is a numbered file (`01-*.md`, `02-*.md`, ...) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+Roadmaps are made up of items. Each item is a priority-prefixed file (`1-*.md`, `2-*.md`, `3-*.md`, `4-*.md`) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+
+**The filename prefix carries priority meaning:**
+
+- `1-*` — Urgent: the codebase is broken or blocked; fix this before forward progress
+- `2-*` — High: the clear next step
+- `3-*` — Medium: a committed later bet; "when, not if"
+- `4-*` — Low: speculative work
 
 **Every item must open with a bold finish line.** What's true when this item is done that isn't true now? Make it specific enough that you know when you've crossed it.
 
 ```markdown
-# 01: Audit Breakdown
+# Audit Breakdown
 
 **Finish line:** `lf implement` shows separate token rows for scratch, wave, and docs.
 ```
 
-### Sequencing principles
+### Bucket principles
 
-- **Frontload the risk.** Start with the thing you need to try to see if it works. Don't pre-build infrastructure before you've proven the core idea.
-- **Sequence by learning, not dependencies.** What are you most uncertain about? Build that first.
-- **Defer abstractions.** Build the concrete thing, then extract the pattern.
+- **Use the smallest bucket that is honest.** Don't inflate work into `p0` just to force it to the front.
+- **Frontload the risk.** The most uncertain concrete deliverable usually belongs in `p1`, not buried behind fake staging.
+- **Keep buckets semantic, not numeric theater.** Don't recreate `01/02/03` inside a bucket. Within-bucket ordering is intentionally loose.
 - **Encode uncertainty.** Each item should state what you expect to learn and what might change.
 
 ## Coherence
@@ -137,7 +144,7 @@ that owns an area of the problem space — watching, sensing, but not building.
 
 A silent wave:
 - Keeps its README (vision, strategy, goals, risks, metrics)
-- Has no numbered item files
+- Has no roadmap item files
 - Is a valid, healthy state — not a failure or stall
 - Signals to the human: "this area is covered, add items here if you want work done"
 - Signals to the chord: "nothing compelling to build right now"

@@ -7,14 +7,14 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
     RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
 const COMPLETED_STATE_TYPE: &str = "completed";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
 
 const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
   teams {
@@ -48,7 +48,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         title
         description
-        prioritySortOrder
+        priority
         sortOrder
         state {
           type
@@ -62,16 +62,16 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description }) {
+const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $priority: Int!) {
+  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, priority: $priority }) {
     issue {
       id
     }
   }
 }"#;
 
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title: String, $description: String) {
-  issueUpdate(id: $id, input: { title: $title, description: $description }) {
+const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title: String, $description: String, $priority: Int) {
+  issueUpdate(id: $id, input: { title: $title, description: $description, priority: $priority }) {
     issue {
       id
     }
@@ -148,7 +148,7 @@ impl LinearClient {
             return Ok(team_id.clone());
         }
 
-        // Look for a team named "Loopflow", create if not found
+        // Look for a team named "Waves", create if not found
         let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
         if let Some(team) = response
             .teams
@@ -233,8 +233,36 @@ impl LinearClient {
 
 #[async_trait]
 impl PmProvider for LinearClient {
+    async fn create_team(&self, name: &str) -> PmResult<String> {
+        let key = team_key_from_name(name);
+        let response: TeamCreateData = self
+            .graphql(CREATE_TEAM_MUTATION, json!({ "name": name, "key": key }))
+            .await?;
+        Ok(response.team_create.team.id)
+    }
+
+    async fn find_team(&self, name: &str) -> PmResult<Option<String>> {
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        Ok(response
+            .teams
+            .nodes
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .map(|t| t.id.clone()))
+    }
+
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
+        self.create_project_in_team(&team_id, name, description)
+            .await
+    }
+
+    async fn create_project_in_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String> {
         let description = linear_project_description(description);
         let response: ProjectCreateData = self
             .graphql(
@@ -287,15 +315,11 @@ impl PmProvider for LinearClient {
 
             if !page.page_info.has_next_page {
                 issues.sort_by(|left, right| {
-                    left.priority_sort_order
-                        .total_cmp(&right.priority_sort_order)
+                    linear_priority_sort_key(left.priority)
+                        .cmp(&linear_priority_sort_key(right.priority))
                         .then_with(|| left.sort_order.total_cmp(&right.sort_order))
                 });
-                return Ok(issues
-                    .into_iter()
-                    .enumerate()
-                    .map(|(rank, issue)| issue.into_pm_item(rank as u32))
-                    .collect());
+                return Ok(issues.into_iter().map(IssueNode::into_pm_item).collect());
             }
 
             after = page.page_info.end_cursor;
@@ -312,6 +336,7 @@ impl PmProvider for LinearClient {
                     "projectId": project_id,
                     "title": item.name,
                     "description": item.description,
+                    "priority": item.priority.linear_value(),
                 }),
             )
             .await?;
@@ -320,17 +345,18 @@ impl PmProvider for LinearClient {
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let Some(update) = update.text_update() else {
+        if update.is_noop() {
             return Ok(());
-        };
+        }
 
         let _: Value = self
             .graphql(
                 UPDATE_ITEM_MUTATION,
                 json!({
                     "id": item_id,
-                    "title": update.name,
-                    "description": update.description,
+                    "title": update.name.as_deref(),
+                    "description": update.description.as_deref(),
+                    "priority": update.priority.map(PriorityBucket::linear_value),
                 }),
             )
             .await?;
@@ -437,8 +463,8 @@ struct IssueNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(rename = "prioritySortOrder", default)]
-    priority_sort_order: f64,
+    #[serde(default)]
+    priority: i64,
     #[serde(rename = "sortOrder", default)]
     sort_order: f64,
     #[serde(default)]
@@ -446,7 +472,7 @@ struct IssueNode {
 }
 
 impl IssueNode {
-    fn into_pm_item(self, rank: u32) -> PmItem {
+    fn into_pm_item(self) -> PmItem {
         let completed = self
             .state
             .as_ref()
@@ -456,7 +482,7 @@ impl IssueNode {
             id: self.id,
             name: self.title,
             description: self.description.unwrap_or_default(),
-            rank,
+            priority: PriorityBucket::from_linear_value(self.priority),
             completed,
         }
     }
@@ -596,8 +622,12 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
 }
 
+fn linear_priority_sort_key(priority: i64) -> i64 {
+    i64::from(PriorityBucket::from_linear_value(priority).order())
+}
+
 /// Derive a Linear team key from a name: uppercase letters, max 5 chars.
-/// "Loopflow" → "LF", "My Team" → "MT".
+/// "Waves" → "W", "My Team" → "MT".
 fn team_key_from_name(name: &str) -> String {
     let key: String = name
         .split_whitespace()
@@ -748,7 +778,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_paginates_and_assigns_rank_by_priority_sort_order() {
+    async fn list_items_paginates_and_maps_linear_priority_buckets() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
@@ -761,7 +791,7 @@ mod tests {
                                         "id": "issue-1",
                                         "title": "First",
                                         "description": "one",
-                                        "prioritySortOrder": 30.0,
+                                        "priority": 3,
                                         "sortOrder": 30.0,
                                         "state": { "type": "backlog" }
                                     },
@@ -769,7 +799,7 @@ mod tests {
                                         "id": "issue-2",
                                         "title": "Second",
                                         "description": "two",
-                                        "prioritySortOrder": 10.0,
+                                        "priority": 1,
                                         "sortOrder": 10.0,
                                         "state": { "type": "completed" }
                                     }
@@ -794,7 +824,7 @@ mod tests {
                                         "id": "issue-3",
                                         "title": "Third",
                                         "description": null,
-                                        "prioritySortOrder": 20.0,
+                                        "priority": 2,
                                         "sortOrder": 20.0,
                                         "state": { "type": "unstarted" }
                                     }
@@ -828,21 +858,21 @@ mod tests {
                     id: "issue-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::Urgent,
                     completed: true,
                 },
                 PmItem {
                     id: "issue-3".to_string(),
                     name: "Third".to_string(),
                     description: "".to_string(),
-                    rank: 1,
+                    priority: PriorityBucket::High,
                     completed: false,
                 },
                 PmItem {
                     id: "issue-1".to_string(),
                     name: "First".to_string(),
                     description: "one".to_string(),
-                    rank: 2,
+                    priority: PriorityBucket::Medium,
                     completed: false,
                 },
             ]
@@ -921,7 +951,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    rank: 7,
+                    priority: PriorityBucket::Urgent,
                 },
             )
             .await
@@ -932,7 +962,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Linear client".to_string()),
                     description: Some("Build the GraphQL adapter and tests".to_string()),
-                    rank: Some(0),
+                    priority: Some(PriorityBucket::High),
                 },
             )
             .await
@@ -953,7 +983,8 @@ mod tests {
                     "teamId": "team-9",
                     "projectId": "project-123",
                     "title": "Implement client",
-                    "description": "Build the GraphQL adapter"
+                    "description": "Build the GraphQL adapter",
+                    "priority": 1
                 }
             })
         );
@@ -964,7 +995,8 @@ mod tests {
                 "variables": {
                     "id": "issue-123",
                     "title": "Implement Linear client",
-                    "description": "Build the GraphQL adapter and tests"
+                    "description": "Build the GraphQL adapter and tests",
+                    "priority": 2
                 }
             })
         );
@@ -1079,8 +1111,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_item_skips_rank_only_updates() {
-        let (base_url, requests) = test_server::spawn(Vec::new()).await;
+    async fn update_item_sends_priority_only_updates() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({
+                "data": {
+                    "issueUpdate": {
+                        "issue": { "id": "issue-123" }
+                    }
+                }
+            }),
+        )])
+        .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
             Some("team-9".to_string()),
@@ -1093,13 +1135,26 @@ mod tests {
                 &PmItemUpdate {
                     name: None,
                     description: None,
-                    rank: Some(1),
+                    priority: Some(PriorityBucket::Medium),
                 },
             )
             .await
-            .expect("rank-only update should no-op");
+            .expect("priority-only update should succeed");
 
-        assert!(requests.lock().await.is_empty());
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0].body).expect("json body"),
+            json!({
+                "query": UPDATE_ITEM_MUTATION,
+                "variables": {
+                    "id": "issue-123",
+                    "title": null,
+                    "description": null,
+                    "priority": 3
+                }
+            })
+        );
     }
 
     #[tokio::test]
@@ -1134,7 +1189,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::High,
                 },
             )
             .await
@@ -1170,7 +1225,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::High,
                 },
             )
             .await

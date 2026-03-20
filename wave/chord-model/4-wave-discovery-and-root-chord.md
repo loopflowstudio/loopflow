@@ -1,5 +1,5 @@
 ---
-linear_id: b5904d10-7286-4fa0-baea-19de0371bbe4
+linear_id: 02536e4b-af6f-4c18-bd6c-7db0e00cd4c6
 ---
 # 03: Wave Discovery and Root Chord
 

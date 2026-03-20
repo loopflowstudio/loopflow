@@ -1,6 +1,6 @@
 ---
 asana_id: '1213717741038313'
-linear_id: 704e334b-2a4d-47de-83e7-87d35116ee5c
+linear_id: 792860f0-3769-4f81-ab01-ff515f1c1e46
 ---
 # 11: Notion task parity after the model redo
 

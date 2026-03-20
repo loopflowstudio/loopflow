@@ -1,6 +1,6 @@
 ---
 asana_id: '1213718558926550'
-linear_id: 309b6425-5ddf-47b7-ab9a-9838ee0c03fe
+linear_id: dff685b9-5630-4908-9359-de190ac02a1a
 ---
 # 05: Typed Auth Methods
 

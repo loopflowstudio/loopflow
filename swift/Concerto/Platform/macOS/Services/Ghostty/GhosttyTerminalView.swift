@@ -257,6 +257,9 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
         if ghosttyShouldHandleKeyDownDirectly(
             characters: event.characters,
             modifiers: event.modifierFlags,
@@ -264,6 +267,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             selectedInputSource: inputContext?.selectedKeyboardInputSource
         ) {
             sendKeyPress(to: surface, event: event)
+<<<<<<< HEAD
             return
         }
 
@@ -287,6 +291,13 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         // If insertText fires, it sends text via ghostty_surface_text —
         // skip the manual ghostty_surface_key below to avoid double input.
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+            return
+        }
+
+        // Reserve interpretKeyEvents for composition-capable input paths.
+        // If insertText or setMarkedText fires, it already sent the text/preedit state.
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
         _currentKeyEventModifiers = event.modifierFlags
         defer { _currentKeyEventModifiers = [] }
         _didInsertText = false
@@ -294,6 +305,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
         if _didInsertText || hasMarkedText() { return }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         sendKeyPress(to: surface, event: event)
 =======
@@ -310,6 +322,9 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             }
         }
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+        sendKeyPress(to: surface, event: event)
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -732,6 +747,9 @@ func ghosttyShouldBypassInterpretKeyEvents(modifiers: NSEvent.ModifierFlags) -> 
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
 func ghosttyShouldHandleKeyDownDirectly(
     characters: String?,
     modifiers: NSEvent.ModifierFlags,
@@ -748,13 +766,19 @@ func ghosttyShouldHandleKeyDownDirectly(
     return !ghosttyInputSourceUsesTextComposition(selectedInputSource)
 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
 func ghosttyKeyText(characters: String?, modifiers: NSEvent.ModifierFlags) -> String? {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard modifiers.intersection(controlLikeModifiers).isEmpty else { return nil }
     guard let characters, !characters.isEmpty else { return nil }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
     guard ghosttyIsPrintableKeyText(characters) else { return nil }
     return characters
 }
@@ -775,6 +799,7 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
 =======
@@ -782,6 +807,8 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
 }
 
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
 private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"

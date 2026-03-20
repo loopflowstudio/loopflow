@@ -56,6 +56,9 @@ struct GhosttyTerminalViewTests {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
     @Test("ordinary printable typing goes straight to key events")
     func ordinaryPrintableTypingUsesDirectKeyEvents() {
         #expect(
@@ -97,6 +100,7 @@ struct GhosttyTerminalViewTests {
     }
 
     @Test("printable key text is only attached for printable characters without command or control")
+<<<<<<< HEAD
     func printableKeyTextRespectsModifiers() {
         #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
         #expect(ghosttyKeyText(characters: " ", modifiers: []) == " ")
@@ -106,6 +110,12 @@ struct GhosttyTerminalViewTests {
     func printableKeyTextRespectsModifiers() {
         #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+    func printableKeyTextRespectsModifiers() {
+        #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
+        #expect(ghosttyKeyText(characters: " ", modifiers: []) == " ")
+        #expect(ghosttyKeyText(characters: "\n", modifiers: []) == nil)
+>>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.control]) == nil)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.command]) == nil)
         #expect(ghosttyKeyText(characters: nil, modifiers: []) == nil)

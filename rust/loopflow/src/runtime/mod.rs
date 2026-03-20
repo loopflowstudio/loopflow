@@ -14,9 +14,29 @@ use crate::lfd::id::LfdId;
 const RUNTIME_ROOT: &str = ".lf/runtime/runs";
 
 #[derive(Debug, Clone, Default)]
-pub struct RunTarget {
-    pub flow: Option<String>,
-    pub step: Option<String>,
+pub enum RunTarget {
+    #[default]
+    Untargeted,
+    Flow(String),
+    Step(String),
+}
+
+impl RunTarget {
+    pub fn flow(name: impl Into<String>) -> Self {
+        Self::Flow(name.into())
+    }
+
+    pub fn step(name: impl Into<String>) -> Self {
+        Self::Step(name.into())
+    }
+
+    fn into_parts(self) -> (Option<String>, Option<String>) {
+        match self {
+            Self::Untargeted => (None, None),
+            Self::Flow(flow) => (Some(flow), None),
+            Self::Step(step) => (None, Some(step)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,16 +143,20 @@ impl RuntimeRun {
         let run_id = LfdId::new();
         let run_dir = runs_root(repo_root).join(run_id.as_str());
         fs::create_dir_all(&run_dir)?;
+        let started_at = OffsetDateTime::now_utc();
+        let worktree = repo_root.to_string_lossy().to_string();
+        let command = command.to_vec();
+        let (flow, step) = target.into_parts();
 
         let meta = RuntimeRunMeta {
             run_id: run_id.clone(),
             wave_name: wave_name.clone(),
             repo: main_repo.to_string_lossy().to_string(),
-            worktree: repo_root.to_string_lossy().to_string(),
-            command: command.to_vec(),
-            flow: target.flow.clone(),
-            step: target.step.clone(),
-            started_at: OffsetDateTime::now_utc(),
+            worktree: worktree.clone(),
+            command: command.clone(),
+            flow: flow.clone(),
+            step: step.clone(),
+            started_at,
             target_branch: current_branch(repo_root).ok().flatten(),
         };
 
@@ -147,18 +171,14 @@ impl RuntimeRun {
         };
         run.append_event(&RuntimeEvent::RunStarted {
             run_id,
-            timestamp: OffsetDateTime::now_utc(),
-            command: command.to_vec(),
-            worktree: repo_root.to_string_lossy().to_string(),
+            timestamp: started_at,
+            command,
+            worktree,
             wave_name,
-            flow: target.flow,
-            step: target.step,
+            flow,
+            step,
         })?;
         Ok(run)
-    }
-
-    pub fn meta(&self) -> &RuntimeRunMeta {
-        &self.meta
     }
 
     pub fn emit_step_started(&self, step: &str, index: u32) {
@@ -209,10 +229,6 @@ impl RuntimeRun {
             exit_code: 1,
             error: error.to_string(),
         });
-    }
-
-    pub fn run_dir(&self) -> &Path {
-        &self.run_dir
     }
 
     fn emit(&self, event: RuntimeEvent) {
@@ -276,73 +292,35 @@ pub fn read_events(run_dir: &Path) -> Result<Vec<RuntimeEvent>, std::io::Error> 
 mod tests {
     use super::{read_events, read_meta, RunTarget, RuntimeEvent, RuntimeRun};
     use loopflow_test_support::TestRepo;
-    use std::path::PathBuf;
-    use std::process::Command;
-
-    fn create_wave_worktree(repo: &TestRepo, wave_name: &str) -> PathBuf {
-        let repo_root = repo.path();
-        let parent = repo_root.parent().expect("repo parent");
-        let repo_name = repo_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap();
-        let worktree = parent.join(format!("{repo_name}.{wave_name}"));
-        let output = Command::new("git")
-            .current_dir(repo_root)
-            .args(["worktree", "add"])
-            .arg(&worktree)
-            .args(["-b", wave_name, "main"])
-            .output()
-            .expect("create worktree");
-        assert!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        worktree
-    }
 
     #[test]
     fn runtime_run_is_disabled_in_main_repo() {
         let repo = TestRepo::new();
         let command = vec!["lf".to_string(), "implement".to_string()];
-        assert!(RuntimeRun::maybe_start(
-            repo.path(),
-            &command,
-            RunTarget {
-                step: Some("implement".to_string()),
-                ..RunTarget::default()
-            }
-        )
-        .is_none());
+        assert!(
+            RuntimeRun::maybe_start(repo.path(), &command, RunTarget::step("implement")).is_none()
+        );
     }
 
     #[test]
     fn runtime_run_writes_meta_and_events_in_wave_worktree() {
         let repo = TestRepo::new();
-        let worktree = create_wave_worktree(&repo, "runtime");
+        let worktree = repo.create_wave_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
-        let run = RuntimeRun::maybe_start(
-            &worktree,
-            &command,
-            RunTarget {
-                flow: Some("build".to_string()),
-                ..RunTarget::default()
-            },
-        )
-        .expect("runtime run");
+        let run = RuntimeRun::maybe_start(&worktree, &command, RunTarget::flow("build"))
+            .expect("runtime run");
 
         run.emit_step_started("implement", 0);
         run.emit_waiting("review-design");
         run.emit_step_completed("implement", 0, 0);
         run.complete_success();
 
-        let meta = read_meta(run.run_dir()).expect("read meta");
+        let meta = read_meta(&run.run_dir).expect("read meta");
         assert_eq!(meta.wave_name, "runtime");
         assert_eq!(meta.command, command);
         assert_eq!(meta.flow.as_deref(), Some("build"));
 
-        let events = read_events(run.run_dir()).expect("read events");
+        let events = read_events(&run.run_dir).expect("read events");
         assert!(matches!(events[0], RuntimeEvent::RunStarted { .. }));
         assert!(matches!(events[1], RuntimeEvent::StepStarted { .. }));
         assert!(matches!(events[2], RuntimeEvent::RunWaiting { .. }));

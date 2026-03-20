@@ -165,31 +165,6 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::runtime::{RunTarget, RuntimeEvent, RuntimeRun};
     use loopflow_test_support::TestRepo;
-    use std::path::PathBuf;
-    use std::process::Command;
-
-    fn create_wave_worktree(repo: &TestRepo, wave_name: &str) -> PathBuf {
-        let repo_root = repo.path();
-        let parent = repo_root.parent().expect("repo parent");
-        let repo_name = repo_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap();
-        let worktree = parent.join(format!("{repo_name}.{wave_name}"));
-        let output = Command::new("git")
-            .current_dir(repo_root)
-            .args(["worktree", "add"])
-            .arg(&worktree)
-            .args(["-b", wave_name, "main"])
-            .output()
-            .expect("create worktree");
-        assert!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        worktree
-    }
 
     #[test]
     fn runtime_event_maps_to_client_event() {
@@ -208,14 +183,11 @@ mod tests {
     #[test]
     fn observer_replays_new_runtime_events() {
         let repo = TestRepo::new();
-        let worktree = create_wave_worktree(&repo, "observe");
+        let worktree = repo.create_wave_worktree("observe");
         let run = RuntimeRun::maybe_start(
             &worktree,
             &["lf".to_string(), "build".to_string()],
-            RunTarget {
-                flow: Some("build".to_string()),
-                ..RunTarget::default()
-            },
+            RunTarget::flow("build"),
         )
         .expect("runtime run");
         run.emit_step_started("implement", 0);

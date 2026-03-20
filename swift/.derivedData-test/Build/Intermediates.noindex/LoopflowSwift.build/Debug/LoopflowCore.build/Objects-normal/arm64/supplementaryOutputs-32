@@ -1,0 +1,23 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Models/WaveViewModel.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WaveViewModel.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WaveViewModel.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WaveViewModel.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WaveViewModel.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WaveViewModel.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Models/WorktreeInfo.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeInfo.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeInfo.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeInfo.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeInfo.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeInfo.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/State/WorktreeStore.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeStore.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeStore.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeStore.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeStore.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/WorktreeStore.swiftdeps"
+  }
+}

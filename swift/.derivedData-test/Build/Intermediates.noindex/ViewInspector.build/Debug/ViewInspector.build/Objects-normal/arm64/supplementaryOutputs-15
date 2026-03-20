@@ -1,0 +1,51 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/Toggle.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toggle.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toggle.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toggle.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toggle.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toggle.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/Toolbar.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toolbar.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toolbar.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toolbar.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toolbar.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Toolbar.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/TouchBar.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TouchBar.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TouchBar.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TouchBar.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TouchBar.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TouchBar.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/TreeView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TreeView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TreeView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TreeView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TreeView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TreeView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/TupleView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TupleView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TupleView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TupleView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TupleView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/TupleView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/UnaryViewAdaptor.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/UnaryViewAdaptor.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/UnaryViewAdaptor.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/UnaryViewAdaptor.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/UnaryViewAdaptor.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/UnaryViewAdaptor.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/VSplitView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VSplitView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VSplitView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VSplitView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VSplitView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VSplitView.swiftdeps"
+  }
+}

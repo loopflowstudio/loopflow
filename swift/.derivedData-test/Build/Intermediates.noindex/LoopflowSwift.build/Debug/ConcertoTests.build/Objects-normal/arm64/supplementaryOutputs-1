@@ -1,0 +1,23 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/AttentionStoreTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AttentionStoreTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AttentionStoreTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AttentionStoreTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AttentionStoreTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AttentionStoreTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/AuthProviderStoreTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderStoreTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderStoreTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderStoreTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderStoreTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderStoreTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/AuthProviderTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/AuthProviderTests.swiftdeps"
+  }
+}

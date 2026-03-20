@@ -256,6 +256,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
+<<<<<<< HEAD
         if ghosttyShouldHandleKeyDownDirectly(
             characters: event.characters,
             modifiers: event.modifierFlags,
@@ -268,6 +269,24 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
         // Reserve interpretKeyEvents for composition-capable input paths.
         // If insertText or setMarkedText fires, it already sent the text/preedit state.
+=======
+        if ghosttyShouldBypassInterpretKeyEvents(modifiers: event.modifierFlags) {
+            var key = translateKey(event)
+            if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
+                chars.withCString { textPtr in
+                    key.text = textPtr
+                    _ = ghostty_surface_key(surface, key)
+                }
+            } else {
+                _ = ghostty_surface_key(surface, key)
+            }
+            return
+        }
+
+        // Use interpretKeyEvents for IME support.
+        // If insertText fires, it sends text via ghostty_surface_text —
+        // skip the manual ghostty_surface_key below to avoid double input.
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         _currentKeyEventModifiers = event.modifierFlags
         defer { _currentKeyEventModifiers = [] }
         _didInsertText = false
@@ -275,7 +294,22 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
         if _didInsertText || hasMarkedText() { return }
 
+<<<<<<< HEAD
         sendKeyPress(to: surface, event: event)
+=======
+        // For non-IME keys, send directly to Ghostty
+        if _markedRange.location == NSNotFound {
+            var key = translateKey(event)
+            if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
+                chars.withCString { textPtr in
+                    key.text = textPtr
+                    _ = ghostty_surface_key(surface, key)
+                }
+            } else {
+                _ = ghostty_surface_key(surface, key)
+            }
+        }
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -683,6 +717,9 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
@@ -694,6 +731,7 @@ func ghosttyShouldBypassInterpretKeyEvents(modifiers: NSEvent.ModifierFlags) -> 
     !modifiers.intersection([.control, .command]).isEmpty
 }
 
+<<<<<<< HEAD
 func ghosttyShouldHandleKeyDownDirectly(
     characters: String?,
     modifiers: NSEvent.ModifierFlags,
@@ -710,10 +748,13 @@ func ghosttyShouldHandleKeyDownDirectly(
     return !ghosttyInputSourceUsesTextComposition(selectedInputSource)
 }
 
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 func ghosttyKeyText(characters: String?, modifiers: NSEvent.ModifierFlags) -> String? {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard modifiers.intersection(controlLikeModifiers).isEmpty else { return nil }
     guard let characters, !characters.isEmpty else { return nil }
+<<<<<<< HEAD
     guard ghosttyIsPrintableKeyText(characters) else { return nil }
     return characters
 }
@@ -736,6 +777,11 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
 
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+    return characters
+}
+
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"

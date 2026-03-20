@@ -1,0 +1,51 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/VStack.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VStack.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VStack.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VStack.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VStack.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VStack.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/VideoPlayer.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VideoPlayer.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VideoPlayer.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VideoPlayer.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VideoPlayer.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/VideoPlayer.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/ViewThatFits.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewThatFits.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewThatFits.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewThatFits.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewThatFits.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewThatFits.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/ZStack.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ZStack.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ZStack.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ZStack.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ZStack.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ZStack.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/ViewHosting.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewHosting.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewHosting.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewHosting.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewHosting.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewHosting.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/ViewSearch.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearch.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearch.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearch.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearch.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearch.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/ViewSearchIndex.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearchIndex.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearchIndex.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearchIndex.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearchIndex.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ViewSearchIndex.swiftdeps"
+  }
+}

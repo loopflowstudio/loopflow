@@ -1,0 +1,23 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/PortfolioServiceTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioServiceTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioServiceTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioServiceTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioServiceTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioServiceTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/QuoteReplyQueueFlowTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/QuoteReplyQueueFlowTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/QuoteReplyQueueFlowTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/QuoteReplyQueueFlowTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/QuoteReplyQueueFlowTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/QuoteReplyQueueFlowTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/ReplyQueueTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/ReplyQueueTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/ReplyQueueTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/ReplyQueueTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/ReplyQueueTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/ReplyQueueTests.swiftdeps"
+  }
+}

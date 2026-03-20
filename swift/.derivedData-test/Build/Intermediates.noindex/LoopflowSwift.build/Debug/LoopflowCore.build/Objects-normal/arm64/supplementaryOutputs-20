@@ -1,0 +1,30 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Design/BrandColors.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/BrandColors.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/BrandColors.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/BrandColors.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/BrandColors.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/BrandColors.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Models/ChatMemoryBlock.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatMemoryBlock.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatMemoryBlock.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatMemoryBlock.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatMemoryBlock.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatMemoryBlock.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Models/ChatTurn.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatTurn.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatTurn.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatTurn.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatTurn.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/ChatTurn.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Services/CertificatePinningDelegate.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/CertificatePinningDelegate.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/CertificatePinningDelegate.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/CertificatePinningDelegate.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/CertificatePinningDelegate.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/CertificatePinningDelegate.swiftdeps"
+  }
+}

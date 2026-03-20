@@ -1,0 +1,23 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/LocalWaveServiceAuthTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/LocalWaveServiceAuthTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/LocalWaveServiceAuthTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/LocalWaveServiceAuthTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/LocalWaveServiceAuthTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/LocalWaveServiceAuthTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/MultiplexerTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/MultiplexerTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/MultiplexerTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/MultiplexerTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/MultiplexerTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/MultiplexerTests.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/ConcertoTests/PortfolioRepoStateTests.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioRepoStateTests.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioRepoStateTests.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioRepoStateTests.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioRepoStateTests.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/ConcertoTests.build/Objects-normal/arm64/PortfolioRepoStateTests.swiftdeps"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "" : {
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TensorUtils-primary.dia",
+    "emit-module-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TensorUtils-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TensorUtils-primary-emit-module.dia",
+    "pch" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TensorUtils-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TensorUtils-primary.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/LogitsProcessor.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsProcessor~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/LogitsWarper.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/LogitsWarper~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/RepetitionPenaltyWarper.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/RepetitionPenaltyWarper~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TemperatureLogitsWarper.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TemperatureLogitsWarper~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TopKLogitsWarper.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopKLogitsWarper~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/LogitsWarper/TopPLogitsWarper.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/TopPLogitsWarper~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/MLMultiArray+Utils.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLMultiArray+Utils~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/MLShapedArray+Utils.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/MLShapedArray+Utils~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/TensorUtils/Math.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/TensorUtils.build/Objects-normal/arm64/Math~partial.swiftmodule"
+  }
+}

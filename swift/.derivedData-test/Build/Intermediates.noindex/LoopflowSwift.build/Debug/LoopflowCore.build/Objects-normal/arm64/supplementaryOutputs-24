@@ -1,0 +1,30 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/LoopflowCore.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoopflowCore.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoopflowCore.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoopflowCore.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoopflowCore.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoopflowCore.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Models/MultiplexerLayout.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerLayout.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerLayout.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerLayout.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerLayout.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerLayout.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Services/LocalWaveService.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LocalWaveService.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LocalWaveService.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LocalWaveService.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LocalWaveService.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LocalWaveService.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Services/LoggingService.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoggingService.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoggingService.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoggingService.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoggingService.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/LoggingService.swiftdeps"
+  }
+}

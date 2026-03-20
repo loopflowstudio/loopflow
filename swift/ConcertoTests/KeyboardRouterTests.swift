@@ -208,10 +208,14 @@ struct KeyboardRouterTests {
 
         let handled = router.routeEvent(
 <<<<<<< HEAD
+<<<<<<< HEAD
             key: .character("\\"),
 =======
             key: .character("d"),
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            key: .character("\\"),
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             modifiers: [.command],
             isRepeat: false,
             mode: .terminal
@@ -222,6 +226,9 @@ struct KeyboardRouterTests {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     @Test("terminal focus navigation uses option-command arrows")
     func terminalFocusNavigationShortcut() {
         let router = KeyboardRouter()
@@ -238,8 +245,11 @@ struct KeyboardRouterTests {
         #expect(actions == [.focusNextPane])
     }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     @Test("terminal mode ignores non-multiplexer shortcuts")
     func terminalModeIgnoresNonMultiplexerShortcuts() {
         let router = KeyboardRouter()

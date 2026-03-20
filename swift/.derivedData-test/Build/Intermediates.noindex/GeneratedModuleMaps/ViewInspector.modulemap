@@ -1,0 +1,4 @@
+module ViewInspector {
+header "ViewInspector-Swift.h"
+export *
+}

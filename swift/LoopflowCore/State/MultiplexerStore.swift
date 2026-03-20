@@ -28,10 +28,14 @@ public final class MultiplexerStore {
             return existing
         }
 <<<<<<< HEAD
+<<<<<<< HEAD
         let defaultLayout = assignTerminalSessions(in: LayoutNode.defaultLayout(), for: waveId)
 =======
         let defaultLayout = LayoutNode.defaultLayout()
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        let defaultLayout = assignTerminalSessions(in: LayoutNode.defaultLayout(), for: waveId)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         layoutsByWave[waveId] = defaultLayout
         return defaultLayout
     }
@@ -68,10 +72,14 @@ public final class MultiplexerStore {
 
     public func setLayout(_ layout: LayoutNode, for waveId: String) {
 <<<<<<< HEAD
+<<<<<<< HEAD
         layoutsByWave[waveId] = assignTerminalSessions(in: layout, for: waveId)
 =======
         layoutsByWave[waveId] = layout
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        layoutsByWave[waveId] = assignTerminalSessions(in: layout, for: waveId)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         reconcileFocus(for: waveId)
         persist()
     }
@@ -89,6 +97,7 @@ public final class MultiplexerStore {
         for waveId: String
     ) -> PaneState {
 <<<<<<< HEAD
+<<<<<<< HEAD
         let newPane = makePane(type: newPaneType, for: waveId)
 =======
         if newPaneType == .terminal, let terminalPane = layout(for: waveId).allPanes.first(where: { $0.type == .terminal }) {
@@ -99,6 +108,9 @@ public final class MultiplexerStore {
 
         let newPane = PaneState(type: newPaneType)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        let newPane = makePane(type: newPaneType, for: waveId)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         let current = layout(for: waveId)
         let updated = current.splitting(paneId, axis: axis, newPane: newPane)
         layoutsByWave[waveId] = updated
@@ -111,9 +123,12 @@ public final class MultiplexerStore {
         let current = layout(for: waveId)
         guard let closedPane = current.pane(for: paneId) else { return nil }
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         guard closedPane.type != .terminal else { return nil }
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
         if let updated = current.removing(paneId) {
             layoutsByWave[waveId] = updated
@@ -122,9 +137,13 @@ public final class MultiplexerStore {
             layoutsByWave.removeValue(forKey: waveId)
             focusedPaneByWave.removeValue(forKey: waveId)
 <<<<<<< HEAD
+<<<<<<< HEAD
             removePersistedLayout(for: waveId)
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            removePersistedLayout(for: waveId)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         }
         persist()
         return closedPane
@@ -137,6 +156,9 @@ public final class MultiplexerStore {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     public func replacePane(
         _ paneId: String,
         with newPaneType: PaneType,
@@ -158,8 +180,11 @@ public final class MultiplexerStore {
         return replacement
     }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     public func moveFocus(_ direction: FocusDirection, for waveId: String) {
         guard let current = focusedPaneId(for: waveId) else { return }
         let layout = layout(for: waveId)
@@ -178,6 +203,7 @@ public final class MultiplexerStore {
         layoutsByWave.removeValue(forKey: waveId)
         focusedPaneByWave.removeValue(forKey: waveId)
 <<<<<<< HEAD
+<<<<<<< HEAD
         removePersistedLayout(for: waveId)
         persist()
     }
@@ -190,12 +216,24 @@ public final class MultiplexerStore {
             return pane.config.terminalSessionName
         }
 =======
+=======
+        removePersistedLayout(for: waveId)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         persist()
     }
 
     public func terminalPane(for waveId: String) -> PaneState? {
         layout(for: waveId).allPanes.first(where: { $0.type == .terminal })
 >>>>>>> 55cd605c (lf commit: implement)
+    }
+
+    public func terminalSessionNames(for waveId: String) -> [String] {
+        ensureLoaded(waveId)
+        guard let layout = layoutsByWave[waveId] else { return [] }
+        return layout.allPanes.compactMap { pane in
+            guard pane.type == .terminal else { return nil }
+            return pane.config.terminalSessionName
+        }
     }
 
     // MARK: - Persistence
@@ -234,12 +272,18 @@ public final class MultiplexerStore {
         let key = storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout")
         guard let data = userDefaults.data(forKey: key) else { return }
 <<<<<<< HEAD
+<<<<<<< HEAD
         if let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) {
             layoutsByWave[waveId] = assignTerminalSessions(in: decoded, for: waveId)
         }
 =======
         layoutsByWave[waveId] = try? JSONDecoder().decode(LayoutNode.self, from: data)
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        if let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) {
+            layoutsByWave[waveId] = assignTerminalSessions(in: decoded, for: waveId)
+        }
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     private func reconcileFocus(for waveId: String) {
@@ -257,6 +301,9 @@ public final class MultiplexerStore {
         return "multiplexer.\(suffix).\(repoKey)"
     }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     private func makePane(type: PaneType, for waveId: String) -> PaneState {
         let paneId = UUID().uuidString
@@ -285,8 +332,11 @@ public final class MultiplexerStore {
         guard let repoKey else { return }
         userDefaults.removeObject(forKey: storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout"))
     }
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 }
 
 public enum FocusDirection: Sendable {

@@ -1,0 +1,49 @@
+{
+  "" : {
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub-primary.dia",
+    "emit-module-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub-primary-emit-module.dia",
+    "pch" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub-primary.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/resource_bundle_accessor~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/Hub/Downloader.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Downloader~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/Hub/Hub.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/Hub~partial.swiftmodule"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/swift-transformers/Sources/Hub/HubApi.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.dia",
+    "index-unit-output-path" : "/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.o",
+    "llvm-bc" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.bc",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi.swiftdeps",
+    "swiftmodule" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/swift-transformers.build/Debug/Hub.build/Objects-normal/arm64/HubApi~partial.swiftmodule"
+  }
+}

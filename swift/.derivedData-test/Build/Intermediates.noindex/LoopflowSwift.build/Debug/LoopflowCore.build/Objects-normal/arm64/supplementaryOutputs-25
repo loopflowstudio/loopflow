@@ -1,0 +1,30 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Services/NameGenerator.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NameGenerator.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NameGenerator.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NameGenerator.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NameGenerator.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NameGenerator.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/Services/NotificationService.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NotificationService.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NotificationService.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NotificationService.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NotificationService.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/NotificationService.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/State/MultiplexerStore.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerStore.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerStore.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerStore.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerStore.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/MultiplexerStore.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowCore/State/OutputBuffer.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/OutputBuffer.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/OutputBuffer.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/OutputBuffer.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/OutputBuffer.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/LoopflowSwift.build/Debug/LoopflowCore.build/Objects-normal/arm64/OutputBuffer.swiftdeps"
+  }
+}

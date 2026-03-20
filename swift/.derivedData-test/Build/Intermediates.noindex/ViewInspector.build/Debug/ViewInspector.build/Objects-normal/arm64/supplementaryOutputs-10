@@ -1,0 +1,58 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/MapAnnotation.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MapAnnotation.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MapAnnotation.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MapAnnotation.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MapAnnotation.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MapAnnotation.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/Menu.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Menu.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Menu.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Menu.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Menu.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Menu.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/MenuButton.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MenuButton.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MenuButton.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MenuButton.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MenuButton.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MenuButton.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/MultiDatePicker.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MultiDatePicker.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MultiDatePicker.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MultiDatePicker.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MultiDatePicker.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/MultiDatePicker.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/NavigationDestination.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationDestination.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationDestination.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationDestination.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationDestination.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationDestination.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/NavigationLink.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationLink.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationLink.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationLink.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationLink.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationLink.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/NavigationSplitView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationSplitView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationSplitView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationSplitView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationSplitView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationSplitView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/NavigationStack.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationStack.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationStack.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationStack.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationStack.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/NavigationStack.swiftdeps"
+  }
+}

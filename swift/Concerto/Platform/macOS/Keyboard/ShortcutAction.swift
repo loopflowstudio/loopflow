@@ -245,10 +245,14 @@ enum ShortcutCatalog {
         // Multiplexer
         ShortcutBinding(
 <<<<<<< HEAD
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
 =======
             gesture: ShortcutGesture(key: .character("d"), modifiers: [.command], allowsRepeat: false),
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             action: .splitVertical,
             label: "Split vertical",
             category: .multiplexer,
@@ -256,10 +260,14 @@ enum ShortcutCatalog {
         ),
         ShortcutBinding(
 <<<<<<< HEAD
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
 =======
             gesture: ShortcutGesture(key: .character("d"), modifiers: [.command, .shift], allowsRepeat: false),
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             action: .splitHorizontal,
             label: "Split horizontal",
             category: .multiplexer,
@@ -281,10 +289,14 @@ enum ShortcutCatalog {
         ),
         ShortcutBinding(
 <<<<<<< HEAD
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command, .option], allowsRepeat: false),
 =======
             gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command], allowsRepeat: false),
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command, .option], allowsRepeat: false),
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             action: .focusNextPane,
             label: "Focus next pane",
             category: .multiplexer,
@@ -292,10 +304,14 @@ enum ShortcutCatalog {
         ),
         ShortcutBinding(
 <<<<<<< HEAD
+<<<<<<< HEAD
             gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command, .option], allowsRepeat: false),
 =======
             gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command], allowsRepeat: false),
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command, .option], allowsRepeat: false),
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             action: .focusPreviousPane,
             label: "Focus previous pane",
             category: .multiplexer,

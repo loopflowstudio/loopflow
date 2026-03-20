@@ -1,0 +1,72 @@
+{
+  "buildCommand" : {
+    "command" : "build",
+    "skipDependencies" : false,
+    "style" : "buildAndRun"
+  },
+  "configuredTargets" : [
+    {
+      "guid" : "07dc288c49c684e7988490adc56cbf2014759548ad13a5e9be179c4abb6129de"
+    },
+    {
+      "guid" : "07dc288c49c684e7988490adc56cbf2074d216eff6f8e1551dfd184a35a8b069"
+    },
+    {
+      "guid" : "07dc288c49c684e7988490adc56cbf205fada74de3dc050ceb0c763d05701168"
+    }
+  ],
+  "containerPath" : "/Users/jack/src/loopflow.agent-embedding/swift/LoopflowSwift.xcodeproj",
+  "continueBuildingAfterErrors" : false,
+  "dependencyScope" : "workspace",
+  "enableIndexBuildArena" : false,
+  "hideShellScriptEnvironment" : false,
+  "parameters" : {
+    "action" : "build",
+    "activeArchitecture" : "arm64",
+    "activeRunDestination" : {
+      "disableOnlyActiveArch" : false,
+      "platform" : "macosx",
+      "sdk" : "macosx26.2",
+      "sdkVariant" : "macos",
+      "supportedArchitectures" : [
+        "arm64e",
+        "arm64",
+        "x86_64"
+      ],
+      "targetArchitecture" : "arm64"
+    },
+    "arenaInfo" : {
+      "buildIntermediatesPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex",
+      "buildProductsPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Products",
+      "derivedDataPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test",
+      "indexDataStoreFolderPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Index.noindex/DataStore",
+      "indexEnableDataStore" : true,
+      "indexPCHPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Index.noindex/PrecompiledHeaders",
+      "pchPath" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/PrecompiledHeaders"
+    },
+    "configurationName" : "Debug",
+    "overrides" : {
+      "commandLine" : {
+        "table" : {
+          "CODE_SIGNING_ALLOWED" : "NO",
+          "CODE_SIGNING_REQUIRED" : "NO"
+        }
+      },
+      "synthesized" : {
+        "table" : {
+          "CLANG_COVERAGE_MAPPING" : "YES",
+          "CLANG_PROFILE_DATA_DIRECTORY" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/ProfileData",
+          "ENABLE_PREVIEWS" : "NO",
+          "ENABLE_XOJIT_PREVIEWS" : "YES",
+          "ONLY_ACTIVE_ARCH" : "YES"
+        }
+      }
+    }
+  },
+  "schemeCommand" : "test",
+  "showNonLoggedProgress" : true,
+  "useDryRun" : false,
+  "useImplicitDependencies" : true,
+  "useLegacyBuildLocations" : false,
+  "useParallelTargets" : true
+}

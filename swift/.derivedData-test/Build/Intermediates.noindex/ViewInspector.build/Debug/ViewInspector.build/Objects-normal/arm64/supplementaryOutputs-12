@@ -1,0 +1,58 @@
+{
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/ProgressView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ProgressView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ProgressView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ProgressView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ProgressView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ProgressView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/RadialGradient.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/RadialGradient.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/RadialGradient.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/RadialGradient.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/RadialGradient.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/RadialGradient.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/SafeAreaInset.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SafeAreaInset.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SafeAreaInset.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SafeAreaInset.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SafeAreaInset.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SafeAreaInset.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/ScrollView.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollView.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollView.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollView.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollView.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollView.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/ScrollViewReader.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollViewReader.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollViewReader.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollViewReader.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollViewReader.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/ScrollViewReader.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/Section.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Section.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Section.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Section.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Section.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Section.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/SecureField.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SecureField.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SecureField.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SecureField.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SecureField.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/SecureField.swiftdeps"
+  },
+  "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/SourcePackages/checkouts/ViewInspector/Sources/ViewInspector/SwiftUI/Shape.swift" : {
+    "const-values" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Shape.swiftconstvalues",
+    "dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Shape.d",
+    "diagnostics" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Shape.dia",
+    "object" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Shape.o",
+    "swift-dependencies" : "/Users/jack/src/loopflow.agent-embedding/swift/.derivedData-test/Build/Intermediates.noindex/ViewInspector.build/Debug/ViewInspector.build/Objects-normal/arm64/Shape.swiftdeps"
+  }
+}

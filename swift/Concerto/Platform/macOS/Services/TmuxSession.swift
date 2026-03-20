@@ -1,10 +1,15 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 // Manages the tmux session backing a multiplexer terminal pane.
 // Concerto owns layout and focus; tmux just hosts one durable shell per pane.
 =======
 // Manages the tmux session backing the multiplexer terminal pane.
 // Concerto owns the outer pane tree; tmux owns shell subdivision inside the terminal pane.
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+// Manages the tmux session backing a multiplexer terminal pane.
+// Concerto owns layout and focus; tmux just hosts one durable shell per pane.
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
 import Foundation
 import LoopflowCore
@@ -16,6 +21,7 @@ final class TmuxSession {
     let sessionName: String
     let worktreePath: String
     private let registry: TmuxSessionRegistry
+<<<<<<< HEAD
 
     init(
         sessionName: String,
@@ -50,22 +56,39 @@ final class TmuxSession {
     let sessionName: String
 >>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     let worktreePath: String
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
-    init(waveId: String, worktreePath: String) {
-        self.sessionName = "lf-\(waveId)"
+    init(
+        sessionName: String,
+        worktreePath: String,
+        registry: TmuxSessionRegistry = .shared
+    ) {
+        self.sessionName = sessionName
         self.worktreePath = worktreePath
+        self.registry = registry
     }
 
-    func ensureBaseSession() async throws {
-        guard !(await sessionExists(sessionName)) else { return }
+    func ensureBaseSession(launchCommand: String? = nil) async throws {
+        if await sessionExists(sessionName) {
+            registry.track(sessionName: sessionName)
+            return
+        }
+
         try await run("tmux", "new-session", "-d", "-s", sessionName, "-c", worktreePath)
         try await run("tmux", "set-option", "-t", sessionName, "status", "off")
+        if let launchCommand, !launchCommand.isEmpty {
+            try await run("tmux", "send-keys", "-t", sessionName, "-l", launchCommand)
+            try await run("tmux", "send-keys", "-t", sessionName, "Enter")
+        }
+        registry.track(sessionName: sessionName)
     }
 
     func attachCommand() -> [String] {
         ["tmux", "attach-session", "-t", sessionName]
     }
 
+<<<<<<< HEAD
     func split(_ axis: SplitAxis) async throws {
         try await ensureBaseSession()
         switch axis {
@@ -110,6 +133,8 @@ final class TmuxSession {
 >>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
     }
 
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     func sessionExists(_ name: String) async -> Bool {
         do {
             try await run("tmux", "has-session", "-t", name)
@@ -119,6 +144,7 @@ final class TmuxSession {
         }
     }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
         do {
@@ -141,41 +167,40 @@ final class TmuxSession {
 =======
     private func currentWindowPaneCount() async throws -> Int {
         try await displayMessageCount("#{window_panes}")
+=======
+    func kill() async throws {
+        try Self.killSessionIfExists(named: sessionName)
+        registry.untrack(sessionName: sessionName)
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
-    private func sessionWindowCount() async throws -> Int {
-        try await displayMessageCount("#{session_windows}")
-    }
-
-    private func displayMessageCount(_ format: String) async throws -> Int {
-        let output = try await runOutput(
-            "tmux",
-            "display-message",
-            "-p",
-            "-t",
-            sessionName,
-            format
-        )
-        guard let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            throw TmuxError.unexpectedOutput(output)
+    nonisolated static func killSessionIfExists(named sessionName: String) throws {
+        do {
+            _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])
+        } catch let TmuxError.commandFailed(_, _, detail)
+            where detail.localizedCaseInsensitiveContains("can't find session") {
+            return
         }
-        return count
     }
 
     private func run(_ args: String...) async throws {
         _ = try await runCommand(args)
     }
 
-    private func runOutput(_ args: String...) async throws -> String {
-        try await runCommand(args)
+    private func runCommand(_ args: [String]) async throws -> String {
+        try Self.runCommandSync(args)
     }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     private func runOutput(_ args: [String]) async throws -> String {
 >>>>>>> 55cd605c (lf commit: implement)
 =======
     private func runCommand(_ args: [String]) async throws -> String {
 >>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
+=======
+    private nonisolated static func runCommandSync(_ args: [String]) throws -> String {
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()

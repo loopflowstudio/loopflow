@@ -18,6 +18,7 @@ public enum PaneType: String, Codable, Sendable {
 public struct PaneConfig: Codable, Sendable, Equatable {
     public var filePath: String?
 <<<<<<< HEAD
+<<<<<<< HEAD
     public var terminalSessionName: String?
     public var launchCommand: String?
 
@@ -30,10 +31,23 @@ public struct PaneConfig: Codable, Sendable, Equatable {
         self.terminalSessionName = terminalSessionName
         self.launchCommand = launchCommand
 =======
+=======
+    public var terminalSessionName: String?
+    public var launchCommand: String?
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
-    public init(filePath: String? = nil) {
+    public init(
+        filePath: String? = nil,
+        terminalSessionName: String? = nil,
+        launchCommand: String? = nil
+    ) {
         self.filePath = filePath
+<<<<<<< HEAD
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+        self.terminalSessionName = terminalSessionName
+        self.launchCommand = launchCommand
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     public static let empty = PaneConfig()
@@ -161,6 +175,9 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     /// Replace a leaf pane while preserving the surrounding tree shape.
     public func replacingPane(_ paneId: String, with pane: PaneState) -> LayoutNode {
         switch self {
@@ -177,8 +194,11 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55cd605c (lf commit: implement)
+=======
+>>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     /// Update the split ratio for the split that directly contains a pane.
     public func updatingRatio(containing paneId: String, ratio: Double) -> LayoutNode {
         switch self {

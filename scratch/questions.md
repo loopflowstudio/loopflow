@@ -1,1 +1,0 @@
-- `xcodebuild test -only-testing:ConcertoUITests/ScreenshotPipelineTests/testCapture` still crashes the `ConcertoUITests-Runner` on this host before XCTest connects (`signal kill` during bootstrap). The app/unit test targets pass; unclear whether the remaining failure is an environment-only UI-test issue or a pre-existing app-launch problem in the macOS UI harness.

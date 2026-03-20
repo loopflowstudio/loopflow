@@ -34,7 +34,7 @@ Pattern: detect failure → classify error → headless repair in same branch �
 
 ### VSM governance flows
 
-Four focused governance flows cover identity, intelligence, control, and coordination. Each flow is scan → assess → play-chord.
+Four focused governance flows cover identity, intelligence, control, and coordination. Each flow is scan → assess → wave/mutate.
 
 ```yaml
 # govern-identity
@@ -124,6 +124,7 @@ Chords can contain chords. Each is a viable system with its own S5. Acyclicity e
 - Wave discovery could fight with manual wave management
 - Algedonic signals could be noisy if thresholds are too sensitive
 - Recursive chords could create deep escalation chains that delay human awareness
+- `or` (multi-select branching) is parsed and rendered but execution intentionally errors — shipped builtins use `xor` only; future flows depending on `or` need execution support first
 
 ## Metrics
 

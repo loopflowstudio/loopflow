@@ -2,9 +2,9 @@
 
 Build and garden. Two voices in counterpoint.
 
-A wave builds — code, tests, PRs. A chord gardens — `scan-waves`,
-`assess`, then routes to tune or silence. A wave build round
-routes to play or silence. Same flow engine, same infrastructure. The
+A wave builds — code, tests, PRs. A chord gardens — `garden/scan`,
+`garden/assess`, then routes to mutate or silence. A wave build round
+routes to build or silence. Same flow engine, same infrastructure. The
 difference is area: files vs waves.
 
 The redesign is the first chord. Its first job is building itself.
@@ -20,7 +20,7 @@ chord: redesign
 │  garden: observes its own waves, routes to tune/silence, remembers
 │
 ├── wave: agent-embedding       7 items — Concerto as conductor
-└── wave: chord-model           8 items — garden flow, Letta, mutations, APIs
+└── wave: chord-model           10 items — worker pools, modes, VSM configs, discovery, Letta, mutations, APIs
 
 wave: dogfood                   3 items — Mac Mini server, phone deploy, team workflow
 ```
@@ -37,11 +37,11 @@ it built.
 
 Build enough to run the first garden cycle. Uses existing flows.
 
-- **chord-model/02** — live garden-cycle validation (boot lfd, register redesign, run garden for real)
-- **chord-model/03** — Letta integration once live garden output exists to remember
+- **chord-model/02a–02d** — worker pools, wave modes, VSM chord configs, concurrent ingest
+- **chord-model/04** — Letta integration once live garden output exists to remember
 
 Current bootstrap pressure:
-- chord-model/02 still owns the live lfd proof; the structural garden work is not the finish line
+- governance flows shipped (xor routing, garden-or-silent, four VSM flows); what remains is runtime config (02a–02d) and live validation
 - stall detection, self-healing polish, and signal memory come later inside chord-model rather than as a separate wave
 
 First garden cycle runs. The chord observes its own bootstrap commits.
@@ -82,8 +82,8 @@ A chord's execution alternates between gardening and building.
 
 ```
 garden (1 global update)
-  scan-waves → assess → branch:
-    tune: play-chord → review-chord
+  garden/scan → garden/assess → xor:
+    garden: wave/mutate → wave/review
     silence: exit cleanly
 
 build × N (parallel, one per active wave)

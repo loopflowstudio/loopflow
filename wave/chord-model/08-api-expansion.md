@@ -8,7 +8,7 @@ linear_id: 3a22bbc6-f7be-41d9-8f07-ca39dfacca47
 
 ## Context
 
-The garden flow (scan-waves, assess) needs to read wave state — files, diffs, step/flow/direction metadata. Remote setups (Mac Mini dogfooding, team mode) can't assume local disk access. These endpoints also power Concerto's area picker and config editing UX.
+The garden flow (garden/scan, garden/assess) needs to read wave state — files, diffs, step/flow/direction metadata. Remote setups (Mac Mini dogfooding, team mode) can't assume local disk access. These endpoints also power Concerto's area picker and config editing UX.
 
 ## Scope
 

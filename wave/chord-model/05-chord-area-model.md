@@ -8,9 +8,9 @@ linear_id: c96d9cc8-3b17-43ee-8f11-8136afab0e2f
 
 ## Context
 
-Bootstrap already established the core rule: membership lives exclusively in `area` entries that point at `wave/<name>/` directories. The filesystem defines each member wave. lfd stores runtime state. This item makes that contract explicit so `scan-waves` and future UI work can depend on one consistent snapshot.
+Bootstrap already established the core rule: membership lives exclusively in `area` entries that point at `wave/<name>/` directories. The filesystem defines each member wave. lfd stores runtime state. This item makes that contract explicit so `garden/scan` and future UI work can depend on one consistent snapshot.
 
-The first slice of that model already shipped: `scan-waves` derives member names from `wave/<name>/`, shells out to `lfq show <wave> --json`, and reads live `WaveDto` state from lfd. That DTO now includes the prompt-level runtime surface `scan-waves` uses today — `flow_steps`, `triggers`, `open_pr_count`, `stack_count`, and optional `active_run` PR / queue state. What's left is turning that prompt-level convention into a richer shared loader/API with cross-wave state, git activity, and human history instead of keeping the aggregation logic inside the prompt.
+The first slice of that model already shipped: `garden/scan` derives member names from `wave/<name>/`, shells out to `lfq show <wave> --json`, and reads live `WaveDto` state from lfd. That DTO now includes the prompt-level runtime surface `garden/scan` uses today — `flow_steps`, `triggers`, `open_pr_count`, `stack_count`, and optional `active_run` PR / queue state. What's left is turning that prompt-level convention into a richer shared loader/API with cross-wave state, git activity, and human history instead of keeping the aggregation logic inside the prompt.
 
 ## What to build
 
@@ -29,11 +29,11 @@ The first slice of that model already shipped: `scan-waves` derives member names
 
 3. **Human decision history.** Include calibration decisions, proposal approvals/rejections, and manual wave mutations so gardening can reason about prior judgment instead of only raw activity.
 
-4. **Wave-based loader or API.** `scan-waves` should be able to load the full snapshot for a wave whose `area` points at `wave/`. No separate chord CRUD comes back.
+4. **Wave-based loader or API.** `garden/scan` should be able to load the full snapshot for a wave whose `area` points at `wave/`. No separate chord CRUD comes back.
 
 ## Done when
 
 - The area snapshot returns structured data for all member waves
-- `scan-waves` uses the shared loader/API instead of ad-hoc gathering
+- `garden/scan` uses the shared loader/API instead of ad-hoc gathering
 - Cross-wave file overlap is detectable from the snapshot
 - Human decision history is included in the snapshot

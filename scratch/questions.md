@@ -13,3 +13,15 @@ Deleted shipped `02-vsm-flow.md`. Folded review risk (scan prompts need graceful
 ## update-wave: final verification (2026-03-19)
 
 Verified all code references in wave items against codebase: `serialized` (27 files), `dispatch_pending_activations`, `spawn_immediate_activation`, `play-chord`, `scan-waves`, `manual` mode — all present and matching item descriptions. No new shipped work since prior pass. Scratch contains only validation/PR content — nothing to fold. No changes to wave/.
+
+## update-wave: stale name cleanup (2026-03-19)
+
+Prior passes missed stale step/flow names in wave items. Fixed:
+- `play-chord` → `wave/mutate` in README, 02c, 06
+- `scan-waves` → `garden/scan` in 02d, 05, 08
+- `scan-waves`/`play-chord`/`review-chord` → shipped names in `wave/roadmap.md`
+- Roadmap Phase 1 updated: item 02 shipped, references corrected to 02a–02d and 04
+- Folded review risk (`or` parsed but not executable) into README risks
+- Trimmed scratch review and PR body to validation-only
+
+Items 02a–02d, 03–08 verified coherent. All future work, no shipped items to delete.

@@ -57,7 +57,7 @@ All four only edit wave space — plans, backlogs, configs, `workers` on s1. No 
 
 `mode: loop`, `workers: N`, `flow: build-or-silent`. Workers pull from the backlog (maintained by s2), each in its own worktree. Ephemeral — worktree pruned after landing.
 
-s3 adjusts `workers` on s1 via `play-chord` mutations.
+s3 adjusts `workers` on s1 via `wave/mutate` mutations.
 
 ### Chord config update
 

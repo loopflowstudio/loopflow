@@ -27,7 +27,7 @@ The PM provider handles the race. Loopflow doesn't need its own locking or coord
 
 ### Frontmatter as local cache
 
-Items get `status: available | in-progress | done` in frontmatter with the claiming run's ID. This is local state, not the source of truth — it survives lfd restarts and gives `scan-waves` something to read without hitting the PM API.
+Items get `status: available | in-progress | done` in frontmatter with the claiming run's ID. This is local state, not the source of truth — it survives lfd restarts and gives `garden/scan` something to read without hitting the PM API.
 
 ## Done when
 

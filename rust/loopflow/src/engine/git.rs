@@ -181,6 +181,19 @@ pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
 }
 
 pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), GitError> {
+    if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
+        let command = format!("git -C {} branch -m {}", worktree.display(), new_name);
+        let output = run_git(&worktree, &["branch", "-m", new_name])?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        return Err(GitError::CommandFailed {
+            command,
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
     let command = format!("git branch -m {} {}", old_name, new_name);
     for attempt in 0..3 {
         let output = run_git(repo, &["branch", "-m", old_name, new_name])?;
@@ -188,21 +201,6 @@ pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), 
             return Ok(());
         }
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if stderr.contains(&format!("no branch named '{old_name}'")) {
-            if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
-                let fallback_command =
-                    format!("git -C {} branch -m {}", worktree.display(), new_name);
-                let fallback = run_git(&worktree, &["branch", "-m", new_name])?;
-                if fallback.status.success() {
-                    return Ok(());
-                }
-
-                return Err(GitError::CommandFailed {
-                    command: fallback_command,
-                    stderr: String::from_utf8_lossy(&fallback.stderr).to_string(),
-                });
-            }
-        }
         let lock_failed = stderr.contains("could not lock config file");
         if lock_failed && attempt < 2 {
             thread::sleep(Duration::from_millis(25));

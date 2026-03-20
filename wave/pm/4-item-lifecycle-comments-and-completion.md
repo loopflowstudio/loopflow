@@ -1,6 +1,6 @@
 ---
 asana_id: '1213718325464924'
-linear_id: b8a89ce2-bde3-41ec-b31e-9e948c921b34
+linear_id: 652929e9-1a91-4fe6-92d8-2d9e907a90ad
 ---
 # 06: Item lifecycle comments and completion
 

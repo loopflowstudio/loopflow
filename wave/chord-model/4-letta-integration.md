@@ -1,6 +1,6 @@
 ---
 asana_id: '1213717740994855'
-linear_id: 6c656949-5c43-4493-8987-efb8ec3644b0
+linear_id: 8238f27f-0605-41f5-9c06-41facb80d639
 ---
 # 04: Letta Integration
 

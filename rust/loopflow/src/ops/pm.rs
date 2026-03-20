@@ -125,6 +125,14 @@ fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
 }
 
 async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dyn PmProvider>> {
+    build_client_with_team(repo, provider, None).await
+}
+
+async fn build_client_with_team(
+    repo: &Path,
+    provider: PmProviderKind,
+    team_id: Option<String>,
+) -> OpsResult<Box<dyn PmProvider>> {
     let config = load_config_or_default(Some(repo));
     let client: Box<dyn PmProvider> = match provider {
         PmProviderKind::Asana => {
@@ -133,7 +141,8 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dy
         }
         PmProviderKind::Linear => {
             let token = resolve_provider_token("linear", "LINEAR_API_KEY").await?;
-            Box::new(LinearClient::new(token, config.linear.team.clone()))
+            let effective_team = team_id.or_else(|| config.linear.team.clone());
+            Box::new(LinearClient::new(token, effective_team))
         }
     };
     Ok(client)
@@ -359,29 +368,40 @@ async fn pm_init_async(repo: &Path, progress: &impl Progress) -> OpsResult<PmIni
         return Err(OpsError::Message("no waves found in wave/".to_string()));
     }
 
+    // Resolve provider from first wave (all waves use the same provider for init).
+    let provider_kind = resolve_provider(repo, &waves[0])?;
+    let client = build_client(repo, provider_kind).await?;
+
+    // Create a fresh team. If "Loopflow" already exists, use a timestamped name.
+    progress.status("creating PM team");
+    let team_id = create_fresh_team(&*client).await.map_err(pm_to_ops)?;
+
+    // Clear stale provider IDs from wave item frontmatter before creating fresh projects.
+    for wave in &waves {
+        let wave_dir = wave_root.join(wave);
+        clear_provider_ids(&wave_dir, provider_kind)?;
+    }
+
     let mut results = Vec::new();
     for wave in &waves {
         let wave_dir = wave_root.join(wave);
-        let provider_kind = resolve_provider(repo, wave)?;
         write_pm_provider_to_wave_yaml(repo, wave, provider_kind)?;
 
         let (project_name, description) = read_wave_project_metadata(repo, wave)?;
         let mut local_items = read_local_roadmap_items(&wave_dir)?;
-
-        let client = build_client(repo, provider_kind).await?;
 
         progress.status(&format!(
             "creating {:?} project for wave/{wave}",
             provider_kind
         ));
         let project_id = client
-            .create_project(&project_name, &description)
+            .create_project_in_team(&team_id, &project_name, &description)
             .await
             .map_err(pm_to_ops)?;
         write_pm_project_to_wave_yaml(repo, wave, provider_kind, &project_id)?;
 
         let ctx = PmContext {
-            client,
+            client: build_client_with_team(repo, provider_kind, Some(team_id.clone())).await?,
             provider: provider_kind,
             project: project_id.clone(),
         };
@@ -412,6 +432,43 @@ async fn pm_init_async(repo: &Path, progress: &impl Progress) -> OpsResult<PmIni
     )?;
 
     Ok(PmInitResult { waves: results })
+}
+
+const DEFAULT_TEAM_NAME: &str = "Waves";
+
+async fn create_fresh_team(client: &dyn PmProvider) -> crate::lfd::pm::PmResult<String> {
+    let existing = client.find_team(DEFAULT_TEAM_NAME).await?;
+    if existing.is_some() {
+        let now = time::OffsetDateTime::now_utc();
+        let timestamp = format!(
+            "{:04}-{:02}-{:02}",
+            now.year(),
+            now.month() as u8,
+            now.day()
+        );
+        let name = format!("{DEFAULT_TEAM_NAME} {timestamp}");
+        client.create_team(&name).await
+    } else {
+        client.create_team(DEFAULT_TEAM_NAME).await
+    }
+}
+
+fn clear_provider_ids(wave_dir: &Path, provider: PmProviderKind) -> OpsResult<()> {
+    for item in list_wave_items(wave_dir)? {
+        let path = wave_dir.join(&item.filename);
+        let content = std::fs::read_to_string(&path)?;
+        let mut doc = RoadmapItemDocument::parse(&content).map_err(pm_to_ops)?;
+        let had_id = doc.frontmatter.id_for(provider).is_some();
+        if had_id {
+            match provider {
+                PmProviderKind::Asana => doc.frontmatter.asana_id = None,
+                PmProviderKind::Linear => doc.frontmatter.linear_id = None,
+            }
+            let rendered = doc.render().map_err(pm_to_ops)?;
+            std::fs::write(&path, rendered)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn pm_status(

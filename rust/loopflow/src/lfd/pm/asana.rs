@@ -17,7 +17,7 @@ const TASK_FIELDS: &str = "name,notes,completed,custom_fields.gid,custom_fields.
 const TASK_PRIORITY_FIELDS: &str = "custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
 const PROJECT_PRIORITY_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
 const PRIORITY_FIELD_NAME: &str = "Priority";
 
 #[derive(Debug, Clone)]
@@ -137,7 +137,7 @@ impl AsanaClient {
         Ok(response.data)
     }
 
-    async fn create_team(&self, workspace_id: &str, name: &str) -> PmResult<String> {
+    async fn create_team_in_workspace(&self, workspace_id: &str, name: &str) -> PmResult<String> {
         let body = AsanaRequest {
             data: CreateTeamRequest {
                 name,
@@ -163,7 +163,7 @@ impl AsanaClient {
             return Ok(existing.gid.clone());
         }
 
-        self.create_team(workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
+        self.create_team_in_workspace(workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
             .await
     }
 
@@ -264,10 +264,34 @@ impl AsanaClient {
 
 #[async_trait]
 impl PmProvider for AsanaClient {
+    async fn create_team(&self, name: &str) -> PmResult<String> {
+        let workspace = self.resolve_workspace().await?;
+        self.create_team_in_workspace(&workspace, name).await
+    }
+
+    async fn find_team(&self, name: &str) -> PmResult<Option<String>> {
+        let workspace = self.resolve_workspace().await?;
+        let teams = self.list_teams(&workspace).await?;
+        Ok(teams
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .map(|t| t.gid.clone()))
+    }
+
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let workspace = self.resolve_workspace().await?;
         let team = self.resolve_team_for_project_bootstrap(&workspace).await?;
         self.create_project_for_team(&team, name, description).await
+    }
+
+    async fn create_project_in_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String> {
+        self.create_project_for_team(team_id, name, description)
+            .await
     }
 
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
@@ -708,7 +732,7 @@ mod tests {
                 StatusCode::OK,
                 json!({
                     "data": [
-                        { "gid": "team-1", "name": "Loopflow" },
+                        { "gid": "team-1", "name": "Waves" },
                         { "gid": "team-2", "name": "Other" }
                     ]
                 }),
@@ -781,7 +805,7 @@ mod tests {
             serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
             json!({
                 "data": {
-                    "name": "Loopflow",
+                    "name": "Waves",
                     "organization": "workspace-1"
                 }
             })

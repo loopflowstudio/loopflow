@@ -14,7 +14,7 @@ use crate::lfd::pm::{
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
 const COMPLETED_STATE_TYPE: &str = "completed";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
 
 const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
   teams {
@@ -148,7 +148,7 @@ impl LinearClient {
             return Ok(team_id.clone());
         }
 
-        // Look for a team named "Loopflow", create if not found
+        // Look for a team named "Waves", create if not found
         let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
         if let Some(team) = response
             .teams
@@ -233,8 +233,36 @@ impl LinearClient {
 
 #[async_trait]
 impl PmProvider for LinearClient {
+    async fn create_team(&self, name: &str) -> PmResult<String> {
+        let key = team_key_from_name(name);
+        let response: TeamCreateData = self
+            .graphql(CREATE_TEAM_MUTATION, json!({ "name": name, "key": key }))
+            .await?;
+        Ok(response.team_create.team.id)
+    }
+
+    async fn find_team(&self, name: &str) -> PmResult<Option<String>> {
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        Ok(response
+            .teams
+            .nodes
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .map(|t| t.id.clone()))
+    }
+
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
+        self.create_project_in_team(&team_id, name, description)
+            .await
+    }
+
+    async fn create_project_in_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String> {
         let description = linear_project_description(description);
         let response: ProjectCreateData = self
             .graphql(
@@ -624,7 +652,7 @@ fn linear_priority_sort_key(priority: i64) -> i64 {
 }
 
 /// Derive a Linear team key from a name: uppercase letters, max 5 chars.
-/// "Loopflow" → "LF", "My Team" → "MT".
+/// "Waves" → "W", "My Team" → "MT".
 fn team_key_from_name(name: &str) -> String {
     let key: String = name
         .split_whitespace()

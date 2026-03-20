@@ -1,5 +1,5 @@
 ---
-linear_id: 43f5de6a-52d5-4286-a82b-595e2d97df16
+linear_id: c189aa36-0343-4271-9b55-62c13d1484ce
 ---
 # 01: Daemon-Aware CLI Contract
 

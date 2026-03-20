@@ -1,5 +1,5 @@
 ---
-linear_id: 70b637c6-7a06-4b3a-8cb6-0d3455bec442
+linear_id: 26c41f50-02d3-4f15-b9ae-e11fc979f590
 ---
 # 01: tmux Architecture Study
 

@@ -131,7 +131,18 @@ pub type PmResult<T> = Result<T, PmError>;
 
 #[async_trait]
 pub trait PmProvider: Send + Sync {
+    /// Create a new team/workspace. Returns the team ID.
+    async fn create_team(&self, name: &str) -> PmResult<String>;
+    /// Check whether a team named `name` already exists. Returns its ID if so.
+    async fn find_team(&self, name: &str) -> PmResult<Option<String>>;
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
+    /// Create a project inside a specific team. Used by init to target a freshly created team.
+    async fn create_project_in_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        description: &str,
+    ) -> PmResult<String>;
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;

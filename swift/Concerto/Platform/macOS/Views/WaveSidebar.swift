@@ -47,7 +47,7 @@ struct WaveSidebar: View {
                 },
                 onDelete: {
                     Task {
-                        try? await repoState.deleteWave(wave)
+                        try? await repoState.deleteWaveAndCleanupTmux(wave)
                     }
                 },
                 onRename: { newName in

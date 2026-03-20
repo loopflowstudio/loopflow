@@ -42,13 +42,7 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        let envPrefix = env
-            .sorted { $0.key < $1.key }
-            .map { key, value in "\(key)=\(shellEscape(value))" }
-            .joined(separator: " ")
-        let command = argv.map(shellEscape).joined(separator: " ")
-        let fullCommand = [envPrefix, command].filter { !$0.isEmpty }.joined(separator: " ")
-        return fullCommand.isEmpty ? nil : fullCommand
+        buildGhosttyShellCommand(argv: argv, env: env)
     }
 }
 
@@ -95,6 +89,8 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     private var _markedText = NSMutableAttributedString()
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
+    private var _didInsertText = false
+    private var _currentKeyEventModifiers: NSEvent.ModifierFlags = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -260,26 +256,26 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
-        // Use interpretKeyEvents for IME support
+        if ghosttyShouldHandleKeyDownDirectly(
+            characters: event.characters,
+            modifiers: event.modifierFlags,
+            hasMarkedText: hasMarkedText(),
+            selectedInputSource: inputContext?.selectedKeyboardInputSource
+        ) {
+            sendKeyPress(to: surface, event: event)
+            return
+        }
+
+        // Reserve interpretKeyEvents for composition-capable input paths.
+        // If insertText or setMarkedText fires, it already sent the text/preedit state.
+        _currentKeyEventModifiers = event.modifierFlags
+        defer { _currentKeyEventModifiers = [] }
+        _didInsertText = false
         interpretKeyEvents([event])
 
-        // For non-IME keys, send directly to Ghostty
-        if _markedRange.location == NSNotFound {
-            var key = translateKey(event)
+        if _didInsertText || hasMarkedText() { return }
 
-            // For control combinations, don't include text
-            let mods = event.modifierFlags
-            if mods.contains(.control) || mods.contains(.command) {
-                _ = ghostty_surface_key(surface, key)
-            } else if let chars = event.characters, !chars.isEmpty {
-                chars.withCString { textPtr in
-                    key.text = textPtr
-                    _ = ghostty_surface_key(surface, key)
-                }
-            } else {
-                _ = ghostty_surface_key(surface, key)
-            }
-        }
+        sendKeyPress(to: surface, event: event)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -330,8 +326,6 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     func insertText(_ string: Any, replacementRange: NSRange) {
         guard let surface else { return }
 
-        unmarkText()
-
         let text: String
         if let attrString = string as? NSAttributedString {
             text = attrString.string
@@ -341,9 +335,20 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             return
         }
 
+        if ghosttyShouldHandleTextAsKeyEvent(text, modifiers: _currentKeyEventModifiers) {
+            return
+        }
+
+        _didInsertText = true
+        unmarkText()
+
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
+    }
+
+    override func doCommand(by selector: Selector) {
+        _ = selector
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -557,6 +562,19 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
     // MARK: - Key Translation
 
+    private func sendKeyPress(to surface: ghostty_surface_t, event: NSEvent) {
+        var key = translateKey(event)
+        if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
+            chars.withCString { textPtr in
+                key.text = textPtr
+                _ = ghostty_surface_key(surface, key)
+            }
+            return
+        }
+
+        _ = ghostty_surface_key(surface, key)
+    }
+
     private func translateKey(_ event: NSEvent) -> ghostty_input_key_s {
         var key = ghostty_input_key_s()
         key.action = GHOSTTY_ACTION_PRESS
@@ -606,11 +624,6 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 }
 
-private func shellEscape(_ value: String) -> String {
-    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
-}
-
 #else
 
 // Stub view when GhosttyKit is not available
@@ -652,3 +665,75 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
+
+func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? {
+    let command = argv.map(shellEscape).joined(separator: " ")
+    guard !command.isEmpty else { return nil }
+
+    let envPrefix = env
+        .sorted { $0.key < $1.key }
+        .map { key, value in "\(key)=\(shellEscape(value))" }
+        .joined(separator: " ")
+
+    if envPrefix.isEmpty {
+        return command
+    }
+
+    return ["env", envPrefix, command].joined(separator: " ")
+}
+
+func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
+    guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
+    guard text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first else { return false }
+    return scalar.value < 0x20
+}
+
+func ghosttyShouldBypassInterpretKeyEvents(modifiers: NSEvent.ModifierFlags) -> Bool {
+    !modifiers.intersection([.control, .command]).isEmpty
+}
+
+func ghosttyShouldHandleKeyDownDirectly(
+    characters: String?,
+    modifiers: NSEvent.ModifierFlags,
+    hasMarkedText: Bool,
+    selectedInputSource: String?
+) -> Bool {
+    if ghosttyShouldBypassInterpretKeyEvents(modifiers: modifiers) {
+        return true
+    }
+
+    guard !hasMarkedText else { return false }
+    guard !modifiers.contains(.option) else { return false }
+    guard ghosttyKeyText(characters: characters, modifiers: modifiers) != nil else { return false }
+    return !ghosttyInputSourceUsesTextComposition(selectedInputSource)
+}
+
+func ghosttyKeyText(characters: String?, modifiers: NSEvent.ModifierFlags) -> String? {
+    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
+    guard modifiers.intersection(controlLikeModifiers).isEmpty else { return nil }
+    guard let characters, !characters.isEmpty else { return nil }
+    guard ghosttyIsPrintableKeyText(characters) else { return nil }
+    return characters
+}
+
+private func ghosttyInputSourceUsesTextComposition(_ inputSource: String?) -> Bool {
+    guard let inputSource else { return false }
+    return inputSource.localizedCaseInsensitiveContains("inputmethod")
+}
+
+private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
+    !text.unicodeScalars.contains { scalar in
+        switch scalar.value {
+        case 0x00..<0x20, 0x7F, 0xF700..<0xF900:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
+}

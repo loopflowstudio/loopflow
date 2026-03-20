@@ -16,6 +16,11 @@ struct ContentView: View {
     @State private var toastDismissTask: Task<Void, Never>?
     @Environment(\.palette) private var palette
 
+    private struct MultiplexerContext {
+        let waveId: String
+        let focusedPane: PaneState
+    }
+
     var body: some View {
         @Bindable var repoState = repoState
         NavigationSplitView {
@@ -219,7 +224,7 @@ struct ContentView: View {
         case .deleteWave:
             guard let wave = repoState.selectedWave else { return }
             performWaveAction("delete wave") {
-                try await repoState.deleteWave(wave)
+                try await repoState.deleteWaveAndCleanupTmux(wave)
             }
         case .retryWave:
             guard let wave = repoState.selectedWave else { return }
@@ -250,6 +255,18 @@ struct ContentView: View {
             openFinderForSelectedWave()
         case .viewPR:
             openPRForSelectedWave()
+        case .splitVertical:
+            handleMultiplexerSplit(axis: .horizontal)
+        case .splitHorizontal:
+            handleMultiplexerSplit(axis: .vertical)
+        case .closePane:
+            handleClosePane()
+        case .newShellPane:
+            handleNewShell()
+        case .focusNextPane:
+            handleFocusPane(.next)
+        case .focusPreviousPane:
+            handleFocusPane(.previous)
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -306,6 +323,69 @@ struct ContentView: View {
     private func openTerminalForSelectedWave() {
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
             try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
+        }
+    }
+
+    private func handleMultiplexerSplit(axis: SplitAxis) {
+        guard let context = multiplexerContext() else { return }
+
+        _ = repoState.multiplexerStore.splitPane(
+            context.focusedPane.id,
+            axis: axis,
+            newPaneType: splitPaneType(for: context.focusedPane),
+            for: context.waveId
+        )
+    }
+
+    private func handleClosePane() {
+        guard let context = multiplexerContext() else { return }
+
+        if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
+           let sessionName = closedPane.config.terminalSessionName {
+            TmuxSessionRegistry.shared.killSession(named: sessionName)
+        }
+    }
+
+    private func handleNewShell() {
+        guard let context = multiplexerContext() else { return }
+        _ = repoState.multiplexerStore.splitPane(
+            context.focusedPane.id,
+            axis: .horizontal,
+            newPaneType: .terminal,
+            for: context.waveId
+        )
+    }
+
+    private func handleFocusPane(_ direction: FocusDirection) {
+        guard let context = multiplexerContext() else { return }
+        repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
+    }
+
+    private func multiplexerContext() -> MultiplexerContext? {
+        guard let wave = repoState.selectedWave,
+              (wave.worktreePath ?? wave.api.localWorktree) != nil,
+              let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
+            return nil
+        }
+
+        return MultiplexerContext(
+            waveId: wave.id,
+            focusedPane: focusedPane
+        )
+    }
+
+    private func splitPaneType(for pane: PaneState) -> PaneType {
+        pane.type == .terminal ? .launchpad : nextCompanionPaneType(after: pane.type)
+    }
+
+    private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
+        switch paneType {
+        case .terminal, .launchpad:
+            .markdown
+        case .markdown:
+            .diff
+        case .diff:
+            .launchpad
         }
     }
 

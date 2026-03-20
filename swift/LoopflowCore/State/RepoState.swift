@@ -83,6 +83,7 @@ public final class RepoState {
     public var currentRepo: URL? {
         didSet {
             terminalWorkspaceStore.configure(repoKey: currentRepo?.path())
+            multiplexerStore.configure(repoKey: currentRepo?.path())
         }
     }
     public var repoTarget: RepoTarget?
@@ -96,6 +97,7 @@ public final class RepoState {
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
     public let terminalWorkspaceStore = TerminalWorkspaceStore()
+    public let multiplexerStore = MultiplexerStore()
     public let authProviderStore = AuthProviderStore()
     public let secretsProviderStore = SecretsProviderStore()
     private var sessionStates: [String: SessionState] = [:]
@@ -830,8 +832,8 @@ public final class RepoState {
         return session
     }
 
-    public func selectTerminalSession(_ id: String?) {
-        focusTerminalSession(id)
+    public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
+        focusTerminalSession(id, waveId: waveId)
     }
 
     /// Navigate to a terminal session from the attention queue.
@@ -840,8 +842,8 @@ public final class RepoState {
         focusTerminalSession(sessionId, autoPresent: true)
     }
 
-    private func focusTerminalSession(_ sessionId: String?, autoPresent: Bool = false) {
-        terminalWorkspaceStore.select(sessionId)
+    private func focusTerminalSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
+        terminalWorkspaceStore.select(sessionId, waveId: waveId)
         guard let sessionId,
               let session = terminalWorkspaceStore.sessionsById[sessionId] else {
             return

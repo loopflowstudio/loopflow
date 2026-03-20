@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreText
+import AppKit
 import LoopflowCore
 
 extension AppearanceMode {
@@ -90,7 +91,15 @@ private enum VoiceInputWarmup {
 
 private enum AppRuntime {
     static var isAutomatedTest: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let processInfo = ProcessInfo.processInfo
+        let environment = processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil ||
+            environment["CONCERTO_UI_TEST_MODE"] != nil {
+            return true
+        }
+
+        let arguments = processInfo.arguments
+        return arguments.contains("-ui-test-mode") || arguments.contains("--snapshot")
     }
 }
 
@@ -121,6 +130,24 @@ private func bootstrapConcertoApp() {
 }
 
 #if os(macOS)
+@MainActor
+private enum TmuxTerminationCleanup {
+    private static var observer: NSObjectProtocol?
+
+    static func install() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            TmuxSessionRegistry.shared.killAllSynchronously()
+        }
+    }
+}
+#endif
+
+#if os(macOS)
 @main
 struct ConcertoApp: App {
     @State private var portfolioService = PortfolioService()
@@ -133,6 +160,7 @@ struct ConcertoApp: App {
 
     init() {
         bootstrapConcertoApp()
+        TmuxTerminationCleanup.install()
     }
 
     var body: some Scene {

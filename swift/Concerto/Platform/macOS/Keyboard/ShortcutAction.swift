@@ -76,6 +76,7 @@ struct ChordBinding {
 enum ShortcutCategory: String, CaseIterable {
     case navigation = "Navigation"
     case waveActions = "Wave Actions"
+    case multiplexer = "Multiplexer"
     case tools = "Tools"
     case tabs = "Tabs"
     case global = "Global"
@@ -103,6 +104,14 @@ enum ShortcutAction: Hashable {
     case openIDE
     case openFinder
     case viewPR
+
+    // Multiplexer
+    case splitVertical
+    case splitHorizontal
+    case closePane
+    case newShellPane
+    case focusNextPane
+    case focusPreviousPane
 
     // Tabs
     case switchToCurrentTab
@@ -224,6 +233,50 @@ enum ShortcutCatalog {
             action: .viewPR,
             label: "View PR",
             category: .tools,
+            requiresWave: true
+        ),
+
+        // Multiplexer
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
+            action: .splitVertical,
+            label: "Split vertical",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
+            action: .splitHorizontal,
+            label: "Split horizontal",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .character("w"), modifiers: [.command], allowsRepeat: false),
+            action: .closePane,
+            label: "Close pane",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .keyCode(ShortcutCatalog.returnKeyCode), modifiers: [.command, .shift], allowsRepeat: false),
+            action: .newShellPane,
+            label: "New shell",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .special(.rightArrow), modifiers: [.command, .option], allowsRepeat: false),
+            action: .focusNextPane,
+            label: "Focus next pane",
+            category: .multiplexer,
+            requiresWave: true
+        ),
+        ShortcutBinding(
+            gesture: ShortcutGesture(key: .special(.leftArrow), modifiers: [.command, .option], allowsRepeat: false),
+            action: .focusPreviousPane,
+            label: "Focus previous pane",
+            category: .multiplexer,
             requiresWave: true
         ),
 

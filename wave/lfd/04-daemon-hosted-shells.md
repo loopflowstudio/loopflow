@@ -1,6 +1,3 @@
----
-linear_id: b7a06e6e-c125-48c9-96c0-3bdbe09520f7
----
 # 03: Daemon-Hosted Shells
 
 **Finish line:** `lfd` owns attachable shells / PTYs in fresh or existing worktrees, and Concerto or SSH-style clients attach to those sessions to run normal `lf` commands by hand.

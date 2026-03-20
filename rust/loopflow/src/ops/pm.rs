@@ -164,6 +164,7 @@ pub(crate) async fn build_wave_provider(repo: &Path, wave: &str) -> OpsResult<Pm
     build_provider(repo, wave, provider).await
 }
 
+#[allow(dead_code)] // Used by upcoming PM CLI commands
 pub(crate) fn wave_pm_is_enabled(repo: &Path, wave: &str) -> bool {
     resolve_provider(repo, wave).ok().is_some_and(|provider| {
         read_wave_pm_config(repo, wave)

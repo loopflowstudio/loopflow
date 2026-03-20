@@ -201,6 +201,67 @@ struct KeyboardRouterTests {
         #expect(mode == .terminal)
     }
 
+    @Test("terminal mode still routes multiplexer shortcuts")
+    func terminalModeRoutesMultiplexerShortcuts() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .character("\\"),
+            modifiers: [.command],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.splitVertical])
+    }
+
+    @Test("terminal focus navigation uses option-command arrows")
+    func terminalFocusNavigationShortcut() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .special(.rightArrow),
+            modifiers: [.command, .option],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.focusNextPane])
+    }
+
+    @Test("terminal mode ignores non-multiplexer shortcuts")
+    func terminalModeIgnoresNonMultiplexerShortcuts() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .character("k"),
+            modifiers: [.command],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(!handled)
+        #expect(actions.isEmpty)
+    }
+
+    @Test("help overlay takes priority over terminal focus")
+    func helpOverlayWinsOverTerminalFocus() {
+        let router = KeyboardRouter()
+
+        let mode = router.resolveMode(
+            firstResponder: GhosttyMetalViewStub(),
+            isCommandPaletteVisible: false,
+            isHelpOverlayVisible: true
+        )
+
+        #expect(mode == .helpOverlay)
+    }
+
     @Test("Help overlay mode only handles dismiss keys")
     func helpOverlayDismissKeys() {
         let router = KeyboardRouter()

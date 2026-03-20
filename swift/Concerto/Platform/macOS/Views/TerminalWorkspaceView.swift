@@ -2,36 +2,58 @@ import SwiftUI
 import LoopflowCore
 
 struct TerminalWorkspaceView: View {
+    let waveId: String
+    var onBackToWork: () -> Void = {}
+
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
 
+    private var sessions: [TerminalSession] {
+        repoState.terminalWorkspaceStore.orderedSessions(for: waveId)
+    }
+
+    private var selectedSession: TerminalSession? {
+        repoState.terminalWorkspaceStore.selectedSession(for: waveId)
+    }
+
     var body: some View {
-        if let session = repoState.terminalWorkspaceStore.selectedSession {
+        if let session = selectedSession {
             HSplitView {
                 terminalPane(for: session)
                     .frame(minWidth: 540)
 
-                TerminalContextSidebar(session: session)
+                TerminalContextSidebar(session: session, onBackToWork: onBackToWork)
                     .frame(minWidth: 280, idealWidth: 320)
                     .background(palette.surface)
             }
         } else {
-            AttentionQueueView()
+            ContentUnavailableView(
+                "No active shell in this wave",
+                systemImage: "terminal",
+                description: Text("Return to Work or wait for this wave to request terminal attention.")
+            )
+            .overlay(alignment: .bottom) {
+                Button("Back to work") {
+                    onBackToWork()
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.bottom, Spacing.xl)
+            }
         }
     }
 
     private func terminalPane(for selectedSession: TerminalSession) -> some View {
         VStack(spacing: 0) {
             TerminalWorkspaceTabs(
-                sessions: repoState.terminalWorkspaceStore.orderedSessions,
-                selectedSessionId: repoState.terminalWorkspaceStore.selectedSessionId,
-                onSelect: { repoState.selectTerminalSession($0) }
+                sessions: sessions,
+                selectedSessionId: repoState.terminalWorkspaceStore.selectedSessionId(for: waveId),
+                onSelect: { repoState.selectTerminalSession($0, waveId: waveId) }
             )
 
             Divider()
 
             ZStack {
-                ForEach(repoState.terminalWorkspaceStore.orderedSessions) { session in
+                ForEach(sessions) { session in
                     SessionTerminalSurface(session: session)
                         .opacity(session.id == selectedSession.id ? 1 : 0)
                         .allowsHitTesting(session.id == selectedSession.id)
@@ -166,6 +188,7 @@ private struct SessionTerminalSurface: View {
 
 private struct TerminalContextSidebar: View {
     let session: TerminalSession
+    let onBackToWork: () -> Void
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
@@ -294,8 +317,9 @@ private struct TerminalContextSidebar: View {
                 }
                 .buttonStyle(.bordered)
 
-                Button("Back to queue") {
-                    repoState.selectTerminalSession(nil)
+                Button("Back to work") {
+                    repoState.selectTerminalSession(nil, waveId: session.waveId)
+                    onBackToWork()
                 }
                 .buttonStyle(.bordered)
 

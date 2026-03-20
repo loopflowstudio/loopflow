@@ -1,6 +1,3 @@
----
-linear_id: b00f983a-47b2-4ea8-b357-e45e0d183aa3
----
 # 01: Daemon-Aware CLI Contract
 
 **Finish line:** `lf` can run normally in a plain shell, but when it detects an `lfd`-managed environment it emits structured lifecycle events that let `lfd` track runs, sessions, waits, and outcomes without scraping terminal output.
@@ -56,6 +53,12 @@ tmux uses pure filesystem permissions on the socket directory. No cryptographic 
 ### Transport: WezTerm's Domain abstraction is the model
 
 WezTerm proved that local, SSH, Unix socket, and TLS connections can all implement the same spawn/pane interface. The `lf` → `lfd` event contract should be transport-agnostic from day one: define events as typed messages, let the delivery mechanism vary (HTTP for now, socket later, remote transport eventually) without changing the event schema.
+
+## Key consumers
+
+### `lf` calling the attention API
+
+When `lf` hits `WaitInteractive` for a checkpoint step, it should `POST /attention` with the appropriate context (step name, terminal session ID, design path). When the step completes, it should `POST /attention/{id}/resolve`. The HTTP routes already exist — the daemon-aware CLI contract is what lets `lf` discover and authenticate to them.
 
 ## Open questions
 

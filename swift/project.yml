@@ -68,6 +68,10 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.concerto
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Concerto/Concerto.entitlements
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]":
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+          - "@loader_path/../Frameworks"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 2V3M244HF2
         # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support

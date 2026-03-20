@@ -1,5 +1,5 @@
 ---
-linear_id: 820a796f-a7da-40eb-9fbd-e9ceccf6ad3c
+linear_id: 342dd353-e7fb-4eab-b8ed-a9363b9d6be9
 ---
 # 09: Notion README sync
 

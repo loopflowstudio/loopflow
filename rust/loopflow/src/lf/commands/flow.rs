@@ -207,44 +207,25 @@ fn run_steps(
     for index in 0..total {
         let action = next_action(items, index);
         match action {
-            FlowAction::RunStep { step } => {
-                let step_name = step.step.name.clone();
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                    name = step_name,
-                );
-                run_step_with_runtime(runtime, &step_name, index, || {
-                    crate::lf::commands::run::run(Some(&step_name), message, cli)?;
-                    commit_step_work(repo, &step_name)?;
-                    Ok(())
-                })?;
-            }
+            FlowAction::RunStep { step } => run_flow_step(
+                &step.step.name,
+                (index, total),
+                message,
+                cli,
+                repo,
+                runtime,
+                false,
+            )?,
             FlowAction::WaitInteractive { step } => {
-                let step_name = step.step.name.clone();
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                    name = step_name,
-                );
-                if let Some(runtime) = runtime {
-                    runtime.emit_waiting(&step_name);
-                }
-                run_step_with_runtime(runtime, &step_name, index, || {
-                    crate::lf::commands::run::run(Some(&step_name), message, cli)?;
-                    commit_step_work(repo, &step_name)?;
-                    Ok(())
-                })?;
+                run_flow_step(
+                    &step.step.name,
+                    (index, total),
+                    message,
+                    cli,
+                    repo,
+                    runtime,
+                    true,
+                )?;
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
@@ -281,6 +262,42 @@ fn run_steps(
     Ok(())
 }
 
+fn run_flow_step(
+    step_name: &str,
+    progress: (usize, usize),
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    runtime: Option<&RuntimeRun>,
+    waiting: bool,
+) -> Result<()> {
+    let (index, total) = progress;
+    print_step_progress(index, total, step_name);
+    if waiting {
+        if let Some(runtime) = runtime {
+            runtime.emit_waiting(step_name);
+        }
+    }
+    run_step_with_runtime(runtime, step_name, index, || {
+        crate::lf::commands::run::run(Some(step_name), message, cli)?;
+        commit_step_work(repo, step_name)?;
+        Ok(())
+    })
+}
+
+fn print_step_progress(index: usize, total: usize, step_name: &str) {
+    let colors = Colors::new();
+    eprintln!(
+        "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+        current = index + 1,
+        total = total,
+        name = step_name,
+    );
+}
+
 fn run_step_with_runtime(
     runtime: Option<&RuntimeRun>,
     step_name: &str,
@@ -309,7 +326,7 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run or-routing: execute a routing step, read the verdict, then run the
+/// Run xor-routing: execute a routing step, read the verdict, then run the
 /// selected sub-flow inline.
 fn run_xor(
     xor_def: &ConcreteXor,

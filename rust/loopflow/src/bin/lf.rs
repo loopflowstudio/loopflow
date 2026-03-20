@@ -151,6 +151,17 @@ fn with_runtime<T>(
     result
 }
 
+fn in_repo_runtime<T>(
+    command: &[String],
+    target: RunTarget,
+    run: impl FnOnce(&std::path::Path, Option<&RuntimeRun>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    with_runtime(&repo_root, command, target, |runtime| {
+        run(&repo_root, runtime)
+    })
+}
+
 fn run_target(
     name: &str,
     message: Option<&str>,
@@ -159,22 +170,15 @@ fn run_target(
 ) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
     match loopflow::lf::discovery::discover_target(&repo_root, name)? {
-        loopflow::lf::discovery::Target::Step(_) => with_runtime(
-            &repo_root,
-            command,
-            RunTarget {
-                step: Some(name.to_string()),
-                ..RunTarget::default()
-            },
-            |_| loopflow::lf::commands::run::run(Some(name), message, cli),
-        ),
+        loopflow::lf::discovery::Target::Step(_) => {
+            with_runtime(&repo_root, command, RunTarget::step(name), |_| {
+                loopflow::lf::commands::run::run(Some(name), message, cli)
+            })
+        }
         loopflow::lf::discovery::Target::Flow(flow) => with_runtime(
             &repo_root,
             command,
-            RunTarget {
-                flow: Some(flow.name.clone()),
-                ..RunTarget::default()
-            },
+            RunTarget::flow(flow.name.clone()),
             |runtime| loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root, runtime),
         ),
     }
@@ -209,8 +213,7 @@ fn main() -> anyhow::Result<()> {
     debug!(?cli, "parsed CLI arguments");
 
     if cli.list {
-        let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-        return with_runtime(&repo_root, &args, RunTarget::default(), |_| {
+        return in_repo_runtime(&args, RunTarget::default(), |_, _| {
             loopflow::lf::commands::list::show_all()
         });
     }
@@ -218,28 +221,21 @@ fn main() -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-            with_runtime(&repo_root, &args, RunTarget::default(), |_| {
+            in_repo_runtime(&args, RunTarget::default(), |_, _| {
                 loopflow::lf::commands::run::run(None, Some(&text), &cli)
             })
         }
-        Some(Commands::Ops { op }) => {
-            let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-            with_runtime(&repo_root, &args, RunTarget::default(), |_| {
-                loopflow::lf::commands::ops::run(op)
-            })
-        }
+        Some(Commands::Ops { op }) => in_repo_runtime(&args, RunTarget::default(), |_, _| {
+            loopflow::lf::commands::ops::run(op)
+        }),
         Some(Commands::External(external_args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
             let message = join_args(&step_args);
             run_target(&name, message.as_deref(), &cli, &args)
         }
-        None => {
-            let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-            with_runtime(&repo_root, &args, RunTarget::default(), |_| {
-                loopflow::lf::commands::run::run(None, None, &cli)
-            })
-        }
+        None => in_repo_runtime(&args, RunTarget::default(), |_, _| {
+            loopflow::lf::commands::run::run(None, None, &cli)
+        }),
     }
 }
 

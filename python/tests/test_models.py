@@ -79,7 +79,7 @@ class TestWaveModel:
     def test_flow_steps_parse_ops_items(self):
         data = {**WAVE_MINIMAL, "flow_steps": ["implement", "ops: land --create-pr"]}
         wave = Wave.model_validate(data)
-        assert [step.type for step in wave.flow_steps] == ["step", "ops"]
+        assert [step.type for step in wave.flow_steps] == ["step", "op"]
         assert wave.flow_steps[1].name == "land --create-pr"
 
 

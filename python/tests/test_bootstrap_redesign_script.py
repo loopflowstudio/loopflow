@@ -52,14 +52,16 @@ def test_resolve_repo_root_falls_back_to_script_root_on_git_error(monkeypatch, t
 def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> None:
     created: list[str] = []
     expected_repo = str(bootstrap_redesign.REPO_ROOT)
+    redesign_area = bootstrap_redesign.REDESIGN_AREA
     waves: dict[str, SimpleNamespace] = {
-        "signals": SimpleNamespace(
-            id="wave-signals",
+        "agent-embedding": SimpleNamespace(
+            id="wave-agent-embedding",
             primary_flow="build",
             area=[expected_repo],
             status="idle",
         )
     }
+    updated: list[tuple[str, str, list[str]]] = []
 
     def fake_wave(name: str):
         return waves.get(name)
@@ -68,16 +70,25 @@ def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> 
         assert repo == expected_repo
         wave = SimpleNamespace(
             id=f"wave-{name}",
-            primary_flow="tend" if name == "redesign" else "build",
-            area=["wave/chord-model/", "wave/signals/"] if name == "redesign" else [repo],
+            primary_flow=bootstrap_redesign.REDESIGN_FLOW if name == "redesign" else "build",
+            area=redesign_area if name == "redesign" else [repo],
             status="idle",
         )
         created.append(name)
         waves[name] = wave
         return wave
 
+    def fake_update_wave(name: str, flow: str, area: list[str]):
+        assert name == "redesign"
+        wave = waves[name]
+        wave.primary_flow = flow
+        wave.area = area
+        updated.append((name, flow, area))
+        return wave
+
     monkeypatch.setattr(bootstrap_redesign.loopflow, "wave", fake_wave)
     monkeypatch.setattr(bootstrap_redesign.loopflow, "create_wave", fake_create_wave)
+    monkeypatch.setattr(bootstrap_redesign.loopflow, "update_wave", fake_update_wave)
 
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stdout)
@@ -85,9 +96,10 @@ def test_main_creates_missing_waves_and_prints_redesign_summary(monkeypatch) -> 
     exit_code = bootstrap_redesign.main()
 
     assert exit_code == 0
-    assert created == ["chord-model", "clear-the-deck", "agent-embedding", "redesign"]
+    assert created == ["chord-model", "redesign"]
+    assert updated == [("redesign", bootstrap_redesign.REDESIGN_FLOW, redesign_area)]
     output = stdout.getvalue()
-    assert "signals: exists (wave-signals)" in output
+    assert "agent-embedding: exists (wave-agent-embedding)" in output
     assert "redesign: created (wave-redesign)" in output
-    assert "flow: tend" in output
-    assert "area: wave/chord-model/, wave/signals/" in output
+    assert f"flow: {bootstrap_redesign.REDESIGN_FLOW}" in output
+    assert f"area: {', '.join(redesign_area)}" in output

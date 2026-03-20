@@ -10,11 +10,17 @@ import loopflow.api as loopflow
 from loopflow.models import Wave
 
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
-WAVE_NAMES = [
+MEMBER_WAVE_NAMES = [
     "chord-model",
-    "clear-the-deck",
     "agent-embedding",
-    "signals",
+]
+REDESIGN_FLOW = "garden-or-silent"
+REDESIGN_AREA = [
+    "wave/chord-model/",
+    "wave/agent-embedding/",
+]
+WAVE_NAMES = [
+    *MEMBER_WAVE_NAMES,
     "redesign",
 ]
 
@@ -62,14 +68,19 @@ def _print_summary(redesign: Wave) -> None:
 
 
 def main() -> int:
-    redesign = None
     for name in WAVE_NAMES:
-        wave = _ensure_wave(name)
-        if name == "redesign":
-            redesign = wave
+        _ensure_wave(name)
 
-    if redesign is None:
-        raise RuntimeError("bootstrap created no redesign wave")
+    redesign = loopflow.update_wave(
+        "redesign",
+        flow=REDESIGN_FLOW,
+        area=REDESIGN_AREA,
+    )
+    print(
+        "redesign: configured "
+        f"flow={REDESIGN_FLOW}, "
+        f"area={', '.join(REDESIGN_AREA)}"
+    )
 
     _print_summary(redesign)
     return 0

@@ -1,2 +1,3 @@
 - gate
-- update-wave
+- op: land --create-pr
+- op: pm sync

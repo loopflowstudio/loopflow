@@ -1,9 +1,0 @@
-- tend/scan-waves
-- or:
-    router: tend/assess
-    paths:
-      tune:
-        flow: tend-tune
-        description: "Adjustments needed — compose and review chord changes"
-      silence:
-        description: "Everything is in tune — no action needed this cycle"

@@ -36,33 +36,43 @@ pub fn get_builtin_step(name: &str) -> Option<&'static str> {
 static NAMESPACED_STEPS: std::sync::LazyLock<
     std::collections::HashMap<&'static str, &'static str>,
 > = std::sync::LazyLock::new(|| {
-    let mut m = std::collections::HashMap::new();
-    m.insert(
-        "scan/scan-report",
-        include_str!("builtins/steps/scan/scan-report.md"),
-    );
-    m.insert(
-        "scan/scan-plan",
-        include_str!("builtins/steps/scan/scan-plan.md"),
-    );
-    m.insert(
-        "tend/scan-waves",
-        include_str!("builtins/steps/tend/scan-waves.md"),
-    );
-    m.insert("tend/assess", include_str!("builtins/steps/tend/assess.md"));
-    m.insert(
-        "tend/draft-chord",
-        include_str!("builtins/steps/tend/draft-chord.md"),
-    );
-    m.insert(
-        "tend/review-chord",
-        include_str!("builtins/steps/tend/review-chord.md"),
-    );
-    m.insert(
-        "tend/apply-chord",
-        include_str!("builtins/steps/tend/apply-chord.md"),
-    );
-    m
+    std::collections::HashMap::from([
+        (
+            "scan/scan-report",
+            include_str!("builtins/steps/scan/scan-report.md"),
+        ),
+        (
+            "scan/scan-plan",
+            include_str!("builtins/steps/scan/scan-plan.md"),
+        ),
+        ("garden/scan", include_str!("builtins/steps/garden/scan.md")),
+        (
+            "garden/assess",
+            include_str!("builtins/steps/garden/assess.md"),
+        ),
+        ("wave/mutate", include_str!("builtins/steps/wave/mutate.md")),
+        ("wave/review", include_str!("builtins/steps/wave/review.md")),
+        ("vsm/s5-scan", include_str!("builtins/steps/vsm/s5-scan.md")),
+        (
+            "vsm/s5-assess",
+            include_str!("builtins/steps/vsm/s5-assess.md"),
+        ),
+        ("vsm/s4-scan", include_str!("builtins/steps/vsm/s4-scan.md")),
+        (
+            "vsm/s4-assess",
+            include_str!("builtins/steps/vsm/s4-assess.md"),
+        ),
+        ("vsm/s3-scan", include_str!("builtins/steps/vsm/s3-scan.md")),
+        (
+            "vsm/s3-assess",
+            include_str!("builtins/steps/vsm/s3-assess.md"),
+        ),
+        ("vsm/s2-scan", include_str!("builtins/steps/vsm/s2-scan.md")),
+        (
+            "vsm/s2-assess",
+            include_str!("builtins/steps/vsm/s2-assess.md"),
+        ),
+    ])
 });
 
 /// Returns the content of a built-in flow, if it exists.

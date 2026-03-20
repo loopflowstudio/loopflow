@@ -316,7 +316,9 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
         Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
         Some(ConcreteItem::Op(ops)) => ops.flow_parents.clone(),
         Some(ConcreteItem::And(and)) => and.flow_parents.clone(),
+        Some(ConcreteItem::Xor(or_item)) => or_item.flow_parents.clone(),
         Some(ConcreteItem::Or(or_item)) => or_item.flow_parents.clone(),
+        Some(ConcreteItem::Loop(loop_item)) => loop_item.flow_parents.clone(),
         None => Vec::new(),
     }
 }
@@ -329,7 +331,8 @@ pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> Strin
         .and_then(|plan| match next_action(&plan, step_index as usize) {
             FlowAction::WaitInteractive { step } => Some(step.step.name),
             FlowAction::RunStep { step } => Some(step.step.name),
-            FlowAction::RunOps { ops } => Some(format!("ops {}", ops.item.command)),
+            FlowAction::RunOps { ops } => Some(format!("op {}", ops.item.command)),
+            FlowAction::Loop { .. } => Some("loop".to_string()),
             _ => None,
         });
     name.unwrap_or_else(|| format!("step-{step_index}"))

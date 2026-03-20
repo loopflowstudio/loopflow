@@ -1,0 +1,10 @@
+- garden/scan
+- garden/assess
+- xor:
+    router: garden/assess
+    paths:
+      garden:
+        flow: garden
+        description: "Adjustments needed — mutate waves, then review"
+      silence:
+        description: "Everything is healthy"

@@ -19,7 +19,7 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
 | -- | -- | -- |
 | Split panes | Terminal only | Terminal + native views |
 | Pane types | All terminals | Terminal, chat, diff, file editor, wave config, attention queue |
-| Layouts | Manual splits, saved configs | Named layouts per workflow (build, review, tend, debug) |
+| Layouts | Manual splits, saved configs | Named layouts per workflow (build, review, garden, debug) |
 | Session persistence | Across disconnects | Across app launches, bound to wave state |
 | Context switching | `prefix + window number` | Wave-aware — switch wave, layout follows |
 | Pane communication | Pipes, copy-paste | Semantic — select text in diff, opens in editor at that line |
@@ -34,12 +34,12 @@ The question isn't "can we replace tmux" — it's "what would tmux be if it had 
    * **Diff viewer** — Side-by-side or unified, syntax highlighted, reviewable (approve/comment inline)
    * **File editor** — Native text editor with syntax highlighting (or embedded editor component)
    * **Wave config** — Visual editor for wave YAML (direction picker, area file browser, flow step list)
-   * **Attention queue** — The tend flow's human interface (from agent-embedding/01)
+   * **Attention queue** — The garden flow's human interface (from agent-embedding/01)
    * **Portfolio** — Multi-wave overview (from agent-embedding/03)
 2. **Layout system.** Panes compose into layouts:
    * Horizontal/vertical splits, resizable, nestable (like tmux)
    * Named layouts saved per wave or per workflow
-   * Default layouts: `build` (terminal + chat + file tree), `review` (diff + terminal + chat), `tend` (portfolio + attention queue + calibration), `debug` (terminal + terminal + log viewer)
+   * Default layouts: `build` (terminal + chat + file tree), `review` (diff + terminal + chat), `garden` (portfolio + attention queue + calibration), `debug` (terminal + terminal + log viewer)
    * Layout follows wave — switch wave context, panes update to show that wave's state
 3. **Wave-aware context switching.** The tmux session concept, but bound to waves:
    * Each wave has a "workspace" — its layout, its terminal sessions, its open files

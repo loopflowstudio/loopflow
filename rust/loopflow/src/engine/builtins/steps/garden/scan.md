@@ -1,6 +1,6 @@
 ---
 requires: wave/<chord>/
-produces: scratch/tend-scan.md
+produces: scratch/garden-scan.md
 ---
 Read the territory. Understand what each member wave has done, is doing, and is stuck on.
 
@@ -58,7 +58,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 ## Output
 
-Write `scratch/tend-scan.md`:
+Write `scratch/garden-scan.md`:
 
 ```markdown
 # Tend Scan — <date>

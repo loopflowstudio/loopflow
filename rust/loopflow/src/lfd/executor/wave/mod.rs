@@ -16,8 +16,8 @@ use crate::engine::agent::{build_agent_command, build_agent_env, AgentConfig, Pr
 use crate::engine::config::load_config_or_default;
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
-    build_or_routing_suffix, expand_flow, load_flow, load_or_path_items, load_step, next_action,
-    read_or_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
+    build_xor_routing_suffix, expand_flow, load_flow, load_step, load_xor_path_items, next_action,
+    read_xor_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
 };
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
@@ -588,7 +588,7 @@ impl WaveExecutor {
                         return Ok(());
                     }
                 }
-                FlowAction::Or { branch } => {
+                FlowAction::Xor { branch } => {
                     // Pre-or sync: pick up sibling pushes.
                     if let Err(err) = pre_step_sync(
                         Path::new(&run.snapshot.repo),
@@ -598,7 +598,7 @@ impl WaveExecutor {
                         warn!(run_id = %run.id, error = %err, "pre-or sync failed, continuing");
                     }
 
-                    let router_name = branch.router.as_deref().unwrap_or("or-route");
+                    let router_name = branch.router.as_deref().unwrap_or("xor-route");
 
                     info!(
                         run_id = %run.id,
@@ -609,7 +609,7 @@ impl WaveExecutor {
                     );
 
                     // Build routing instructions to append to the router step.
-                    let routing_suffix = build_or_routing_suffix(&branch);
+                    let routing_suffix = build_xor_routing_suffix(&branch);
 
                     let routing_content = if let Some(ref router_name) = branch.router {
                         let router = load_step(router_name, Path::new(&run.snapshot.repo))?;
@@ -639,7 +639,7 @@ impl WaveExecutor {
 
                     let exit_code = self.run_step(&wave, &mut run, &router).await?;
                     if exit_code != 0 {
-                        self.fail_run(&mut run, &wave, "or router step failed".to_string())
+                        self.fail_run(&mut run, &wave, "xor router step failed".to_string())
                             .await?;
                         return Ok(());
                     }
@@ -648,14 +648,18 @@ impl WaveExecutor {
                     if let Err(err) =
                         post_step_sync(Path::new(&run.worktree), &run.branch, router_name)
                     {
-                        self.fail_run(&mut run, &wave, format!("post-or-route sync failed: {err}"))
-                            .await?;
+                        self.fail_run(
+                            &mut run,
+                            &wave,
+                            format!("post-xor-route sync failed: {err}"),
+                        )
+                        .await?;
                         return Ok(());
                     }
 
                     // Read the verdict.
-                    let verdict_path = Path::new(&run.worktree).join("scratch/route-or.md");
-                    let selected_path = match read_or_verdict(&verdict_path, &branch) {
+                    let verdict_path = Path::new(&run.worktree).join("scratch/route-xor.md");
+                    let selected_path = match read_xor_verdict(&verdict_path, &branch) {
                         Ok(path) => path,
                         Err(err) => {
                             self.fail_run(&mut run, &wave, err).await?;
@@ -666,7 +670,7 @@ impl WaveExecutor {
                     info!(
                         run_id = %run.id,
                         selected = %selected_path,
-                        "or routed"
+                        "xor routed"
                     );
 
                     // Load and execute the selected sub-flow inline.
@@ -675,7 +679,7 @@ impl WaveExecutor {
                         .get(&selected_path)
                         .expect("selected path validated by read_or_verdict");
 
-                    let sub_items = load_or_path_items(or_path, Path::new(&run.snapshot.repo))?;
+                    let sub_items = load_xor_path_items(or_path, Path::new(&run.snapshot.repo))?;
 
                     for sub_item in &sub_items {
                         let sub_step = match sub_item {
@@ -684,7 +688,7 @@ impl WaveExecutor {
                                 warn!(
                                     run_id = %run.id,
                                     item = ?other,
-                                    "or sub-flow contains non-step item, skipping"
+                                    "xor sub-flow contains non-step item, skipping"
                                 );
                                 continue;
                             }
@@ -714,7 +718,7 @@ impl WaveExecutor {
                             self.fail_run(
                                 &mut run,
                                 &wave,
-                                format!("or sub-step {} failed", sub_step.step.name),
+                                format!("xor sub-step {} failed", sub_step.step.name),
                             )
                             .await?;
                             return Ok(());
@@ -740,6 +744,37 @@ impl WaveExecutor {
 
                     self.advance_run_step(&mut run, &plan, wave.id()).await?;
                 }
+                FlowAction::Or { .. } => {
+                    self.fail_run(
+                        &mut run,
+                        &wave,
+                        "or (multi-select) execution is not yet implemented".to_string(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                FlowAction::Loop { body } => loop {
+                    info!(
+                        run_id = %run.id,
+                        step_index = run.step_index,
+                        "running loop body"
+                    );
+
+                    self.run_inline_items(&wave, &mut run, &body.steps).await?;
+                    if run.status == WaveRunStatus::Failed {
+                        return Ok(());
+                    }
+
+                    let selected = self.run_inline_xor(&wave, &mut run, &body.exit).await?;
+                    if run.status == WaveRunStatus::Failed {
+                        return Ok(());
+                    }
+
+                    if selected == "done" {
+                        self.advance_run_step(&mut run, &plan, wave.id()).await?;
+                        break;
+                    }
+                },
                 FlowAction::Complete => {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
@@ -1013,6 +1048,289 @@ impl WaveExecutor {
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
+    }
+
+    async fn run_inline_items(
+        &self,
+        wave: &Wave,
+        run: &mut WaveRun,
+        items: &[ConcreteItem],
+    ) -> Result<()> {
+        for item in items {
+            match item {
+                ConcreteItem::Step(step) => {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
+                        warn!(run_id = %run.id, error = %err, "pre-step sync failed in inline execution, continuing");
+                    }
+
+                    if let Err(err) = self.ensure_summary_fresh(wave, run).await {
+                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
+                    }
+
+                    let exit_code = self.run_step(wave, run, step).await?;
+                    if exit_code != 0 {
+                        self.fail_run(run, wave, format!("inline step {} failed", step.step.name))
+                            .await?;
+                        return Ok(());
+                    }
+
+                    if let Err(err) =
+                        post_step_sync(Path::new(&run.worktree), &run.branch, &step.step.name)
+                    {
+                        self.fail_run(
+                            run,
+                            wave,
+                            format!(
+                                "post-step sync failed for inline step {}: {err}",
+                                step.step.name
+                            ),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                }
+                ConcreteItem::Op(ops) => {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
+                        warn!(run_id = %run.id, error = %err, "pre-op sync failed in inline execution, continuing");
+                    }
+
+                    let worktree = run.worktree.clone();
+                    let item = ops.item.clone();
+                    let command = item.display_name();
+                    match tokio::task::spawn_blocking(move || {
+                        crate::ops::execute_flow_ops(
+                            Path::new(&worktree),
+                            &item,
+                            &crate::ops::NullProgress,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            self.fail_run(
+                                run,
+                                wave,
+                                format!("inline op '{command}' failed: {err}"),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            self.fail_run(
+                                run,
+                                wave,
+                                format!("inline op '{command}' panicked: {err}"),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                    }
+                }
+                ConcreteItem::And(_) => {
+                    self.fail_run(
+                        run,
+                        wave,
+                        "inline and constructs are not supported inside loop bodies".to_string(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                ConcreteItem::Xor(branch) => {
+                    let _ = self.run_inline_xor(wave, run, branch).await?;
+                    if run.status == WaveRunStatus::Failed {
+                        return Ok(());
+                    }
+                }
+                ConcreteItem::Or(_) => {
+                    self.fail_run(
+                        run,
+                        wave,
+                        "or (multi-select) execution is not yet implemented".to_string(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                ConcreteItem::Loop(_) => {
+                    self.fail_run(
+                        run,
+                        wave,
+                        "nested loop constructs are not supported in inline execution".to_string(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_inline_xor(
+        &self,
+        wave: &Wave,
+        run: &mut WaveRun,
+        branch: &crate::engine::ConcreteXor,
+    ) -> Result<String> {
+        if let Err(err) = pre_step_sync(
+            Path::new(&run.snapshot.repo),
+            Path::new(&run.worktree),
+            &run.branch,
+        ) {
+            warn!(run_id = %run.id, error = %err, "pre-or sync failed in inline execution, continuing");
+        }
+
+        let router_name = branch.router.as_deref().unwrap_or("xor-route");
+        let routing_suffix = build_xor_routing_suffix(branch);
+        let routing_content = if let Some(ref router_name) = branch.router {
+            let router = load_step(router_name, Path::new(&run.snapshot.repo))?;
+            let base = router.content.as_deref().unwrap_or("");
+            format!("{base}\n\n{routing_suffix}")
+        } else {
+            format!(
+                "Previous steps have analyzed the current state and written their findings to scratch/.\n\
+                 Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
+                 {routing_suffix}"
+            )
+        };
+
+        let router = ConcreteStep {
+            step: Step {
+                name: router_name.to_string(),
+                agent: None,
+                default_agent: Some("claude:sonnet".to_string()),
+                directions: Vec::new(),
+                action_style: None,
+                interactive: None,
+                content: Some(routing_content),
+                fast_path: None,
+            },
+            flow_parents: branch.flow_parents.clone(),
+        };
+
+        let exit_code = self.run_step(wave, run, &router).await?;
+        if exit_code != 0 {
+            self.fail_run(run, wave, "xor router step failed".to_string())
+                .await?;
+            return Ok("done".to_string());
+        }
+
+        if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, router_name) {
+            self.fail_run(run, wave, format!("post-xor-route sync failed: {err}"))
+                .await?;
+            return Ok("done".to_string());
+        }
+
+        let verdict_path = Path::new(&run.worktree).join("scratch/route-xor.md");
+        let selected = match read_xor_verdict(&verdict_path, branch) {
+            Ok(path) => path,
+            Err(err) => {
+                self.fail_run(run, wave, err).await?;
+                return Ok("done".to_string());
+            }
+        };
+
+        let or_path = branch
+            .paths
+            .get(&selected)
+            .expect("selected path validated by read_or_verdict");
+        let sub_items = load_xor_path_items(or_path, Path::new(&run.snapshot.repo))?;
+        for sub_item in &sub_items {
+            match sub_item {
+                ConcreteItem::Step(step) => {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
+                        warn!(run_id = %run.id, error = %err, "pre-step sync failed in inline or sub-step, continuing");
+                    }
+
+                    if let Err(err) = self.ensure_summary_fresh(wave, run).await {
+                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
+                    }
+
+                    let exit_code = self.run_step(wave, run, step).await?;
+                    if exit_code != 0 {
+                        self.fail_run(run, wave, format!("xor sub-step {} failed", step.step.name))
+                            .await?;
+                        return Ok(selected);
+                    }
+
+                    if let Err(err) =
+                        post_step_sync(Path::new(&run.worktree), &run.branch, &step.step.name)
+                    {
+                        self.fail_run(
+                            run,
+                            wave,
+                            format!(
+                                "post-step sync failed for or sub-step {}: {err}",
+                                step.step.name
+                            ),
+                        )
+                        .await?;
+                        return Ok(selected);
+                    }
+                }
+                ConcreteItem::Op(ops) => {
+                    let worktree = run.worktree.clone();
+                    let item = ops.item.clone();
+                    let command = item.display_name();
+                    match tokio::task::spawn_blocking(move || {
+                        crate::ops::execute_flow_ops(
+                            Path::new(&worktree),
+                            &item,
+                            &crate::ops::NullProgress,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            self.fail_run(
+                                run,
+                                wave,
+                                format!("xor sub-op '{command}' failed: {err}"),
+                            )
+                            .await?;
+                            return Ok(selected);
+                        }
+                        Err(err) => {
+                            self.fail_run(
+                                run,
+                                wave,
+                                format!("xor sub-op '{command}' panicked: {err}"),
+                            )
+                            .await?;
+                            return Ok(selected);
+                        }
+                    }
+                }
+                ConcreteItem::And(_)
+                | ConcreteItem::Xor(_)
+                | ConcreteItem::Or(_)
+                | ConcreteItem::Loop(_) => {
+                    self.fail_run(
+                        run,
+                        wave,
+                        "nested and/or/loop constructs are not supported inside inline or paths"
+                            .to_string(),
+                    )
+                    .await?;
+                    return Ok(selected);
+                }
+            }
+        }
+
+        Ok(selected)
     }
 
     /// Create a repair run in the same worktree/branch as the failed run.

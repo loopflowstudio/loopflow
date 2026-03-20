@@ -165,7 +165,7 @@ fn discover_target_finds_step() {
 fn discover_target_finds_flow() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let target = discover_target(repo.path(), "ship").expect("should find builtin flow");
+    let target = discover_target(repo.path(), "build").expect("should find builtin flow");
     assert!(matches!(target, Target::Flow(_)));
 }
 

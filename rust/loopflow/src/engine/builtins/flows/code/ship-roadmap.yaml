@@ -1,8 +1,0 @@
-- ingest
-- or:
-    paths:
-      play:
-        flow: ship-roadmap-play
-        description: "Compelling item found — design and build it"
-      silence:
-        description: "Nothing compelling to build right now — stay quiet this iteration"

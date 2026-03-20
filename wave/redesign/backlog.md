@@ -4,7 +4,7 @@ Ideas worth revisiting after the redesign waves stabilize. Not prioritized, not 
 
 ## scale/01 — FlowRun Container
 
-WaveRun/FlowRun split: iterations own branches/PRs, flows execute within them. Real architectural need but the shape gets clearer after chord-model ships and tend cycles run. Revisit when the pain is concrete.
+WaveRun/FlowRun split: iterations own branches/PRs, flows execute within them. Real architectural need but the shape gets clearer after chord-model ships and garden cycles run. Revisit when the pain is concrete.
 
 ## scale/04 — Chords UI
 

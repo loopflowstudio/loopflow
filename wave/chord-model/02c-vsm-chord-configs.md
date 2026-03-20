@@ -45,7 +45,7 @@ No need to configure "s5 weekly, s4 daily" separately. One cron, all levels run,
 
 ## Open design questions
 
-- **Flow engine traversal primitive.** How does the flow engine express recursive up/down traversal? Is it built into the planning flow definition, or does lfd manage the tree walk externally? May need a new primitive for "run these steps at each node in tree order."
+- **Flow engine traversal primitive.** The flow engine now handles recursive expansion (`expand_with_chain`), AND/XOR branching, loop constructs, and parent-flow plumbing. What's missing is a primitive for "run these steps at each node in tree order" — the chord-tree up/down traversal. Options: a new flow-level `traverse` construct, or lfd manages the tree walk externally and invokes standard flows at each node.
 - **Capacity writes.** How does s3's capacity allocation get written? Mutation to child wave configs via `wave/mutate`? A separate capacity file?
 - **Batch vs pool initiation.** Autonomous work wants batch (plan → execute → plan). Interactive/garden wants pool (workers always running, human feeds queue). Same `workers: N` underneath, different initiation pattern. Is this just `mode` (cron vs loop)?
 - **Scan tool availability.** Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Planning flow needs graceful skip behavior when a scan can't reach an expected data source.

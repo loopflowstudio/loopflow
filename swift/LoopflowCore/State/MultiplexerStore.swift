@@ -52,34 +52,6 @@ public final class MultiplexerStore {
         )
     }
 
-    public func layout(for wave: WaveViewModel) -> LayoutNode {
-        if let existing = loadedLayout(for: wave.id) {
-            return existing
-        }
-
-        let defaultLayout = normalizeLayout(defaultLayout(for: wave), for: wave.id)
-        layoutsByWave[wave.id] = defaultLayout
-        return defaultLayout
-    }
-
-    public func defaultLayout(for wave: WaveViewModel) -> LayoutNode {
-        let roadmap = makePane(type: .roadmap, for: wave.id)
-        let runs = makePane(type: .runs, for: wave.id)
-        let terminal = makePane(type: .terminal, for: wave.id)
-
-        return .split(
-            .horizontal,
-            first: .split(
-                .vertical,
-                first: .leaf(roadmap),
-                second: .leaf(runs),
-                ratio: 0.58
-            ),
-            second: .leaf(terminal),
-            ratio: 0.42
-        )
-    }
-
     public func focusedPaneId(for waveId: String) -> String? {
         let layout = layout(for: waveId)
         return focusedPaneByWave[waveId].flatMap { layout.pane(for: $0)?.id } ?? layout.firstPane?.id

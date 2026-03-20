@@ -1,9 +1,9 @@
 - qa
 - triage
-- or:
+- xor:
     paths:
       fix:
-        flow: qa-fix
+        flow: code
         description: "Blocking issues found, fix before deploy"
       deploy:
         flow: deploy

@@ -7,7 +7,7 @@ linear_id: 69a97ac1-b39d-4d15-ab1f-0f2f1a271f41
 
 ## Context
 
-The conductor needs a panoramic view. Not drill-in-to-see-details — glance-and-know-what-matters. This serves the tend flow's calibration moment: the human looks at the portfolio, the chord surfaces its assessment, the human calibrates.
+The conductor needs a panoramic view. Not drill-in-to-see-details — glance-and-know-what-matters. This serves the garden flow's calibration moment: the human looks at the portfolio, the chord surfaces its assessment, the human calibrates.
 
 Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the conductor framing.
 

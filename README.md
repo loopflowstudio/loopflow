@@ -99,14 +99,19 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 
-### Tend steps (`tend/`)
+### Garden steps (`garden/`)
 
 | Step | What it does |
 |------|--------------|
-| `tend/scan-waves` | Read member wave state — PRs, blocks, progress, git activity |
-| `tend/assess` | Judge wave health and identify pressure points |
-| `tend/play-chord` | Compose and apply coordinated mutations across member waves |
-| `tend/review-chord` | Review what already changed, then amend or revert if needed |
+| `garden/scan` | Read member wave state — PRs, blocks, progress, git activity |
+| `garden/assess` | Judge wave health and identify pressure points |
+
+### Wave steps (`wave/`)
+
+| Step | What it does |
+|------|--------------|
+| `wave/mutate` | Compose and apply coordinated mutations across member waves |
+| `wave/review` | Review what already changed, then amend or revert if needed |
 
 ### VSM steps (`vsm/`)
 
@@ -154,28 +159,50 @@ Flows can include mechanical ops items directly:
 ```yaml
 - implement
 - gate
-- ops: land --create-pr
+- op: land --create-pr
 ```
 
 ### Code flows (`code/`)
 
 | Flow | Steps |
 |------|-------|
-| `build` | implement → compress → lint → gate → update-wave |
-| `design-and-ship` | design → implement → reduce → polish |
-| `ship` | design → build → demo/code-review → land |
-| `pair` | design → build |
-| `grind` | research → iterate → build → gate |
-| `integrate` | rebase → integrate-upstream |
-| `incident` | debug → 5whys → build |
-| `start` | ingest → kickoff |
-| `ship-wave` | start → build |
-| `ship-roadmap` | ingest → or(play: ship-roadmap-play, silence) |
-| `ship-roadmap-play` | kickoff → review-design → build → demo/code-review → land |
+| `code` | implement → compress → lint → gate |
+| `pair` | design → code |
+| `deploy` | gate → op: land → op: pm sync |
+| `sync` | rebase → integrate-upstream → op: pm sync |
+| `qa-deploy` | qa → triage → xor(code, deploy) |
 | `reorg` | update-wave (coherence pass) |
-| `qa-deploy` | qa → triage → or(fix, deploy) |
-| `qa-fix` | implement → compress → lint → gate |
-| `deploy` | gate → update-wave |
+
+### Build flows (`build/`)
+
+| Flow | Steps |
+|------|-------|
+| `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
+| `build-or-silent` | ingest → xor(build, silence) |
+| `design-and-ship` | design → implement → reduce → polish → deploy |
+| `queue` | gate → update-wave → deploy |
+
+### Garden flows (`garden/`)
+
+| Flow | Steps |
+|------|-------|
+| `garden` | wave/mutate → wave/review |
+| `garden-or-silent` | garden/scan → garden/assess → xor(garden, silence) |
+
+### Algedonic flows (`algedonic/`)
+
+| Flow | Steps |
+|------|-------|
+| `incident` | debug → 5whys → code → deploy |
+
+### VSM flows (`vsm/`)
+
+| Flow | Steps |
+|------|-------|
+| `govern-identity` | s5-scan → s5-assess → wave/mutate |
+| `govern-intelligence` | s4-scan → s4-assess → wave/mutate |
+| `govern-control` | s3-scan → s3-assess → wave/mutate |
+| `govern-coordination` | s2-scan → s2-assess → wave/mutate |
 
 ### Plan flows (`plan/`)
 
@@ -185,26 +212,11 @@ Flows can include mechanical ops items directly:
 | `wave-polish` | and(polish×3) → update-wave |
 | `wave-expand` | and(expand×3) → update-wave |
 
-### Tend flows (`tend/`)
-
-| Flow | Steps |
-|------|-------|
-| `tend` | scan-waves → assess → or(tune, silence) |
-
-### VSM flows (`vsm/`)
-
-| Flow | Steps |
-|------|-------|
-| `govern-identity` | s5-scan → s5-assess → play-chord |
-| `govern-intelligence` | s4-scan → s4-assess → play-chord |
-| `govern-control` | s3-scan → s3-assess → play-chord |
-| `govern-coordination` | s2-scan → s2-assess → play-chord |
-
 ### Scan flows (`scan/`)
 
 | Flow | Steps |
 |------|-------|
-| `scan` | scan/scan-report → scan/scan-plan → build |
+| `scan` | scan/scan-report → scan/scan-plan → code |
 
 ### Forks (and)
 
@@ -216,26 +228,25 @@ lf wave-reduce    # runs reduce 3x with different perspectives
 
 `wave-reduce` runs `reduce` across infra, ux, and ceo directions via `and`, then reconciles results with `update-wave`.
 
-### Branches (or)
+### Branches (xor)
 
-Branches route a flow based on an agent's assessment of the current state. One path runs.
+Branches route a flow based on an agent's assessment of the current state. Exactly one path runs.
 
 ```yaml
-# flow: tend
-- tend/scan-waves
-- or:
-    router: tend/assess
+# flow: garden-or-silent
+- garden/scan
+- garden/assess
+- xor:
+    router: garden/assess
     paths:
-      tune:
-        description: "Adjustments needed — play the chord, then review what happened"
-        steps:
-          - tend/play-chord
-          - tend/review-chord
+      garden:
+        flow: garden
+        description: "Adjustments needed — mutate waves, then review"
       silence:
-        description: "Everything is in tune"
+        description: "Everything is healthy"
 ```
 
-The `or` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.
+The `xor` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.
 
 If no `router:` is specified, a generic routing agent picks a path based on scratch/ contents.
 

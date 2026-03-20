@@ -1,6 +1,6 @@
 ---
-requires: scratch/tend-assessment.md or scratch/vsm-*-assessment.md
-produces: wave/ (updated configs and items), scratch/tend-chord.md
+requires: scratch/garden-assessment.md or scratch/vsm-*-assessment.md
+produces: wave/ (updated configs and items), scratch/wave-mutate.md
 ---
 Compose and play the chord in one pass.
 
@@ -16,13 +16,13 @@ of what changed and why. This step is both composer and performer.
 
 1. **Read the freshest assessment.** Use the assessment produced by the current
    flow:
-   - `scratch/tend-assessment.md`, or
+   - `scratch/garden-assessment.md`, or
    - `scratch/vsm-s5-assessment.md`, `scratch/vsm-s4-assessment.md`,
      `scratch/vsm-s3-assessment.md`, or `scratch/vsm-s2-assessment.md`
 
 2. **Extract the actionable pressure.** Pull out only the items that warrant
    mutation now:
-   - tend pressure points
+   - garden pressure points
    - s5 identity / boundary concerns
    - s4 environmental proposals
    - s3 mechanical or capacity fixes
@@ -52,7 +52,7 @@ of what changed and why. This step is both composer and performer.
 
 ## Output
 
-Write `scratch/tend-chord.md`:
+Write `scratch/wave-mutate.md`:
 
 ```markdown
 # Chord Played — <date>
@@ -79,7 +79,7 @@ Write `scratch/tend-chord.md`:
 <findings that did not warrant mutation now>
 ```
 
-Commit the applied changes with message: `tend: play chord`.
+Commit the applied changes with message: `wave: mutate`.
 
 ## What to avoid
 

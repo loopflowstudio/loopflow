@@ -14,8 +14,8 @@ Depends on:
 Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Governance waves need graceful skip behavior when their scan can't reach an expected data source.
 
 Open design questions from the governance flow build:
-- **`tend/scan` consuming sN outputs:** Does tend/scan pull (run the sN scans inline) or read (assume governance flows ran recently and consume their outputs)? Affects whether tend and governance flows are coupled or independent.
-- **Interactive flag on `review-chord`:** Is interactivity baked into the step or inherited from flow context? Matters because governance flows are headless (no human) while tend is interactive.
+- **`garden/scan` consuming sN outputs:** Does garden/scan pull (run the sN scans inline) or read (assume governance flows ran recently and consume their outputs)? Affects whether garden and governance flows are coupled or independent.
+- **Interactive flag on `review-chord`:** Is interactivity baked into the step or inherited from flow context? Matters because governance flows are headless (no human) while garden is interactive.
 
 ## The shape
 
@@ -35,7 +35,7 @@ wave/redesign/
     s2-coordination.yaml     # cron: every 4h, flow: govern-coordination
     README.md
   wave/s1-operations/
-    s1-operations.yaml       # mode: loop, workers: N, flow: ship-roadmap
+    s1-operations.yaml       # mode: loop, workers: N, flow: build-or-silent
     README.md
     01-first-item.md         # backlog items maintained by s2
 ```
@@ -55,7 +55,7 @@ All four only edit wave space — plans, backlogs, configs, `workers` on s1. No 
 
 ### s1-operations (worker pool)
 
-`mode: loop`, `workers: N`, `flow: ship-roadmap`. Workers pull from the backlog (maintained by s2), each in its own worktree. Ephemeral — worktree pruned after landing.
+`mode: loop`, `workers: N`, `flow: build-or-silent`. Workers pull from the backlog (maintained by s2), each in its own worktree. Ephemeral — worktree pruned after landing.
 
 s3 adjusts `workers` on s1 via `play-chord` mutations.
 
@@ -75,7 +75,7 @@ area:
 
 - Five member wave directories exist with configs and READMEs
 - s5–s2 run their governance flows on independent cron schedules
-- s1 runs `ship-roadmap` with `workers: N`
+- s1 runs `build-or-silent` with `workers: N`
 - Redesign chord area includes all five member waves
 - Sequential `vsm.yaml` is removed (already done in 02)
-- Tend flow still works for human check-ins on the same chord
+- Garden flow still works for human check-ins on the same chord

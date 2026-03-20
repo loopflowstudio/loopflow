@@ -4,7 +4,7 @@ linear_id: c96d9cc8-3b17-43ee-8f11-8136afab0e2f
 ---
 # 05: Chord-Wave Area Model
 
-**Finish line:** The `area over waves` contract is defined and implemented. A chord-wave's tend flow sees wave configs, run history, PR outcomes, block history, and human decisions — everything it needs to tend effectively — without a separate chord data model.
+**Finish line:** The `area over waves` contract is defined and implemented. A chord-wave's garden flow sees wave configs, run history, PR outcomes, block history, and human decisions — everything it needs to garden effectively — without a separate chord data model.
 
 ## Context
 
@@ -27,7 +27,7 @@ The first slice of that model already shipped: `scan-waves` derives member names
    - Progress timeline and velocity trends
    - Block history and how each block resolved
 
-3. **Human decision history.** Include calibration decisions, proposal approvals/rejections, and manual wave mutations so tending can reason about prior judgment instead of only raw activity.
+3. **Human decision history.** Include calibration decisions, proposal approvals/rejections, and manual wave mutations so gardening can reason about prior judgment instead of only raw activity.
 
 4. **Wave-based loader or API.** `scan-waves` should be able to load the full snapshot for a wave whose `area` points at `wave/`. No separate chord CRUD comes back.
 

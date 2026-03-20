@@ -35,7 +35,7 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 ## Goals
 
 - Primary Concerto screen is an attention queue, not a chat view
-- Every human checkpoint in build and tend flows surfaces as an `AttentionItem`
+- Every human checkpoint in build and garden flows surfaces as an `AttentionItem`
 - Coding sessions happen in embedded Ghostty terminals
 - Multi-repo, multi-wave status is visible at a glance
 - Human calibration moments have a dedicated UX

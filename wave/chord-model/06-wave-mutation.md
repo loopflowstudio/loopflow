@@ -44,5 +44,5 @@ The folded `signals` work changes the pressure behind these levers. Stall detect
 - Every mutation is logged with actor, rationale, and previous value
 - Mutations are individually revertible
 - `play-chord` uses the API for both automatic and human-amended changes
-- At least one real mutation has been applied by the redesign chord-wave's tend flow
+- At least one real mutation has been applied by the redesign chord-wave's garden flow
 - Repeated stall or algedonic pressure can be expressed as structured mutation proposals without a separate signal subsystem

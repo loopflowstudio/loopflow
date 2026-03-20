@@ -1,0 +1,21 @@
+- kickoff
+- review-design
+- loop:
+    steps:
+      - code
+      - xor:
+          paths:
+            demo:
+              step: demo
+              description: "Observable change — walk through the experience"
+            code-review:
+              step: code-review
+              description: "Internal change — walk through the code"
+    exit:
+      router: gate
+      paths:
+        again:
+          description: "Needs more work — iterate"
+        done:
+          description: "Ready to ship"
+- deploy

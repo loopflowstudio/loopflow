@@ -45,19 +45,13 @@ static NAMESPACED_STEPS: std::sync::LazyLock<
             "scan/scan-plan",
             include_str!("builtins/steps/scan/scan-plan.md"),
         ),
+        ("garden/scan", include_str!("builtins/steps/garden/scan.md")),
         (
-            "tend/scan-waves",
-            include_str!("builtins/steps/tend/scan-waves.md"),
+            "garden/assess",
+            include_str!("builtins/steps/garden/assess.md"),
         ),
-        ("tend/assess", include_str!("builtins/steps/tend/assess.md")),
-        (
-            "tend/play-chord",
-            include_str!("builtins/steps/tend/play-chord.md"),
-        ),
-        (
-            "tend/review-chord",
-            include_str!("builtins/steps/tend/review-chord.md"),
-        ),
+        ("wave/mutate", include_str!("builtins/steps/wave/mutate.md")),
+        ("wave/review", include_str!("builtins/steps/wave/review.md")),
         ("vsm/s5-scan", include_str!("builtins/steps/vsm/s5-scan.md")),
         (
             "vsm/s5-assess",

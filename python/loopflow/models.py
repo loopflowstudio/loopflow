@@ -53,12 +53,16 @@ class FlowStep(BaseModel):
         if isinstance(value, dict):
             return cls.model_validate(value)
         if isinstance(value, str):
+            if value.startswith("op:"):
+                return cls(type="op", name=value.split(":", 1)[1].strip())
             if value.startswith("ops:"):
-                return cls(type="ops", name=value.split(":", 1)[1].strip())
+                return cls(type="op", name=value.split(":", 1)[1].strip())
             if value == "[branch]":
                 return cls(type="branch", name="branch")
             if value == "[fork]":
                 return cls(type="fork", name="fork")
+            if value == "[loop]":
+                return cls(type="loop", name="loop")
             return cls(type="step", name=value)
         raise TypeError(f"Unsupported flow step value: {value!r}")
 

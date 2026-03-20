@@ -322,50 +322,33 @@ fn builtin_wave_reduce_expands_to_update_wave() {
 }
 
 #[test]
-fn builtin_ship_uses_ops_land_item() {
+fn builtin_deploy_uses_ops_land_item() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "ship");
+    let items = expand_named_flow(repo, "deploy");
     assert!(!items.is_empty());
-    assert!(matches!(items.last(), Some(ConcreteItem::Op(_))));
+    assert!(matches!(&items[1], ConcreteItem::Op(_)));
 }
 
 #[test]
-fn builtin_tend_flow_structure() {
+fn builtin_garden_or_silent_flow_structure() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "tend");
+    let items = expand_named_flow(repo, "garden-or-silent");
 
-    // tend: scan-waves, or(router: assess)
-    assert_eq!(items.len(), 2);
-    assert_step_name(&items[0], "tend/scan-waves");
-    match &items[1] {
-        ConcreteItem::Or(or_def) => {
-            assert_eq!(
-                or_def.router.as_deref(),
-                Some("tend/assess"),
-                "or should have tend/assess as router"
-            );
-            assert_eq!(or_def.paths.len(), 2);
-            assert!(or_def.paths.contains_key("tune"));
-            assert!(or_def.paths.contains_key("silence"));
-            assert_eq!(or_def.paths["tune"].flow, None);
-            assert_eq!(or_def.paths["tune"].step, None);
-            assert_eq!(
-                or_def.paths["tune"]
-                    .steps
-                    .iter()
-                    .map(|step| step.name.as_str())
-                    .collect::<Vec<_>>(),
-                vec!["tend/play-chord", "tend/review-chord"]
-            );
-            assert_eq!(or_def.paths["silence"].flow, None);
-            assert_eq!(or_def.paths["silence"].step, None);
-            assert!(or_def.paths["silence"].steps.is_empty());
+    // garden-or-silent: garden/scan, garden/assess, xor(garden, silence)
+    assert_eq!(items.len(), 3);
+    assert_step_name(&items[0], "garden/scan");
+    assert_step_name(&items[1], "garden/assess");
+    match &items[2] {
+        ConcreteItem::Xor(xor_def) => {
+            assert_eq!(xor_def.paths.len(), 2);
+            assert!(xor_def.paths.contains_key("garden"));
+            assert!(xor_def.paths.contains_key("silence"));
         }
-        other => panic!("expected Or, got {other:?}"),
+        other => panic!("expected Xor, got {other:?}"),
     }
 }
 
@@ -377,19 +360,19 @@ fn builtin_governance_flows_structure() {
     let cases = [
         (
             "govern-identity",
-            ["vsm/s5-scan", "vsm/s5-assess", "tend/play-chord"],
+            ["vsm/s5-scan", "vsm/s5-assess", "wave/mutate"],
         ),
         (
             "govern-intelligence",
-            ["vsm/s4-scan", "vsm/s4-assess", "tend/play-chord"],
+            ["vsm/s4-scan", "vsm/s4-assess", "wave/mutate"],
         ),
         (
             "govern-control",
-            ["vsm/s3-scan", "vsm/s3-assess", "tend/play-chord"],
+            ["vsm/s3-scan", "vsm/s3-assess", "wave/mutate"],
         ),
         (
             "govern-coordination",
-            ["vsm/s2-scan", "vsm/s2-assess", "tend/play-chord"],
+            ["vsm/s2-scan", "vsm/s2-assess", "wave/mutate"],
         ),
     ];
 
@@ -400,21 +383,19 @@ fn builtin_governance_flows_structure() {
 }
 
 #[test]
-fn builtin_ship_roadmap_has_ops_in_or_subflow() {
+fn builtin_build_or_silent_has_xor_branch() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "ship-roadmap");
-    let play_flow_name = match &items[1] {
-        ConcreteItem::Or(or_def) => or_def.paths["play"]
-            .flow
-            .as_deref()
-            .expect("play path should point at a sub-flow"),
-        other => panic!("expected or in ship-roadmap, got {other:?}"),
+    let items = expand_named_flow(repo, "build-or-silent");
+    // ingest, xor(build, silence)
+    assert_eq!(items.len(), 2);
+    assert_step_name(&items[0], "ingest");
+    match &items[1] {
+        ConcreteItem::Xor(xor_def) => {
+            assert!(xor_def.paths.contains_key("build"));
+            assert!(xor_def.paths.contains_key("silence"));
+        }
+        other => panic!("expected Xor in build-or-silent, got {other:?}"),
     };
-    let items = expand_named_flow(repo, play_flow_name);
-    assert!(
-        items.iter().any(|item| matches!(item, ConcreteItem::Op(_))),
-        "ship-roadmap-play should contain an ops item"
-    );
 }

@@ -1,15 +1,15 @@
 # Redesign Roadmap
 
-Build and tend. Two voices in counterpoint.
+Build and garden. Two voices in counterpoint.
 
-A wave builds — code, tests, PRs. A chord tends — `scan-waves`,
+A wave builds — code, tests, PRs. A chord gardens — `scan-waves`,
 `assess`, then routes to tune or silence. A wave build round
 routes to play or silence. Same flow engine, same infrastructure. The
 difference is area: files vs waves.
 
 The redesign is the first chord. Its first job is building itself.
-Its second job is tending the waves that build everything else. The
-recursive case — a chord that tends its own construction — is the
+Its second job is gardening the waves that build everything else. The
+recursive case — a chord that gardens its own construction — is the
 real test. If it can't coordinate its own creation, it can't
 coordinate anything.
 
@@ -17,16 +17,16 @@ coordinate anything.
 chord: redesign
 │
 │  build: creates chord machinery and Letta integration
-│  tend:  observes its own waves, routes to tune/silence, remembers
+│  garden: observes its own waves, routes to tune/silence, remembers
 │
 ├── wave: agent-embedding       7 items — Concerto as conductor
-└── wave: chord-model           8 items — tend flow, Letta, mutations, APIs
+└── wave: chord-model           8 items — garden flow, Letta, mutations, APIs
 
 wave: dogfood                   3 items — Mac Mini server, phone deploy, team workflow
 ```
 
-Both waves use existing `build` / `ship-wave` flows until the
-chord-model wave produces `tend`. Then the chord starts using what
+Both waves use existing `build` / `build-or-silent` flows until the
+chord-model wave produces `garden`. Then the chord starts using what
 it built.
 
 ---
@@ -35,21 +35,21 @@ it built.
 
 ### Phase 1: Bootstrap
 
-Build enough to run the first tend cycle. Uses existing flows.
+Build enough to run the first garden cycle. Uses existing flows.
 
-- **chord-model/02** — live tend-cycle validation (boot lfd, register redesign, run tend for real)
-- **chord-model/03** — Letta integration once live tend output exists to remember
+- **chord-model/02** — live garden-cycle validation (boot lfd, register redesign, run garden for real)
+- **chord-model/03** — Letta integration once live garden output exists to remember
 
 Current bootstrap pressure:
-- chord-model/02 still owns the live lfd proof; the structural tend work is not the finish line
+- chord-model/02 still owns the live lfd proof; the structural garden work is not the finish line
 - stall detection, self-healing polish, and signal memory come later inside chord-model rather than as a separate wave
 
-First tend cycle runs. The chord observes its own bootstrap commits.
+First garden cycle runs. The chord observes its own bootstrap commits.
 Letta records its first memories. The recursive loop is live.
 
-### Phase 2: Build and Tend in Counterpoint
+### Phase 2: Build and Garden in Counterpoint
 
-Waves produce real PRs. The chord tends them. Build and tend
+Waves produce real PRs. The chord gardens them. Build and garden
 alternate — waves create, chord observes, chord proposes, waves
 adjust.
 
@@ -63,7 +63,7 @@ algedonic polish, and memory work stay in this wave.
 
 ### Phase 3: The Chord Earns Its Keep
 
-Enough tend cycles to answer the open questions with evidence.
+Enough garden cycles to answer the open questions with evidence.
 
 - chord-model/07 — DAG enforcement and default chord
 - chord-model/04 — memory of repeated algedonic and calibration patterns
@@ -71,17 +71,17 @@ Enough tend cycles to answer the open questions with evidence.
 
 The default chord absorbs the existing five waves (foundation,
 trust, context, concerto, scale) and restructures them through
-tend cycles. Not manual reshuffling — the chord proposes, the
+garden cycles. Not manual reshuffling — the chord proposes, the
 human reviews.
 
 ---
 
 ## Rhythm
 
-A chord's execution alternates between tending and building.
+A chord's execution alternates between gardening and building.
 
 ```
-tend (1 global update)
+garden (1 global update)
   scan-waves → assess → branch:
     tune: play-chord → review-chord
     silence: exit cleanly
@@ -92,22 +92,22 @@ build × N (parallel, one per active wave)
     silence: exit cleanly
 ```
 
-One tend cycle, then N parallel build cycles — one per member wave that
+One garden cycle, then N parallel build cycles — one per member wave that
 has compelling work. Silent waves don't participate in the build round.
 The chord naturally focuses on the work that matters most.
 
 This is recursive. A chord whose members include sub-chords:
 
 ```
-tend (top-level chord)
+garden (top-level chord)
   └── apply mutations to sub-chords and leaf waves
 
 build (sub-chord A)           build (sub-chord B)        build (leaf wave C)
-  └── tend (own update)         └── tend (own update)      └── ingest → build
+  └── garden (own update)       └── garden (own update)    └── ingest → build
       └── build × M                └── build × K
 ```
 
-The ratio — 1 tend per N builds — is the pulse. Tend observes what
+The ratio — 1 garden per N builds — is the pulse. Garden observes what
 built, adjusts, then build runs again. The chord doesn't micromanage;
 it sets direction and checks in.
 
@@ -159,7 +159,7 @@ alternatives, risks. Verdict: go / rethink / scope down.
 Is what we built good enough? The diff in context of design intent.
 Verdict: ship / iterate / reject.
 
-**Tend: calibration** (meta, cross-cutting, panoramic)
+**Garden: calibration** (meta, cross-cutting, panoramic)
 The highest-leverage moment. The chord presents:
 - Are we making real, measurable progress?
 - Are we lost in details that don't matter, or skipping details
@@ -234,5 +234,5 @@ The second chord is whatever the default chord proposes when it
 absorbs the existing waves. The third is Cadenza (../cadenza).
 
 The recursive test is the hardest test. A chord that can build
-itself, tend itself, and remember what it learned is a chord that
+itself, garden itself, and remember what it learned is a chord that
 can do anything.

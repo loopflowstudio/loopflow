@@ -1,6 +1,6 @@
 ---
-requires: scratch/tend-chord.md
-produces: scratch/tend-review.md
+requires: scratch/wave-mutate.md
+produces: scratch/wave-review.md
 interactive: true
 ---
 Review what the chord already played.
@@ -42,7 +42,7 @@ After the per-mutation walkthrough, zoom out:
 
 ## Output
 
-Write `scratch/tend-review.md`:
+Write `scratch/wave-review.md`:
 
 ```markdown
 # Chord Review — <date>

@@ -1,2 +1,3 @@
 - rebase
 - integrate-upstream
+- op: pm sync

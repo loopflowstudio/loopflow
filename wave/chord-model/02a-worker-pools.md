@@ -20,7 +20,7 @@ Replace `serialized: bool` with `workers: u32`.
 No `0` / unlimited mode. Every wave has a finite worker count.
 
 ```yaml
-flow: ship-wave
+flow: build-or-silent
 workers: 3          # up to 3 concurrent runs
 ```
 

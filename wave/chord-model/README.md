@@ -40,22 +40,22 @@ Four focused governance flows cover identity, intelligence, control, and coordin
 # govern-identity
 - vsm/s5-scan
 - vsm/s5-assess
-- tend/play-chord
+- wave/mutate
 
 # govern-intelligence
 - vsm/s4-scan
 - vsm/s4-assess
-- tend/play-chord
+- wave/mutate
 
 # govern-control
 - vsm/s3-scan
 - vsm/s3-assess
-- tend/play-chord
+- wave/mutate
 
 # govern-coordination
 - vsm/s2-scan
 - vsm/s2-assess
-- tend/play-chord
+- wave/mutate
 ```
 
 There is no builtin sequential `vsm` flow anymore. S1 stays out of scope here — member waves still do the actual work, and worker-pool operations come later.
@@ -75,7 +75,7 @@ area:
   - wave/s1-operations/    # or just the leaf waves directly
 ```
 
-Each system wave runs on its own rhythm. S5 slower (weekly, on-demand). S4 scans frequently. S3 tends daily. S2 reconciles as needed. Same model, different scale.
+Each system wave runs on its own rhythm. S5 slower (weekly, on-demand). S4 scans frequently. S3 gardens daily. S2 reconciles as needed. Same model, different scale.
 
 ## Strategy
 

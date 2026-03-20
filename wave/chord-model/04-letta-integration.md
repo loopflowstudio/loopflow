@@ -4,13 +4,13 @@ linear_id: 0ce367a0-0d8e-472b-af6d-7990d0606139
 ---
 # 04: Letta Integration
 
-**Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Tend cycles load memories before running and write observations after. The chord-wave remembers across runs, including which algedonic and calibration interventions actually helped.
+**Finish line:** The redesign chord-wave has a Letta agent with persistent memory. Garden cycles load memories before running and write observations after. The chord-wave remembers across runs, including which algedonic and calibration interventions actually helped.
 
 ## Context
 
 Letta (formerly MemGPT) provides layered memory: core, recall, archival. The architectural boundary stays the same after bootstrap: Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The redesign chord-wave is the only place where durable qualitative memory belongs.
 
-Item 02 now covers the first live tend cycle. Finish that first so Letta has a real stream of scan observations, routed decisions, and human calibration events to remember instead of a purely structural test run.
+Item 02 now covers the first live garden cycle. Finish that first so Letta has a real stream of scan observations, routed decisions, and human calibration events to remember instead of a purely structural test run.
 
 The old `signals/05` idea folds here rather than living in a separate wave. Resolution history, calibration notes, and repeated stall/algedonic patterns belong in chord memory, not in a parallel block system.
 
@@ -39,27 +39,27 @@ Run a self-hosted Letta instance alongside lfd. Keep the setup reproducible and 
 - Full redesign context and history
 - Abandoned approaches and why they were abandoned
 - Research findings (VSM, Daytona, OpenCode)
-- Patterns observed across multiple tend cycles
+- Patterns observed across multiple garden cycles
 
-### Wire memory into tend
+### Wire memory into garden
 
 ```
-tend cycle starts
+garden cycle starts
   -> load core memories
   -> search recall for recent relevant context
   -> search archival when assessment surfaces something historical
-  -> run tend flow with memories in prompt context
+  -> run garden flow with memories in prompt context
   -> write new memories:
       - scan observations -> recall
       - assessment conclusions -> recall
       - durable decisions -> core or recall
       - cross-cutting patterns -> archival
-tend cycle ends
+garden cycle ends
 ```
 
 ### Memory hygiene
 
-Core memories need a size budget. When core fills, demote lower-value entries to recall. The chord-wave should be able to promote, demote, or retire memories as part of ordinary tending instead of letting the store bloat.
+Core memories need a size budget. When core fills, demote lower-value entries to recall. The chord-wave should be able to promote, demote, or retire memories as part of ordinary gardening instead of letting the store bloat.
 
 ### Pattern use
 
@@ -72,7 +72,7 @@ Memory should feed back into real decisions:
 
 - Letta runs alongside lfd via repo-local tooling
 - The redesign chord-wave has initial core memories seeded from the redesign docs
-- Tend loads and writes memories on each cycle
-- After 3+ tend cycles, recall contains useful history
-- Memory search returns relevant context for new tend cycles
-- At least one repeated algedonic or calibration pattern is recalled and used in a later tend decision
+- Garden loads and writes memories on each cycle
+- After 3+ garden cycles, recall contains useful history
+- Memory search returns relevant context for new garden cycles
+- At least one repeated algedonic or calibration pattern is recalled and used in a later garden decision

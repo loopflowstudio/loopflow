@@ -29,7 +29,7 @@ This wave is newly split out. The current `agent-embedding` diff improves the te
 There should be one real execution path:
 - `lf design`
 - `lf build`
-- `lf ship-roadmap`
+- `lf build-or-silent`
 - `lf ci-fix`
 
 No second bespoke in-daemon flow executor as the long-term architecture.

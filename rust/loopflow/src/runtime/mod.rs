@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -12,6 +13,7 @@ use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main}
 use crate::lfd::id::LfdId;
 
 const RUNTIME_ROOT: &str = ".lf/runtime/runs";
+const RUNTIME_EXCLUDE_ENTRY: &str = ".lf/runtime/";
 
 #[derive(Debug, Clone, Default)]
 pub enum RunTarget {
@@ -140,6 +142,7 @@ impl RuntimeRun {
         command: &[String],
         target: RunTarget,
     ) -> Result<Self, std::io::Error> {
+        ensure_runtime_ignored(repo_root)?;
         let run_id = LfdId::new();
         let run_dir = runs_root(repo_root).join(run_id.as_str());
         fs::create_dir_all(&run_dir)?;
@@ -288,9 +291,45 @@ pub fn read_events(run_dir: &Path) -> Result<Vec<RuntimeEvent>, std::io::Error> 
     Ok(events)
 }
 
+fn ensure_runtime_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["rev-parse", "--git-path", "info/exclude"])
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "git rev-parse --git-path info/exclude failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    let exclude_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if let Some(parent) = exclude_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|line| line.trim() == RUNTIME_EXCLUDE_ENTRY)
+    {
+        return Ok(());
+    }
+
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(RUNTIME_EXCLUDE_ENTRY);
+    updated.push('\n');
+    fs::write(exclude_path, updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{read_events, read_meta, RunTarget, RuntimeEvent, RuntimeRun};
+    use crate::engine::git::is_clean;
     use loopflow_test_support::TestRepo;
 
     #[test]
@@ -326,5 +365,17 @@ mod tests {
         assert!(matches!(events[2], RuntimeEvent::RunWaiting { .. }));
         assert!(matches!(events[3], RuntimeEvent::StepCompleted { .. }));
         assert!(matches!(events[4], RuntimeEvent::RunCompleted { .. }));
+    }
+
+    #[test]
+    fn runtime_run_keeps_worktree_clean() {
+        let repo = TestRepo::new();
+        let worktree = repo.create_wave_worktree("runtime");
+        let command = vec!["lf".to_string(), "build".to_string()];
+
+        let _run = RuntimeRun::maybe_start(&worktree, &command, RunTarget::flow("build"))
+            .expect("runtime run");
+
+        assert!(is_clean(&worktree).expect("worktree should stay clean"));
     }
 }

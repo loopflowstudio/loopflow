@@ -8,9 +8,3 @@ area:
 direction:
   - clarity
   - simplicity
-<<<<<<< HEAD
-pm:
-  provider: linear
-  linear_project: 02ca00a1-ede3-445b-b80e-ba3dc521be46
-=======
->>>>>>> eb790e5f (concerto: stabilize bundled daemon terminal handoff)

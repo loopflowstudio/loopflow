@@ -207,21 +207,8 @@ struct KeyboardRouterTests {
         var actions: [ShortcutAction] = []
 
         let handled = router.routeEvent(
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-            key: .character("\\"),
-=======
-            key: .character("d"),
->>>>>>> 55cd605c (lf commit: implement)
-=======
-            key: .character("\\"),
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-            modifiers: [.command],
-=======
             key: .keyCode(ShortcutCatalog.fiveKeyCode),
             modifiers: [.control, .shift],
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
             isRepeat: false,
             mode: .terminal
         ) { actions.append($0) }
@@ -230,12 +217,6 @@ struct KeyboardRouterTests {
         #expect(actions == [.splitVertical])
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
     @Test("terminal mode routes horizontal split shortcut by key code")
     func terminalModeRoutesHorizontalSplitShortcut() {
         let router = KeyboardRouter()
@@ -252,7 +233,6 @@ struct KeyboardRouterTests {
         #expect(actions == [.splitHorizontal])
     }
 
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
     @Test("terminal focus navigation uses option-command arrows")
     func terminalFocusNavigationShortcut() {
         let router = KeyboardRouter()
@@ -269,11 +249,6 @@ struct KeyboardRouterTests {
         #expect(actions == [.focusNextPane])
     }
 
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     @Test("terminal mode ignores non-multiplexer shortcuts")
     func terminalModeIgnoresNonMultiplexerShortcuts() {
         let router = KeyboardRouter()
@@ -290,7 +265,6 @@ struct KeyboardRouterTests {
         #expect(actions.isEmpty)
     }
 
-<<<<<<< HEAD
     @Test("help overlay takes priority over terminal focus")
     func helpOverlayWinsOverTerminalFocus() {
         let router = KeyboardRouter()
@@ -304,8 +278,6 @@ struct KeyboardRouterTests {
         #expect(mode == .helpOverlay)
     }
 
-=======
->>>>>>> 55cd605c (lf commit: implement)
     @Test("Help overlay mode only handles dismiss keys")
     func helpOverlayDismissKeys() {
         let router = KeyboardRouter()

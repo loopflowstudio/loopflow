@@ -238,38 +238,6 @@ private struct AttentionDetailView: View {
                     }
                 }
             }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        case .stepFailure(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let step = context.step { detailLine("Step", step) }
-                if let error = context.error { detailLine("Error", error) }
-            }
-        case .designReview(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                detailLine("Step", context.step)
-                if let designPath = context.designPath {
-                    detailLine("Design", designPath)
-                }
-            }
-        case .calibration(let context):
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                detailLine("Step", context.step)
-                if let chordPath = context.chordPath {
-                    detailLine("Chord", chordPath)
-                }
-            }
-=======
->>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
-        case .raw(let raw):
-            Text(raw)
-                .font(Typography.code())
-                .foregroundStyle(palette.text)
->>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
-=======
->>>>>>> 429609a0 (swift: trim unused attention fallback state)
         }
     }
 
@@ -291,32 +259,6 @@ private struct AttentionDetailView: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-            case .designReview(let context):
-                if let sessionId = context.terminalSessionId {
-                    Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                }
-            case .calibration(let context):
-                if let sessionId = context.terminalSessionId {
-                    Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                }
-            case .queueFailure, .raw:
-=======
-            case .raw:
->>>>>>> bb36fbcb (attention: collapse kinds to Interactive/Algedonic, add HTTP create/resolve API)
-                EmptyView()
->>>>>>> 07c9c6ed (attention queue completion: wire interactive steps into attention queue)
-=======
->>>>>>> 429609a0 (swift: trim unused attention fallback state)
             }
         }
     }

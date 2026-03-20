@@ -26,77 +26,26 @@ public final class MultiplexerStore {
         if let existing = loadedLayout(for: waveId) {
             return existing
         }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-        let defaultLayout = assignTerminalSessions(in: LayoutNode.defaultLayout(), for: waveId)
-=======
-        let defaultLayout = LayoutNode.defaultLayout()
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        let defaultLayout = assignTerminalSessions(in: LayoutNode.defaultLayout(), for: waveId)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
 
         let defaultLayout = normalizeLayout(LayoutNode.defaultLayout(), for: waveId)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         layoutsByWave[waveId] = defaultLayout
         return defaultLayout
     }
 
     public func focusedPaneId(for waveId: String) -> String? {
-<<<<<<< HEAD
-<<<<<<< HEAD
         let layout = layout(for: waveId)
         return focusedPaneByWave[waveId].flatMap { layout.pane(for: $0)?.id } ?? layout.firstPane?.id
     }
 
     public func focusedPane(for waveId: String) -> PaneState? {
         let layout = layout(for: waveId)
-<<<<<<< HEAD
-        guard let id = focusedPaneId(for: waveId) else { return nil }
-        return layout.pane(for: id)
-=======
-=======
-        let layout = layout(for: waveId)
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
-        let id = focusedPaneByWave[waveId]
-        if let id, layout.pane(for: id) != nil {
-            return id
-        }
-        return layout.firstPane?.id
-    }
-
-    public func focusedPane(for waveId: String) -> PaneState? {
-        let layout = layout(for: waveId)
-        guard let id = focusedPaneId(for: waveId) else { return nil }
-<<<<<<< HEAD
-        return layout(for: waveId).pane(for: id)
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        return layout.pane(for: id)
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
-=======
         return focusedPaneId(for: waveId).flatMap { layout.pane(for: $0) }
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
     }
 
     // MARK: - Mutations
 
     public func setLayout(_ layout: LayoutNode, for waveId: String) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-        layoutsByWave[waveId] = assignTerminalSessions(in: layout, for: waveId)
-=======
-        layoutsByWave[waveId] = layout
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        layoutsByWave[waveId] = assignTerminalSessions(in: layout, for: waveId)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
         layoutsByWave[waveId] = normalizeLayout(layout, for: waveId)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         reconcileFocus(for: waveId)
         persist()
     }
@@ -113,27 +62,8 @@ public final class MultiplexerStore {
         newPaneType: PaneType,
         for waveId: String
     ) -> PaneState {
-<<<<<<< HEAD
-<<<<<<< HEAD
         let newPane = makePane(type: newPaneType, for: waveId)
-<<<<<<< HEAD
-=======
-        if newPaneType == .terminal, let terminalPane = layout(for: waveId).allPanes.first(where: { $0.type == .terminal }) {
-            focusedPaneByWave[waveId] = terminalPane.id
-            persist()
-            return terminalPane
-        }
-
-        let newPane = PaneState(type: newPaneType)
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        let newPane = makePane(type: newPaneType, for: waveId)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-        let current = layout(for: waveId)
-        let updated = current.splitting(paneId, axis: axis, newPane: newPane)
-=======
         let updated = layout(for: waveId).splitting(paneId, axis: axis, newPane: newPane)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         layoutsByWave[waveId] = updated
         focusedPaneByWave[waveId] = newPane.id
         persist()
@@ -143,32 +73,12 @@ public final class MultiplexerStore {
     public func closePane(_ paneId: String, for waveId: String) -> PaneState? {
         let current = layout(for: waveId)
         guard let closedPane = current.pane(for: paneId) else { return nil }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        guard closedPane.type != .terminal else { return nil }
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
         if let updated = current.removing(paneId) {
             layoutsByWave[waveId] = updated
             reconcileFocus(for: waveId)
         } else {
-<<<<<<< HEAD
-            layoutsByWave.removeValue(forKey: waveId)
-            focusedPaneByWave.removeValue(forKey: waveId)
-<<<<<<< HEAD
-<<<<<<< HEAD
-            removePersistedLayout(for: waveId)
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
-            removePersistedLayout(for: waveId)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
             clearWaveState(waveId)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         }
 
         persist()
@@ -184,10 +94,6 @@ public final class MultiplexerStore {
         persist()
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     public func replacePane(
         _ paneId: String,
         with newPaneType: PaneType,
@@ -208,11 +114,6 @@ public final class MultiplexerStore {
         return replacement
     }
 
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     public func moveFocus(_ direction: FocusDirection, for waveId: String) {
         guard let current = focusedPaneId(for: waveId) else { return }
 
@@ -232,40 +133,10 @@ public final class MultiplexerStore {
     }
 
     public func removeWave(_ waveId: String) {
-<<<<<<< HEAD
-        layoutsByWave.removeValue(forKey: waveId)
-        focusedPaneByWave.removeValue(forKey: waveId)
-<<<<<<< HEAD
-<<<<<<< HEAD
-        removePersistedLayout(for: waveId)
-=======
         clearWaveState(waveId)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         persist()
     }
 
-<<<<<<< HEAD
-    public func terminalSessionNames(for waveId: String) -> [String] {
-        ensureLoaded(waveId)
-        guard let layout = layoutsByWave[waveId] else { return [] }
-        return layout.allPanes.compactMap { pane in
-            guard pane.type == .terminal else { return nil }
-            return pane.config.terminalSessionName
-        }
-=======
-=======
-        removePersistedLayout(for: waveId)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-        persist()
-    }
-
-    public func terminalPane(for waveId: String) -> PaneState? {
-        layout(for: waveId).allPanes.first(where: { $0.type == .terminal })
->>>>>>> 55cd605c (lf commit: implement)
-    }
-
-=======
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
     public func terminalSessionNames(for waveId: String) -> [String] {
         layout(for: waveId).allPanes.compactMap { pane in
             guard pane.type == .terminal else { return nil }
@@ -312,29 +183,12 @@ public final class MultiplexerStore {
         guard layoutsByWave[waveId] == nil, let repoKey else { return }
 
         let key = storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout")
-<<<<<<< HEAD
-        guard let data = userDefaults.data(forKey: key) else { return }
-<<<<<<< HEAD
-<<<<<<< HEAD
-        if let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) {
-            layoutsByWave[waveId] = assignTerminalSessions(in: decoded, for: waveId)
-        }
-=======
-        layoutsByWave[waveId] = try? JSONDecoder().decode(LayoutNode.self, from: data)
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        if let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) {
-            layoutsByWave[waveId] = assignTerminalSessions(in: decoded, for: waveId)
-        }
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
         guard let data = userDefaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode(LayoutNode.self, from: data) else {
             return
         }
 
         layoutsByWave[waveId] = normalizeLayout(decoded, for: waveId)
->>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
     }
 
     private func reconcileFocus(for waveId: String) {
@@ -352,10 +206,6 @@ public final class MultiplexerStore {
         }
         return "multiplexer.\(suffix).\(repoKey)"
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     private func makePane(type: PaneType, for waveId: String) -> PaneState {
         let paneId = UUID().uuidString
@@ -396,11 +246,6 @@ public final class MultiplexerStore {
         guard let repoKey else { return }
         userDefaults.removeObject(forKey: storageKey(repoKey: repoKey, waveId: waveId, suffix: "layout"))
     }
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 }
 
 public enum FocusDirection: Sendable {

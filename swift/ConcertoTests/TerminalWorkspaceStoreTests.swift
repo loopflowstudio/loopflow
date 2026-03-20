@@ -54,10 +54,6 @@ struct TerminalWorkspaceStoreTests {
         #expect(store.selectedSession?.id == "session-a")
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
     @Test("wave selections stay independent across workspaces")
     func waveSelectionsStayIndependent() {
         let store = TerminalWorkspaceStore(userDefaults: UserDefaults(suiteName: "TerminalWorkspaceStoreTests.\(UUID().uuidString)")!)
@@ -95,13 +91,6 @@ struct TerminalWorkspaceStoreTests {
     private func makeSession(
         id: String,
         waveId: String? = nil,
-<<<<<<< HEAD
-=======
-    private func makeSession(
-        id: String,
->>>>>>> caddde45 (lf commit: compress)
-=======
->>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
         createdAt: TimeInterval,
         status: TerminalSessionStatus = .pending
     ) -> TerminalSession {

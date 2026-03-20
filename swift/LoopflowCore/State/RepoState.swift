@@ -269,9 +269,7 @@ public final class RepoState {
         supportedHarnesses = []
         waveStore.removeAll()
         worktreeStore.removeAll()
-        sessionStates.removeAll()
-        waitingSessionIds.removeAll()
-        optimisticInteractiveWaveIds.removeAll()
+        resetTransientWaveState()
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
@@ -834,38 +832,8 @@ public final class RepoState {
         return session
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
         focusTerminalSession(id, waveId: waveId)
-    }
-
-    /// Navigate to a terminal session from the attention queue.
-    /// Selects the wave, switches to the terminal tab, and selects the session.
-    public func openTerminalSession(_ sessionId: String) {
-        focusTerminalSession(sessionId, autoPresent: true)
-    }
-
-    private func focusTerminalSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
-        terminalWorkspaceStore.select(sessionId, waveId: waveId)
-        guard let sessionId,
-              let session = terminalWorkspaceStore.sessionsById[sessionId] else {
-            return
-        }
-        selectedWaveId = session.waveId
-        if autoPresent {
-            markAutoPresentTerminal(for: session.waveId)
-        }
-        loadWaveContent(for: session.waveId)
-        loadRuns(for: session.waveId)
-=======
-    public func selectTerminalSession(_ id: String?) {
-        focusTerminalSession(id)
->>>>>>> 0d6e9b1c (lf land: stage uncommitted changes)
-=======
-    public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
-        focusTerminalSession(id, waveId: waveId)
->>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
     }
 
     /// Navigate to a terminal session from the attention queue.

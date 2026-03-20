@@ -18,19 +18,7 @@ struct ContentView: View {
 
     private struct MultiplexerContext {
         let waveId: String
-<<<<<<< HEAD
-<<<<<<< HEAD
         let focusedPane: PaneState
-=======
-        let worktreePath: String
-=======
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
-        let focusedPane: PaneState
-<<<<<<< HEAD
-        let routesToTerminal: Bool
->>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     var body: some View {
@@ -310,14 +298,6 @@ struct ContentView: View {
             handleFocusPane(.next)
         case .focusPreviousPane:
             handleFocusPane(.previous)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        case .snapHalf, .snapThird, .snapQuarter:
-            break // Phase 3
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
         case .switchToCurrentTab:
             post(.switchToCurrentTab)
         case .switchToRunsTab:
@@ -380,29 +360,10 @@ struct ContentView: View {
     private func handleMultiplexerSplit(axis: SplitAxis) {
         guard let context = multiplexerContext() else { return }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
         _ = repoState.multiplexerStore.splitPane(
             context.focusedPane.id,
             axis: axis,
             newPaneType: splitPaneType(for: context.focusedPane),
-=======
-        if context.routesToTerminal {
-            performTmuxAction(context) { try await $0.split(axis) }
-            return
-        }
-
-        _ = repoState.multiplexerStore.splitPane(
-            context.focusedPane.id,
-            axis: axis,
-            newPaneType: nextOuterPaneType(after: context.focusedPane.type),
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        _ = repoState.multiplexerStore.splitPane(
-            context.focusedPane.id,
-            axis: axis,
-            newPaneType: splitPaneType(for: context.focusedPane),
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             for: context.waveId
         )
     }
@@ -410,102 +371,34 @@ struct ContentView: View {
     private func handleClosePane() {
         guard let context = multiplexerContext() else { return }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
         if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
            let sessionName = closedPane.config.terminalSessionName {
             TmuxSessionRegistry.shared.killSession(named: sessionName)
         }
-=======
-        if context.routesToTerminal {
-            performTmuxAction(context) { try await $0.closeFocusedThing() }
-            return
-        }
-
-        _ = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId)
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
-           let sessionName = closedPane.config.terminalSessionName {
-            TmuxSessionRegistry.shared.killSession(named: sessionName)
-        }
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     private func handleNewShell() {
         guard let context = multiplexerContext() else { return }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         _ = repoState.multiplexerStore.splitPane(
             context.focusedPane.id,
             axis: .horizontal,
             newPaneType: .terminal,
             for: context.waveId
         )
-<<<<<<< HEAD
-=======
-
-        Task {
-            do {
-                try await TmuxSession(waveId: context.waveId, worktreePath: context.worktreePath).createWindow()
-            } catch {
-                repoState.errorMessage = error.localizedDescription
-            }
-        }
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        performTmuxAction(context) { try await $0.createWindow() }
->>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     }
 
     private func handleFocusPane(_ direction: FocusDirection) {
         guard let context = multiplexerContext() else { return }
-<<<<<<< HEAD
-<<<<<<< HEAD
         repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
     }
 
     private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
               (wave.worktreePath ?? wave.api.localWorktree) != nil,
-=======
-
-        if context.routesToTerminal {
-            performTmuxAction(context) { tmux in
-                switch direction {
-                case .next:
-                    try await tmux.selectNextWindow()
-                case .previous:
-                    try await tmux.selectPreviousWindow()
-                }
-            }
-            return
-        }
-
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-        repoState.multiplexerStore.moveFocus(direction, for: context.waveId)
-    }
-
-    private func multiplexerContext() -> MultiplexerContext? {
-        guard let wave = repoState.selectedWave,
-<<<<<<< HEAD
-              let worktreePath = wave.worktreePath ?? wave.api.localWorktree,
->>>>>>> 55cd605c (lf commit: implement)
-=======
-              (wave.worktreePath ?? wave.api.localWorktree) != nil,
->>>>>>> 14032ed8 (Remove checked-in build artifacts and trim multiplexer scaffolding)
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
         return MultiplexerContext(
             waveId: wave.id,
             focusedPane: focusedPane
@@ -519,57 +412,14 @@ struct ContentView: View {
     private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
         switch paneType {
         case .terminal, .launchpad:
-=======
-        let routesToTerminal = focusedPane.type == .terminal && isTerminalResponder(NSApp.keyWindow?.firstResponder)
-        return (wave.id, worktreePath, focusedPane, routesToTerminal)
-=======
-        return MultiplexerContext(
-            waveId: wave.id,
-            worktreePath: worktreePath,
-            focusedPane: focusedPane
-        )
->>>>>>> 19106fdd (concerto: simplify multiplexer helpers)
-    }
-
-    private func splitPaneType(for pane: PaneState) -> PaneType {
-        pane.type == .terminal ? .launchpad : nextCompanionPaneType(after: pane.type)
-    }
-
-    private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
-        switch paneType {
-<<<<<<< HEAD
-        case .terminal:
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        case .terminal, .launchpad:
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             .markdown
         case .markdown:
             .diff
         case .diff:
             .launchpad
-<<<<<<< HEAD
-<<<<<<< HEAD
         }
     }
 
-=======
-        case .launchpad:
-            .markdown
-        }
-    }
-
-    private func isTerminalResponder(_ responder: Any?) -> Bool {
-        guard let responder else { return false }
-        return String(describing: type(of: responder)).contains("GhosttyMetalView")
-    }
-
->>>>>>> 55cd605c (lf commit: implement)
-=======
-        }
-    }
-
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     private func openIDEForSelectedWave() {
         performLauncherAction(failureLabel: "open Cursor") { launcher, worktreeURL in
             try launcher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)

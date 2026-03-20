@@ -1,15 +1,5 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
 // Wave multiplexer — recursive split layout with native panes and pane-scoped tmux-backed terminals.
 // Concerto owns the layout; each terminal pane attaches to its own tmux session.
-=======
-// Wave multiplexer — recursive split layout with one outer terminal pane and native companion panes.
-// Concerto owns the outer layout; tmux owns shell subdivision inside the terminal pane.
->>>>>>> 55cd605c (lf commit: implement)
-=======
-// Wave multiplexer — recursive split layout with native panes and pane-scoped tmux-backed terminals.
-// Concerto owns the layout; each terminal pane attaches to its own tmux session.
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
 import AppKit
 import SwiftUI
@@ -150,15 +140,7 @@ private struct PaneContainerView: View {
         case .diff:
             DiffPaneView(worktreePath: worktreePath)
         case .launchpad:
-<<<<<<< HEAD
-<<<<<<< HEAD
             LaunchpadPaneView(pane: pane, waveId: waveId, worktreePath: worktreePath)
-=======
-            LaunchpadPaneView(waveId: waveId, worktreePath: worktreePath)
->>>>>>> 55cd605c (lf commit: implement)
-=======
-            LaunchpadPaneView(pane: pane, waveId: waveId, worktreePath: worktreePath)
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         }
     }
 
@@ -194,14 +176,7 @@ private struct TerminalPaneView: View {
     let waveId: String
     let worktreePath: String
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     @Environment(RepoState.self) private var repoState
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
-    @Environment(RepoState.self) private var repoState
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
     @State private var tmuxReady = false
     @State private var errorMessage: String?
@@ -217,15 +192,7 @@ private struct TerminalPaneView: View {
             } else if tmuxReady {
                 GhosttyTerminalView(
                     workingDirectory: worktreePath,
-<<<<<<< HEAD
-<<<<<<< HEAD
                     argv: tmuxSession.attachCommand(),
-=======
-                    argv: TmuxSession(waveId: waveId, worktreePath: worktreePath).attachCommand(),
->>>>>>> 55cd605c (lf commit: implement)
-=======
-                    argv: tmuxSession.attachCommand(),
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
                     sessionId: pane.id,
                     manager: ghosttyManager
                 )
@@ -236,31 +203,15 @@ private struct TerminalPaneView: View {
             }
         }
         .task(id: pane.id) {
-<<<<<<< HEAD
-<<<<<<< HEAD
             do {
                 try await tmuxSession.ensureBaseSession(launchCommand: pane.config.launchCommand)
                 clearLaunchCommandIfNeeded()
-=======
-            let tmux = TmuxSession(waveId: waveId, worktreePath: worktreePath)
-            do {
-                try await tmux.ensureBaseSession()
->>>>>>> 55cd605c (lf commit: implement)
-=======
-            do {
-                try await tmuxSession.ensureBaseSession(launchCommand: pane.config.launchCommand)
-                clearLaunchCommandIfNeeded()
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
                 tmuxReady = true
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     private var tmuxSession: TmuxSession {
         TmuxSession(
@@ -275,11 +226,6 @@ private struct TerminalPaneView: View {
         config.launchCommand = nil
         repoState.multiplexerStore.updatePaneConfig(pane.id, config: config, for: waveId)
     }
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 }
 
 // MARK: - Native panes
@@ -357,45 +303,19 @@ private struct DiffPaneView: View {
 }
 
 private struct LaunchpadPaneView: View {
-<<<<<<< HEAD
-<<<<<<< HEAD
     let pane: PaneState
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
-    let pane: PaneState
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
     let waveId: String
     let worktreePath: String
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
-<<<<<<< HEAD
-<<<<<<< HEAD
     @State private var selectedStep = "design"
     @State private var prompt = ""
-=======
-
-    private let terminalLauncher = TerminalLauncher()
-    private let worktreeURL: URL
-
-    init(waveId: String, worktreePath: String) {
-        self.waveId = waveId
-        self.worktreePath = worktreePath
-        self.worktreeURL = URL(fileURLWithPath: worktreePath)
-    }
->>>>>>> 55cd605c (lf commit: implement)
-=======
-    @State private var selectedStep = "design"
-    @State private var prompt = ""
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     private var terminalLauncher: TerminalLauncher {
         TerminalLauncher()
     }
@@ -476,99 +396,6 @@ private struct LaunchpadPaneView: View {
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-=======
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xl) {
-            Text("Open in…")
-                .font(Typography.sectionTitle())
-                .foregroundStyle(Color.loopflowBurgundy)
-=======
-    private var terminalLauncher: TerminalLauncher {
-        TerminalLauncher()
-    }
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-
-    private var worktreeURL: URL {
-        URL(fileURLWithPath: worktreePath)
-    }
-
-    private let loopflowSteps = [
-        "design",
-        "implement",
-        "debug",
-        "refine",
-        "review-design",
-    ]
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    Text("Start in this split")
-                        .font(Typography.sectionTitle())
-                        .foregroundStyle(Color.loopflowBurgundy)
-                    Text("Launch a fresh shell or drop straight into an lf session.")
-                        .font(Typography.body())
-                        .foregroundStyle(palette.textSecondary)
-                }
-
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    Text("Loopflow session")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                        .textCase(.uppercase)
-
-                    Picker("Step", selection: $selectedStep) {
-                        ForEach(loopflowSteps, id: \.self) { step in
-                            Text(step).tag(step)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    TextField("Prompt (optional)", text: $prompt, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-
-                    HStack(spacing: Spacing.sm) {
-                        launchButton("Launch lf session", icon: "sparkles") {
-                            launchInteractiveSession()
-                        }
-                        launchButton("Fresh shell", icon: "terminal") {
-                            launchTerminal(command: nil)
-                        }
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Open in…")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                        .textCase(.uppercase)
-
-                    launchButton("Cursor", icon: "curlybraces") {
-                        try? terminalLauncher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)
-                    }
-                    launchButton("Finder", icon: "folder") {
-                        terminalLauncher.openInFinder(at: worktreeURL)
-                    }
-                    if let prURL = wave?.prURL {
-                        launchButton("Pull Request", icon: "arrow.triangle.pull") {
-                            NSWorkspace.shared.open(prURL)
-                        }
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(Spacing.xl)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-<<<<<<< HEAD
-        .padding(Spacing.xl)
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.surface)
     }
@@ -585,10 +412,6 @@ private struct LaunchpadPaneView: View {
         .background(palette.surfaceMuted.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     private func launchInteractiveSession() {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -612,11 +435,6 @@ private struct LaunchpadPaneView: View {
             for: waveId
         )
     }
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 }
 
 // MARK: - Helpers

@@ -1,12 +1,5 @@
 import Testing
-<<<<<<< HEAD
-<<<<<<< HEAD
 import AppKit
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
-import AppKit
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 @testable import Concerto
 
 @Suite("Ghostty terminal command")
@@ -35,10 +28,6 @@ struct GhosttyTerminalViewTests {
     func returnsNilWithoutCommand() {
         #expect(buildGhosttyShellCommand(argv: [], env: ["RLM_DEPTH": "1"]) == nil)
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 
     @Test("control-modified control characters fall through to key handling")
     func controlCharactersFallThroughToKeyHandling() {
@@ -55,10 +44,6 @@ struct GhosttyTerminalViewTests {
         #expect(!ghosttyShouldBypassInterpretKeyEvents(modifiers: []))
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
     @Test("ordinary printable typing goes straight to key events")
     func ordinaryPrintableTypingUsesDirectKeyEvents() {
         #expect(
@@ -100,29 +85,12 @@ struct GhosttyTerminalViewTests {
     }
 
     @Test("printable key text is only attached for printable characters without command or control")
-<<<<<<< HEAD
     func printableKeyTextRespectsModifiers() {
         #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
         #expect(ghosttyKeyText(characters: " ", modifiers: []) == " ")
         #expect(ghosttyKeyText(characters: "\n", modifiers: []) == nil)
-=======
-    @Test("printable key text is only attached without command or control")
-    func printableKeyTextRespectsModifiers() {
-        #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
-=======
-    func printableKeyTextRespectsModifiers() {
-        #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
-        #expect(ghosttyKeyText(characters: " ", modifiers: []) == " ")
-        #expect(ghosttyKeyText(characters: "\n", modifiers: []) == nil)
->>>>>>> bbb3b383 (Concerto: send ordinary terminal typing through key events)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.control]) == nil)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.command]) == nil)
         #expect(ghosttyKeyText(characters: nil, modifiers: []) == nil)
     }
-<<<<<<< HEAD
-=======
->>>>>>> 55cd605c (lf commit: implement)
-=======
->>>>>>> d5db82d4 (lf land: stage uncommitted changes)
 }

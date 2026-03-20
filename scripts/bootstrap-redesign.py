@@ -76,11 +76,7 @@ def main() -> int:
         flow=REDESIGN_FLOW,
         area=REDESIGN_AREA,
     )
-    print(
-        "redesign: configured "
-        f"flow={REDESIGN_FLOW}, "
-        f"area={', '.join(REDESIGN_AREA)}"
-    )
+    print(f"redesign: configured flow={REDESIGN_FLOW}, area={', '.join(REDESIGN_AREA)}")
 
     _print_summary(redesign)
     return 0

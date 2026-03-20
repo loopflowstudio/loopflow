@@ -11,7 +11,6 @@ Usage:
     uv run python scripts/setup-asana.py pm
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -44,7 +43,7 @@ def main():
         sys.exit(1)
 
     headers = {"Authorization": f"Bearer {token}"}
-    print(f"Authenticated with Asana.\n")
+    print("Authenticated with Asana.\n")
 
     # 2. Workspace
     workspaces = asana_get(headers, "/workspaces")
@@ -110,7 +109,7 @@ def main():
     lf_config["asana"] = asana_config
     lf_config_path.parent.mkdir(parents=True, exist_ok=True)
     lf_config_path.write_text(yaml.dump(lf_config, default_flow_style=False))
-    print(f"\nWrote asana.workspace to .lf/config.yaml")
+    print("\nWrote asana.workspace to .lf/config.yaml")
 
     # wave/<name>/<name>.yaml — pm block
     wave_config = {}
@@ -121,7 +120,7 @@ def main():
     wave_yaml.write_text(yaml.dump(wave_config, default_flow_style=False))
     print(f"Wrote pm block to wave/{wave_name}/{wave_name}.yaml")
 
-    print(f"\nReady. Run:")
+    print("\nReady. Run:")
     print(f"  lf ops export {wave_name} --dry-run")
     print(f"  lf ops export {wave_name}")
 

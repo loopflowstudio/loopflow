@@ -3,7 +3,6 @@
 
 import argparse
 import subprocess
-import sys
 
 
 def run_provider(provider: str) -> int:

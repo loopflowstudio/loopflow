@@ -269,7 +269,8 @@ def _connect_provider(provider: str) -> None:
 def _complete_oauth_code_flow(provider: str) -> None:
     provider_label = _provider_label(provider)
     typer.echo(
-        f"{provider_label} will redirect to an out-of-band page. Paste the full redirect URL or just the authorization code."
+        f"{provider_label} will redirect to an out-of-band page. "
+        "Paste the full redirect URL or just the authorization code."
     )
     value = typer.prompt("Authorization code").strip()
     code = _extract_authorization_code(value)

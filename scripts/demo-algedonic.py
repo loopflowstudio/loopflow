@@ -85,20 +85,15 @@ def main() -> None:
                     last_run_count = len(runs)
                     for run in runs:
                         repair_marker = " (repair)" if run.get("repair_of") else ""
-                        print(
-                            f"   Run {run['id'][:8]}... "
-                            f"status={run['status']}{repair_marker}"
-                        )
+                        print(f"   Run {run['id'][:8]}... status={run['status']}{repair_marker}")
 
                 # Check for attention items
                 attn_resp = client.get("/attention")
                 if attn_resp.status_code == 200:
                     items = attn_resp.json()
-                    algedonic = [
-                        i for i in items if i.get("kind") == "algedonic"
-                    ]
+                    algedonic = [i for i in items if i.get("kind") == "algedonic"]
                     if algedonic:
-                        print(f"\n4. Algedonic attention item created!")
+                        print("\n4. Algedonic attention item created!")
                         item = algedonic[0]
                         print(f"   ID: {item['id']}")
                         print(f"   Title: {item['title']}")
@@ -107,14 +102,12 @@ def main() -> None:
 
                         # Count total runs
                         all_runs = client.get(f"/waves/{wave_id}/runs").json()
-                        repair_runs = [
-                            r for r in all_runs if r.get("repair_of")
-                        ]
-                        print(f"\n5. Summary:")
+                        repair_runs = [r for r in all_runs if r.get("repair_of")]
+                        print("\n5. Summary:")
                         print(f"   Total runs: {len(all_runs)}")
                         print(f"   Repair attempts: {len(repair_runs)}")
                         print(f"   Elapsed: {time.time() - start:.0f}s")
-                        print(f"\n=== Demo complete ===")
+                        print("\n=== Demo complete ===")
                         return
 
             time.sleep(5)

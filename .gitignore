@@ -18,6 +18,7 @@ swift/dist/
 .lf/log/
 .lf/logs/
 .lf/prompts/
+.lf/runtime/
 .lf/rlm/
 .lf/summaries/
 *.profraw

@@ -18,10 +18,6 @@ This is a runtime architecture shift, not just terminal embedding polish.
 
 Without this split, terminal transport, app workspace UX, daemon execution semantics, and CLI/daemon protocol all get tangled into one wave.
 
-## Status
-
-This wave is newly split out. The current `agent-embedding` diff improves the terminal workspace seam and bundled-daemon behavior, but it does **not** finish interactive sessions end to end inside the Swift app, and it does not yet replace the bespoke daemon executor with a shared runtime-store model plus real `lf` process supervision. Treat the docs here as the next build target.
-
 ## Strategy
 
 ### One execution model
@@ -110,9 +106,8 @@ It should not need its own launch shim or a private interpretation of how loopfl
 
 ## Milestone docs
 
-1. `02-daemon-aware-cli-contract.md` — define the shared runtime-store contract and how `lf` discovers and writes to it
-2. `03-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against that same store
-3. `04-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
+1. `01-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against the shared runtime store
+2. `02-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
 
 ## Three roles
 

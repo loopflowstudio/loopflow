@@ -225,8 +225,11 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
     for index in 0..total {
         let action = next_action(items, index);
         match action {
-            FlowAction::RunStep { step } | FlowAction::WaitInteractive { step } => {
-                run_flow_step(&step.step.name, (index, total), message, cli, repo)?
+            FlowAction::RunStep { step } => {
+                run_flow_step(&step.step.name, (index, total), message, cli, repo, false)?
+            }
+            FlowAction::WaitInteractive { step } => {
+                run_flow_step(&step.step.name, (index, total), message, cli, repo, true)?;
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
@@ -269,6 +272,7 @@ fn run_flow_step(
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
+    _waiting: bool,
 ) -> Result<()> {
     let (index, total) = progress;
     print_step_progress(index, total, step_name);

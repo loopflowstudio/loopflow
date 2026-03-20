@@ -23,23 +23,15 @@ public final class MultiplexerStore {
     // MARK: - Layout access
 
     public func layout(for waveId: String) -> LayoutNode {
-        if let existing = loadedLayout(for: waveId) {
-            return existing
+        resolvedLayout(for: waveId) {
+            LayoutNode.defaultLayout()
         }
-
-        let defaultLayout = normalizeLayout(LayoutNode.defaultLayout(), for: waveId)
-        layoutsByWave[waveId] = defaultLayout
-        return defaultLayout
     }
 
     public func layout(for wave: WaveViewModel) -> LayoutNode {
-        if let existing = loadedLayout(for: wave.id) {
-            return existing
+        resolvedLayout(for: wave.id) {
+            defaultLayout(for: wave)
         }
-
-        let defaultLayout = normalizeLayout(defaultLayout(for: wave), for: wave.id)
-        layoutsByWave[wave.id] = defaultLayout
-        return defaultLayout
     }
 
     public func defaultLayout(for wave: WaveViewModel) -> LayoutNode {
@@ -211,6 +203,16 @@ public final class MultiplexerStore {
         return layoutsByWave[waveId]
     }
 
+    private func resolvedLayout(for waveId: String, makeDefault: () -> LayoutNode) -> LayoutNode {
+        if let existing = loadedLayout(for: waveId) {
+            return existing
+        }
+
+        let layout = normalizeLayout(makeDefault(), for: waveId)
+        layoutsByWave[waveId] = layout
+        return layout
+    }
+
     private func ensureLoaded(_ waveId: String) {
         guard layoutsByWave[waveId] == nil, let repoKey else { return }
 
@@ -224,12 +226,13 @@ public final class MultiplexerStore {
     }
 
     private func reconcileFocus(for waveId: String) {
+        let layout = layout(for: waveId)
         guard let focused = focusedPaneByWave[waveId],
-              layout(for: waveId).pane(for: focused) == nil else {
+              layout.pane(for: focused) == nil else {
             return
         }
 
-        focusedPaneByWave[waveId] = layout(for: waveId).firstPane?.id
+        focusedPaneByWave[waveId] = layout.firstPane?.id
     }
 
     private func storageKey(repoKey: String, waveId: String? = nil, suffix: String) -> String {

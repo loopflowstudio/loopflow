@@ -240,9 +240,6 @@ struct ContentView: View {
         repoState.waveStore.ordered.map { wave in
             PaletteAction("Switch to \(wave.displayName)", id: "wave-\(wave.id)", icon: wave.status.icon) {
                 repoState.selectedWaveId = wave.id
-                _ = repoState.multiplexerStore.layout(for: wave)
-                repoState.loadWaveContent(for: wave.id)
-                repoState.loadRuns(for: wave.id)
             }
         }
     }
@@ -417,20 +414,12 @@ struct ContentView: View {
     }
 
     private func multiplexerContext() -> MultiplexerContext? {
-        guard let wave = repoState.selectedWave else {
+        guard let wave = repoState.selectedWave,
+              let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
-        _ = repoState.multiplexerStore.layout(for: wave)
-
-        guard let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
-            return nil
-        }
-
-        return MultiplexerContext(
-            waveId: wave.id,
-            focusedPane: focusedPane
-        )
+        return MultiplexerContext(waveId: wave.id, focusedPane: focusedPane)
     }
 
     private func splitPaneType(for pane: PaneState) -> PaneType {
@@ -456,8 +445,6 @@ struct ContentView: View {
 
     private func focusOrCreatePane(_ paneType: PaneType) {
         guard let wave = repoState.selectedWave else { return }
-
-        _ = repoState.multiplexerStore.layout(for: wave)
 
         if let existingPane = repoState.multiplexerStore.pane(ofType: paneType, for: wave.id) {
             repoState.multiplexerStore.setFocusedPane(existingPane.id, for: wave.id)

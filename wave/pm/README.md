@@ -21,7 +21,7 @@ The PM architecture still centers on provider roles, a shared seam, and a single
 - `rust/loopflow/src/ops/pm.rs` remains the orchestration layer for `pm_init`, `pm_pull`, `pm_status`, `pm_import`, and `pm_sync`
 - `WaveExecutor::execute()` already imports from the read/write provider at PR-oriented run start and exports back to configured providers at the end; future work should keep using that lifecycle instead of inventing a second sync path
 
-Prompts, ingest, and provider sync now assume four semantic priority buckets (`P0`–`P3`) and translate that meaning into the native language of each PM tool. The next steps are wiring ingest to auto-refresh from PM before picking, cleaning up auth to OAuth-only, and then bringing Notion in as the doc-native provider.
+Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. The next steps are wiring ingest to auto-refresh from PM before picking, cleaning up auth to OAuth-only, and then bringing Notion in as the doc-native provider.
 
 ### Invariants
 
@@ -43,9 +43,9 @@ Prompts, ingest, and provider sync now assume four semantic priority buckets (`P
 
 ## Risks
 
-- **Within-bucket choice is unresolved.** The bucket model is landed, but multiple items in the same bucket use filename order as a local fast path. Anything that assumes a deterministic total order will need a follow-up rule.
-- **Asana label recognition is brittle.** Priority mapping relies on custom-field option names being semantically recognizable (`P0`/`P1`/`P2`/`P3` or `Urgent`/`High`/`Medium`/`Low`). Unexpected labels will need follow-up.
-- **Legacy numbered files coexist with bucketed files.** Ingest prefers bucketed files but still reads numbered items as a fallback. Mixed local states need to behave well during transition.
+- **Within-level choice is unresolved.** The priority model is landed, but multiple items at the same level use filename order as a local fast path. Anything that assumes a deterministic total order will need a follow-up rule.
+- **Asana label recognition is brittle.** Priority mapping relies on custom-field option names being semantically recognizable (`Urgent`/`High`/`Medium`/`Low`). Unexpected labels will need follow-up.
+- **Legacy numbered files coexist with priority files.** Ingest prefers priority-prefixed files but still reads numbered items as a fallback. Mixed local states need to behave well during transition.
 - **Notion block model complexity remains real.** README sync looks high value, but page/block round-tripping is structurally more complex than Asana/Linear task sync.
 - **Credential drift is user-facing.** PM flows will still feel broken until the auth cleanup removes mixed setup paths and points users at the right browser-based connect flow.
 

@@ -18,7 +18,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 1. **Read wave configs.** For each member wave directory in the area:
    - README.md — vision, strategy, goals, risks, metrics
-   - All roadmap item files (`p0-*` through `p3-*`, plus any legacy numbered files still present during transition)
+   - All roadmap item files (`1-*` through `4-*`, plus any legacy numbered files still present during transition)
    - The wave YAML — flow, mode, direction, triggers
 
 2. **Read runtime state.** For each member wave:

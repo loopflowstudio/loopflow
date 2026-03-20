@@ -20,7 +20,7 @@ pub struct IngestResult {
 
 /// Fast-path ingest: pick the highest-priority roadmap item and move it to scratch/.
 ///
-/// Bucketed files (`p0-*` through `p3-*`) take precedence over legacy numbered files.
+/// Priority files (`1-*` through `4-*`) take precedence over legacy numbered files.
 /// Within the same bucket or stage, the fast path uses filename order.
 pub fn ingest(
     repo: &Path,
@@ -162,8 +162,8 @@ mod tests {
 
     #[test]
     fn parse_wave_item_filename_parses_bucketed_files() {
-        let item = parse_wave_item_filename("p1-setup.md").expect("bucketed item");
-        assert_eq!(item.priority_bucket(), Some(PriorityBucket::P1));
+        let item = parse_wave_item_filename("2-setup.md").expect("bucketed item");
+        assert_eq!(item.priority_bucket(), Some(PriorityBucket::High));
         assert_eq!(item.slug, "setup");
     }
 
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn parse_wave_item_filename_rejects_no_slug() {
-        assert!(parse_wave_item_filename("p1-.md").is_none());
+        assert!(parse_wave_item_filename("2-.md").is_none());
     }
 
     #[test]
@@ -194,8 +194,8 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         std::fs::write(dir.path().join("README.md"), "# Wave").expect("write readme");
         std::fs::write(dir.path().join("03-third.md"), "# Third").expect("write third");
-        std::fs::write(dir.path().join("p2-later.md"), "# Later").expect("write later");
-        std::fs::write(dir.path().join("p0-broken.md"), "# Broken").expect("write broken");
+        std::fs::write(dir.path().join("3-later.md"), "# Later").expect("write later");
+        std::fs::write(dir.path().join("1-broken.md"), "# Broken").expect("write broken");
         std::fs::write(dir.path().join("notes.txt"), "ignored").expect("write notes");
 
         let items = list_wave_items(dir.path()).expect("list wave items");
@@ -204,7 +204,7 @@ mod tests {
                 .iter()
                 .map(|item| item.filename.as_str())
                 .collect::<Vec<_>>(),
-            vec!["p0-broken.md", "p2-later.md", "03-third.md"]
+            vec!["1-broken.md", "3-later.md", "03-third.md"]
         );
     }
 
@@ -223,8 +223,8 @@ mod tests {
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(wave_dir.join("README.md"), "# Test").expect("write readme");
         std::fs::write(wave_dir.join("01-legacy.md"), "# Legacy").expect("write legacy");
-        std::fs::write(wave_dir.join("p1-next.md"), "# Next").expect("write p1");
-        std::fs::write(wave_dir.join("p0-broken.md"), "# Broken").expect("write p0");
+        std::fs::write(wave_dir.join("2-next.md"), "# Next").expect("write high");
+        std::fs::write(wave_dir.join("1-broken.md"), "# Broken").expect("write urgent");
 
         let result = ingest(
             repo,
@@ -239,8 +239,8 @@ mod tests {
         assert_eq!(result.slug, "broken");
         assert!(result.dest.ends_with("scratch/test-wave-broken.md"));
         assert!(result.dest.exists());
-        assert!(!wave_dir.join("p0-broken.md").exists());
-        assert!(wave_dir.join("p1-next.md").exists());
+        assert!(!wave_dir.join("1-broken.md").exists());
+        assert!(wave_dir.join("2-next.md").exists());
         assert!(wave_dir.join("01-legacy.md").exists());
     }
 
@@ -257,8 +257,8 @@ mod tests {
 
         let wave_dir = repo.join("wave").join("test-wave");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("p1-alpha.md"), "# Alpha").expect("write alpha");
-        std::fs::write(wave_dir.join("p1-beta.md"), "# Beta").expect("write beta");
+        std::fs::write(wave_dir.join("2-alpha.md"), "# Alpha").expect("write alpha");
+        std::fs::write(wave_dir.join("2-beta.md"), "# Beta").expect("write beta");
 
         let result = ingest(
             repo,
@@ -270,8 +270,8 @@ mod tests {
         .expect("ingest succeeds");
 
         assert_eq!(result.slug, "alpha");
-        assert!(!wave_dir.join("p1-alpha.md").exists());
-        assert!(wave_dir.join("p1-beta.md").exists());
+        assert!(!wave_dir.join("2-alpha.md").exists());
+        assert!(wave_dir.join("2-beta.md").exists());
     }
 
     #[test]

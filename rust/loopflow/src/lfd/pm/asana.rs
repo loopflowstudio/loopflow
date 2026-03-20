@@ -221,10 +221,10 @@ impl AsanaClient {
                     "name": PRIORITY_FIELD_NAME,
                     "resource_subtype": "enum",
                     "enum_options": [
-                        { "name": "P0" },
-                        { "name": "P1" },
-                        { "name": "P2" },
-                        { "name": "P3" }
+                        { "name": "Urgent" },
+                        { "name": "High" },
+                        { "name": "Medium" },
+                        { "name": "Low" }
                     ]
                 }
             }
@@ -488,7 +488,7 @@ impl AsanaTask {
         self.custom_fields
             .iter()
             .find_map(AsanaPriorityField::priority_from_value)
-            .unwrap_or(PriorityBucket::P3)
+            .unwrap_or(PriorityBucket::Low)
     }
 }
 
@@ -917,21 +917,21 @@ mod tests {
                     id: "task-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    priority: PriorityBucket::P0,
+                    priority: PriorityBucket::Urgent,
                     completed: true,
                 },
                 PmItem {
                     id: "task-3".to_string(),
                     name: "Third".to_string(),
                     description: "three".to_string(),
-                    priority: PriorityBucket::P1,
+                    priority: PriorityBucket::High,
                     completed: false,
                 },
                 PmItem {
                     id: "task-1".to_string(),
                     name: "First".to_string(),
                     description: "one".to_string(),
-                    priority: PriorityBucket::P2,
+                    priority: PriorityBucket::Medium,
                     completed: false,
                 },
             ]
@@ -963,10 +963,10 @@ mod tests {
                             "name": "Priority",
                             "resource_subtype": "enum",
                             "enum_options": [
-                                { "gid": "opt-p0", "name": "P0" },
-                                { "gid": "opt-p1", "name": "P1" },
-                                { "gid": "opt-p2", "name": "P2" },
-                                { "gid": "opt-p3", "name": "P3" }
+                                { "gid": "opt-p0", "name": "Urgent" },
+                                { "gid": "opt-p1", "name": "High" },
+                                { "gid": "opt-p2", "name": "Medium" },
+                                { "gid": "opt-p3", "name": "Low" }
                             ]
                         }
                     }]
@@ -984,12 +984,12 @@ mod tests {
                             "gid": "field-priority",
                             "name": "Priority",
                             "resource_subtype": "enum",
-                            "enum_value": { "gid": "opt-p0", "name": "P0" },
+                            "enum_value": { "gid": "opt-p0", "name": "Urgent" },
                             "enum_options": [
-                                { "gid": "opt-p0", "name": "P0" },
-                                { "gid": "opt-p1", "name": "P1" },
-                                { "gid": "opt-p2", "name": "P2" },
-                                { "gid": "opt-p3", "name": "P3" }
+                                { "gid": "opt-p0", "name": "Urgent" },
+                                { "gid": "opt-p1", "name": "High" },
+                                { "gid": "opt-p2", "name": "Medium" },
+                                { "gid": "opt-p3", "name": "Low" }
                             ]
                         }]
                     }
@@ -1012,7 +1012,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the HTTP adapter".to_string(),
-                    priority: PriorityBucket::P0,
+                    priority: PriorityBucket::Urgent,
                 },
             )
             .await
@@ -1023,7 +1023,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Asana client".to_string()),
                     description: Some("Build the HTTP adapter and tests".to_string()),
-                    priority: Some(PriorityBucket::P1),
+                    priority: Some(PriorityBucket::High),
                 },
             )
             .await
@@ -1131,7 +1131,7 @@ mod tests {
                 &PmItemUpdate {
                     name: None,
                     description: None,
-                    priority: Some(PriorityBucket::P2),
+                    priority: Some(PriorityBucket::Medium),
                 },
             )
             .await
@@ -1164,10 +1164,10 @@ mod tests {
                             "name": "Priority",
                             "resource_subtype": "enum",
                             "enum_options": [
-                                { "gid": "opt-p0", "name": "P0" },
-                                { "gid": "opt-p1", "name": "P1" },
-                                { "gid": "opt-p2", "name": "P2" },
-                                { "gid": "opt-p3", "name": "P3" }
+                                { "gid": "opt-p0", "name": "Urgent" },
+                                { "gid": "opt-p1", "name": "High" },
+                                { "gid": "opt-p2", "name": "Medium" },
+                                { "gid": "opt-p3", "name": "Low" }
                             ]
                         }
                     }]
@@ -1196,7 +1196,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the HTTP adapter".to_string(),
-                    priority: PriorityBucket::P1,
+                    priority: PriorityBucket::High,
                 },
             )
             .await

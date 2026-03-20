@@ -299,42 +299,15 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     };
 
     match cmd {
-        PmCommand::Init {
-            wave,
-            wave_flag,
-            all,
-        } => {
-            if *all {
-                for wave in list_all_waves()? {
-                    let result = crate::ops::pm::pm_init(
-                        &repo_root,
-                        &crate::ops::pm::PmInitOptions { wave: Some(wave) },
-                        progress,
-                    )?;
-                    println!(
-                        "{}: {:?} project {} ({} linked, {} created)",
-                        result.wave,
-                        result.provider,
-                        result.project_id,
-                        result.linked,
-                        result.created.len()
-                    );
-                }
-            } else {
-                let result = crate::ops::pm::pm_init(
-                    &repo_root,
-                    &crate::ops::pm::PmInitOptions {
-                        wave: wave.clone().or_else(|| wave_flag.clone()),
-                    },
-                    progress,
-                )?;
+        PmCommand::Init {} => {
+            let result = crate::ops::pm::pm_init(&repo_root, progress)?;
+            for wave_result in &result.waves {
                 println!(
-                    "{}: {:?} project {} ({} linked, {} created)",
-                    result.wave,
-                    result.provider,
-                    result.project_id,
-                    result.linked,
-                    result.created.len()
+                    "{}: {:?} project {} ({} items)",
+                    wave_result.wave,
+                    wave_result.provider,
+                    wave_result.project_id,
+                    wave_result.items,
                 );
             }
         }

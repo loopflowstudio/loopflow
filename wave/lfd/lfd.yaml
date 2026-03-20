@@ -8,3 +8,6 @@ area:
 direction:
   - clarity
   - simplicity
+pm:
+  provider: linear
+  linear_project: c5ea518f-7cd5-4ac6-959f-245a33eb78b4

@@ -11,47 +11,47 @@ use thiserror::Error;
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum PriorityBucket {
-    P0,
-    P1,
-    P2,
-    P3,
+    Urgent,
+    High,
+    Medium,
+    Low,
 }
 
 impl PriorityBucket {
     pub fn filename_prefix(self) -> &'static str {
         match self {
-            Self::P0 => "p0",
-            Self::P1 => "p1",
-            Self::P2 => "p2",
-            Self::P3 => "p3",
+            Self::Urgent => "1",
+            Self::High => "2",
+            Self::Medium => "3",
+            Self::Low => "4",
         }
     }
 
     pub fn order(self) -> u8 {
         match self {
-            Self::P0 => 0,
-            Self::P1 => 1,
-            Self::P2 => 2,
-            Self::P3 => 3,
+            Self::Urgent => 0,
+            Self::High => 1,
+            Self::Medium => 2,
+            Self::Low => 3,
         }
     }
 
     pub fn from_filename_prefix(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "p0" => Some(Self::P0),
-            "p1" => Some(Self::P1),
-            "p2" => Some(Self::P2),
-            "p3" => Some(Self::P3),
+        match value.trim() {
+            "1" => Some(Self::Urgent),
+            "2" => Some(Self::High),
+            "3" => Some(Self::Medium),
+            "4" => Some(Self::Low),
             _ => None,
         }
     }
 
     pub fn from_semantic_label(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "p0" | "urgent" => Some(Self::P0),
-            "p1" | "high" => Some(Self::P1),
-            "p2" | "medium" => Some(Self::P2),
-            "p3" | "low" => Some(Self::P3),
+            "urgent" => Some(Self::Urgent),
+            "high" => Some(Self::High),
+            "medium" | "med" => Some(Self::Medium),
+            "low" => Some(Self::Low),
             _ => None,
         }
     }
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn pm_item_update_is_noop_skips_priority_only_changes() {
         let update = PmItemUpdate {
-            priority: Some(PriorityBucket::P1),
+            priority: Some(PriorityBucket::High),
             ..PmItemUpdate::default()
         };
 
@@ -401,29 +401,33 @@ mod tests {
     fn pm_item_update_is_noop_only_without_text_or_priority_changes() {
         assert!(PmItemUpdate::default().is_noop());
         assert!(!PmItemUpdate {
-            priority: Some(PriorityBucket::P2),
+            priority: Some(PriorityBucket::Medium),
             ..PmItemUpdate::default()
         }
         .is_noop());
     }
 
     #[test]
-    fn priority_bucket_parses_native_and_shared_labels() {
+    fn priority_bucket_parses_semantic_labels() {
         assert_eq!(
             PriorityBucket::from_semantic_label("urgent"),
-            Some(PriorityBucket::P0)
+            Some(PriorityBucket::Urgent)
         );
         assert_eq!(
             PriorityBucket::from_semantic_label("High"),
-            Some(PriorityBucket::P1)
+            Some(PriorityBucket::High)
         );
         assert_eq!(
-            PriorityBucket::from_semantic_label("p2"),
-            Some(PriorityBucket::P2)
+            PriorityBucket::from_semantic_label("medium"),
+            Some(PriorityBucket::Medium)
+        );
+        assert_eq!(
+            PriorityBucket::from_semantic_label("med"),
+            Some(PriorityBucket::Medium)
         );
         assert_eq!(
             PriorityBucket::from_semantic_label("LOW"),
-            Some(PriorityBucket::P3)
+            Some(PriorityBucket::Low)
         );
         assert_eq!(PriorityBucket::from_semantic_label("later"), None);
     }

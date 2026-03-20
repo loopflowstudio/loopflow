@@ -15,21 +15,21 @@ Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 The wave's plan (`wave/<wave>/`) should be included in docs. If you can't find the wave's plan, note this in `scratch/questions.md`.
 
-## Bucketed wave plans
+## Priority-ordered wave plans
 
-Wave plans use four semantic priority buckets:
+Wave plans use four priority levels:
 
 ```
 wave/rust/
   README.md               # Strategic context (not a pickable item)
-  p0-fix-crash-loop.md   # Broken / unblock-now work
-  p1-core-engine.md      # Clear next steps
-  p2-hardening.md        # Big "when not if" bets
-  p3-experiments.md      # Speculative ideas
+  1-fix-crash-loop.md    # Urgent — broken / unblock-now work
+  2-core-engine.md       # High — clear next steps
+  3-hardening.md         # Medium — big "when not if" bets
+  4-experiments.md       # Low — speculative ideas
 ```
 
-**Bucket ordering rules:**
-- Pick from the highest-priority non-empty bucket first (`p0` before `p1`, `p1` before `p2`, `p2` before `p3`)
+**Priority ordering rules:**
+- Pick from the highest-priority non-empty level first (1 before 2, 2 before 3, 3 before 4)
 - Treat the prefixes semantically, not as a fake exact queue
 - README.md provides principles and success criteria—use it to evaluate priority, but don't pick it
 
@@ -40,8 +40,8 @@ wave/rust/
 - Read **Metrics** to understand what signals matter
 - Respect scope boundaries stated in Vision — don't pick items that conflict
 
-**Using the roadmap (`p0-*.md` through `p3-*.md`):**
-- The roadmap is the bucketed files alongside the README — their prefixes define urgency, not a total order
+**Using the roadmap (`1-*.md` through `4-*.md`):**
+- The roadmap is the priority-prefixed files alongside the README — their prefixes define urgency, not a total order
 - Read them to understand dependencies and what's been shipped
 
 ## Selection criteria
@@ -63,7 +63,7 @@ If multiple items score similarly, prefer smaller scope—ship something.
 1. Get wave name from `<lf:wave>` in context
 2. Find `wave/<wave>/` in the docs
 3. Read README.md for strategic context (Vision, Goals, Risks, Metrics)
-   Read the roadmap (`p0-*.md` through `p3-*.md`) for urgency, dependencies, and scope
+   Read the roadmap (`1-*.md` through `4-*.md`) for urgency, dependencies, and scope
 4. Identify the highest-priority non-empty bucket
 5. Pick the highest-priority item from that bucket
 6. Move it to `scratch/<wave>-<slug>.md`

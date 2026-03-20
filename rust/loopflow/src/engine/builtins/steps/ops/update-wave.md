@@ -53,7 +53,7 @@ Design docs for already-shipped work and other purely historical content can be 
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
 1. Write `wave/<wave>/README.md` — the anchor that survives when plans change. Vision, strategy, goals, risks, metrics. **No roadmap tables or phase lists** — the item files are the roadmap.
-2. Write bucketed item files (`p0-fix-broken-build.md`, `p1-next-step.md`, `p2-big-rock.md`, `p3-speculative-bet.md`) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
+2. Write priority item files (`1-fix-broken-build.md`, `2-next-step.md`, `3-big-rock.md`, `4-speculative-bet.md`) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 
 ### README.md
 
@@ -78,16 +78,14 @@ If the README has any of these, delete them.
 
 ### Items
 
-Roadmaps are made up of items. Each item is a bucketed file (`p0-*.md`, `p1-*.md`, `p2-*.md`, `p3-*.md`) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+Roadmaps are made up of items. Each item is a priority-prefixed file (`1-*.md`, `2-*.md`, `3-*.md`, `4-*.md`) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
 
-**The filename prefix carries the shared priority meaning:**
+**The filename prefix carries priority meaning:**
 
-- `p0-*` — the codebase is broken or blocked; fix this before forward progress
-- `p1-*` — the clear next step
-- `p2-*` — a committed later bet; "when, not if"
-- `p3-*` — speculative work
-
-Prompts should speak in those meanings. Remote tools may say `Urgent/High/Medium/Low` or `P0/P1/P2/P3`; local wave files use the shared bucket prefixes.
+- `1-*` — Urgent: the codebase is broken or blocked; fix this before forward progress
+- `2-*` — High: the clear next step
+- `3-*` — Medium: a committed later bet; "when, not if"
+- `4-*` — Low: speculative work
 
 **Every item must open with a bold finish line.** What's true when this item is done that isn't true now? Make it specific enough that you know when you've crossed it.
 

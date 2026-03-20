@@ -596,20 +596,20 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
 
 fn linear_priority_bucket(priority: i64) -> PriorityBucket {
     match priority {
-        1 => PriorityBucket::P0,
-        2 => PriorityBucket::P1,
-        3 => PriorityBucket::P2,
-        4 => PriorityBucket::P3,
-        _ => PriorityBucket::P3,
+        1 => PriorityBucket::Urgent,
+        2 => PriorityBucket::High,
+        3 => PriorityBucket::Medium,
+        4 => PriorityBucket::Low,
+        _ => PriorityBucket::Low,
     }
 }
 
 fn linear_priority_value(priority: PriorityBucket) -> i64 {
     match priority {
-        PriorityBucket::P0 => 1,
-        PriorityBucket::P1 => 2,
-        PriorityBucket::P2 => 3,
-        PriorityBucket::P3 => 4,
+        PriorityBucket::Urgent => 1,
+        PriorityBucket::High => 2,
+        PriorityBucket::Medium => 3,
+        PriorityBucket::Low => 4,
     }
 }
 
@@ -855,21 +855,21 @@ mod tests {
                     id: "issue-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    priority: PriorityBucket::P0,
+                    priority: PriorityBucket::Urgent,
                     completed: true,
                 },
                 PmItem {
                     id: "issue-3".to_string(),
                     name: "Third".to_string(),
                     description: "".to_string(),
-                    priority: PriorityBucket::P1,
+                    priority: PriorityBucket::High,
                     completed: false,
                 },
                 PmItem {
                     id: "issue-1".to_string(),
                     name: "First".to_string(),
                     description: "one".to_string(),
-                    priority: PriorityBucket::P2,
+                    priority: PriorityBucket::Medium,
                     completed: false,
                 },
             ]
@@ -948,7 +948,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    priority: PriorityBucket::P0,
+                    priority: PriorityBucket::Urgent,
                 },
             )
             .await
@@ -959,7 +959,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Linear client".to_string()),
                     description: Some("Build the GraphQL adapter and tests".to_string()),
-                    priority: Some(PriorityBucket::P1),
+                    priority: Some(PriorityBucket::High),
                 },
             )
             .await
@@ -1132,7 +1132,7 @@ mod tests {
                 &PmItemUpdate {
                     name: None,
                     description: None,
-                    priority: Some(PriorityBucket::P2),
+                    priority: Some(PriorityBucket::Medium),
                 },
             )
             .await
@@ -1186,7 +1186,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    priority: PriorityBucket::P1,
+                    priority: PriorityBucket::High,
                 },
             )
             .await
@@ -1222,7 +1222,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    priority: PriorityBucket::P1,
+                    priority: PriorityBucket::High,
                 },
             )
             .await

@@ -38,10 +38,10 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 ```
 wave/infra/
 ├── README.md               # Vision, strategy, goals, risks
-├── p0-fix-crash-loop.md   # Broken / unblock-now work
-├── p1-daemon-integrity.md # Clear next step
-├── p2-golden-tests.md     # Big "when not if" work
-└── p3-security-research.md
+├── 1-fix-crash-loop.md    # Urgent — broken / unblock-now
+├── 2-daemon-integrity.md  # High — clear next step
+├── 3-golden-tests.md      # Medium — big "when not if" work
+└── 4-security-research.md # Low — speculative
 ```
 
 The `wave/` directory is the source of truth for what to build. `lfd` reads it; `update-wave` writes it.
@@ -75,23 +75,23 @@ The README is the wave's north star. Agents read it before every iteration to st
 
 ### Writing Items
 
-Items are bucketed markdown files. The prefix sets shared priority:
+Items are priority-prefixed markdown files:
 
 ```
-p0-fix-crash-loop.md    # broken or blocked; fix first
-p1-daemon-integrity.md  # clear next step
-p2-golden-tests.md      # committed later
-p3-security-research.md # speculative
+1-fix-crash-loop.md    # Urgent — broken or blocked; fix first
+2-daemon-integrity.md  # High — clear next step
+3-golden-tests.md      # Medium — committed later
+4-security-research.md # Low — speculative
 ```
 
-Bucket meanings:
+Priority meanings:
 
-- **`p0-*`** — the current codebase is broken and needs to be fixed before forward progress
-- **`p1-*`** — the clear next step
-- **`p2-*`** — a big idea that is "when, not if"
-- **`p3-*`** — speculative work
+- **`1-*`** — Urgent: the current codebase is broken and needs to be fixed before forward progress
+- **`2-*`** — High: the clear next step
+- **`3-*`** — Medium: a big idea that is "when, not if"
+- **`4-*`** — Low: speculative work
 
-`ingest` picks from the highest-priority non-empty bucket first. Within a bucket, exact ordering is intentionally loose.
+`ingest` picks from the highest-priority non-empty level first. Within a level, exact ordering is intentionally loose.
 
 Each item needs:
 
@@ -262,14 +262,14 @@ A `wave/billing/` directory for a billing rewrite:
 **Items** are scoped to one PR each:
 
 ```
-p1-usage-events.md       → Event capture and storage
-p1-metering-api.md       → Public metering endpoint
-p2-invoice-generation.md → Monthly invoice calculation
-p2-migration-shim.md     → Legacy API compatibility layer
-p3-cleanup.md            → Remove old billing code
+2-usage-events.md       → Event capture and storage
+2-metering-api.md       → Public metering endpoint
+3-invoice-generation.md → Monthly invoice calculation
+3-migration-shim.md     → Legacy API compatibility layer
+4-cleanup.md            → Remove old billing code
 ```
 
-The two `p1-*` items are both legitimate next steps. `ingest` picks from the highest-priority non-empty bucket first, then keeps looping until the backlog is empty.
+The two `2-*` items are both legitimate next steps. `ingest` picks from the highest-priority non-empty level first, then keeps looping until the backlog is empty.
 
 ---
 

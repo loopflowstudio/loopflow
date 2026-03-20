@@ -1,4 +1,4 @@
-# PM priority-bucket redo — validation
+# PM priority rename + init rework — validation
 
 ## Try it
 
@@ -6,10 +6,10 @@
 cargo test -p loopflow
 ```
 
-Confirms bucketed ingest flow, Asana/Linear priority mapping, prompt parity, and the rest of the crate pass together.
+Confirms priority ingest flow (Urgent/High/Medium/Low, `1-` through `4-` prefixes), Asana/Linear priority mapping, prompt parity, and the rest of the crate pass together.
 
 ```bash
-rg -n "p0-|highest-priority non-empty bucket|PriorityBucket" \
+rg -n "Urgent|High|Medium|Low|PriorityBucket|from_semantic_label" \
   docs/wave-authoring.md \
   rust/loopflow/src/engine/builtins \
   rust/loopflow/src/ops/ingest.rs \
@@ -17,7 +17,13 @@ rg -n "p0-|highest-priority non-empty bucket|PriorityBucket" \
   rust/loopflow/src/ops/pm.rs
 ```
 
-Shows the new shared planning model end to end: docs, prompts, ingest, shared PM types, and provider adapters.
+Shows the shared priority model end to end: docs, prompts, ingest, shared PM types, and provider adapters.
+
+```bash
+lf ops pm init
+```
+
+Creates fresh projects for all waves. No per-wave init, no matching against existing remote state.
 
 ## Validation checklist
 

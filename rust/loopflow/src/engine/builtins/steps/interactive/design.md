@@ -80,11 +80,11 @@ This is the natural session exit point. The user's answer determines what to run
    - `area`: inferred from the files/directories discussed (default `["."]`)
    - `direction`: inferred from conversation perspective (optional)
    - `triggers`: ask if needed; omit for manual runs
-5. Write roadmap files as `wave/<name>/p0-*.md`, `p1-*.md`, `p2-*.md`, `p3-*.md` — use the smallest honest bucket for each item. **Create every file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
-6. The first item you expect to build now — usually `p0-*` or `p1-*` — becomes the design doc for this branch (`scratch/<branch>.md`)
+5. Write roadmap files as `wave/<name>/1-*.md`, `2-*.md`, `3-*.md`, `4-*.md` — use the smallest honest priority for each item. **Create every file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
+6. The first item you expect to build now — usually `1-*` or `2-*` — becomes the design doc for this branch (`scratch/<branch>.md`)
 7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
 8. End session and tell the user what to run next:
-   - `lf implement` (for the immediate `p0`/`p1` item)
+   - `lf implement` (for the immediate urgent/high item)
    - `lf ship-wave`
 
 Once breaking things up, be aggressive about commit boundaries—each item should be independently shippable.

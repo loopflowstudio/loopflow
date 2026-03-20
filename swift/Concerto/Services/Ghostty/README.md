@@ -217,8 +217,9 @@ struct SurfaceRepresentable: NSViewRepresentable {
 
 5. Input handling:
    │
-   ├── keyDown → ghostty_surface_key()
+   ├── keyDown → ghostty_surface_key() for direct typing
    ├── mouseDown → ghostty_surface_mouse_button()
+   ├── IME commit/paste → ghostty_surface_text()
    └── scrollWheel → ghostty_surface_mouse_scroll()
 ```
 
@@ -271,7 +272,7 @@ Components:
 Features implemented:
 - CADisplayLink for rendering (modern macOS 14+ API)
 - Full keyboard input with Ctrl+C/D/Z, Esc, tmux support
-- NSTextInputClient for IME/composition (Japanese, Korean, etc.)
+- Direct key events for ordinary typing; NSTextInputClient reserved for IME/composition and paste
 - Right-click context menu with Copy/Paste/Clear
 - Cmd+C/V for copy/paste
 - Mouse tracking with exit detection

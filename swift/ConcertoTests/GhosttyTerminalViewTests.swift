@@ -44,9 +44,51 @@ struct GhosttyTerminalViewTests {
         #expect(!ghosttyShouldBypassInterpretKeyEvents(modifiers: []))
     }
 
-    @Test("printable key text is only attached without command or control")
+    @Test("ordinary printable typing goes straight to key events")
+    func ordinaryPrintableTypingUsesDirectKeyEvents() {
+        #expect(
+            ghosttyShouldHandleKeyDownDirectly(
+                characters: "a",
+                modifiers: [],
+                hasMarkedText: false,
+                selectedInputSource: "com.apple.keylayout.US"
+            )
+        )
+    }
+
+    @Test("composing input keeps printable keys on the text input path")
+    func composingInputUsesTextInputPath() {
+        #expect(
+            !ghosttyShouldHandleKeyDownDirectly(
+                characters: "a",
+                modifiers: [],
+                hasMarkedText: true,
+                selectedInputSource: "com.apple.keylayout.US"
+            )
+        )
+        #expect(
+            !ghosttyShouldHandleKeyDownDirectly(
+                characters: "a",
+                modifiers: [],
+                hasMarkedText: false,
+                selectedInputSource: "com.apple.inputmethod.Kotoeri.Japanese"
+            )
+        )
+        #expect(
+            !ghosttyShouldHandleKeyDownDirectly(
+                characters: "´",
+                modifiers: [.option],
+                hasMarkedText: false,
+                selectedInputSource: "com.apple.keylayout.US"
+            )
+        )
+    }
+
+    @Test("printable key text is only attached for printable characters without command or control")
     func printableKeyTextRespectsModifiers() {
         #expect(ghosttyKeyText(characters: "a", modifiers: []) == "a")
+        #expect(ghosttyKeyText(characters: " ", modifiers: []) == " ")
+        #expect(ghosttyKeyText(characters: "\n", modifiers: []) == nil)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.control]) == nil)
         #expect(ghosttyKeyText(characters: "a", modifiers: [.command]) == nil)
         #expect(ghosttyKeyText(characters: nil, modifiers: []) == nil)

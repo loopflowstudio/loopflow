@@ -1,0 +1,2 @@
+- Assumed `NSTextInputContext.selectedKeyboardInputSource` identifiers containing `inputmethod` should stay on the AppKit text-input path so Japanese/Korean/Chinese IMEs can start composition before marked text exists.
+- Kept Option-modified printable keys on the text-input path to preserve dead-key accent composition on Roman keyboard layouts.

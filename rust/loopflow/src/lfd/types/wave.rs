@@ -48,7 +48,7 @@ impl WaveStatus {
 }
 
 impl std::str::FromStr for WaveStatus {
-    type Err = ();
+    type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
@@ -57,7 +57,7 @@ impl std::str::FromStr for WaveStatus {
             "waiting" => Ok(Self::Waiting),
             "paused" => Ok(Self::Paused),
             "failed" => Ok(Self::Failed),
-            _ => Err(()),
+            _ => Err(format!("unknown wave status: {value}")),
         }
     }
 }

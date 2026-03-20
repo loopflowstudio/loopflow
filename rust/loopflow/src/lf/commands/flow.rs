@@ -112,23 +112,26 @@ fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>>
             }
             Ok(lines)
         }
-        ConcreteItem::Xor(xor_def) => render_branch_pipeline(
-            "xor",
-            xor_def
-                .router
-                .as_deref()
-                .unwrap_or(TEMP_XOR_ROUTE_STEP_NAME),
-            &xor_def.paths,
-            repo,
-        ),
-        ConcreteItem::Or(or_def) => render_branch_pipeline(
-            "or",
-            or_def.router.as_deref().unwrap_or("or-route"),
-            &or_def.paths,
-            repo,
-        ),
+        ConcreteItem::Xor(branch) => {
+            render_branch_item("xor", branch, TEMP_XOR_ROUTE_STEP_NAME, repo)
+        }
+        ConcreteItem::Or(branch) => render_branch_item("or", branch, "or-route", repo),
         ConcreteItem::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
     }
+}
+
+fn render_branch_item(
+    kind: &str,
+    branch: &ConcreteXor,
+    default_router: &str,
+    repo: &Path,
+) -> Result<Vec<String>> {
+    render_branch_pipeline(
+        kind,
+        branch.router.as_deref().unwrap_or(default_router),
+        &branch.paths,
+        repo,
+    )
 }
 
 fn render_branch_pipeline(

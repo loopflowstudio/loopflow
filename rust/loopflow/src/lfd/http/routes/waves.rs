@@ -21,7 +21,7 @@ use crate::lfd::http::dto::{
     NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{
-    read_wave_config, update_wave_agent_config, TriggerDef,
+    read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig,
 };
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -233,17 +233,7 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let cron_field = wave_config.as_ref().and_then(|c| c.cron.clone());
-    let workers = requested_workers
-        .or_else(|| wave_config.as_ref().and_then(|c| c.workers))
-        .or_else(|| {
-            if serialized {
-                Some(1)
-            } else {
-                wave_config.as_ref().and_then(|c| c.serialized).map(|_| 1)
-            }
-        })
-        .unwrap_or(1)
-        .max(1);
+    let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
 
     let mut wave = Wave {
         id: id.clone(),
@@ -420,6 +410,30 @@ fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn create_wave_workers(
+    requested_workers: Option<u32>,
+    serialized: bool,
+    wave_config: Option<&WaveConfig>,
+) -> u32 {
+    requested_workers
+        .or_else(|| wave_config.and_then(|config| config.workers))
+        .or_else(|| serialized.then_some(1))
+        .or_else(|| wave_config.and_then(|config| config.serialized).map(|_| 1))
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn update_wave_workers(
+    current_workers: u32,
+    requested_workers: Option<u32>,
+    serialized: Option<bool>,
+) -> u32 {
+    requested_workers
+        .map(|workers| workers.max(1))
+        .or_else(|| serialized.map(|_| 1))
+        .unwrap_or(current_workers)
+}
+
 async fn resolve_wave_source_wave_id(
     store: &crate::lfd::store::SharedStore,
     repo: &str,
@@ -575,15 +589,10 @@ pub async fn update_wave_handler(
     if let Some(area) = payload.area {
         wave.area = area;
     }
-    if let Some(workers) = payload.workers {
-        wave.workers = workers.max(1);
-    }
+    wave.workers = update_wave_workers(wave.workers, payload.workers, payload.serialized);
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
-    }
-    if payload.serialized.is_some() {
-        wave.workers = 1;
     }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {

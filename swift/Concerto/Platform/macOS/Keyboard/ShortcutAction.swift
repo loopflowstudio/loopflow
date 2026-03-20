@@ -27,6 +27,10 @@ enum ShortcutKey: Hashable {
                 "Esc"
             case ShortcutCatalog.slashKeyCode:
                 "/"
+            case ShortcutCatalog.fiveKeyCode:
+                "5"
+            case ShortcutCatalog.quoteKeyCode:
+                "'"
             default:
                 "Key"
             }
@@ -129,6 +133,8 @@ enum ShortcutCatalog {
     static let returnKeyCode = UInt16(kVK_Return)
     static let keypadEnterKeyCode = UInt16(kVK_ANSI_KeypadEnter)
     static let escapeKeyCode = UInt16(kVK_Escape)
+    static let fiveKeyCode = UInt16(kVK_ANSI_5)
+    static let quoteKeyCode = UInt16(kVK_ANSI_Quote)
     static let normalizedModifierMask: NSEvent.ModifierFlags = [.shift, .command, .option, .control]
 
     static let shortcuts: [ShortcutBinding] = [
@@ -238,14 +244,14 @@ enum ShortcutCatalog {
 
         // Multiplexer
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .keyCode(ShortcutCatalog.fiveKeyCode), modifiers: [.control, .shift], allowsRepeat: false),
             action: .splitVertical,
             label: "Split vertical",
             category: .multiplexer,
             requiresWave: true
         ),
         ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("\\"), modifiers: [.command, .shift], allowsRepeat: false),
+            gesture: ShortcutGesture(key: .keyCode(ShortcutCatalog.quoteKeyCode), modifiers: [.control, .shift], allowsRepeat: false),
             action: .splitHorizontal,
             label: "Split horizontal",
             category: .multiplexer,

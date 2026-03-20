@@ -29,16 +29,9 @@ public final class TerminalWorkspaceStore {
     }
 
     public func selectedSessionId(for waveId: String) -> String? {
-        if let selectedSessionId,
-           let session = activeSession(id: selectedSessionId),
-           session.waveId == waveId {
-            return selectedSessionId
-        }
-        if let storedSessionId = selectedSessionIdsByWave[waveId],
-           activeSession(id: storedSessionId) != nil {
-            return storedSessionId
-        }
-        return nextSelectableSessionId(for: waveId)
+        activeSessionId(selectedSessionId, in: waveId)
+            ?? activeSessionId(selectedSessionIdsByWave[waveId], in: waveId)
+            ?? nextSelectableSessionId(for: waveId)
     }
 
     public func selectedSession(for waveId: String) -> TerminalSession? {
@@ -93,12 +86,13 @@ public final class TerminalWorkspaceStore {
     public func select(_ sessionId: String?, waveId: String? = nil) {
         selectedSessionId = sessionId
         keepsGlobalSelectionCleared = sessionId == nil
-        if let sessionId,
-           let session = sessionsById[sessionId] {
-            selectedSessionIdsByWave[session.waveId] = sessionId
+
+        if let session = session(id: sessionId) {
+            selectedSessionIdsByWave[session.waveId] = session.id
         } else if let waveId, selectedSessionIdsByWave[waveId] == nil {
             selectedSessionIdsByWave[waveId] = nextSelectableSessionId(for: waveId)
         }
+
         reconcileSelection()
         persist()
     }
@@ -108,14 +102,10 @@ public final class TerminalWorkspaceStore {
     }
 
     private func persist() {
-        guard let orderKey = storageKey("order"),
-              let selectedKey = storageKey("selected"),
-              let waveSelectionKey = storageKey("selectedByWave") else {
-            return
-        }
-        userDefaults.set(orderedSessionIds, forKey: orderKey)
-        userDefaults.set(selectedSessionId, forKey: selectedKey)
-        userDefaults.set(selectedSessionIdsByWave, forKey: waveSelectionKey)
+        guard let storageKeys else { return }
+        userDefaults.set(orderedSessionIds, forKey: storageKeys.order)
+        userDefaults.set(selectedSessionId, forKey: storageKeys.selected)
+        userDefaults.set(selectedSessionIdsByWave, forKey: storageKeys.selectedByWave)
     }
 
     private func reconcileSelection() {
@@ -130,14 +120,18 @@ public final class TerminalWorkspaceStore {
 
         guard let session = activeSession(id: currentSelection) else {
             keepsGlobalSelectionCleared = false
-            let currentWaveId = session(id: currentSelection)?.waveId
-            selectedSessionId = currentWaveId.flatMap { nextSelectableSessionId(for: $0, excluding: currentSelection) }
-                ?? nextSelectableSessionId(excluding: currentSelection)
+            selectedSessionId = fallbackSelection(after: currentSelection)
             return
         }
 
         keepsGlobalSelectionCleared = false
         selectedSessionIdsByWave[session.waveId] = currentSelection
+    }
+
+    private func fallbackSelection(after sessionId: String) -> String? {
+        let waveId = session(id: sessionId)?.waveId
+        return waveId.flatMap { nextSelectableSessionId(for: $0, excluding: sessionId) }
+            ?? nextSelectableSessionId(excluding: sessionId)
     }
 
     private func nextSelectableSessionId(
@@ -157,37 +151,45 @@ public final class TerminalWorkspaceStore {
         let waveIds = Set(sessionsById.values.map(\.waveId)).union(selectedSessionIdsByWave.keys)
         for waveId in waveIds {
             let currentSelection = selectedSessionIdsByWave[waveId]
-            guard let currentSelection,
-                  let session = activeSession(id: currentSelection) else {
-                selectedSessionIdsByWave[waveId] = nextSelectableSessionId(
-                    for: waveId,
-                    excluding: currentSelection
-                )
-                continue
-            }
-            selectedSessionIdsByWave[waveId] = session.id
+            selectedSessionIdsByWave[waveId] = activeSessionId(currentSelection, in: waveId)
+                ?? nextSelectableSessionId(for: waveId, excluding: currentSelection)
         }
     }
 
     private func restoreSelection() {
-        guard let orderKey = storageKey("order"),
-              let selectedKey = storageKey("selected"),
-              let waveSelectionKey = storageKey("selectedByWave") else {
+        guard let storageKeys else {
             orderedSessionIds = []
             selectedSessionIdsByWave = [:]
             selectedSessionId = nil
             return
         }
-        orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
-        selectedSessionId = userDefaults.string(forKey: selectedKey)
-        selectedSessionIdsByWave = userDefaults.dictionary(forKey: waveSelectionKey) as? [String: String] ?? [:]
+
+        orderedSessionIds = userDefaults.stringArray(forKey: storageKeys.order) ?? []
+        selectedSessionId = userDefaults.string(forKey: storageKeys.selected)
+        selectedSessionIdsByWave = userDefaults.dictionary(forKey: storageKeys.selectedByWave) as? [String: String] ?? [:]
         keepsGlobalSelectionCleared = false
         reconcileSelection()
     }
 
-    private func storageKey(_ suffix: String) -> String? {
+    private var storageKeys: (order: String, selected: String, selectedByWave: String)? {
         guard let repoKey else { return nil }
-        return "terminalWorkspace.\(suffix).\(repoKey)"
+        return (
+            order: storageKey("order", repoKey: repoKey),
+            selected: storageKey("selected", repoKey: repoKey),
+            selectedByWave: storageKey("selectedByWave", repoKey: repoKey)
+        )
+    }
+
+    private func storageKey(_ suffix: String, repoKey: String) -> String {
+        "terminalWorkspace.\(suffix).\(repoKey)"
+    }
+
+    private func activeSessionId(_ sessionId: String?, in waveId: String? = nil) -> String? {
+        guard let session = activeSession(id: sessionId),
+              waveId == nil || session.waveId == waveId else {
+            return nil
+        }
+        return session.id
     }
 
     private func session(id: String?) -> TerminalSession? {

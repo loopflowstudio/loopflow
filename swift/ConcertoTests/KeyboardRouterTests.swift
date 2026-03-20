@@ -207,14 +207,30 @@ struct KeyboardRouterTests {
         var actions: [ShortcutAction] = []
 
         let handled = router.routeEvent(
-            key: .character("\\"),
-            modifiers: [.command],
+            key: .keyCode(ShortcutCatalog.fiveKeyCode),
+            modifiers: [.control, .shift],
             isRepeat: false,
             mode: .terminal
         ) { actions.append($0) }
 
         #expect(handled)
         #expect(actions == [.splitVertical])
+    }
+
+    @Test("terminal mode routes horizontal split shortcut by key code")
+    func terminalModeRoutesHorizontalSplitShortcut() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .keyCode(ShortcutCatalog.quoteKeyCode),
+            modifiers: [.control, .shift],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.splitHorizontal])
     }
 
     @Test("terminal focus navigation uses option-command arrows")

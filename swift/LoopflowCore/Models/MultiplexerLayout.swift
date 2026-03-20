@@ -93,14 +93,8 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
 
     /// Replace the leaf with the given paneId with a split containing the original and a new pane.
     public func splitting(_ paneId: String, axis: SplitAxis, newPane: PaneState, ratio: Double = 0.5) -> LayoutNode {
-        switch self {
-        case .leaf(let pane):
-            guard pane.id == paneId else { return self }
-            return .split(axis, first: .leaf(pane), second: .leaf(newPane), ratio: ratio)
-        case .split(let ax, let first, let second, let r):
-            return .split(ax, first: first.splitting(paneId, axis: axis, newPane: newPane, ratio: ratio),
-                          second: second.splitting(paneId, axis: axis, newPane: newPane, ratio: ratio),
-                          ratio: r)
+        replacingLeaf(paneId) { pane in
+            .split(axis, first: .leaf(pane), second: .leaf(newPane), ratio: ratio)
         }
     }
 
@@ -123,32 +117,16 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
 
     /// Update the pane config for a specific pane.
     public func updatingPane(_ paneId: String, config: PaneConfig) -> LayoutNode {
-        switch self {
-        case .leaf(var pane):
-            guard pane.id == paneId else { return self }
-            pane.config = config
-            return .leaf(pane)
-        case .split(let axis, let first, let second, let ratio):
-            return .split(axis, first: first.updatingPane(paneId, config: config),
-                          second: second.updatingPane(paneId, config: config),
-                          ratio: ratio)
+        replacingLeaf(paneId) { pane in
+            var updatedPane = pane
+            updatedPane.config = config
+            return .leaf(updatedPane)
         }
     }
 
     /// Replace a leaf pane while preserving the surrounding tree shape.
     public func replacingPane(_ paneId: String, with pane: PaneState) -> LayoutNode {
-        switch self {
-        case .leaf(let current):
-            guard current.id == paneId else { return self }
-            return .leaf(pane)
-        case .split(let axis, let first, let second, let ratio):
-            return .split(
-                axis,
-                first: first.replacingPane(paneId, with: pane),
-                second: second.replacingPane(paneId, with: pane),
-                ratio: ratio
-            )
-        }
+        replacingLeaf(paneId) { _ in .leaf(pane) }
     }
 
     /// Update the split ratio for the split that directly contains a pane.
@@ -160,19 +138,19 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
             if first.isLeaf(paneId) || second.isLeaf(paneId) {
                 return .split(axis, first: first, second: second, ratio: ratio)
             }
-            if first.containsPane(paneId) {
-                return .split(axis,
-                              first: first.updatingRatio(containing: paneId, ratio: ratio),
-                              second: second,
-                              ratio: currentRatio)
+
+            let updatedFirst = first.containsPane(paneId)
+                ? first.updatingRatio(containing: paneId, ratio: ratio)
+                : first
+            let updatedSecond = second.containsPane(paneId)
+                ? second.updatingRatio(containing: paneId, ratio: ratio)
+                : second
+
+            guard updatedFirst != first || updatedSecond != second else {
+                return self
             }
-            if second.containsPane(paneId) {
-                return .split(axis,
-                              first: first,
-                              second: second.updatingRatio(containing: paneId, ratio: ratio),
-                              ratio: currentRatio)
-            }
-            return self
+
+            return .split(axis, first: updatedFirst, second: updatedSecond, ratio: currentRatio)
         }
     }
 
@@ -191,6 +169,21 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         guard let index = panes.firstIndex(where: { $0.id == paneId }) else { return nil }
         let neighborIndex = (index + offset + panes.count) % panes.count
         return panes[neighborIndex]
+    }
+
+    private func replacingLeaf(_ paneId: String, with transform: (PaneState) -> LayoutNode) -> LayoutNode {
+        switch self {
+        case .leaf(let pane):
+            guard pane.id == paneId else { return self }
+            return transform(pane)
+        case .split(let axis, let first, let second, let ratio):
+            return .split(
+                axis,
+                first: first.replacingLeaf(paneId, with: transform),
+                second: second.replacingLeaf(paneId, with: transform),
+                ratio: ratio
+            )
+        }
     }
 
     // MARK: - Codable

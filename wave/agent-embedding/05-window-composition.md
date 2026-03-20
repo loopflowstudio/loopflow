@@ -2,7 +2,7 @@
 asana_id: '1213718096104955'
 linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 ---
-# 06: Window Composition — Polish
+# 05: Window Composition — Polish
 
 **Finish line:** The multiplexer panes are rich enough to stay open. Markdown has a file picker, diff shows unified hunks, splitting offers a type choice, and directional focus works across the whole layout.
 
@@ -61,8 +61,7 @@ Replace next/previous with spatial navigation.
 
 ### 6. Snap hotkeys and named layouts
 
-`snapHalf`, `snapThird`, `snapQuarter` actions already exist in `ShortcutAction` but aren't wired.
-
+- Add `snapHalf`, `snapThird`, `snapQuarter` actions to `ShortcutAction`
 - `Cmd+1/2/3/4` for quarter/third/half/full on focused outer pane
 - Named layouts per workflow: "build" (terminal + markdown), "review" (terminal + diff), "full" (terminal only)
 - Layout presets stored per wave alongside the current split tree
@@ -72,6 +71,10 @@ Replace next/previous with spatial navigation.
 - Drag-to-resize split boundaries
 - Focus ring that clearly shows which layer is active (outer pane border vs terminal focus)
 - Cross-pane interaction: click a file path in terminal → open in markdown viewer (later)
+
+### 8. IME input source validation
+
+The direct-key typing path bypasses `interpretKeyEvents` for ordinary printable input but defers to AppKit text input when `selectedKeyboardInputSource` contains `inputmethod` or when Option is held. Validate with Japanese (Kotoeri), Korean, Chinese (Pinyin), and third-party input methods (e.g. RIME, Google Japanese Input) to confirm composition still starts correctly.
 
 ## Done when
 

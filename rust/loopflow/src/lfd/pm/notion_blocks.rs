@@ -491,15 +491,15 @@ fn render_block(block: &Value, indent: usize) -> String {
             let text = render_rich_text(data);
             format!("{prefix}```{language}\n{text}\n{prefix}```\n\n")
         }
-        "bulleted_list_item" => render_list_item(block, indent, "- ", None),
-        "numbered_list_item" => render_list_item(block, indent, "1. ", None),
+        "bulleted_list_item" => render_list_item(block, indent, "- "),
+        "numbered_list_item" => render_list_item(block, indent, "1. "),
         "to_do" => {
             let checked = block_data(block, block_type)
                 .get("checked")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             let marker = if checked { "- [x] " } else { "- [ ] " };
-            render_list_item(block, indent, marker, None)
+            render_list_item(block, indent, marker)
         }
         _ => {
             let text = block_plain_text(block);
@@ -512,7 +512,7 @@ fn render_block(block: &Value, indent: usize) -> String {
     }
 }
 
-fn render_list_item(block: &Value, indent: usize, marker: &str, _number: Option<usize>) -> String {
+fn render_list_item(block: &Value, indent: usize, marker: &str) -> String {
     let block_type = block
         .get("type")
         .and_then(Value::as_str)

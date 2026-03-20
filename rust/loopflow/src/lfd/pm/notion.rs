@@ -72,19 +72,16 @@ impl NotionClient {
             .header("Notion-Version", NOTION_VERSION)
     }
 
-    fn request_with_query(
+    fn request_with_start_cursor(
         &self,
         method: Method,
         path: &str,
-        query: &[(&str, &str)],
+        start_cursor: Option<&str>,
     ) -> reqwest::RequestBuilder {
         let mut url = Url::parse(&format!("{}{}", self.base_url, path))
             .expect("notion base URL should be valid");
-        if !query.is_empty() {
-            let mut pairs = url.query_pairs_mut();
-            for (key, value) in query {
-                pairs.append_pair(key, value);
-            }
+        if let Some(cursor) = start_cursor {
+            url.query_pairs_mut().append_pair("start_cursor", cursor);
         }
         self.client
             .request(method, url)
@@ -92,9 +89,9 @@ impl NotionClient {
             .header("Notion-Version", NOTION_VERSION)
     }
 
-    async fn send_json<F>(&self, make_request: F) -> PmResult<Value>
+    async fn send_json<F>(&self, mut make_request: F) -> PmResult<Value>
     where
-        F: Fn() -> reqwest::RequestBuilder,
+        F: FnMut() -> reqwest::RequestBuilder,
     {
         for attempt in 0..=RATE_LIMIT_RETRIES {
             let response = make_request()
@@ -121,6 +118,42 @@ impl NotionClient {
         ))
     }
 
+    async fn collect_paginated_results<F>(&self, mut make_request: F) -> PmResult<Vec<Value>>
+    where
+        F: FnMut(Option<&str>) -> reqwest::RequestBuilder,
+    {
+        let mut results = Vec::new();
+        let mut next_cursor: Option<String> = None;
+
+        loop {
+            let cursor = next_cursor.clone();
+            let response = self.send_json(|| make_request(cursor.as_deref())).await?;
+
+            results.extend(
+                response
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+
+            if !response
+                .get("has_more")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                break;
+            }
+
+            next_cursor = response
+                .get("next_cursor")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+
+        Ok(results)
+    }
+
     async fn resolve_team_for_project_bootstrap(&self) -> PmResult<String> {
         if let Some(team_id) = self.find_team(DEFAULT_TEAM_NAME).await? {
             return Ok(team_id);
@@ -129,23 +162,21 @@ impl NotionClient {
     }
 
     async fn search(&self, query: &str, value: &str) -> PmResult<Vec<Value>> {
-        let response = self
-            .send_json(|| {
-                self.request(Method::POST, "/search").json(&json!({
-                    "query": query,
-                    "page_size": NOTION_PAGE_SIZE,
-                    "filter": {
-                        "property": "object",
-                        "value": value,
-                    }
-                }))
-            })
-            .await?;
-        Ok(response
-            .get("results")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default())
+        self.collect_paginated_results(|start_cursor| {
+            let mut body = json!({
+                "query": query,
+                "page_size": NOTION_PAGE_SIZE,
+                "filter": {
+                    "property": "object",
+                    "value": value,
+                }
+            });
+            if let Some(cursor) = start_cursor {
+                body["start_cursor"] = Value::String(cursor.to_string());
+            }
+            self.request(Method::POST, "/search").json(&body)
+        })
+        .await
     }
 
     async fn fetch_page(&self, page_id: &str) -> PmResult<Value> {
@@ -158,111 +189,49 @@ impl NotionClient {
         Ok(blocks_to_markdown(&blocks))
     }
 
+    async fn fetch_direct_block_children(&self, block_id: &str) -> PmResult<Vec<Value>> {
+        self.collect_paginated_results(|start_cursor| {
+            self.request_with_start_cursor(
+                Method::GET,
+                &format!("/blocks/{block_id}/children"),
+                start_cursor,
+            )
+        })
+        .await
+    }
+
     async fn fetch_block_children(&self, block_id: &str) -> PmResult<Vec<Value>> {
-        let mut children = Vec::new();
-        let mut next_cursor: Option<String> = None;
+        let mut children = self.fetch_direct_block_children(block_id).await?;
 
-        loop {
-            let response = self
-                .send_json(|| {
-                    if let Some(cursor) = &next_cursor {
-                        self.request_with_query(
-                            Method::GET,
-                            &format!("/blocks/{block_id}/children"),
-                            &[("start_cursor", cursor.as_str())],
-                        )
-                    } else {
-                        self.request(Method::GET, &format!("/blocks/{block_id}/children"))
-                    }
-                })
-                .await?;
-
-            let batch = response
-                .get("results")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            for mut block in batch {
-                if block
-                    .get("has_children")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    let id = value_string(&block, "id")?;
-                    let nested = Box::pin(self.fetch_block_children(&id)).await?;
-                    if let Some(block_type) = block
-                        .get("type")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                    {
-                        if let Some(data) =
-                            block.get_mut(&block_type).and_then(Value::as_object_mut)
-                        {
-                            data.insert("children".to_string(), Value::Array(nested));
-                        }
-                    }
-                }
-                children.push(block);
-            }
-
-            if !response
-                .get("has_more")
+        for block in &mut children {
+            if block
+                .get("has_children")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                break;
+                let id = value_string(block, "id")?;
+                let nested = Box::pin(self.fetch_block_children(&id)).await?;
+                if let Some(block_type) = block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                {
+                    if let Some(data) = block.get_mut(&block_type).and_then(Value::as_object_mut) {
+                        data.insert("children".to_string(), Value::Array(nested));
+                    }
+                }
             }
-            next_cursor = response
-                .get("next_cursor")
-                .and_then(Value::as_str)
-                .map(str::to_string);
         }
 
         Ok(children)
     }
 
     async fn fetch_top_level_block_ids(&self, block_id: &str) -> PmResult<Vec<String>> {
-        let mut ids = Vec::new();
-        let mut next_cursor: Option<String> = None;
-
-        loop {
-            let response = self
-                .send_json(|| {
-                    if let Some(cursor) = &next_cursor {
-                        self.request_with_query(
-                            Method::GET,
-                            &format!("/blocks/{block_id}/children"),
-                            &[("start_cursor", cursor.as_str())],
-                        )
-                    } else {
-                        self.request(Method::GET, &format!("/blocks/{block_id}/children"))
-                    }
-                })
-                .await?;
-
-            for block in response
-                .get("results")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                ids.push(value_string(block, "id")?);
-            }
-
-            if !response
-                .get("has_more")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                break;
-            }
-            next_cursor = response
-                .get("next_cursor")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-        }
-
-        Ok(ids)
+        self.fetch_direct_block_children(block_id)
+            .await?
+            .iter()
+            .map(|block| value_string(block, "id"))
+            .collect()
     }
 
     async fn delete_page_body(&self, page_id: &str) -> PmResult<()> {
@@ -323,42 +292,15 @@ impl NotionClient {
     }
 
     async fn query_database_pages(&self, database_id: &str) -> PmResult<Vec<Value>> {
-        let mut pages = Vec::new();
-        let mut next_cursor: Option<String> = None;
-
-        loop {
-            let response = self
-                .send_json(|| {
-                    let mut body = json!({ "page_size": NOTION_PAGE_SIZE });
-                    if let Some(cursor) = &next_cursor {
-                        body["start_cursor"] = Value::String(cursor.clone());
-                    }
-                    self.request(Method::POST, &format!("/databases/{database_id}/query"))
-                        .json(&body)
-                })
-                .await?;
-
-            pages.extend(
-                response
-                    .get("results")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-            if !response
-                .get("has_more")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                break;
+        self.collect_paginated_results(|start_cursor| {
+            let mut body = json!({ "page_size": NOTION_PAGE_SIZE });
+            if let Some(cursor) = start_cursor {
+                body["start_cursor"] = Value::String(cursor.to_string());
             }
-            next_cursor = response
-                .get("next_cursor")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-        }
-
-        Ok(pages)
+            self.request(Method::POST, &format!("/databases/{database_id}/query"))
+                .json(&body)
+        })
+        .await
     }
 }
 

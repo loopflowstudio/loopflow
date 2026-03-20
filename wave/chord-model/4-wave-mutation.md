@@ -9,9 +9,9 @@ notion_id: 32af8f99-3d81-81bd-ab89-f9303b2a1563
 
 ## Context
 
-`wave/mutate` composes and executes changes in one pass. After bootstrap, the constraint is sharper: mutations have to operate on the waves-only model that replaced chord CRUD. Changes should update ordinary wave config and runtime state, not smuggle chord-specific state back into the system.
+`wave/mutate` now exists as a shipped builtin step that composes and executes changes in one pass. It edits wave YAML and item files directly, while the waves API / `update_wave` path syncs runtime fields (`flow`, `direction`, `area`, `status`, `agent`, `step_agents`) back into lfd. The governance flows (`govern-*`) each terminate with `wave/mutate`.
 
-The manual execution path exists now, and `wave/mutate` edits wave YAML and item files directly while the ordinary waves API / `update_wave` path can already sync runtime fields like `flow`, `direction`, `area`, `status`, `agent`, and `step_agents` back into lfd. What's missing is one typed mutation layer that spans those levers, logs each change, and preserves enough prior state to revert it cleanly.
+What's missing is one typed mutation layer that spans all levers, logs each change, and preserves enough prior state to revert cleanly. Currently `wave/mutate` operates through direct file edits without structured logging or reversibility.
 
 The levers stay the same:
 - **Direction** — shift what a wave optimizes for

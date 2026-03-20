@@ -62,22 +62,17 @@ Four focused governance flows cover identity, intelligence, control, and coordin
 
 There is no builtin sequential `vsm` flow anymore. S1 stays out of scope here — member waves still do the actual work, and worker-pool operations come later.
 
-### VSM chord (five waves)
+### Planning flow (chord-tree traversal)
 
-For projects complex enough that each system needs its own persistent wave, memory, and cadence:
+For chords with member waves, a single planning flow traverses the tree: scanning up (leaves → root) then governing down (root → leaves). The s-levels (s5–s2) are steps within each chord's scan/govern pass, not separate waves.
 
-```yaml
-# wave/root/root.yaml
-flow: govern-identity  # plus govern-intelligence / govern-control / govern-coordination on sibling governance waves
-area:
-  - wave/s5-policy/
-  - wave/s4-intelligence/
-  - wave/s3-control/
-  - wave/s2-coordination/
-  - wave/s1-operations/    # or just the leaf waves directly
+```
+up (leaves → root):  each chord scans — information flows inward
+down (root → leaves): each chord governs — decisions flow outward
+commit:              one PR for the entire planning pass
 ```
 
-Each system wave runs on its own rhythm. S5 slower (weekly, on-demand). S4 scans frequently. S3 gardens daily. S2 reconciles as needed. Same model, different scale.
+Cadence is uniform. The same flow runs every cycle; levels with nothing to say pass through as no-ops. Every 4h: s3/s2 (queue, capacity). Daily: s4 (environment). Weekly: s5 (policy). After the planning PR lands, workers fire across all waves with capacity.
 
 ## Strategy
 

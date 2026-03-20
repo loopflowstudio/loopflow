@@ -1,81 +1,59 @@
-# 02c: VSM Chord Configs
+# 02c: Planning Flow and Chord Governance
 
-**Finish line:** The redesign chord has five member waves (s5-policy, s4-intelligence, s3-control, s2-coordination, s1-operations), each with its own flow and rhythm. The sequential `vsm.yaml` flow is removed.
+**Finish line:** A chord-wave runs a single planning flow that traverses its member tree — scanning up (leaves → root), governing down (root → leaves) — producing one reviewable PR per planning cycle. The s-levels (s5–s2) are steps within the flow, not separate waves.
 
 ## Context
 
-Item 02 creates the governance flows (govern-identity, govern-intelligence, govern-control, govern-coordination) and their scan/assess steps. This item creates the actual wave configs that run those flows, and wires s1 as a worker pool.
+The original design had five member waves per chord (s5-policy, s4-intelligence, s3-control, s2-coordination, s1-operations), each with independent cron schedules. That model was replaced during the worker-pools design conversation for three reasons:
+
+- **Planning levels aren't independent.** s2 needs s3's capacity decision, s3 needs s4's environmental read. Independent crons mean each level works with stale output from the others.
+- **PM noise.** Each wave needs a Linear project, backlog, README. Five waves per chord is overhead for what's really one planning process.
+- **No natural parallelism.** Planning is inherently serial — you never want two s4 scans racing. `workers > 1` is meaningless for governance.
+
+The builtin steps (`vsm/s5-scan`, `vsm/s5-assess`, ..., `vsm/s2-scan`, `vsm/s2-assess`) and governance flows (`govern-identity`, `govern-intelligence`, `govern-control`, `govern-coordination`) already shipped. What's missing is the recursive traversal that composes them into a single chord-tree planning pass.
 
 Depends on:
-- ~~02 (governance flows and steps exist)~~ — shipped
-- 02a (worker pools — s1 needs `workers: N`)
-- 02b (wave modes — s1 needs `mode: loop`, governance waves need `mode: cron`)
+- ~~02a (worker pools)~~ — shipped
+- 02b (wave modes — planning flow needs `mode: cron`)
 
-Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Governance waves need graceful skip behavior when their scan can't reach an expected data source.
+## The planning flow model
 
-Open design questions from the governance flow build:
-- **`garden/scan` consuming sN outputs:** Does garden/scan pull (run the sN scans inline) or read (assume governance flows ran recently and consume their outputs)? Affects whether garden and governance flows are coupled or independent.
-- **Interactive flag on `review-chord`:** Is interactivity baked into the step or inherited from flow context? Matters because governance flows are headless (no human) while garden is interactive.
+A chord has two rhythms:
 
-## The shape
+1. **Planning beat** (periodic): scan up → govern down → one PR
+2. **Worker batch** (triggered by planning): N workers fire against the queue, each producing its own PR
 
-```
-wave/redesign/
-  redesign.yaml
-  wave/s5-policy/
-    s5-policy.yaml           # cron: weekly, flow: govern-identity
-    README.md
-  wave/s4-intelligence/
-    s4-intelligence.yaml     # cron: daily, flow: govern-intelligence
-    README.md
-  wave/s3-control/
-    s3-control.yaml          # cron: every 4h, flow: govern-control
-    README.md
-  wave/s2-coordination/
-    s2-coordination.yaml     # cron: every 4h, flow: govern-coordination
-    README.md
-  wave/s1-operations/
-    s1-operations.yaml       # mode: loop, workers: N, flow: build-or-silent
-    README.md
-    01-first-item.md         # backlog items maintained by s2
-```
+The planning pass is itself `workers: 1` — always serial. The parallelism lives in the work phase.
 
-### Governance waves (s5–s2)
+### Up pass (scan)
 
-Independent rhythms:
+Leaves → root. Each chord scans its member state. Parent sees children's scan output as input. Pure information, no side effects. This is each system's afferent channel.
 
-- **s5-policy** — `mode: cron`, weekly or slower. Identity doesn't shift fast.
-- **s4-intelligence** — `mode: cron`, daily. Environment changes constantly.
-- **s3-control** — `mode: cron`, every 4 hours. Tight control loop.
-- **s2-coordination** — `mode: cron`, every 4 hours. Deconfliction before workers grab items.
+### Down pass (govern)
 
-Each runs on its own clock and works with whatever's current. Not trigger-chained — each reads the latest output from other levels when it runs.
+Root → leaves. Each chord governs based on the full scan picture. Children inherit parent's policy/constraints. Writes mutations — queue ordering, capacity, policy. This is the efferent channel.
 
-All four only edit wave space — plans, backlogs, configs, `workers` on s1. No code changes.
+### Cadence
 
-### s1-operations (worker pool)
+The same up/down flow runs at every cadence. Levels with nothing to say pass through as no-ops:
 
-`mode: loop`, `workers: N`, `flow: build-or-silent`. Workers pull from the backlog (maintained by s2), each in its own worktree. Ephemeral — worktree pruned after landing.
+- Every 4h: s3/s2 mostly — queue reordering, capacity adjustment
+- Daily: s4 joins — CVEs, dependency updates
+- Weekly: s5 weighs in — policy shifts, area reorg
 
-s3 adjusts `workers` on s1 via `wave/mutate` mutations.
+No need to configure "s5 weekly, s4 daily" separately. One cron, all levels run, cheap levels are cheap.
 
-### Chord config update
+## Open design questions
 
-`redesign.yaml` area updated to include the five member wave directories:
-```yaml
-area:
-  - wave/redesign/wave/s5-policy/
-  - wave/redesign/wave/s4-intelligence/
-  - wave/redesign/wave/s3-control/
-  - wave/redesign/wave/s2-coordination/
-  - wave/redesign/wave/s1-operations/
-```
+- **Flow engine traversal primitive.** How does the flow engine express recursive up/down traversal? Is it built into the planning flow definition, or does lfd manage the tree walk externally? May need a new primitive for "run these steps at each node in tree order."
+- **Capacity writes.** How does s3's capacity allocation get written? Mutation to child wave configs via `wave/mutate`? A separate capacity file?
+- **Batch vs pool initiation.** Autonomous work wants batch (plan → execute → plan). Interactive/garden wants pool (workers always running, human feeds queue). Same `workers: N` underneath, different initiation pattern. Is this just `mode` (cron vs loop)?
+- **Scan tool availability.** Some scan prompts depend on tools or external signals (`cargo audit`, `lfq show`, `lfq usage`) that may be unavailable in a given runtime. Planning flow needs graceful skip behavior when a scan can't reach an expected data source.
 
 ## Done when
 
-- Five member wave directories exist with configs and READMEs
-- s5–s2 run their governance flows on independent cron schedules
-- s1 runs `build-or-silent` with `workers: N`
-- Redesign chord area includes all five member waves
-- Sequential `vsm.yaml` is removed (already done in 02)
-- Garden flow still works for human check-ins on the same chord
+- A chord-wave can run a planning flow that traverses its member tree
+- Scan runs leaves → root, govern runs root → leaves
+- The s-levels compose as steps within each chord's scan/govern pass
+- One PR per planning cycle captures all governance decisions
+- After the planning PR lands, workers fire across all waves with capacity

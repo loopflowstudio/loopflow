@@ -11,7 +11,7 @@ notion_id: 32af8f99-3d81-8132-a56d-d07cdbcb3384
 
 Letta (formerly MemGPT) provides layered memory: core, recall, archival. The architectural boundary stays the same after bootstrap: Letta is a memory service, not an agent runtime. Waves stay ephemeral with file-based state. The redesign chord-wave is the only place where durable qualitative memory belongs.
 
-Item 02 now covers the first live garden cycle. Finish that first so Letta has a real stream of scan observations, routed decisions, and human calibration events to remember instead of a purely structural test run.
+The governance flows (`govern-identity`, `govern-intelligence`, `govern-control`, `govern-coordination`) and their scan/assess steps now exist as builtins. The garden flow (`garden/scan` → `garden/assess` → `wave/mutate` → `wave/review`) is also shipped. Letta integration can build on real scan observations and governance decisions from these flows.
 
 The old `signals/05` idea folds here rather than living in a separate wave. Resolution history, calibration notes, and repeated stall/algedonic patterns belong in chord memory, not in a parallel block system.
 
@@ -34,7 +34,7 @@ Run a self-hosted Letta instance alongside lfd. Keep the setup reproducible and 
 - Conflict resolutions and their outcomes
 - Algedonic repair attempts and whether they worked
 - Human calibration decisions and reasoning
-- Tend-cycle observations and proposals
+- Garden-cycle observations and proposals
 
 **Archival memories** (long-term, searchable):
 - Full redesign context and history

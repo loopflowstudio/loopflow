@@ -33,23 +33,46 @@ struct CommandPalette: View {
         if query.isEmpty {
             return actions
         }
-        return actions.filter { action in
-            fuzzyMatch(query: query.lowercased(), target: action.title.lowercased())
-        }
+        let q = query.lowercased()
+        return actions
+            .compactMap { action -> (PaletteAction, Int)? in
+                let score = fuzzyScore(query: q, target: action.title.lowercased())
+                return score > 0 ? (action, score) : nil
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
     }
 
-    private func fuzzyMatch(query: String, target: String) -> Bool {
+    /// Score a fuzzy match. Returns 0 for no match.
+    /// Higher = better: prefix > word-start > scattered subsequence.
+    private func fuzzyScore(query: String, target: String) -> Int {
+        guard !query.isEmpty else { return 1 }
+
         var queryIndex = query.startIndex
         var targetIndex = target.startIndex
+        var score = 0
+        var prevWasBoundary = true // start of string counts as boundary
 
         while queryIndex < query.endIndex && targetIndex < target.endIndex {
-            if query[queryIndex] == target[targetIndex] {
+            let qChar = query[queryIndex]
+            let tChar = target[targetIndex]
+
+            if qChar == tChar {
+                if queryIndex == query.startIndex && targetIndex == target.startIndex {
+                    score += 3 // prefix match
+                } else if prevWasBoundary {
+                    score += 2 // word-start match
+                } else {
+                    score += 1 // scattered match
+                }
                 queryIndex = query.index(after: queryIndex)
             }
+
+            prevWasBoundary = tChar == " " || tChar == "-" || tChar == "_"
             targetIndex = target.index(after: targetIndex)
         }
 
-        return queryIndex == query.endIndex
+        return queryIndex == query.endIndex ? score : 0
     }
 
     var body: some View {

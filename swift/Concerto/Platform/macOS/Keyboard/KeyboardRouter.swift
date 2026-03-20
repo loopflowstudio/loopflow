@@ -80,11 +80,10 @@ final class KeyboardRouter {
         )
 
         guard let key = normalizeKey(event) else { return false }
-        let modifiers = normalizeModifiers(event.modifierFlags)
 
         return routeEvent(
             key: key,
-            modifiers: modifiers,
+            modifiers: normalizeModifiers(event.modifierFlags),
             isRepeat: event.isARepeat,
             mode: mode,
             handler: handler
@@ -190,7 +189,9 @@ final class KeyboardRouter {
     ) -> ShortcutKey? {
         if keyCode == ShortcutCatalog.returnKeyCode ||
             keyCode == ShortcutCatalog.keypadEnterKeyCode ||
-            keyCode == ShortcutCatalog.escapeKeyCode {
+            keyCode == ShortcutCatalog.escapeKeyCode ||
+            keyCode == ShortcutCatalog.fiveKeyCode ||
+            keyCode == ShortcutCatalog.quoteKeyCode {
             return .keyCode(keyCode)
         }
 

@@ -159,6 +159,7 @@ struct ConcertoApp: App {
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
+        NSWindow.allowsAutomaticWindowTabbing = false
         bootstrapConcertoApp()
         TmuxTerminationCleanup.install()
     }

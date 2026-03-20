@@ -53,16 +53,9 @@ public final class TerminalWorkspaceStore {
     }
 
     public func selectedSessionId(for waveId: String) -> String? {
-        if let selectedSessionId,
-           let session = activeSession(id: selectedSessionId),
-           session.waveId == waveId {
-            return selectedSessionId
-        }
-        if let storedSessionId = selectedSessionIdsByWave[waveId],
-           activeSession(id: storedSessionId) != nil {
-            return storedSessionId
-        }
-        return nextSelectableSessionId(for: waveId)
+        activeSessionId(selectedSessionId, in: waveId)
+            ?? activeSessionId(selectedSessionIdsByWave[waveId], in: waveId)
+            ?? nextSelectableSessionId(for: waveId)
     }
 
     public func selectedSession(for waveId: String) -> TerminalSession? {
@@ -130,17 +123,21 @@ public final class TerminalWorkspaceStore {
 =======
 >>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
         keepsGlobalSelectionCleared = sessionId == nil
-        if let sessionId,
-           let session = sessionsById[sessionId] {
-            selectedSessionIdsByWave[session.waveId] = sessionId
+
+        if let session = session(id: sessionId) {
+            selectedSessionIdsByWave[session.waveId] = session.id
         } else if let waveId, selectedSessionIdsByWave[waveId] == nil {
             selectedSessionIdsByWave[waveId] = nextSelectableSessionId(for: waveId)
         }
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
 >>>>>>> caddde45 (lf commit: compress)
 =======
 >>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
+=======
+
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         reconcileSelection()
         persist()
     }
@@ -150,6 +147,7 @@ public final class TerminalWorkspaceStore {
     }
 
     private func persist() {
+<<<<<<< HEAD
         guard let orderKey = storageKey("order"),
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -169,6 +167,12 @@ public final class TerminalWorkspaceStore {
 <<<<<<< HEAD
 <<<<<<< HEAD
         userDefaults.set(selectedSessionIdsByWave, forKey: waveSelectionKey)
+=======
+        guard let storageKeys else { return }
+        userDefaults.set(orderedSessionIds, forKey: storageKeys.order)
+        userDefaults.set(selectedSessionId, forKey: storageKeys.selected)
+        userDefaults.set(selectedSessionIdsByWave, forKey: storageKeys.selectedByWave)
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
     }
 
     private func reconcileSelection() {
@@ -243,14 +247,18 @@ public final class TerminalWorkspaceStore {
 =======
 >>>>>>> 429609a0 (swift: trim unused attention fallback state)
             keepsGlobalSelectionCleared = false
-            let currentWaveId = session(id: currentSelection)?.waveId
-            selectedSessionId = currentWaveId.flatMap { nextSelectableSessionId(for: $0, excluding: currentSelection) }
-                ?? nextSelectableSessionId(excluding: currentSelection)
+            selectedSessionId = fallbackSelection(after: currentSelection)
             return
         }
 
         keepsGlobalSelectionCleared = false
         selectedSessionIdsByWave[session.waveId] = currentSelection
+    }
+
+    private func fallbackSelection(after sessionId: String) -> String? {
+        let waveId = session(id: sessionId)?.waveId
+        return waveId.flatMap { nextSelectableSessionId(for: $0, excluding: sessionId) }
+            ?? nextSelectableSessionId(excluding: sessionId)
     }
 
     private func nextSelectableSessionId(
@@ -270,19 +278,13 @@ public final class TerminalWorkspaceStore {
         let waveIds = Set(sessionsById.values.map(\.waveId)).union(selectedSessionIdsByWave.keys)
         for waveId in waveIds {
             let currentSelection = selectedSessionIdsByWave[waveId]
-            guard let currentSelection,
-                  let session = activeSession(id: currentSelection) else {
-                selectedSessionIdsByWave[waveId] = nextSelectableSessionId(
-                    for: waveId,
-                    excluding: currentSelection
-                )
-                continue
-            }
-            selectedSessionIdsByWave[waveId] = session.id
+            selectedSessionIdsByWave[waveId] = activeSessionId(currentSelection, in: waveId)
+                ?? nextSelectableSessionId(for: waveId, excluding: currentSelection)
         }
     }
 
     private func restoreSelection() {
+<<<<<<< HEAD
         guard let orderKey = storageKey("order"),
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -295,6 +297,9 @@ public final class TerminalWorkspaceStore {
               let selectedKey = storageKey("selected"),
               let waveSelectionKey = storageKey("selectedByWave") else {
 >>>>>>> 3a87b793 (concerto: keep terminal workspaces scoped to each wave)
+=======
+        guard let storageKeys else {
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
             orderedSessionIds = []
             selectedSessionIdsByWave = [:]
             selectedSessionId = nil
@@ -302,16 +307,39 @@ public final class TerminalWorkspaceStore {
         }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         orderedSessionIds = userDefaults.stringArray(forKey: orderKey) ?? []
         selectedSessionId = userDefaults.string(forKey: selectedKey)
         selectedSessionIdsByWave = userDefaults.dictionary(forKey: waveSelectionKey) as? [String: String] ?? [:]
+=======
+
+        orderedSessionIds = userDefaults.stringArray(forKey: storageKeys.order) ?? []
+        selectedSessionId = userDefaults.string(forKey: storageKeys.selected)
+        selectedSessionIdsByWave = userDefaults.dictionary(forKey: storageKeys.selectedByWave) as? [String: String] ?? [:]
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
         keepsGlobalSelectionCleared = false
         reconcileSelection()
     }
 
-    private func storageKey(_ suffix: String) -> String? {
+    private var storageKeys: (order: String, selected: String, selectedByWave: String)? {
         guard let repoKey else { return nil }
-        return "terminalWorkspace.\(suffix).\(repoKey)"
+        return (
+            order: storageKey("order", repoKey: repoKey),
+            selected: storageKey("selected", repoKey: repoKey),
+            selectedByWave: storageKey("selectedByWave", repoKey: repoKey)
+        )
+    }
+
+    private func storageKey(_ suffix: String, repoKey: String) -> String {
+        "terminalWorkspace.\(suffix).\(repoKey)"
+    }
+
+    private func activeSessionId(_ sessionId: String?, in waveId: String? = nil) -> String? {
+        guard let session = activeSession(id: sessionId),
+              waveId == nil || session.waveId == waveId else {
+            return nil
+        }
+        return session.id
     }
 
     private func session(id: String?) -> TerminalSession? {

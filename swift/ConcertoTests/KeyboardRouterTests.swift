@@ -209,6 +209,7 @@ struct KeyboardRouterTests {
         let handled = router.routeEvent(
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             key: .character("\\"),
 =======
             key: .character("d"),
@@ -217,6 +218,10 @@ struct KeyboardRouterTests {
             key: .character("\\"),
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
             modifiers: [.command],
+=======
+            key: .keyCode(ShortcutCatalog.fiveKeyCode),
+            modifiers: [.control, .shift],
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
             isRepeat: false,
             mode: .terminal
         ) { actions.append($0) }
@@ -227,8 +232,27 @@ struct KeyboardRouterTests {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> d5db82d4 (lf land: stage uncommitted changes)
+=======
+    @Test("terminal mode routes horizontal split shortcut by key code")
+    func terminalModeRoutesHorizontalSplitShortcut() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .keyCode(ShortcutCatalog.quoteKeyCode),
+            modifiers: [.control, .shift],
+            isRepeat: false,
+            mode: .terminal
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.splitHorizontal])
+    }
+
+>>>>>>> 0e412996 (concerto: polish workspace keyboard routing and review docs)
     @Test("terminal focus navigation uses option-command arrows")
     func terminalFocusNavigationShortcut() {
         let router = KeyboardRouter()

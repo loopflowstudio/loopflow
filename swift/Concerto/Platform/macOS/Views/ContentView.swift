@@ -209,6 +209,37 @@ struct ContentView: View {
             }
         }
 
+        if multiplexerContext() != nil {
+            actions.append(PaletteAction(
+                "Split vertical",
+                icon: "rectangle.split.1x2",
+                shortcut: keyboardRouter.keyDisplay(for: .splitVertical)
+            ) {
+                self.handleMultiplexerSplit(axis: .horizontal)
+            })
+            actions.append(PaletteAction(
+                "Split horizontal",
+                icon: "rectangle.split.2x1",
+                shortcut: keyboardRouter.keyDisplay(for: .splitHorizontal)
+            ) {
+                self.handleMultiplexerSplit(axis: .vertical)
+            })
+            actions.append(PaletteAction(
+                "Close pane",
+                icon: "xmark.square",
+                shortcut: keyboardRouter.keyDisplay(for: .closePane)
+            ) {
+                self.handleClosePane()
+            })
+            actions.append(PaletteAction(
+                "New shell",
+                icon: "terminal",
+                shortcut: keyboardRouter.keyDisplay(for: .newShellPane)
+            ) {
+                self.handleNewShell()
+            })
+        }
+
         return actions
     }
 

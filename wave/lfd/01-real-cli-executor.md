@@ -7,11 +7,33 @@ linear_id: b854c1c9-b49f-47f6-be6f-381f7c7cb1b0
 
 ## Context
 
-The runtime journal contract is now implemented: `lf` writes JSONL lifecycle events under `.lf/journal/runs/<run_id>/events.jsonl` when running in a wave worktree, and `lfd` polls those journals at 1-second intervals to emit `run.*`, `flow.*`, and `step.*` events through the EventHub. Wave attribution is filesystem-derived (sibling worktree naming), fire-and-forget, and invisible to git.
+The runtime journal contract (v2) is implemented and tested:
+- `journal/mod.rs` — `LfEvent` struct with `node` × `event` discriminators, `emit()` free function, `RunContext` thread-local, gitignore management
+- `lfd/journal.rs` — `LfObserver` polling loop that reads JSONL under `.lf/journal/runs/<run_id>/events.jsonl` and fans events through the EventHub at 1-second intervals
+- `lfd/types/event.rs` — websocket `Event` variants that map 1:1 from `LfEvent`
 
-The daemon still carries its own deep execution path in `WaveExecutor`. That creates semantic drift: the CLI and the daemon each have to know how flows run, how overrides resolve, how interactive waits behave, and how results map back into run state. The longer both paths coexist, the more bugs land in the seam between them.
+Wave attribution is filesystem-derived (sibling worktree naming), fire-and-forget, and invisible to git. Manual CLI runs are already observable through the shared store.
+
+The daemon still carries its own deep execution path in `WaveExecutor` (22 files reference it). That creates semantic drift: the CLI and the daemon each have to know how flows run, how overrides resolve, how interactive waits behave, and how results map back into run state. The longer both paths coexist, the more bugs land in the seam between them.
 
 `lfd` should stay responsible for scheduling, queueing, worktree choice, and process supervision. It should stop being the place where loopflow execution semantics are reimplemented.
+
+### What to delete during convergence
+
+From the v2 contract design doc (now shipped):
+- `RuntimeRun` struct and its `Cell<bool>` finished guard
+- `RuntimeRunMeta` / `meta.json` — the `run.started` event carries the same info
+- `RuntimeEvent` enum — replaced by `LfEvent`
+- `RunTarget` enum — no longer needed, flow identity comes from `flow.started`
+- `map_runtime_event` — no translation needed
+- All `Option<&RuntimeRun>` parameters in flow.rs and lf.rs
+- `runtime/mod.rs` → replaced by `journal/mod.rs`
+- `lfd/runtime_journal.rs` → replaced by `lfd/journal.rs`
+- `.lf/runtime/` → replaced by `.lf/journal/`
+
+### Escalation gap
+
+The journal protocol supports `*.escalated` events end-to-end, but the CLI currently has no dedicated escalation error/signal type. All `anyhow::Error` paths emit `*.errored`. A dedicated escalation signal would let the CLI distinguish "I need human attention" from "something broke." This can land as part of executor convergence or as a follow-on.
 
 ## What to build
 

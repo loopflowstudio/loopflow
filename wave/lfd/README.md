@@ -106,7 +106,7 @@ It should not need its own launch shim or a private interpretation of how loopfl
 
 ## Milestone docs
 
-1. `01-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against the shared runtime store
+1. `01-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands; shared-store observation is shipped, executor convergence is next
 2. `02-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
 
 ## Three roles
@@ -153,19 +153,21 @@ What stays:
 
 ## Milestones
 
-1. **Shared-store observation**
-   - `lf` can discover a runtime store and write structured lifecycle events to it
-   - manual CLI runs become visible without going through a bespoke daemon executor
+1. ~~**Shared-store observation**~~ (shipped)
+   - `lf` discovers a runtime store and writes structured journal v2 events
+   - manual CLI runs are visible through `lfd` without a bespoke daemon executor
+   - `lfd` polls `.lf/journal/runs/` and fans out events over WebSocket
 
-2. **Automated runs via real `lf` processes**
+2. **Automated runs via real `lf` processes** (next — see `01-real-cli-executor.md`)
    - `lfd` starts normal `lf <flow-or-step>` commands
    - automated and manual runs converge on one event model
+   - `WaveExecutor` becomes a process supervisor, not a flow interpreter
 
 3. **Local client convergence**
    - Concerto consumes the same store and can open ordinary local terminals
    - no new launch shim becomes the product contract
 
-4. **Daemon-hosted PTY / shell model**
+4. **Daemon-hosted PTY / shell model** (see `02-daemon-hosted-shells.md`)
    - attach/read/write/resize/close
    - fresh or existing worktree shells
    - reconnect support

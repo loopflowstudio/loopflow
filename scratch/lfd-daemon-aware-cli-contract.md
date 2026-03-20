@@ -1,192 +1,261 @@
 ---
 linear_id: b00f983a-47b2-4ea8-b357-e45e0d183aa3
 ---
-# Daemon-Aware CLI Contract
+# Wave-Aware CLI Runtime Journal
 
 ## Problem
 
-`lfd` can't observe what `lf` is doing. Today `lfd` works around this by bypassing `lf` entirely — it spawns agents directly and reimplements flow logic (step sequencing, xor routing, fork/synthesize) in the wave executor. This creates two problems:
+`lfd` cannot see normal `lf` execution unless it owns the run. Today it works around that by executing flows itself and recreating loopflow semantics inside the daemon. That leaves two bad seams:
 
-1. **Flow logic diverges.** `lf` has xor, loop, and, fork-to-worktree. The wave executor has its own step loop. They will drift.
-2. **CLI-started runs are invisible.** A human or agent running `lf implement` in a daemon-managed worktree produces zero telemetry. `lfd` has no idea it happened.
+1. **Execution semantics drift.** `lf` and `lfd` both need to know how flows, routing, loops, and waiting behave.
+2. **Manual CLI work disappears.** Running `lf implement` in a wave worktree leaves no durable runtime trace unless `lfd` was already in the middle.
 
-The fix: make `lf` the execution unit that `lfd` observes, rather than a tool `lfd` replaces.
+The fix is not “more daemon control.” The fix is one shared runtime substrate that `lf` can write and `lfd` can consume.
 
-## Approach
+## Intent
 
-Add a lightweight reporting client to `lf` that fires lifecycle events to `lfd` over HTTP when daemon env vars are present. `lfd` pre-assigns identity for runs it starts; `lf` self-registers for runs started independently. Events are fire-and-forget — `lf` never blocks on delivery.
+Keep wave identity and execution semantics in `lf`.
 
-### Detection contract
+- A **wave** is a durable line of work expressed through a worktree
+- A **branch / PR** is the current publication state of that wave
+- A **run** is one execution within that wave
+- `lfd` observes, schedules, indexes, and fans out runtime state
+- `lf` remains the thing that actually executes steps and flows
 
-`lf` checks three env vars at startup:
+This milestone is about **durable observation of wave-attributed CLI runs**, not arbitrary repo activity and not yet the full WaveExecutor rewrite.
 
-| Var | Set by | Purpose |
-|-----|--------|---------|
-| `LFD_URL` | `lfd` or user | Base URL of the daemon HTTP API (e.g. `http://127.0.0.1:2486`) |
-| `LFD_TOKEN` | `lfd` or user | Bearer token for auth |
-| `LFD_RUN_ID` | `lfd` only | Pre-assigned run ID for daemon-started runs |
+## Core decision
 
-If `LFD_URL` is absent, `lf` behaves exactly as it does today. No daemon path, no overhead. The detection is a single env var check at the top of `main()`.
+Use a **durable local runtime journal**, not live HTTP callbacks to a running daemon.
 
-If `LFD_URL` is present but `LFD_RUN_ID` is absent, this is a CLI-started run in a daemon-managed environment. `lf` calls `POST /v0/runs/register` to get an ID, then proceeds with events.
+`lf` writes structured lifecycle events to a predefined path. `lfd` tails or imports them when present. If `lfd` is down, the run still leaves a usable trace. If `lfd` starts later, it can ingest after the fact.
 
-If both are present, `lf` uses the pre-assigned run ID directly. No registration handshake.
-
-Optional context vars `lfd` can also set:
-
-| Var | Purpose |
-|-----|---------|
-| `LFD_WAVE_ID` | Associate this run with a wave |
-| `LFD_WAVE_RUN_ID` | Associate with a specific wave run |
-| `LFD_SESSION_ID` | Associate with a session |
-
-These are correlation IDs only. `lf` passes them through in events but doesn't interpret them.
-
-### Contract version
-
-The first env var check also reads `LFD_CONTRACT_VERSION` (default: `1`). The event schema below is version 1. If `lf` sees a version it doesn't understand, it logs a warning and disables reporting (safe fallback, not crash).
-
-### Events
-
-Six event types. All are POST requests to `LFD_URL/v0/runs/{run_id}/events` with JSON bodies. All carry a `timestamp` (RFC3339) and `type` field.
-
-```
-POST /v0/runs/{run_id}/events
-Authorization: Bearer {LFD_TOKEN}
-Content-Type: application/json
-
-{ "type": "...", "timestamp": "...", ... }
-```
-
-| Type | When | Extra fields |
-|------|------|-------------|
-| `run.started` | `lf` begins executing | `command` (full argv), `step` or `flow` (resolved name), `worktree` (path), `wave_id`, `wave_run_id` (if set) |
-| `step.started` | A step begins (within a flow, fired per step) | `step` (name), `index` (position in flow) |
-| `step.completed` | A step finishes | `step`, `exit_code`, `index` |
-| `run.waiting` | Interactive wait point — agent needs human input | `step`, `session_id` (if applicable) |
-| `run.completed` | `lf` exits successfully | `exit_code` (0) |
-| `run.failed` | `lf` exits with error | `exit_code`, `error` (message) |
-
-For single-step runs (`lf implement`), only `run.started` and `run.completed`/`run.failed` fire — no `step.*` events.
-
-For flow runs (`lf build`), `step.started`/`step.completed` fire for each step in the flow, bracketed by `run.started` and `run.completed`/`run.failed`.
-
-### Delivery semantics
-
-**Fire-and-forget.** `lf` sends each event via a non-blocking HTTP POST. If the request fails (connection refused, timeout, 5xx), `lf` logs a debug message and continues. No retry. No queue. No buffering.
-
-This is the right tradeoff because:
-- Events are observability, not correctness. `lfd` can reconcile from process exit codes if events are lost.
-- `lf` must never block on `lfd`. A slow or crashed daemon must not degrade CLI performance.
-- The failure mode is "less telemetry" not "broken execution."
-
-Implementation: a background `tokio::spawn` task per event, with a 2-second timeout on the HTTP POST. The `lf` process doesn't join these tasks — if `lf` exits before an event delivers, the event is lost. That's fine.
-
-### Registration endpoint
-
-For CLI-started runs (no `LFD_RUN_ID`):
-
-```
-POST /v0/runs/register
-Authorization: Bearer {LFD_TOKEN}
-Content-Type: application/json
-
-{
-  "worktree": "/path/to/worktree",
-  "command": ["lf", "implement"],
-  "wave_id": null,
-  "wave_run_id": null
-}
-
-Response 201:
-{
-  "run_id": "uuid-v4"
-}
-```
-
-This is the only synchronous call. It must complete before `lf` starts executing so that all subsequent events carry the assigned ID. If it fails, `lf` disables reporting and proceeds without daemon awareness. Timeout: 1 second.
-
-### `lfd` changes
-
-**New HTTP routes:**
-- `POST /v0/runs/register` — create a run record, return ID
-- `POST /v0/runs/{run_id}/events` — ingest a lifecycle event
-
-**WaveExecutor refactor (future):** Once this contract exists, `lfd` can spawn `lf <flow>` instead of spawning agents directly. The wave executor becomes a thin orchestrator: create worktree, set env vars, spawn `lf`, observe events. Flow logic (xor, loop, and) stays in `lf` where it belongs. This is a follow-on change, not part of this milestone.
-
-**Event → internal EventHub bridging:** When `lfd` receives a `step.started` event via HTTP, it translates to the internal `Event::AgentStarted` (or a new `Event::StepStarted` variant). This lets the WebSocket stream and Concerto UI show step-level progress for CLI-started runs, not just daemon-started ones.
-
-### `lf` implementation
-
-New module: `engine/daemon.rs`.
-
-```rust
-pub struct DaemonClient {
-    url: String,
-    token: String,
-    run_id: String,
-    http: reqwest::Client,
-}
-
-impl DaemonClient {
-    /// Returns None if LFD_URL is not set (standalone mode).
-    pub fn from_env() -> Option<Self> { ... }
-
-    /// Fire-and-forget event delivery.
-    pub fn emit(&self, event: DaemonEvent) { ... }
-}
-```
-
-The `DaemonClient` is created once in `main()` and threaded through to `run_target()` / flow execution. It's `Option<DaemonClient>` everywhere — `None` means standalone mode, no daemon reporting.
-
-The existing `EngineEvent` enum (`engine/event.rs`) is replaced by `DaemonEvent` which carries the HTTP-serializable event payload. Or better: `EngineEvent` is extended with the fields needed and `DaemonClient::emit` serializes it to the HTTP format.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Unix socket instead of HTTP | Lower latency, no port allocation | `lfd` already has an HTTP server. Adding a socket means two transports to maintain. HTTP is ~1ms on localhost. Latency doesn't matter for fire-and-forget events. |
-| Stdio side channel (fd 3) | Zero network overhead, works in containers | Only works when `lfd` owns the process. Doesn't work for CLI-started runs. Would need HTTP anyway as fallback, so we'd have two paths. |
-| Shared log file + inotify | No daemon needed at all | Parsing is fragile (the exact problem we're solving). Race conditions on concurrent writes. No structured schema enforcement. |
-| `lfd` continues spawning agents directly | No changes to `lf` needed | Flow logic stays duplicated. CLI-started runs stay invisible. This is the status quo and it's already showing cracks. |
-| Full request-response protocol (tmux-style) | `lfd` can control `lf` execution | Over-coupling. `lf` should be autonomous. `lfd` observes, it doesn't command. The tmux study says: learn from control mode, don't copy it. |
-
-## Key decisions
-
-**HTTP over sockets.** The daemon already listens on HTTP. One transport, one auth model, one set of routes. If we need sockets later (high-frequency events, container networking), the event schema stays the same — only the transport changes.
-
-**Fire-and-forget over reliable delivery.** Lost events are acceptable because `lfd` already tracks process lifecycle (PID, exit code). Events add granularity (step-level progress, resolved flow/step names), not correctness. Reliable delivery would require queuing, retry logic, and backpressure — complexity that doesn't pay for itself.
-
-**Pre-assign for daemon runs, register for CLI runs.** One authority for identity (lfd), zero for conflicts. Daemon-started runs get IDs injected via env. CLI-started runs register once synchronously, then proceed with fire-and-forget events. The registration call is the only synchronous interaction.
-
-**Six events, not twenty.** The minimum set that gives `lfd` step-level visibility without coupling to `lf` internals. `run.started`/`run.completed`/`run.failed` bracket the process. `step.started`/`step.completed` give progress within flows. `run.waiting` signals interactive handoff. No events for internal decisions (xor routing, fork strategy) — those are `lf`'s business.
-
-**`EngineEvent` as the internal type.** Rather than creating a parallel event system, extend the existing `EngineEvent` with the fields needed for HTTP serialization. The daemon client reads `EngineEvent` and serializes to JSON. One event vocabulary, two delivery paths (daemon HTTP, standalone no-op).
+This keeps delivery fire-and-forget without making daemon availability part of the contract.
 
 ## Scope
 
-**In scope:**
-- `LFD_URL` / `LFD_TOKEN` / `LFD_RUN_ID` detection in `lf`
-- `DaemonClient` module with fire-and-forget HTTP event delivery
-- `POST /v0/runs/register` endpoint in `lfd`
-- `POST /v0/runs/{run_id}/events` endpoint in `lfd`
-- Event → internal EventHub bridging in `lfd`
-- `EngineEvent` extension with serializable fields
-- Parity tests: `lf implement` with and without `LFD_URL`, same execution semantics
-- Contract version header for forward compatibility
+### In scope
 
-**Out of scope:**
-- Refactoring WaveExecutor to spawn `lf` instead of agents (follow-on)
-- Output streaming from `lf` to `lfd` (existing OutputHub handles this for daemon-spawned processes)
-- Interactive session bridging (existing session API handles this)
-- Remote/TLS transport
-- Event persistence or replay in `lfd` (events flow through EventHub broadcast, not stored separately)
+- Wave-attributed CLI runs write durable runtime journals
+- `lfd` can ingest those journals live or later
+- Manual CLI runs become visible without going through the daemon executor
+- The journal schema is stable enough for later `lfd -> lf` real-process execution
+
+### Out of scope
+
+- Refactoring `WaveExecutor` to spawn real `lf` processes
+- Daemon-hosted PTYs / shells
+- Remote transport or TLS
+- Tracking arbitrary non-wave `lf` runs
+
+## Wave attribution
+
+The journal contract applies only when `lf` can attribute the run to a wave.
+
+### Primary attribution path
+
+Infer the wave from the current worktree using the existing sibling naming contract:
+
+```text
+~/src/loopflow            # main repo
+~/src/loopflow.lfd        # wave worktree -> wave "lfd"
+```
+
+If `lf` is running from `loopflow.lfd`, the wave is `lfd`.
+
+### Non-wave runs
+
+If wave attribution is ambiguous, `lf` behaves normally and does **not** write runtime journal entries. This keeps the model wave-centric instead of turning all CLI usage into daemon data.
+
+In v1, wave runtime integration is worktree-derived only. Running `lf` from the main repo or any other non-wave context is plain standalone CLI behavior with no journal emission and no `lfd` integration for that run.
+
+## Journal layout
+
+Use one directory per run inside the wave worktree:
+
+```text
+<worktree>/.lf/runtime/
+  runs/
+    <run_id>/
+      meta.json
+      events.jsonl
+```
+
+Why this shape:
+
+- no global append-only log shared by many writers
+- each `lf` process owns its own run directory
+- later `lfd` replay is simple: scan runs, read metadata, tail `events.jsonl`
+- concurrent runs do not contend on one file
+
+## Identity
+
+`lf` creates the run id locally when the run starts.
+
+The id should use the same durable ID scheme the daemon already uses (`LfdId`-style, monotonic/type-prefixed if that remains the house style). The CLI should not need to synchronously ask `lfd` for permission to exist.
+
+Later, when `lfd` starts automated runs itself, it may inject a run id for correlation — but that is a follow-on, not a requirement for journal v1.
+
+## Metadata
+
+`meta.json` is the stable summary for discovery and indexing. It should include:
+
+- `run_id`
+- `wave_id` or `wave_name`
+- `repo`
+- `worktree`
+- `command`
+- `flow` or top-level step
+- `started_at`
+- optional `target_branch`
+- optional parent / repair lineage fields when relevant
+
+`lfd` should be able to list known runs and decide whether to ingest them without opening the event stream first.
+
+## Events
+
+Use newline-delimited JSON in `events.jsonl`.
+
+Each event has:
+
+- `type`
+- `timestamp` (RFC3339)
+- `run_id`
+
+V1 keeps the event set small:
+
+| Type | When | Fields |
+|------|------|--------|
+| `run.started` | run begins | `command`, `flow` or `step`, `worktree`, `wave` |
+| `step.started` | a flow step begins | `step`, `index` |
+| `step.completed` | a flow step finishes | `step`, `index`, `exit_code` |
+| `run.waiting` | execution needs human input | `step`, optional session/terminal references |
+| `run.completed` | run exits successfully | `exit_code` |
+| `run.failed` | run exits with error | `exit_code`, `error` |
+
+For a single-step CLI invocation, `run.started` + terminal event are enough.
+
+## Delivery semantics
+
+Fire-and-forget still holds, but the target is the journal instead of the daemon.
+
+- `lf` appends events locally
+- no retry loop
+- no daemon handshake
+- no blocking on `lfd`
+- if journal writes fail, `lf` logs debug output and continues execution
+
+This is observability, not correctness.
+
+## Concurrency model
+
+Avoid the hardest logging problem by refusing to have one shared writer target.
+
+- one run -> one writer
+- one writer -> one `events.jsonl`
+- many runs can exist at once in the same wave or repo
+- `lfd` is the reader/indexer, not an intermediary writer
+
+This makes concurrent writers mostly a non-problem in v1.
+
+## `lfd` behavior
+
+`lfd` becomes a consumer of the journal.
+
+### When already running
+
+- discover journal roots for known wave worktrees
+- tail new `events.jsonl` entries
+- translate runtime events into `EventHub` updates for WebSocket / Concerto
+
+### When started later
+
+- scan known wave worktrees for run directories
+- ingest `meta.json`
+- replay `events.jsonl`
+- mark imported runs as historical if they already ended
+
+The daemon should own replay cursors and indexing state in its own store. The journal remains append-only runtime evidence, not the query layer.
+
+## Relationship to existing daemon events
+
+The current `lfd` event vocabulary is wave- and agent-centric (`wave_started`, `agent_started`, `wave_waiting`, ...). The journal is run- and step-centric.
+
+That mismatch should be handled at the daemon boundary:
+
+- journal events are the source format
+- `lfd` maps them onto existing client-facing events where possible
+- if the mapping becomes awkward, add first-class run/step events to `lfd`
+
+Do **not** make `lf` emit daemon-shaped events just to satisfy current UI plumbing.
+
+## Shared implementation
+
+The important split is not “in `lf`” versus “in `lfd`.” The durable pieces should live in shared runtime code:
+
+- event schema
+- run ids
+- journal paths
+- metadata read/write
+- event append/read helpers
+
+Then:
+
+- `lf` uses the shared code to write
+- `lfd` uses the shared code to read, tail, and import
+
+One contract. Two roles.
+
+## Ownership
+
+### `lf` owns
+
+- wave attribution
+- run creation
+- flow / step execution semantics
+- journal writes
+
+### Shared runtime module owns
+
+- journal layout
+- metadata schema
+- event schema
+- append/read helpers
+
+### `lfd` owns
+
+- scanning and ingestion
+- replay cursors
+- store indexing
+- WebSocket / Concerto fanout
+- scheduling and supervision for future daemon-launched runs
+
+## Why not live HTTP for v1
+
+HTTP only simplifies things if daemon availability is part of the contract.
+
+If the desired behavior is:
+
+> run `lf` now, start `lfd` later, still observe the run
+
+then HTTP is the wrong primitive. It makes `lfd` the required runtime receiver instead of an optional consumer.
+
+The journal model matches the wave README more closely:
+
+- shared runtime substrate first
+- daemon as host and observer around it
+- CLI remains first-class
+
+## Open questions
+
+1. Should the journal root always live inside the worktree, or should there be an overridable shared root for unusual environments?
+2. Does `lfd` need first-class `run.*` / `step.*` events immediately, or is mapping onto existing wave/agent events good enough for the first cut?
 
 ## Done when
 
-- `lf` detects `LFD_URL` and emits lifecycle events over HTTP without changing execution behavior
-- `lfd` receives and bridges events to its internal EventHub
-- `lf implement` and `lf build` produce identical results with and without `LFD_URL` set
-- CLI-started runs in daemon-managed worktrees register and report step progress
-- Tests pin the event schema (JSON golden tests) and the env var detection contract
-- `cargo test` includes a test that runs `lf` with mock `LFD_URL`, verifies events arrive, and confirms `lf` completes normally even if the mock server is slow or down
+- Running `lf` inside a wave worktree creates a durable runtime journal
+- The journal exists whether or not `lfd` is running
+- Starting `lfd` later can import completed or in-progress runs from that journal
+- If `lfd` is already running, clients can see step progress from the same journal
+- Runs without wave attribution do not enter the runtime model
+- The later “real CLI executor” milestone can consume this contract instead of inventing a second one

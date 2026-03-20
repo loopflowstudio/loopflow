@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::{list_worktrees, main_repo_root, wave_name_from_worktree_and_main};
-use crate::journal::{events_path, read_events, runs_root, LfEvent};
+use crate::journal::{events_path, runs_root, LfEvent};
 use crate::lfd::events::EventHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
@@ -74,12 +75,9 @@ impl LfObserver {
                 continue;
             }
 
-            if let Err(err) = read_events(&path) {
+            if let Err(err) = self.replay_new_lines(&path, event_hub) {
                 debug!(error = %err, run_dir = %path.display(), "skipping invalid journal");
-                continue;
             }
-
-            self.replay_new_lines(&path, event_hub)?;
         }
         Ok(())
     }
@@ -90,16 +88,18 @@ impl LfObserver {
             return Ok(());
         }
 
-        let content = std::fs::read_to_string(&events_path)
+        let file = std::fs::File::open(&events_path)
             .map_err(|err| format!("failed reading {}: {err}", events_path.display()))?;
         let seen = self.line_cursors.get(run_dir).copied().unwrap_or(0);
         let mut processed = 0_usize;
-        for line in content.lines() {
+        for line in BufReader::new(file).lines() {
             processed += 1;
+            let line =
+                line.map_err(|err| format!("failed reading {}: {err}", events_path.display()))?;
             if processed <= seen || line.trim().is_empty() {
                 continue;
             }
-            let event: LfEvent = serde_json::from_str(line)
+            let event: LfEvent = serde_json::from_str(&line)
                 .map_err(|err| format!("invalid journal event: {err}"))?;
             event_hub.send(Event::from(event));
         }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tokio::process::Command;
 use tokio::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
@@ -358,6 +358,7 @@ impl WaveExecutor {
             outcome.exit_code
         };
 
+        eprintln!("[DIAG] execute: exit_code={exit_code} run={} wave={}", run.id, wave.id());
         if exit_code == 0 {
             self.finish_completed_run(&wave, &mut run).await
         } else {
@@ -498,29 +499,35 @@ impl WaveExecutor {
             }
         };
 
-        debug!(
-            source_wave_id = %source_wave_id,
-            trigger_count = triggers.len(),
-            "trigger_listeners_on_completion: found triggers"
-        );
+        eprintln!("[DIAG] trigger_listeners_on_completion: source={source_wave_id} triggers={}", triggers.len());
 
         for mut trigger in triggers {
             if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
+                eprintln!("[DIAG] trigger_listeners_on_completion: skipping trigger {} (enabled={}, source_match={})",
+                    trigger.id, trigger.enabled, trigger.source_wave_id.as_ref() == Some(source_wave_id));
                 continue;
             }
 
             let listener_wave = match self.store.get_wave(&trigger.wave_id).await {
                 Ok(Some(wave)) => wave,
-                Ok(None) => continue,
+                Ok(None) => {
+                    eprintln!("[DIAG] trigger_listeners_on_completion: listener wave {} not found", trigger.wave_id);
+                    continue;
+                }
                 Err(err) => {
+                    eprintln!("[DIAG] trigger_listeners_on_completion: error loading wave {}: {err}", trigger.wave_id);
                     warn!(trigger_id = %trigger.id, error = %err, "failed to load listening wave");
                     continue;
                 }
             };
 
             if listener_wave.status() == WaveStatus::Paused {
+                eprintln!("[DIAG] trigger_listeners_on_completion: listener {} is paused", listener_wave.id());
                 continue;
             }
+
+            eprintln!("[DIAG] trigger_listeners_on_completion: dispatching for listener {} workers={} status={:?}",
+                listener_wave.id(), listener_wave.workers(), listener_wave.status());
 
             let reason = format!(
                 "wave trigger {} triggered by source wave {}",
@@ -534,11 +541,6 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
-            debug!(
-                listener_wave_id = %listener_wave.id(),
-                listener_workers = listener_wave.workers(),
-                "trigger_listeners_on_completion: dispatching activation"
-            );
             let activated = dispatch_or_enqueue_activation(
                 &self.store,
                 self,
@@ -549,11 +551,7 @@ impl WaveExecutor {
                 envelope,
             )
             .await;
-            debug!(
-                listener_wave_id = %listener_wave.id(),
-                activated,
-                "trigger_listeners_on_completion: activation result"
-            );
+            eprintln!("[DIAG] trigger_listeners_on_completion: activated={activated}");
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {

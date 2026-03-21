@@ -9,11 +9,12 @@ notion_id: 32af8f99-3d81-81c8-a089-d47185436add
 
 ## Context
 
-The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and four pane types (terminal, markdown, diff, launchpad). Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
+The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and first-party workspace panes for roadmap, README, runs, launcher, markdown, diff, terminal, and launchpad. Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
 
 Current pane state:
 - **Terminal:** Fully functional — Ghostty embedding, tmux-backed splits, session lifecycle
-- **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no FSEvents
+- **Roadmap / README / Runs / Launcher:** Shipped and useful, but still simple projections over existing stores rather than deeply interactive tools
+- **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no file watching
 - **Diff:** Shows `git diff --stat main...HEAD`. No per-file unified diff, no file list sidebar
 - **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
@@ -71,9 +72,14 @@ Replace next/previous with spatial navigation.
 
 - Drag-to-resize split boundaries
 - Focus ring that clearly shows which layer is active (outer pane border vs terminal focus)
-- Cross-pane interaction: click a file path in terminal → open in markdown viewer (later)
+- Cross-pane interaction: click a file path in terminal → open in markdown viewer
 
-### 8. IME input source validation
+### 8. Layout persistence safety
+
+- Version `MultiplexerLayout` persistence so future schema changes can migrate cleanly
+- Add a reset path for invalid or stale layouts instead of stranding a wave in a broken workspace
+
+### 9. IME input source validation
 
 The direct-key typing path bypasses `interpretKeyEvents` for ordinary printable input but defers to AppKit text input when `selectedKeyboardInputSource` contains `inputmethod` or when Option is held. Validate with Japanese (Kotoeri), Korean, Chinese (Pinyin), and third-party input methods (e.g. RIME, Google Japanese Input) to confirm composition still starts correctly.
 

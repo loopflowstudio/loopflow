@@ -26,13 +26,13 @@ The local-first terminal workspace is now in place: `lfd` persists `terminal_ses
 
 But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
 
-The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `06-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
+The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `05-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
 - Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
 - Treat Ghostty embedding as a rendering surface, not a session owner
 - Layout serialization is shipped (`MultiplexerLayout` encodes split trees as `Codable` data, persisted per wave via `MultiplexerStore`)
 - Expect multi-client size negotiation to be a daemon concern — Concerto sends its viewport size, `lfd` decides
 
-The multiplexer is now in place: a recursive binary split tree per wave, persisted via `MultiplexerStore`, with four pane types (terminal, markdown, diff, launchpad). The terminal pane is backed by tmux (`TmuxSession`), and focus-aware keyboard routing dispatches to SwiftUI or tmux based on first-responder detection. `TerminalWorkspaceStore` manages session ordering and selection per repo; the multiplexer extends that model with spatial layout. Remaining composition work (richer pane content, directional focus, named layouts) should deepen these surfaces rather than introducing parallel state.
+The workspace multiplexer is now in place: a recursive binary split tree per wave, persisted via `MultiplexerStore`, with roadmap, README, runs, launcher, terminal, markdown, diff, and launchpad panes. The default workspace opens into roadmap + runs + terminal, and the command palette focuses existing panes before creating duplicates. The terminal pane is backed by tmux (`TmuxSession`), and focus-aware keyboard routing dispatches to SwiftUI or tmux based on first-responder detection. `TerminalWorkspaceStore` manages session ordering and selection per repo; the multiplexer extends that model with spatial layout. Remaining composition work (richer pane content, directional focus, named layouts, layout migrations) should deepen these surfaces rather than introducing parallel state.
 
 Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. The existing portfolio window already proves the repo-card shell: basic per-repo wave counts, blocked counts, and diff summaries. Future portfolio work should deepen that surface with shared wave/run/attention/session queries instead of building a second dashboard stack beside it. The persisted `terminal_sessions` records in `lfd` are also the source of truth for adoption and latency measurement: portfolio trend lines, in-app completion rate, and resume-latency work should query those rows rather than inventing a second analytics cache.
 
@@ -48,11 +48,12 @@ Derive cross-wave and cross-repo views from the same stores that already power t
 
 ## Risks
 
-- Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical `interactive_step` payloads
+- Partial attention coverage still creates blind spots until design review and calibration checkpoints surface through canonical step-scoped `interactive` payloads
 - The current launch-spec shim diverges from the shared-store-first runtime model and the eventual daemon-owned PTY design (tracked in `wave/lfd/`); Swift should avoid taking new dependencies on it
 - Portfolio scope can expand unboundedly; repo/chord aggregation needs store-level queries before the view goes broad
 - Lifecycle or compositor work could drift from `lfd` terminal semantics if Swift starts inventing its own launch, completion, or persistence rules
 - Ghostty C library linkage is build-environment sensitive; `GhosttyTerminalView` depends on the library being available at link time
+- Persisted `MultiplexerLayout` trees can go stale across schema changes if migrations and reset paths are not kept in sync
 - The direct-key typing path uses `NSTextInputContext.selectedKeyboardInputSource` containing `inputmethod` to detect IME keyboards; unusual input sources may route incorrectly until validated with broader CJK and third-party input methods
 - Terminal session cleanup still depends on completion callbacks; blocked POSTs or hard-killed processes can leave sessions stuck in `running` state until the shared-store contract replaces that path
 - `ConcertoUITests-Runner` exits during bootstrap before establishing the UI-test connection; `xcodebuild test` passes app build and unit/package tests but the UI-test harness fails locally even after clean DerivedData rebuilds

@@ -12,15 +12,15 @@ notion_id: 32af8f99-3d81-81f8-87ac-decf31e198c2
 Three kinds of human intervention, each with different UX needs:
 - Build: design review (forward-looking, single wave, focused)
 - Build: code review (backward-looking, single wave, focused)
-- Tend: calibration (meta, all waves, panoramic)
+- Garden: calibration (meta, all waves, panoramic)
 
 Design and code review have existing UX patterns (PR review, design doc review). Calibration is new — there's no established pattern for "review the trajectory of a coordinated system of agents."
 
-The attention queue groundwork is already in place, and item 01 is explicitly keeping attention kinds coarse. The current code already reserves `calibration` as a first-class attention label in Rust/Swift ordering and rendering, but no executor path creates one yet and Swift still has no typed calibration context. Calibration should therefore ship as a structured `interactive_step` attention item with `context.step = "chord/review"`, not as a one-off top-level kind that drifts from the eventual step-id contract.
+Item 01 keeps the queue contract coarse: calibration should ride the same `interactive` path as other human checkpoints, keyed by `context.step`. This item starts after that routing exists. Its job is the dedicated all-waves review surface, not a new top-level attention kind.
 
 ## What to build
 
-1. **Calibration prompt.** When `tend/draft-chord` completes, the calibration surfaces in the attention queue with a dedicated view. Not a generic failure row — a structured trajectory review keyed off `kind: interactive_step` plus `context.step = "chord/review"`.
+1. **Calibration prompt.** When a garden cycle reaches `wave/review`, the calibration surfaces in the attention queue with a dedicated view. Not a generic failure row — a structured trajectory review keyed off `kind: interactive` plus `context.step = "wave/review"`.
 
 2. **Assessment display.** The chord's observations, per wave and overall:
    - Progress: what shipped since last calibration, velocity trend
@@ -31,7 +31,7 @@ The attention queue groundwork is already in place, and item 01 is explicitly ke
 
 3. **Proposal review.** The chord's proposed mutations, grouped by wave. Each with rationale. The human approves, modifies, or rejects per mutation. Approved mutations execute immediately.
 
-4. **Trajectory notes.** The human can write back — "focus here next," "this direction is wrong," "this wave should be more ambitious." These become core memories in Letta, shaping future tend cycles.
+4. **Trajectory notes.** The human can write back — "focus here next," "this direction is wrong," "this wave should be more ambitious." These become core memories in Letta, shaping future garden cycles.
 
 5. **Calibration history.** Past calibrations and what changed as a result. The chord and human can see whether course corrections had the intended effect.
 

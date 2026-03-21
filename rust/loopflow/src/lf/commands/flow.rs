@@ -7,9 +7,9 @@ use crate::engine::fork::{
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
-    expand_flow, xor_verdict_path, ConcreteAnd, ConcreteItem, ConcreteLoop, ExecutionContext,
-    ExecutionStep, Flow, FlowEngine, FlowOutcome, FlowProgress, StepExecutor, StepOutcome,
-    TEMP_XOR_ROUTE_STEP_NAME,
+    expand_flow, xor_verdict_path, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor,
+    ExecutionContext, ExecutionStep, Flow, FlowEngine, FlowOutcome, FlowProgress, StepExecutor,
+    StepOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;

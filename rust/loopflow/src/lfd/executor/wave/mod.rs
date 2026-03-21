@@ -20,10 +20,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::triggers::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
-    ActivationEnvelope, EnqueueOutcome,
-};
+use crate::lfd::triggers::{dispatch_or_enqueue_activation, ActivationEnvelope};
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Signal, TerminalSession,
     TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
@@ -726,7 +723,6 @@ fn flow_step_env(
     }
     env
 }
-
 
 /// Determine which flow to use for a repair attempt based on the failed run.
 ///

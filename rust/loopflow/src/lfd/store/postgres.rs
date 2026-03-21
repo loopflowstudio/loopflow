@@ -282,17 +282,18 @@ impl PostgresStore {
             argv: serde_json::from_str(row.get::<_, &str>(6))?,
             env: serde_json::from_str(row.get::<_, &str>(7))?,
             source: row.get(8),
-            status: TerminalSessionStatus::from_i32(row.get::<_, i32>(9)),
-            completion_token: row.get(10),
-            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(11)),
+            tmux_name: row.get(9),
+            status: TerminalSessionStatus::from_i32(row.get::<_, i32>(10)),
+            completion_token: row.get(11),
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(12)),
             attached_at: row
-                .get::<_, Option<i64>>(12)
-                .map(crate::lfd::store::rows::unix_to_datetime),
-            started_at: row
                 .get::<_, Option<i64>>(13)
                 .map(crate::lfd::store::rows::unix_to_datetime),
-            completed_at: row
+            started_at: row
                 .get::<_, Option<i64>>(14)
+                .map(crate::lfd::store::rows::unix_to_datetime),
+            completed_at: row
+                .get::<_, Option<i64>>(15)
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
     }
@@ -888,7 +889,7 @@ impl PostgresStore {
     }
 
     const TERMINAL_SESSION_COLS: &str =
-        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, status, \
+        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, tmux_name, status, \
          completion_token, created_at, attached_at, started_at, completed_at";
 
     pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
@@ -898,7 +899,7 @@ impl PostgresStore {
                 .execute(
                     &format!(
                         "INSERT INTO terminal_sessions ({cols}) \
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"
                     ),
                     &[
                         &session.id,
@@ -910,6 +911,7 @@ impl PostgresStore {
                         &serde_json::to_string(&session.argv)?,
                         &serde_json::to_string(&session.env)?,
                         &session.source,
+                        &session.tmux_name,
                         &session.status.as_i32(),
                         &session.completion_token,
                         &session.created_at.unix_timestamp(),
@@ -1016,12 +1018,13 @@ impl PostgresStore {
                          argv = $7,
                          env = $8,
                          source = $9,
-                         status = $10,
-                         completion_token = $11,
-                         created_at = $12,
-                         attached_at = $13,
-                         started_at = $14,
-                         completed_at = $15
+                         tmux_name = $10,
+                         status = $11,
+                         completion_token = $12,
+                         created_at = $13,
+                         attached_at = $14,
+                         started_at = $15,
+                         completed_at = $16
                      WHERE id = $1",
                     &[
                         &session.id,
@@ -1033,6 +1036,7 @@ impl PostgresStore {
                         &serde_json::to_string(&session.argv)?,
                         &serde_json::to_string(&session.env)?,
                         &session.source,
+                        &session.tmux_name,
                         &session.status.as_i32(),
                         &session.completion_token,
                         &session.created_at.unix_timestamp(),

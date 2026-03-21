@@ -339,8 +339,10 @@ pub fn pr_merge_squash_auto(repo: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
-/// Fetch origin/main_branch and reset if main_branch is checked out.
-/// Returns true if up-to-date or updated, false if local branch can't be reset.
+/// Fetch origin/main_branch and fast-forward the local tracking branch.
+/// When on a different branch, uses update-ref to advance the local ref.
+/// When main_branch is checked out, stashes dirty state, resets, then pops.
+/// Returns true if up-to-date or updated, false if local branch can't be synced.
 pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
     let output = run_git(repo, &["fetch", "origin", main_branch])?;
     if !output.status.success() {
@@ -350,24 +352,42 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
         });
     }
 
+    let origin_ref = format!("origin/{}", main_branch);
+    let local_ref = format!("refs/heads/{}", main_branch);
+
     if current_branch(repo)? != Some(main_branch.to_string()) {
-        return Ok(true);
+        // Not on main — fast-forward the local ref to match origin.
+        let output = run_git(repo, &["update-ref", &local_ref, &origin_ref])?;
+        if !output.status.success() {
+            tracing::warn!(
+                "Failed to update local {} to match {}",
+                main_branch,
+                origin_ref
+            );
+        }
+        return Ok(output.status.success());
     }
 
-    // Only check tracked files — reset --hard doesn't touch untracked files
+    // On main — stash if dirty, reset, then pop.
     let status = run_git(repo, &["status", "--porcelain", "-uno"])?;
-    if !status.status.success() {
-        return Ok(false);
-    }
-    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
-        return Ok(false);
+    let dirty = status.status.success()
+        && !String::from_utf8_lossy(&status.stdout).trim().is_empty();
+
+    if dirty {
+        let _ = run_git(repo, &["stash", "push", "-m", "sync_main: auto-stash"]);
     }
 
-    let output = run_git(
-        repo,
-        &["reset", "--hard", &format!("origin/{}", main_branch)],
-    )?;
-    Ok(output.status.success())
+    let output = run_git(repo, &["reset", "--hard", &origin_ref])?;
+    let ok = output.status.success();
+
+    if dirty {
+        let pop = run_git(repo, &["stash", "pop"])?;
+        if !pop.status.success() {
+            tracing::warn!("stash pop failed after sync_main reset; stash preserved");
+        }
+    }
+
+    Ok(ok)
 }
 
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {

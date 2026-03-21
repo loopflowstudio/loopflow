@@ -118,29 +118,25 @@ private struct SessionTerminalSurface: View {
 
     @Environment(RepoState.self) private var repoState
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
-    @State private var launchSpec: TerminalLaunchSpec?
+    @State private var connectionInfo: TerminalConnectionInfo?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
-            if let launchSpec {
+            if let command = connectionInfo.map({ TerminalAttachCommand($0) }) {
                 GhosttyTerminalView(
-                    workingDirectory: launchSpec.cwd,
-                    argv: launchSpec.argv,
-                    env: launchSpec.env,
+                    workingDirectory: command.workingDirectory,
+                    argv: command.argv,
+                    env: command.env,
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
-            } else if session.status == .running {
-                if ghosttyManager.hasSession(session.id) {
-                    ContentUnavailableView(
-                        "Session already attached",
-                        systemImage: "terminal",
-                        description: Text("This terminal is already open in the current app process.")
-                    )
-                } else {
-                    detachedSessionView
-                }
+            } else if ghosttyManager.hasSession(session.id) {
+                ContentUnavailableView(
+                    "Session already attached",
+                    systemImage: "terminal",
+                    description: Text("This terminal is already open in the current app process.")
+                )
             } else if let errorMessage {
                 ContentUnavailableView("Terminal unavailable", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
@@ -150,40 +146,62 @@ private struct SessionTerminalSurface: View {
         }
         .onChange(of: session.status) { _, newStatus in
             guard newStatus.isTerminal else { return }
-            launchSpec = nil
+            connectionInfo = nil
             ghosttyManager.destroySession(session.id)
         }
         .task(id: session.id) {
-            guard launchSpec == nil, !session.status.isTerminal else { return }
-            guard session.status == .pending || session.status == .attached else { return }
+            guard connectionInfo == nil, !session.status.isTerminal else { return }
             do {
-                let spec = try await repoState.attachTerminalSession(session.id)
-                launchSpec = spec
-                _ = try await repoState.startTerminalSession(session.id)
+                connectionInfo = try await repoState.attachTerminalSession(session.id)
+                errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
     }
+}
 
-    private var detachedSessionView: some View {
-        VStack(spacing: Spacing.lg) {
-            ContentUnavailableView(
-                "Session lost its terminal surface",
-                systemImage: "terminal",
-                description: Text("The shell is still marked running, but this window no longer owns the embedded terminal.")
-            )
+struct TerminalAttachCommand: Equatable {
+    let workingDirectory: String
+    let argv: [String]
+    let env: [String: String]
 
-            Button("Cancel stale session", role: .destructive) {
-                Task {
-                    _ = try? await repoState.cancelTerminalSession(session.id)
-                    ghosttyManager.destroySession(session.id)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    init(
+        workingDirectory: String,
+        argv: [String],
+        env: [String: String]
+    ) {
+        self.workingDirectory = workingDirectory
+        self.argv = argv
+        self.env = env
     }
+
+    init(_ connection: TerminalConnectionInfo) {
+        if connection.usesLocalTmux {
+            self.init(
+                workingDirectory: connection.cwd,
+                argv: ["tmux", "attach-session", "-t", connection.sessionName],
+                env: [:]
+            )
+            return
+        }
+
+        self.init(
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            argv: [
+                "ssh",
+                "-t",
+                connection.host,
+                "tmux attach-session -t \(shellEscape(connection.sessionName))",
+            ],
+            env: [:]
+        )
+    }
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
 }
 
 private struct TerminalContextSidebar: View {

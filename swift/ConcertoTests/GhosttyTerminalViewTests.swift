@@ -1,6 +1,7 @@
 import Testing
 import AppKit
 @testable import Concerto
+import LoopflowCore
 
 @Suite("Ghostty terminal command")
 struct GhosttyTerminalViewTests {
@@ -27,6 +28,66 @@ struct GhosttyTerminalViewTests {
     @Test("returns nil when there is no command to run")
     func returnsNilWithoutCommand() {
         #expect(buildGhosttyShellCommand(argv: [], env: ["RLM_DEPTH": "1"]) == nil)
+    }
+
+    @Test("builds a local tmux attach command from connection info")
+    func buildsLocalTmuxAttachCommand() {
+        let command = TerminalAttachCommand(
+            TerminalConnectionInfo(
+                sessionName: "lfd-session-1",
+                host: "localhost",
+                cwd: "/tmp/repo",
+                status: .running
+            )
+        )
+
+        #expect(command.workingDirectory == "/tmp/repo")
+        #expect(command.argv == ["tmux", "attach-session", "-t", "lfd-session-1"])
+        #expect(command.env.isEmpty)
+    }
+
+    @Test("builds an ssh tmux attach command for remote hosts")
+    func buildsRemoteTmuxAttachCommand() {
+        let command = TerminalAttachCommand(
+            TerminalConnectionInfo(
+                sessionName: "lfd-session-1",
+                host: "lfd.example.com",
+                cwd: "/remote/repo",
+                status: .running
+            )
+        )
+
+        #expect(command.workingDirectory == FileManager.default.homeDirectoryForCurrentUser.path)
+        #expect(command.argv == ["ssh", "-t", "lfd.example.com", "tmux attach-session -t 'lfd-session-1'"])
+        #expect(command.env.isEmpty)
+    }
+
+    @Test("localhost detection normalizes common local host spellings")
+    func localhostDetectionNormalizesCommonValues() {
+        #expect(
+            TerminalConnectionInfo(
+                sessionName: "lfd-session-1",
+                host: "127.0.0.1",
+                cwd: "/tmp/repo",
+                status: .running
+            ).usesLocalTmux
+        )
+        #expect(
+            TerminalConnectionInfo(
+                sessionName: "lfd-session-1",
+                host: "[::1]",
+                cwd: "/tmp/repo",
+                status: .running
+            ).usesLocalTmux
+        )
+        #expect(
+            !TerminalConnectionInfo(
+                sessionName: "lfd-session-1",
+                host: "lfd.example.com",
+                cwd: "/tmp/repo",
+                status: .running
+            ).usesLocalTmux
+        )
     }
 
     @Test("control-modified control characters fall through to key handling")

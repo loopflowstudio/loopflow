@@ -47,6 +47,22 @@ The runtime model should assume:
 
 Serialization remains useful, but only as explicit policy.
 
+### Three access planes
+
+`lfd` participates differently in each plane. The terminal plane connection contract is shipped; the structured plane is next.
+
+**Terminal plane.** Full interactive terminal access. Ghostty connects to tmux directly — locally via `tmux attach-session -t <name>`, remotely via SSH. `lfd` owns session lifecycle (create, track, destroy) and returns transport-agnostic connection metadata (`session_name`, `host`, `cwd`, `status`). Concerto decides whether to attach locally or over SSH. `lfd` never touches terminal bytes.
+
+**Structured plane.** Non-terminal interaction with agent sessions. `lfd` runs the agent harness in server mode and exposes a higher-level API — tool calls, questions, approvals, structured output. This is the interface for clients that can't be terminal participants (iPhone, web). Not terminal bytes in a web view.
+
+**Event plane.** Metadata stream over WebSocket. Already exists. The `connected` event carries a full state snapshot; every mutation emits an event. Both terminal and non-terminal clients consume this.
+
+| Client | Terminal | Structured | Events |
+|--------|----------|------------|--------|
+| macOS Concerto (Ghostty) | SSH + tmux attach | — | WebSocket |
+| iPhone Concerto | — | Harness API | WebSocket |
+| `lfq` CLI | — | — | HTTP + WebSocket |
+
 ### Local terminals before daemon-hosted shells
 
 Local-first use does not wait for daemon PTYs. Execution state flows into the shared store via journal events, and Concerto can open ordinary local Ghostty sessions while presenting a coherent workspace. The minimal interactive-step path (tmux sessions with execution cursor persistence) is shipped; full PTY ownership is next.
@@ -138,7 +154,7 @@ What stays:
 
 **`lf` owns**: flow expansion, step execution, structured lifecycle events.
 
-**Concerto owns**: tmux session management (local shells), pane layout, rendering the event stream into a workspace UI.
+**Concerto owns**: tmux session management (builds local `tmux attach` or remote `ssh ... tmux attach` commands from connection info), pane layout, rendering the event stream into a workspace UI.
 
 ## Relationship to existing waves
 

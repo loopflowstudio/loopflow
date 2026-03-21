@@ -1,22 +1,21 @@
 use axum::extract::{Path, Query, State};
+use axum::http::header::HOST;
+use axum::http::uri::Authority;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use secrecy::ExposeSecret;
 use serde::Deserialize;
 use tokio::process::Command;
 use tracing::warn;
 
-use crate::lfd::auth::AuthProvider;
 use crate::lfd::http::dto::{
-    terminal_session_dto, ListResponse, TerminalLaunchSpecDto, TerminalSessionDto,
+    terminal_connection_info_dto, terminal_session_dto, ListResponse, TerminalConnectionInfoDto,
+    TerminalSessionDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    tmux_session_name, Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
-};
+use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -25,12 +24,6 @@ pub struct ListTerminalSessionsQuery {
     pub repo: Option<String>,
     pub wave_id: Option<String>,
     pub active_only: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateTerminalSessionRequest {
-    pub wave_id: String,
-    pub wave_run_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,43 +90,23 @@ pub async fn attach_terminal_session_handler(
     State(state): State<HttpState>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
-) -> ApiResult<TerminalLaunchSpecDto> {
+) -> ApiResult<TerminalConnectionInfoDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
-    let session =
-        update_terminal_session(&state, &session_id, |session| Ok(session.attach())).await?;
+    let session = update_terminal_session(&state, &session_id, |session| {
+        if session.source != TMUX_TERMINAL_SOURCE {
+            return Err(api_error(
+                StatusCode::PRECONDITION_FAILED,
+                "terminal session is not tmux-backed",
+            ));
+        }
+        Ok(session.attach())
+    })
+    .await?;
 
-    if session.source == TMUX_TERMINAL_SOURCE {
-        return Ok(Json(TerminalLaunchSpecDto {
-            cwd: session.cwd,
-            argv: vec![
-                "tmux".to_string(),
-                "attach-session".to_string(),
-                "-t".to_string(),
-                tmux_session_name(&session.id),
-            ],
-            env: Default::default(),
-        }));
-    }
-
-    let completion_token = session.completion_token.clone().ok_or_else(|| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "missing completion token",
-        )
-    })?;
-    let complete_url = completion_url(&headers, &session_id);
-    let auth_header = local_auth_header(&state.auth);
-    let launch_argv = vec![
-        "/bin/zsh".to_string(),
-        "-lc".to_string(),
-        build_wrapped_command(&session, &complete_url, &auth_header, &completion_token),
-    ];
-
-    Ok(Json(TerminalLaunchSpecDto {
-        cwd: session.cwd,
-        argv: launch_argv,
-        env: session.env,
-    }))
+    Ok(Json(terminal_connection_info_dto(
+        &session,
+        connection_host(&headers),
+    )))
 }
 
 pub async fn start_terminal_session_handler(
@@ -201,17 +174,6 @@ async fn store_terminal_session_update(
     Ok(())
 }
 
-async fn store_terminal_session_update_if_changed(
-    state: &HttpState,
-    session: &TerminalSession,
-    changed: bool,
-) -> Result<(), ApiError> {
-    if changed {
-        store_terminal_session_update(state, session).await?;
-    }
-    Ok(())
-}
-
 async fn update_terminal_session<F>(
     state: &HttpState,
     session_id: &LfdId,
@@ -222,7 +184,9 @@ where
 {
     let mut session = load_terminal_session(state, session_id).await?;
     let changed = update(&mut session)?;
-    store_terminal_session_update_if_changed(state, &session, changed).await?;
+    if changed {
+        store_terminal_session_update(state, &session).await?;
+    }
     Ok(session)
 }
 
@@ -246,25 +210,28 @@ fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Re
     Ok(())
 }
 
-fn completion_url(headers: &HeaderMap, session_id: &crate::lfd::id::LfdId) -> String {
+fn connection_host(headers: &HeaderMap) -> String {
     let host = headers
-        .get("host")
+        .get(HOST)
         .and_then(|value| value.to_str().ok())
-        .unwrap_or("127.0.0.1");
-    format!("http://{host}/v0/terminal-sessions/{session_id}/complete")
-}
-
-fn local_auth_header(auth: &AuthProvider) -> String {
-    let token = match auth {
-        AuthProvider::Local { session_token } => session_token,
-        AuthProvider::Studio { local_token, .. } => local_token,
-    };
-    format!("Authorization: Bearer {}", token.expose_secret())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "localhost".to_string());
+    let parsed = host
+        .parse::<Authority>()
+        .ok()
+        .map(|authority| authority.host().to_string())
+        .unwrap_or(host);
+    let normalized = parsed.trim_matches(['[', ']']);
+    if matches!(normalized, "127.0.0.1" | "::1" | "localhost") {
+        "localhost".to_string()
+    } else {
+        parsed
+    }
 }
 
 async fn stop_tmux_terminal_session(session: &TerminalSession) {
     match Command::new("tmux")
-        .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+        .args(["kill-session", "-t", &session.tmux_name])
         .status()
         .await
     {
@@ -282,34 +249,129 @@ async fn stop_tmux_terminal_session(session: &TerminalSession) {
     }
 }
 
-fn build_wrapped_command(
-    session: &TerminalSession,
-    complete_url: &str,
-    auth_header: &str,
-    completion_token: &str,
-) -> String {
-    let env_prefix = session
-        .env
-        .iter()
-        .map(|(key, value)| format!("{key}={} ", shell_escape(value)))
-        .collect::<String>();
-    let agent_command = session
-        .argv
-        .iter()
-        .map(|value| shell_escape(value))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let exit_payload = "{\\\"exit_code\\\":%s}";
-    format!(
-        "{env_prefix}{agent_command}; EXIT_CODE=$?; /usr/bin/curl -fsS -X POST -H {} -H 'Content-Type: application/json' -H {} --data \"$(printf '{}' \\\"$EXIT_CODE\\\")\" {} >/dev/null 2>&1 || true; exit \"$EXIT_CODE\"",
-        shell_escape(auth_header),
-        shell_escape(&format!("{COMPLETION_TOKEN_HEADER}: {completion_token}")),
-        exit_payload,
-        shell_escape(complete_url),
-    )
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::http::routes::test_helpers::test_http_state;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{
+        tmux_session_name, TerminalSessionStatus, Wave, WaveMode, WaveStatus,
+    };
+    use axum::extract::{Path, State};
+    use axum::http::{header::HOST, HeaderValue};
+    use time::OffsetDateTime;
 
-fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\'', "'\\''");
-    format!("'{escaped}'")
+    fn make_wave(repo: &str) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: "terminal-test".to_string(),
+            repo: repo.to_string(),
+            mode: WaveMode::Manual,
+            primary_flow: "build".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            workers: 1,
+        }
+    }
+
+    fn make_terminal_session(wave_id: LfdId, source: &str) -> TerminalSession {
+        let id = LfdId::new();
+        let tmux_name = tmux_session_name("test-branch");
+        TerminalSession {
+            id,
+            wave_id,
+            wave_run_id: None,
+            step: "design".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo".to_string(),
+            argv: vec!["lf".to_string(), "design".to_string()],
+            env: Default::default(),
+            source: source.to_string(),
+            tmux_name,
+            status: TerminalSessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn attach_returns_tmux_connection_info() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo");
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+        let session = make_terminal_session(wave.id().clone(), TMUX_TERMINAL_SOURCE);
+        state
+            .store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("127.0.0.1:2486"));
+
+        let Json(response) = attach_terminal_session_handler(
+            State(state.clone()),
+            headers,
+            Path(session.id.to_string()),
+        )
+        .await
+        .expect("attach should succeed");
+
+        assert_eq!(response.session_name, "lf-test-branch");
+        assert_eq!(response.host, "localhost");
+        assert_eq!(response.cwd, "/tmp/repo");
+        assert_eq!(response.status, "attached");
+
+        let stored = state
+            .store
+            .get_terminal_session(&session.id)
+            .await
+            .expect("session lookup should succeed")
+            .expect("session should still exist");
+        assert_eq!(stored.status, TerminalSessionStatus::Attached);
+        assert!(stored.attached_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn attach_rejects_non_tmux_sessions() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo");
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+        let session = make_terminal_session(wave.id().clone(), "wave_run");
+        state
+            .store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let error = attach_terminal_session_handler(
+            State(state),
+            HeaderMap::new(),
+            Path(session.id.to_string()),
+        )
+        .await
+        .expect_err("attach should fail");
+
+        assert_eq!(error.0, StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            error.1 .0.error.message,
+            "terminal session is not tmux-backed"
+        );
+    }
 }

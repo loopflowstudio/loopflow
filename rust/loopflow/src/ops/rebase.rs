@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::engine::git::{fetch, rebase, squash_merge_fork_point};
+use crate::engine::git::{fetch, rebase, squash_merge_fork_point, sync_main};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -18,6 +18,8 @@ pub fn rebase_with_recovery(
 ) -> OpsResult<()> {
     if let Some(branch) = options.onto.strip_prefix("origin/") {
         let _ = fetch(repo, "origin", branch);
+        // Keep local main in sync with origin so downstream reads see current state.
+        let _ = sync_main(repo, branch);
     }
 
     // When a stacked branch's parent was squash-merged into the target,

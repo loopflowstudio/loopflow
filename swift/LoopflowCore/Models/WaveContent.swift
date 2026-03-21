@@ -20,9 +20,15 @@ public enum RoadmapPriority: Int, Sendable, CaseIterable, Equatable, Hashable {
     }
 
     public static func from(prefix: String) -> RoadmapPriority? {
+        parseFilenamePrefix(prefix)?.priority
+    }
+
+    static func parseFilenamePrefix(_ prefix: String) -> (priority: Self, isCanonical: Bool)? {
         let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Int(normalized) else { return nil }
-        return Self(rawValue: value)
+        guard let value = Int(normalized), let priority = Self(rawValue: value) else {
+            return nil
+        }
+        return (priority, normalized == priority.filenamePrefix)
     }
 }
 

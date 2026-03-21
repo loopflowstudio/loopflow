@@ -206,10 +206,8 @@ public enum WaveContentParser {
 
         let prefix = String(parts[0])
         let slug = String(parts[1])
-        let normalizedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !slug.isEmpty,
-              let priority = RoadmapPriority.from(prefix: prefix),
-              let number = Int(normalizedPrefix) else {
+              let parsedPrefix = RoadmapPriority.parseFilenamePrefix(prefix) else {
             return nil
         }
 
@@ -218,25 +216,10 @@ public enum WaveContentParser {
             stem: stem,
             fileName: fileName,
             slug: slug,
-            number: number,
-            priority: priority,
-            order: bucketPriority(from: prefix).map(RoadmapOrder.bucket) ?? .legacy(number)
+            number: parsedPrefix.priority.rawValue,
+            priority: parsedPrefix.priority,
+            order: parsedPrefix.isCanonical ? .bucket(parsedPrefix.priority) : .legacy(parsedPrefix.priority.rawValue)
         )
-    }
-
-    private static func bucketPriority(from prefix: String) -> RoadmapPriority? {
-        switch prefix {
-        case "1":
-            .urgent
-        case "2":
-            .high
-        case "3":
-            .medium
-        case "4":
-            .low
-        default:
-            nil
-        }
     }
 
     private static func extractContent(from lines: [String]) -> String? {

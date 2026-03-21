@@ -25,11 +25,11 @@ Validation on March 21, 2026:
 
 - `cargo fmt --check` ✅
 - `cargo clippy --all-targets --all-features -- -D warnings` ✅
-- `cargo test --all` ✅ (998 passed, 0 failed, 2 ignored)
+- `cargo test --all` ✅ (1076 passed, 0 failed, 2 ignored)
 - `.venv/bin/pytest python/tests/` ✅ (115 passed)
 - `cargo test -p loopflow ops::ingest::tests` ✅ (12 passed)
-- `swift test --package-path swift` ✅ (312 passed)
-- `swift test --package-path swift --filter WaveContentParser` ✅ (7 passed)
+- `swift test --package-path swift` ✅ (313 passed)
+- `swift test --package-path swift --filter WaveContentParser` ✅ (8 passed)
 - `swift test --package-path swift --filter Multiplexer` ✅ (22 passed)
 - `tests/e2e/test_smoke.sh` ✅
 - `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` ✅ (16 passed)
@@ -38,7 +38,7 @@ I also attempted the macOS UI test job:
 
 - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
 
-That built the app and test bundles, but `ConcertoUITests-Runner` exited early before establishing the UI-test connection in this headless session.
+That built the app and UI test bundles, but `ConcertoUITests-Runner` later failed while loading `Concerto.debug.dylib` because macOS system policy denied the library in this headless session.
 
 ## Intent
 
@@ -54,10 +54,10 @@ Make roadmap-driven waves usable from the Concerto workspace instead of treating
 
 - Reused the existing wave run endpoint with a one-shot `roadmap_item` override rather than adding a separate ingest RPC.
 - Kept file renames as the only priority source of truth, so UI state stays aligned with the underlying roadmap files.
-- Aligned Swift roadmap ordering with Rust ingest ordering so canonical bucketed items sort ahead of legacy numbered items in both the UI and the backend.
+- Aligned Swift roadmap ordering with Rust ingest ordering so canonical bucketed items sort ahead of legacy zero-padded items in both the UI and the backend.
 
 ## Not included
 
 - No remote roadmap reprioritization flow.
 - No new roadmap metadata format beyond filename prefixes.
-- No automated workaround for headless macOS UI-test runner startup.
+- No automated workaround for the headless macOS UI-test runner failure.

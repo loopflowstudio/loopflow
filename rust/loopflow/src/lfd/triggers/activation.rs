@@ -69,6 +69,48 @@ async fn create_wave_run(
     }
 }
 
+fn target_branch_ref(target_branch: &str) -> Option<&str> {
+    match target_branch {
+        "" | "main" => None,
+        branch => Some(branch),
+    }
+}
+
+fn ingest_roadmap_item_for_run(wave: &Wave, run: &WaveRun, item: &str) -> anyhow::Result<()> {
+    ingest(
+        Path::new(&run.worktree),
+        &IngestOptions {
+            wave: Some(wave.name().clone()),
+            item: Some(item.to_string()),
+        },
+        &NullProgress,
+    )
+    .map_err(|err| anyhow!("ingest failed: {err}"))?;
+
+    Ok(())
+}
+
+async fn fail_immediate_activation(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    wave: &Wave,
+    run: &mut WaveRun,
+    error: &anyhow::Error,
+) {
+    run.status = crate::lfd::types::WaveRunStatus::Failed;
+    run.ended_at = Some(time::OffsetDateTime::now_utc());
+    run.error = Some(error.to_string());
+    let _ = store.update_wave_run(run).await;
+
+    if let Ok(Some(mut stored_wave)) = store.get_wave(wave.id()).await {
+        stored_wave.status = WaveStatus::Idle;
+        let _ = store.update_wave(&stored_wave).await;
+    }
+
+    let _ = cleanup_workspace_worktree(Path::new(&run.worktree));
+    event_hub.send(Event::wave_updated(wave.id().clone()));
+}
+
 #[derive(Debug, Clone)]
 pub struct ActivationEnvelope {
     pub wave_id: LfdId,
@@ -296,24 +338,14 @@ pub async fn spawn_immediate_activation(
         return Err(anyhow!("failed to write activation log: {err}"));
     }
 
-    let target = if envelope.target_branch.is_empty() || envelope.target_branch == "main" {
-        None
-    } else {
-        Some(envelope.target_branch.as_str())
-    };
-    let create_run = if wave.workers() == 1 {
-        create_wave_run_with_id(store, wave, &run_id, target).await
-    } else {
-        create_parallel_wave_run(store, wave, &run_id, target).await
-    };
-
-    let mut run = match create_run {
+    let target = target_branch_ref(&envelope.target_branch);
+    let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
                 wave_id = %wave.id(),
                 error = %err,
-                "failed to create parallel wave run for immediate activation"
+                "failed to create wave run for immediate activation"
             );
             if activation_requires_manual_resolution(&err) {
                 pause_wave_after_activation_conflict(store, event_hub, wave, &err).await;
@@ -325,14 +357,7 @@ pub async fn spawn_immediate_activation(
         run.snapshot.flow = flow_override;
     }
     if let Some(item) = roadmap_item {
-        if let Err(err) = ingest(
-            Path::new(&run.worktree),
-            &IngestOptions {
-                wave: Some(wave.name().clone()),
-                item: Some(item.clone()),
-            },
-            &NullProgress,
-        ) {
+        if let Err(err) = ingest_roadmap_item_for_run(wave, &run, &item) {
             tracing::error!(
                 wave_id = %wave.id(),
                 run_id = %run.id,
@@ -340,19 +365,8 @@ pub async fn spawn_immediate_activation(
                 error = %err,
                 "failed targeted ingest before immediate activation"
             );
-            run.status = crate::lfd::types::WaveRunStatus::Failed;
-            run.ended_at = Some(time::OffsetDateTime::now_utc());
-            run.error = Some(format!("ingest failed: {err}"));
-            let _ = store.update_wave_run(&run).await;
-
-            if let Ok(Some(mut stored_wave)) = store.get_wave(wave.id()).await {
-                stored_wave.status = WaveStatus::Idle;
-                let _ = store.update_wave(&stored_wave).await;
-            }
-
-            let _ = cleanup_workspace_worktree(Path::new(&run.worktree));
-            event_hub.send(Event::wave_updated(wave.id().clone()));
-            return Err(anyhow!("ingest failed: {err}"));
+            fail_immediate_activation(store, event_hub, wave, &mut run, &err).await;
+            return Err(err);
         }
     }
     run.target_branch = envelope.target_branch.clone();
@@ -466,11 +480,7 @@ pub async fn dispatch_wave_if_ready(
         None => None,
     };
 
-    let target = if activation.target_branch.is_empty() || activation.target_branch == "main" {
-        None
-    } else {
-        Some(activation.target_branch.as_str())
-    };
+    let target = target_branch_ref(&activation.target_branch);
     let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {

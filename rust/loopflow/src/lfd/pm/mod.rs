@@ -12,6 +12,69 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
+pub enum PriorityBucket {
+    Urgent,
+    High,
+    Medium,
+    Low,
+}
+
+impl PriorityBucket {
+    pub(crate) fn from_filename_prefix(prefix: &str) -> Option<Self> {
+        match prefix {
+            "1" => Some(Self::Urgent),
+            "2" => Some(Self::High),
+            "3" => Some(Self::Medium),
+            "4" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_semantic_label(label: &str) -> Option<Self> {
+        match label.trim().to_ascii_lowercase().as_str() {
+            "urgent" => Some(Self::Urgent),
+            "high" => Some(Self::High),
+            "medium" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_rank(rank: u32) -> Self {
+        match rank {
+            0 => Self::Urgent,
+            1 => Self::High,
+            2 => Self::Medium,
+            _ => Self::Low,
+        }
+    }
+
+    pub(crate) fn order(self) -> u8 {
+        match self {
+            Self::Urgent => 0,
+            Self::High => 1,
+            Self::Medium => 2,
+            Self::Low => 3,
+        }
+    }
+
+    pub(crate) fn rank(self) -> u32 {
+        u32::from(self.order())
+    }
+
+    pub(crate) fn semantic_label(self) -> &'static str {
+        match self {
+            Self::Urgent => "Urgent",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum PmProviderKind {
     Asana,
     Linear,
@@ -72,13 +135,13 @@ pub struct PmItemUpdate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PmTextUpdate<'a> {
-    name: Option<&'a str>,
-    description: Option<&'a str>,
+pub(crate) struct PmTextUpdate<'a> {
+    pub(crate) name: Option<&'a str>,
+    pub(crate) description: Option<&'a str>,
 }
 
 impl PmItemUpdate {
-    fn text_update(&self) -> Option<PmTextUpdate<'_>> {
+    pub(crate) fn text_update(&self) -> Option<PmTextUpdate<'_>> {
         if self.name.is_none() && self.description.is_none() {
             return None;
         }

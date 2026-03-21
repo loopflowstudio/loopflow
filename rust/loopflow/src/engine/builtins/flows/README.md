@@ -74,6 +74,7 @@ Multi-perspective analysis via `and` branches.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
+| `pm-sync` | import-pm → implement → export-pm | Pull from PM, work, push back |
 | `release` | op: release run patch | Cut a release |
 
 ## Adding a flow

@@ -297,6 +297,16 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
         }
         Ok(waves)
     };
+    let list_pm_waves = || -> Result<Vec<String>> {
+        let waves = list_all_waves()?
+            .into_iter()
+            .filter(|wave| crate::ops::pm::wave_pm_is_enabled(&repo_root, wave))
+            .collect::<Vec<_>>();
+        if waves.is_empty() {
+            return Err(anyhow!("no PM-enabled waves found in wave/"));
+        }
+        Ok(waves)
+    };
 
     match cmd {
         PmCommand::Init {
@@ -391,7 +401,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             all,
         } => {
             let waves = if *all {
-                list_all_waves()?
+                list_pm_waves()?
             } else {
                 vec![wave
                     .clone()
@@ -412,6 +422,37 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     result.project_id,
                     result.local_written,
                     result.local_removed
+                );
+            }
+        }
+        PmCommand::Export {
+            wave,
+            wave_flag,
+            all,
+        } => {
+            let waves = if *all {
+                list_pm_waves()?
+            } else {
+                vec![wave
+                    .clone()
+                    .or_else(|| wave_flag.clone())
+                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
+                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
+            };
+            for wave in waves {
+                let result = crate::ops::pm::pm_export(
+                    &repo_root,
+                    &crate::ops::pm::PmExportOptions { wave: wave.clone() },
+                    progress,
+                )?;
+                println!(
+                    "{}: {:?} project {} ({} created, {} updated, {} skipped)",
+                    result.wave,
+                    result.provider,
+                    result.project_id,
+                    result.created,
+                    result.updated,
+                    result.skipped
                 );
             }
         }

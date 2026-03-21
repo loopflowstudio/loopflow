@@ -141,6 +141,8 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `split-wave` | Split a wave into smaller independent waves |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
+| `import-pm` | Pull PM state into the current wave |
+| `export-pm` | Push the current wave into PM |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `pr` | Generate PR title/body and call `lf op pr --title --body` |
@@ -217,6 +219,12 @@ Flows can include mechanical ops items directly:
 | Flow | Steps |
 |------|-------|
 | `scan` | scan/scan-report → scan/scan-plan → code |
+
+### Ops flows (`ops/`)
+
+| Flow | Steps |
+|------|-------|
+| `pm-sync` | import-pm → implement → export-pm |
 
 ### Forks (and)
 
@@ -343,7 +351,12 @@ lf op pm init pm           # connect/create one wave project, link items, write 
 lf op pm init --all        # bootstrap every wave/ project on the shared PM team
 lf op pm pull pm           # rewrite one wave from PM; remote changes win
 lf op pm pull --all        # rewrite every wave from PM; remote changes win
+lf op pm export pm         # push one wave to PM; local changes win
+lf op pm export --all      # push every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
+lf import-pm               # step wrapper around `lf op pm pull`
+lf export-pm               # step wrapper around `lf op pm export`
+lf pm-sync                 # import-pm → implement → export-pm
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

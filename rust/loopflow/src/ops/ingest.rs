@@ -87,10 +87,10 @@ pub(crate) struct WaveItem {
 }
 
 impl WaveItem {
-    pub fn priority_bucket(&self) -> Option<PriorityBucket> {
+    pub(crate) fn rank(&self) -> u32 {
         match self.order {
-            WaveItemOrder::Bucket(bucket) => Some(bucket),
-            WaveItemOrder::LegacyStage(_) => None,
+            WaveItemOrder::Bucket(bucket) => bucket.rank(),
+            WaveItemOrder::LegacyStage(stage) => stage.saturating_sub(1),
         }
     }
 }
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn parse_wave_item_filename_parses_bucketed_files() {
         let item = parse_wave_item_filename("2-setup.md").expect("bucketed item");
-        assert_eq!(item.priority_bucket(), Some(PriorityBucket::High));
+        assert_eq!(item.order, WaveItemOrder::Bucket(PriorityBucket::High));
         assert_eq!(item.slug, "setup");
     }
 

@@ -1,4 +1,5 @@
 use axum::extract::{Path, Query, State};
+use axum::http::header::HOST;
 use axum::http::uri::Authority;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
@@ -7,7 +8,8 @@ use tokio::process::Command;
 use tracing::warn;
 
 use crate::lfd::http::dto::{
-    terminal_session_dto, ListResponse, TerminalConnectionInfoDto, TerminalSessionDto,
+    terminal_connection_info_dto, terminal_session_dto, ListResponse, TerminalConnectionInfoDto,
+    TerminalSessionDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -24,12 +26,6 @@ pub struct ListTerminalSessionsQuery {
     pub repo: Option<String>,
     pub wave_id: Option<String>,
     pub active_only: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateTerminalSessionRequest {
-    pub wave_id: String,
-    pub wave_run_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,12 +105,10 @@ pub async fn attach_terminal_session_handler(
     })
     .await?;
 
-    Ok(Json(TerminalConnectionInfoDto {
-        session_name: tmux_session_name(&session.id),
-        host: connection_host(&headers),
-        cwd: session.cwd,
-        status: session.status.as_str().to_string(),
-    }))
+    Ok(Json(terminal_connection_info_dto(
+        &session,
+        connection_host(&headers),
+    )))
 }
 
 pub async fn start_terminal_session_handler(
@@ -182,17 +176,6 @@ async fn store_terminal_session_update(
     Ok(())
 }
 
-async fn store_terminal_session_update_if_changed(
-    state: &HttpState,
-    session: &TerminalSession,
-    changed: bool,
-) -> Result<(), ApiError> {
-    if changed {
-        store_terminal_session_update(state, session).await?;
-    }
-    Ok(())
-}
-
 async fn update_terminal_session<F>(
     state: &HttpState,
     session_id: &LfdId,
@@ -203,7 +186,9 @@ where
 {
     let mut session = load_terminal_session(state, session_id).await?;
     let changed = update(&mut session)?;
-    store_terminal_session_update_if_changed(state, &session, changed).await?;
+    if changed {
+        store_terminal_session_update(state, &session).await?;
+    }
     Ok(session)
 }
 
@@ -229,7 +214,7 @@ fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Re
 
 fn connection_host(headers: &HeaderMap) -> String {
     let host = headers
-        .get("host")
+        .get(HOST)
         .and_then(|value| value.to_str().ok())
         .map(ToString::to_string)
         .unwrap_or_else(|| "localhost".to_string());

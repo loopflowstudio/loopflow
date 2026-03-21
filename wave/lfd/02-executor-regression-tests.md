@@ -18,6 +18,11 @@ The terminal session attach tests added on the connection-info branch are focuse
 - Failure propagation (step failure → run failure → wave state update)
 - Run-scoped overrides (direction, area overrides per-run)
 
+## Known constraints
+
+- Concerto macOS app tests (`xcodebuild test`) fail to bootstrap locally before test execution starts. With `CODE_SIGNING_ALLOWED=NO`, dyld rejects `Concerto.debug.dylib` under system policy; with ad-hoc signing, the app is killed before XCTest connects. Swift package tests pass. This may or may not reproduce in CI — needs verification.
+- Targeted terminal session attach tests already exist (added on the connection-info branch). This item is the broader suite beyond that path.
+
 ## Approach
 
 Integration tests that exercise `DaemonFlowExecutor` with real `lf` subprocess spawning, not mocks. The test harness should set up a minimal wave config, trigger execution, and assert on the resulting run/session state.

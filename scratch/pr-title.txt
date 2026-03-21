@@ -1,1 +1,0 @@
-lfd: return tmux connection info instead of launch argv

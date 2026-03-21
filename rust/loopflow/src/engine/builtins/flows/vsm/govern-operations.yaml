@@ -1,0 +1,8 @@
+- ingest
+- xor:
+    paths:
+      build:
+        flow: s1-build
+        description: "Compelling item found — build it"
+      silence:
+        description: "Nothing compelling to build right now"

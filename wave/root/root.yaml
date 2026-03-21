@@ -1,8 +1,11 @@
-flow: tend
+flow: garden
 mode: manual
 area:
-- wave/chord-model/
-- wave/agent-embedding/
+- wave/model/
+- wave/macos/
+- wave/lfd/
+- wave/pm/
+- wave/ios/
 direction:
 - care
 - clarity

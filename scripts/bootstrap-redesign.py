@@ -14,7 +14,7 @@ MEMBER_WAVE_NAMES = [
     "chord-model",
     "agent-embedding",
 ]
-REDESIGN_FLOW = "garden-or-silent"
+REDESIGN_FLOW = "garden"
 REDESIGN_AREA = [
     "wave/chord-model/",
     "wave/agent-embedding/",

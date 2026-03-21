@@ -2456,16 +2456,6 @@ Be careful.
     }
 
     #[test]
-    fn qa_deploy_flow_parses_and_expands() {
-        let tmp = TempDir::new().unwrap();
-        let flow = load_flow("qa-deploy", tmp.path()).unwrap();
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        // qa, triage, branch
-        assert_eq!(items.len(), 3);
-        assert!(matches!(&items[2], ConcreteItem::Xor(_)));
-    }
-
-    #[test]
     fn code_flow_parses_and_expands() {
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("code", tmp.path()).unwrap();

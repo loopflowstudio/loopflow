@@ -69,7 +69,6 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "gate",
         ],
     ),
-    ("Scan", &["scan/scan-report", "scan/scan-plan"]),
     ("Git", &["commit", "rebase", "pr", "land"]),
     (
         "Ops",
@@ -118,8 +117,6 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
         ("release", "Run one-shot release workflow"),
-        ("scan/scan-report", "Scan deps and APIs for issues"),
-        ("scan/scan-plan", "Turn scan report into action plan"),
     ])
 }
 

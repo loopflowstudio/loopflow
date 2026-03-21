@@ -29,7 +29,7 @@ wave: redesign (chord-wave)
 │
 │  area: wave/chord-model/,
 │        wave/agent-embedding/
-│  flow: garden-or-silent
+│  flow: garden
 │
 ├── wave: chord-model           13 items — runtime config, governance, Letta, mutations, APIs
 └── wave: agent-embedding       5 items — Concerto as conductor

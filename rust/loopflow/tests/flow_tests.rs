@@ -281,46 +281,6 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     }
 }
 
-/// The builtin wave-reduce flow should expand to 3 items:
-/// and(reduce×3), update-wave, deploy (which itself expands).
-#[test]
-fn builtin_wave_reduce_expands_to_update_wave() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_flow(repo, "wave-reduce");
-
-    // and + update-wave + deploy (gate + op:land + op:pm push-diff) = 5
-    assert!(
-        items.len() >= 3,
-        "wave-reduce should expand into at least and + update-wave + deploy items, got {}",
-        items.len()
-    );
-
-    // Step 0: and (reduce × 3 directions)
-    assert!(
-        matches!(&items[0], ConcreteItem::And(_)),
-        "expected and at index 0"
-    );
-    if let ConcreteItem::And(and) = &items[0] {
-        let branch_directions: Vec<Vec<String>> = and
-            .branches
-            .iter()
-            .map(|branch| branch.directions.clone())
-            .collect();
-        assert_eq!(
-            branch_directions,
-            vec![
-                vec!["infra".to_string()],
-                vec!["ux".to_string()],
-                vec!["ceo".to_string()]
-            ]
-        );
-    }
-    // Step 1: update-wave
-    assert_step_name(&items[1], "update-wave");
-}
-
 #[test]
 fn builtin_deploy_uses_ops_land_item() {
     let temp = TempDir::new().unwrap();
@@ -332,24 +292,20 @@ fn builtin_deploy_uses_ops_land_item() {
 }
 
 #[test]
-fn builtin_garden_or_silent_flow_structure() {
+fn builtin_garden_flow_structure() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "garden-or-silent");
+    let items = expand_named_flow(repo, "garden");
 
-    // garden-or-silent: op:pm pull, garden/scan, garden/assess, xor(garden, silence)
-    assert_eq!(items.len(), 4);
-    assert!(
-        matches!(&items[0], ConcreteItem::Op(_)),
-        "expected op:pm pull at index 0"
-    );
-    assert_step_name(&items[1], "garden/scan");
-    assert_step_name(&items[2], "garden/assess");
-    match &items[3] {
+    // garden: garden/scan, garden/assess, xor(act, silence)
+    assert_eq!(items.len(), 3);
+    assert_step_name(&items[0], "garden/scan");
+    assert_step_name(&items[1], "garden/assess");
+    match &items[2] {
         ConcreteItem::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
-            assert!(xor_def.paths.contains_key("garden"));
+            assert!(xor_def.paths.contains_key("act"));
             assert!(xor_def.paths.contains_key("silence"));
         }
         other => panic!("expected Xor, got {other:?}"),

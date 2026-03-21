@@ -1,3 +1,10 @@
-- wave/mutate
-- wave/review
-- deploy
+- garden/scan
+- garden/assess
+- xor:
+    router: garden/assess
+    paths:
+      act:
+        flow: garden-act
+        description: "Adjustments needed — mutate waves, then review"
+      silence:
+        description: "Everything is healthy"

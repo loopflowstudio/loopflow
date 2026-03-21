@@ -12,8 +12,6 @@ Inner loops — composable building blocks that don't land.
 | `pair` | design → code | Interactive design then build |
 | `deploy` | gate → op: land → op: pm push-diff | Gate, land PR, push PM changes |
 | `sync` | rebase → integrate-upstream → op: pm pull | Rebase and pull fresh PM state |
-| `qa-deploy` | qa → triage → xor(code, deploy) | QA gate with fix-or-ship branch |
-| `reorg` | update-wave | Wave coherence pass |
 
 ## Build flows (`build/`)
 
@@ -22,7 +20,8 @@ Full cycles that end with deploy.
 | Flow | Steps | Use case |
 |------|-------|----------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy | Full iterative build cycle |
-| `build-or-silent` | op: pm pull → ingest → xor(build, silence) | Pull PM, pick item or stay quiet |
+| `build-or-silent` | ingest → xor(build, silence) | Pick item or stay quiet |
+| `s1-build` | kickoff → code → deploy | Autonomous build — no reviews |
 | `design-and-ship` | design → implement → reduce → polish → deploy | Design through to ship |
 | `queue` | gate → update-wave → deploy | Gate, reconcile wave, then ship |
 
@@ -32,8 +31,8 @@ Chord-level scanning, assessment, and mutation of member waves.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `garden` | wave/mutate → wave/review → deploy | Apply, review, and ship wave mutations |
-| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) | Pull PM, scan, assess, mutate if needed |
+| `garden` | garden/scan → garden/assess → xor(act, silence) | Full garden cycle |
+| `garden-act` | wave/mutate → wave/review | Apply and review wave mutations |
 
 ## Algedonic flows (`algedonic/`)
 
@@ -49,26 +48,11 @@ Viable system model governance — scan a specific system dimension and mutate.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `govern-identity` | s5-scan → s5-assess → wave/mutate | Identity and structural drift |
-| `govern-intelligence` | s4-scan → s4-assess → wave/mutate | Environmental change response |
-| `govern-control` | s3-scan → s3-assess → wave/mutate | Control health and capacity |
-| `govern-coordination` | s2-scan → s2-assess → wave/mutate | Coordination risk and interference |
-
-## Plan flows (`plan/`)
-
-Multi-perspective analysis via `and` branches.
-
-| Flow | Steps | Use case |
-|------|-------|----------|
-| `wave-reduce` | and(reduce×3) → update-wave → deploy | Find simplification opportunities |
-| `wave-polish` | and(polish×3) → update-wave → deploy | Find polish priorities |
-| `wave-expand` | and(expand×3) → update-wave → deploy | Find expansion opportunities |
-
-## Scan flows (`scan/`)
-
-| Flow | Steps | Use case |
-|------|-------|----------|
-| `scan` | scan-report → scan-plan → code | Scan environment, plan response, build |
+| `govern-operations` | ingest → xor(s1-build, silence) | S1 — autonomous build |
+| `govern-coordination` | s2-scan → s2-assess → wave/mutate | S2 — coordination risk and interference |
+| `govern-control` | s3-scan → s3-assess → wave/mutate | S3 — control health and capacity |
+| `govern-intelligence` | s4-scan → s4-assess → wave/mutate | S4 — environmental change response |
+| `govern-identity` | s5-scan → s5-assess → wave/mutate | S5 — identity and structural drift |
 
 ## Ops flows (`ops/`)
 

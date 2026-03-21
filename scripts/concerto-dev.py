@@ -410,7 +410,8 @@ def _seed_waves_from_wave_dir() -> None:
     if created or paused:
         print(
             "Bootstrapped roadmap waves: "
-            f"{created} created, {paused} paused, {len(worktree_by_wave)} sibling worktrees discovered"
+            f"{created} created, {paused} paused, "
+            f"{len(worktree_by_wave)} sibling worktrees discovered"
         )
 
 
@@ -421,7 +422,10 @@ def _print_run_debug_checklist() -> None:
     print("  2. Open Terminal tab only when that wave has an active terminal session.")
     print("  3. Switch between two waiting waves: each terminal tab should keep its own surface.")
     print("  4. Exit terminal with status 0: wave should resume in lfd.")
-    print("  5. Exit terminal non-zero or stop session: wave should fail and surface should disappear.")
+    print(
+        "  5. Exit terminal non-zero or stop session: "
+        "wave should fail and surface should disappear."
+    )
     print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
 
 

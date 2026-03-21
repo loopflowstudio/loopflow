@@ -2,7 +2,9 @@
 
 ## Vision
 
-Every chord is a viable system. Each chord maintains its own identity, boundary, and all five VSM systems for its members. The root chord is special only because it has no parent — its algedonic signals go to a human.
+Every chord is a viable system.
+
+Each chord maintains its own identity, boundary, and all five VSM systems for its members. The root chord is special only because it has no parent — its algedonic signals go to a human.
 
 A chord-wave is an ordinary wave whose `area` points at `wave/<name>/` directories. No parallel runtime model. Coordination, self-healing, and policy all grow out of the existing wave/flow system.
 

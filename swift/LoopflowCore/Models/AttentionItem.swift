@@ -44,6 +44,19 @@ public struct InteractiveAttentionContext: Sendable, Hashable {
     public let step: String?
     public let terminalSessionId: String?
     public let designPath: String?
+    public let mutationSummary: String?
+
+    public init(
+        step: String? = nil,
+        terminalSessionId: String? = nil,
+        designPath: String? = nil,
+        mutationSummary: String? = nil
+    ) {
+        self.step = step
+        self.terminalSessionId = terminalSessionId
+        self.designPath = designPath
+        self.mutationSummary = mutationSummary
+    }
 }
 
 /// Context for algedonic attention items (system escalation).
@@ -52,6 +65,18 @@ public struct AlgedonicAttentionContext: Sendable, Hashable {
     public let error: String?
     public let reason: String?
     public let conflictFiles: [String]
+
+    public init(
+        step: String? = nil,
+        error: String? = nil,
+        reason: String? = nil,
+        conflictFiles: [String] = []
+    ) {
+        self.step = step
+        self.error = error
+        self.reason = reason
+        self.conflictFiles = conflictFiles
+    }
 }
 
 public enum AttentionContext: Sendable, Hashable {
@@ -110,7 +135,8 @@ public extension AttentionItem {
                 InteractiveAttentionContext(
                     step: json["step"] as? String,
                     terminalSessionId: json["terminal_session_id"] as? String,
-                    designPath: json["design_path"] as? String
+                    designPath: json["design_path"] as? String,
+                    mutationSummary: json["mutation_summary"] as? String
                 )
             )
         case .algedonic:

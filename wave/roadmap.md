@@ -19,8 +19,8 @@ chord: redesign
 │  build: creates chord machinery and Letta integration
 │  garden: observes its own waves, routes to tune/silence, remembers
 │
-├── wave: agent-embedding       7 items — Concerto as conductor
-└── wave: chord-model           10 items — worker pools, modes, VSM configs, discovery, Letta, mutations, APIs
+├── wave: agent-embedding       5 items — Concerto as conductor
+└── wave: chord-model           13 items — worker pools, modes, VSM configs, discovery, Letta, mutations, APIs
 
 wave: dogfood                   3 items — Mac Mini server, phone deploy, team workflow
 ```
@@ -53,9 +53,10 @@ Waves produce real PRs. The chord gardens them. Build and garden
 alternate — waves create, chord observes, chord proposes, waves
 adjust.
 
-**agent-embedding** starts with block queue view (01) — the chord
-needs somewhere to surface blocks. Terminal embedding (02) and
-portfolio (03) follow.
+**agent-embedding** now turns the old detail panel into a workspace.
+The remaining roadmap starts with interactive checkpoints in the queue
+(01), closes the last lifecycle gaps (02), then expands into
+portfolio (03) and calibration (04).
 
 **chord-model** continues with triggers (04), area model (05),
 wave mutation (06), and later API expansion (08). Stall detection,
@@ -67,7 +68,9 @@ Enough garden cycles to answer the open questions with evidence.
 
 - chord-model/07 — DAG enforcement and default chord
 - chord-model/04 — memory of repeated algedonic and calibration patterns
-- agent-embedding/05 — calibration view (trajectory review UX)
+- agent-embedding/04 — calibration view (trajectory review UX)
+- agent-embedding/05 — window-composition polish once the workspace
+  usage patterns are proven
 
 The default chord absorbs the existing five waves (foundation,
 trust, context, concerto, scale) and restructures them through

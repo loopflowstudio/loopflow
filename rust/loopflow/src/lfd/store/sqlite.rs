@@ -1244,25 +1244,50 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn map_attention_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttentionItem> {
+        let kind_raw: String = row.get(3)?;
+        let status_raw: String = row.get(4)?;
+        let context_raw: String = row.get(7)?;
+        let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(StoreError::InvalidData(err)),
+            )
+        })?;
+        let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(StoreError::InvalidData(err)),
+            )
+        })?;
+
+        Ok(AttentionItem {
+            id: LfdId::from_raw(row.get::<_, String>(0)?),
+            wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
+            run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+            kind,
+            status,
+            title: row.get(5)?,
+            summary: row.get(6)?,
+            context: serde_json::from_str(&context_raw)
+                .unwrap_or(serde_json::Value::Object(Default::default())),
+            surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.get(8)?),
+            viewed_at: row
+                .get::<_, Option<i64>>(9)?
+                .map(crate::lfd::store::rows::unix_to_datetime),
+            resolved_at: row
+                .get::<_, Option<i64>>(10)?
+                .map(crate::lfd::store::rows::unix_to_datetime),
+        })
+    }
+
     pub fn list_attention_items(
         &self,
         status: Option<AttentionStatus>,
         kind: Option<AttentionKind>,
     ) -> StoreResult<Vec<AttentionItem>> {
-        struct RawAttentionItem {
-            id: LfdId,
-            wave_id: LfdId,
-            run_id: Option<LfdId>,
-            kind: String,
-            status: String,
-            title: String,
-            summary: String,
-            context: String,
-            surfaced_at: i64,
-            viewed_at: Option<i64>,
-            resolved_at: Option<i64>,
-        }
-
         let mut sql = String::from(
             "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items",
         );
@@ -1284,52 +1309,12 @@ impl SqliteStore {
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            Ok(RawAttentionItem {
-                id: LfdId::from_raw(row.get::<_, String>(0)?),
-                wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
-                run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
-                kind: row.get(3)?,
-                status: row.get(4)?,
-                title: row.get(5)?,
-                summary: row.get(6)?,
-                context: row.get(7)?,
-                surfaced_at: row.get(8)?,
-                viewed_at: row.get(9)?,
-                resolved_at: row.get(10)?,
-            })
-        })?;
-
-        let mut items = Vec::new();
-        for raw in rows {
-            let raw = raw?;
-            let kind = raw
-                .kind
-                .parse::<AttentionKind>()
-                .map_err(StoreError::InvalidData)?;
-            let status = raw
-                .status
-                .parse::<AttentionStatus>()
-                .map_err(StoreError::InvalidData)?;
-            let context = serde_json::from_str(&raw.context)
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-            items.push(AttentionItem {
-                id: raw.id,
-                wave_id: raw.wave_id,
-                run_id: raw.run_id,
-                kind,
-                status,
-                title: raw.title,
-                summary: raw.summary,
-                context,
-                surfaced_at: crate::lfd::store::rows::unix_to_datetime(raw.surfaced_at),
-                viewed_at: raw.viewed_at.map(crate::lfd::store::rows::unix_to_datetime),
-                resolved_at: raw
-                    .resolved_at
-                    .map(crate::lfd::store::rows::unix_to_datetime),
-            });
-        }
-        Ok(items)
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params.iter()),
+            Self::map_attention_item_row,
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
     }
 
     pub fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
@@ -1337,43 +1322,31 @@ impl SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items WHERE id = ?1",
         )?;
-        stmt.query_row(rusqlite::params![attention_id], |row| {
-            let kind_raw: String = row.get(3)?;
-            let status_raw: String = row.get(4)?;
-            let context_raw: String = row.get(7)?;
-            let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    3,
-                    rusqlite::types::Type::Text,
-                    Box::new(StoreError::InvalidData(err)),
-                )
-            })?;
-            let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    4,
-                    rusqlite::types::Type::Text,
-                    Box::new(StoreError::InvalidData(err)),
-                )
-            })?;
-            Ok(AttentionItem {
-                id: LfdId::from_raw(row.get::<_, String>(0)?),
-                wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
-                run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
-                kind,
-                status,
-                title: row.get(5)?,
-                summary: row.get(6)?,
-                context: serde_json::from_str(&context_raw)
-                    .unwrap_or(serde_json::Value::Object(Default::default())),
-                surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.get(8)?),
-                viewed_at: row
-                    .get::<_, Option<i64>>(9)?
-                    .map(crate::lfd::store::rows::unix_to_datetime),
-                resolved_at: row
-                    .get::<_, Option<i64>>(10)?
-                    .map(crate::lfd::store::rows::unix_to_datetime),
-            })
-        })
+        stmt.query_row(
+            rusqlite::params![attention_id],
+            Self::map_attention_item_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
+             FROM attention_items
+             WHERE run_id = ?1 AND kind = ?2 AND status != ?3
+             ORDER BY surfaced_at DESC
+             LIMIT 1",
+        )?;
+        stmt.query_row(
+            rusqlite::params![run_id, kind.as_str(), AttentionStatus::Resolved.as_str()],
+            Self::map_attention_item_row,
+        )
         .optional()
         .map_err(StoreError::from)
     }

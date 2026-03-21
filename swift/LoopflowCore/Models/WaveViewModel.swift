@@ -151,6 +151,62 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         return "\(areaStr) · \(configuredFlow.isEmpty ? "default" : configuredFlow)"
     }
 
+    /// First line of the vision section — the tagline.
+    public var visionTagline: String? {
+        guard let vision = content?.vision else { return nil }
+        let firstLine = vision.components(separatedBy: .newlines)
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
+            .trimmingCharacters(in: .whitespaces)
+        return firstLine
+    }
+
+    /// Short diff summary like "+42 −8" for display, when there's an active diff.
+    public var diffIndicator: String? {
+        guard hasDiff, let stat = diffStat else { return nil }
+        // diffStat is a git stat summary; extract insertions/deletions
+        var adds = 0
+        var dels = 0
+        let parts = stat.components(separatedBy: ",")
+        for part in parts {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            if trimmed.contains("insertion") {
+                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
+                    adds = num
+                }
+            } else if trimmed.contains("deletion") {
+                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
+                    dels = num
+                }
+            }
+        }
+        if adds == 0 && dels == 0 { return nil }
+        var result: [String] = []
+        if adds > 0 { result.append("+\(adds)") }
+        if dels > 0 { result.append("−\(dels)") }
+        return result.joined(separator: " ")
+    }
+
+    /// Whether the diff is net-positive (green) or net-negative (red).
+    public var diffIsPositive: Bool {
+        guard let stat = diffStat else { return true }
+        var adds = 0
+        var dels = 0
+        let parts = stat.components(separatedBy: ",")
+        for part in parts {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            if trimmed.contains("insertion") {
+                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
+                    adds = num
+                }
+            } else if trimmed.contains("deletion") {
+                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
+                    dels = num
+                }
+            }
+        }
+        return adds >= dels
+    }
+
     public var areaDisplay: String {
         if area.isEmpty { return "" }
         return area.first == "." ? "." : area.joined(separator: ", ")

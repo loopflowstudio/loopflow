@@ -23,13 +23,33 @@ public final class MultiplexerStore {
     // MARK: - Layout access
 
     public func layout(for waveId: String) -> LayoutNode {
-        if let existing = loadedLayout(for: waveId) {
-            return existing
+        resolvedLayout(for: waveId) {
+            LayoutNode.defaultLayout()
         }
+    }
 
-        let defaultLayout = normalizeLayout(LayoutNode.defaultLayout(), for: waveId)
-        layoutsByWave[waveId] = defaultLayout
-        return defaultLayout
+    public func layout(for wave: WaveViewModel) -> LayoutNode {
+        resolvedLayout(for: wave.id) {
+            defaultLayout(for: wave)
+        }
+    }
+
+    public func defaultLayout(for wave: WaveViewModel) -> LayoutNode {
+        let roadmap = makePane(type: .roadmap, for: wave.id)
+        let runs = makePane(type: .runs, for: wave.id)
+        let terminal = makePane(type: .terminal, for: wave.id)
+
+        return .split(
+            .horizontal,
+            first: .split(
+                .vertical,
+                first: .leaf(roadmap),
+                second: .leaf(runs),
+                ratio: 0.58
+            ),
+            second: .leaf(terminal),
+            ratio: 0.42
+        )
     }
 
     public func focusedPaneId(for waveId: String) -> String? {
@@ -40,6 +60,10 @@ public final class MultiplexerStore {
     public func focusedPane(for waveId: String) -> PaneState? {
         let layout = layout(for: waveId)
         return focusedPaneId(for: waveId).flatMap { layout.pane(for: $0) }
+    }
+
+    public func pane(ofType type: PaneType, for waveId: String) -> PaneState? {
+        layout(for: waveId).allPanes.first { $0.type == type }
     }
 
     // MARK: - Mutations
@@ -179,6 +203,16 @@ public final class MultiplexerStore {
         return layoutsByWave[waveId]
     }
 
+    private func resolvedLayout(for waveId: String, makeDefault: () -> LayoutNode) -> LayoutNode {
+        if let existing = loadedLayout(for: waveId) {
+            return existing
+        }
+
+        let layout = normalizeLayout(makeDefault(), for: waveId)
+        layoutsByWave[waveId] = layout
+        return layout
+    }
+
     private func ensureLoaded(_ waveId: String) {
         guard layoutsByWave[waveId] == nil, let repoKey else { return }
 
@@ -192,12 +226,13 @@ public final class MultiplexerStore {
     }
 
     private func reconcileFocus(for waveId: String) {
+        let layout = layout(for: waveId)
         guard let focused = focusedPaneByWave[waveId],
-              layout(for: waveId).pane(for: focused) == nil else {
+              layout.pane(for: focused) == nil else {
             return
         }
 
-        focusedPaneByWave[waveId] = layout(for: waveId).firstPane?.id
+        focusedPaneByWave[waveId] = layout.firstPane?.id
     }
 
     private func storageKey(repoKey: String, waveId: String? = nil, suffix: String) -> String {

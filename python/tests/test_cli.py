@@ -20,8 +20,8 @@ from loopflow.cli import (
     _auth_poll_timeout_seconds,
     _auth_status_table,
     _billing_tables,
-    _extract_authorization_code,
     _estimate_cost,
+    _extract_authorization_code,
     _format_cost,
     _format_tokens,
     _infer_group_by,
@@ -168,9 +168,7 @@ def test_extract_authorization_code_accepts_raw_code() -> None:
 
 def test_extract_authorization_code_parses_redirect_url() -> None:
     assert (
-        _extract_authorization_code(
-            "urn:ietf:wg:oauth:2.0:oob?code=abc123&state=ignored"
-        )
+        _extract_authorization_code("urn:ietf:wg:oauth:2.0:oob?code=abc123&state=ignored")
         == "abc123"
     )
 

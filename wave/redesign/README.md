@@ -1,6 +1,8 @@
 # Redesign
 
-The agent layer is commoditizing. Claude Code, Codex, and OpenCode are all good enough — and getting better faster than we can compete. Loopflow's future is the layer above: orchestrating agents, not being one.
+Orchestrating agents, not being one.
+
+The agent layer is commoditizing. Claude Code, Codex, and OpenCode are all good enough — and getting better faster than we can compete. Loopflow's future is the layer above.
 
 Three things differentiate loopflow:
 
@@ -29,8 +31,8 @@ wave: redesign (chord-wave)
 │        wave/agent-embedding/
 │  flow: garden-or-silent
 │
-├── wave: chord-model           8 items — garden flow, Letta, mutations, APIs
-└── wave: agent-embedding       7 items — Concerto as conductor
+├── wave: chord-model           13 items — runtime config, governance, Letta, mutations, APIs
+└── wave: agent-embedding       5 items — Concerto as conductor
 ```
 
 ## Phasing
@@ -45,7 +47,7 @@ Build enough to run the first garden cycle. Uses existing flows.
 Current sequencing matters:
 - `chord-model/02` owns the operational gap between "the garden machinery parses" and "the redesign chord actually runs in lfd"
 - stall detection, algedonic polish, and memory-backed pattern work stay inside `chord-model` after the live proof exists
-- `agent-embedding/01` can keep building isolated Swift scaffolding, but backend/auth/pm work that escapes `swift/` should move into the owning wave instead of broadening its scope silently
+- `agent-embedding/01` can keep tightening queue and workspace UX inside `swift/`, but backend/auth/pm work that escapes `swift/` should move into the owning wave instead of broadening its scope silently
 
 First garden cycle runs. The chord-wave observes its own bootstrap commits. Letta records its first memories. The recursive loop is live.
 
@@ -53,7 +55,7 @@ First garden cycle runs. The chord-wave observes its own bootstrap commits. Lett
 
 Waves produce real PRs. The chord-wave gardens them. Build and garden alternate — waves create, chord-wave observes, chord-wave proposes, waves adjust.
 
-**agent-embedding** starts with block queue view (01) — the chord-wave needs somewhere to surface blocks. Terminal embedding (02) and portfolio (03) follow.
+**agent-embedding** now turns the old detail panel into a workspace. The remaining roadmap starts with interactive checkpoints in the queue (01), closes the last lifecycle gaps (02), then expands into portfolio (03) and calibration (04).
 
 **chord-model** continues with Letta (04), area model (05), wave mutation (06), and later API expansion (08). Stall detection, self-healing polish, and signal memory now live here instead of in a separate `signals` lane.
 
@@ -63,7 +65,8 @@ Enough garden cycles to answer the open questions with evidence.
 
 - chord-model/07 — DAG enforcement and default chord-wave
 - chord-model/04 — memory starts carrying repeated algedonic and calibration patterns
-- agent-embedding/05 — calibration view (trajectory review UX)
+- agent-embedding/04 — calibration view (trajectory review UX)
+- agent-embedding/05 — window-composition polish once the workspace usage patterns are proven
 
 The default chord-wave absorbs the existing five waves (foundation, trust, context, concerto, scale) and restructures them through garden cycles. Not manual reshuffling — the chord-wave proposes, the human reviews.
 
@@ -99,7 +102,7 @@ Not a platform. Not a service. Not selling seats or tiers. The business model is
 The five existing waves (foundation, trust, context, concerto, scale) keep running as-is. They aren't manually reshuffled into the new structure. When the default chord-wave is ready (chord-model/07), it absorbs them and proposes restructuring through garden cycles.
 
 Some existing work items are already covered by the new waves:
-- scale/04 (chord UI) -> agent-embedding/01 + 03
+- scale/04 (chord UI) -> agent-embedding/03 + 04
 - scale/05 (cross-repo UI) -> agent-embedding/03
 
 These overlaps resolve naturally when the default chord-wave runs its first garden cycle and proposes consolidation.

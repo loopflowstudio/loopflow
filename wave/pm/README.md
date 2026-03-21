@@ -2,7 +2,7 @@
 
 ## Vision
 
-Loopflow syncs with the planning tools teams already use. Asana, Linear, and Notion are all first-class PM providers with full item sync. The next frontier is making Notion the doc-native source that brings README context and supporting docs into the wave instead of flattening everything into tasks/issues.
+Loopflow syncs with the planning tools teams already use. Asana, Linear, and Notion are all first-class PM providers with full item sync. The next frontier is making Notion the doc-native source that brings README context and supporting docs into the wave instead of flattening everything into tasks/issues. ff64d8ac6 (lf commit: implement)
 
 ### Not here
 

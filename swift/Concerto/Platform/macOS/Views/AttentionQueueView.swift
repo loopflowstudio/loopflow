@@ -106,15 +106,59 @@ struct AttentionQueueView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.sm) {
-            Text("Nothing needs you.")
-                .font(Typography.sectionTitle())
-                .foregroundStyle(palette.accent)
-            Text("Waves are running.")
-                .font(Typography.body())
-                .foregroundStyle(palette.textSecondary)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(repoState.waves) { wave in
+                    waveOverviewRow(wave)
+                }
+            }
+            .padding(Spacing.xl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func waveOverviewRow(_ wave: WaveViewModel) -> some View {
+        Button {
+            repoState.selectedWaveId = wave.id
+        } label: {
+            HStack(spacing: Spacing.md) {
+                Image(systemName: wave.statusIndicator.icon)
+                    .foregroundStyle(wave.statusIndicator.color)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(wave.displayName)
+                        .font(Typography.body())
+                        .fontWeight(.medium)
+                        .foregroundStyle(palette.text)
+
+                    if let tagline = wave.visionTagline {
+                        Text(tagline)
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                if let diff = wave.diffIndicator {
+                    Text(diff)
+                        .font(Typography.caption())
+                        .fontWeight(.medium)
+                        .foregroundStyle(wave.diffIsPositive ? Color.statusSuccess : Color.statusError)
+                }
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
+            .background(palette.surface)
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .stroke(palette.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -173,7 +217,7 @@ private struct AttentionRow: View {
     }
 }
 
-private struct AttentionDetailView: View {
+struct AttentionDetailView: View {
     let item: AttentionItem?
 
     @Environment(RepoState.self) private var repoState
@@ -220,6 +264,27 @@ private struct AttentionDetailView: View {
                 }
                 if let designPath = context.designPath {
                     detailLine("Design", designPath)
+                }
+                if let preview = attentionDesignPreviewText(
+                    context: context,
+                    repoRoot: repoRoot(for: item)
+                ) {
+                    attentionSection("Design preview", accessibilityIdentifier: "attention-design-preview") {
+                        Text(renderAttentionMarkdown(preview))
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+                if let mutationSummary = attentionMutationSummary(context) {
+                    attentionSection("Proposed mutations", accessibilityIdentifier: "attention-mutation-summary") {
+                        Text(renderAttentionMarkdown(mutationSummary))
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
                 }
             }
         case .algedonic(let context):
@@ -273,4 +338,67 @@ private struct AttentionDetailView: View {
                 .foregroundStyle(palette.text)
         }
     }
+
+    @ViewBuilder
+    private func attentionSection<Content: View>(
+        _ title: String,
+        accessibilityIdentifier: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text(title)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+            content()
+                .accessibilityIdentifier(accessibilityIdentifier)
+        }
+    }
+
+    private func repoRoot(for item: AttentionItem) -> URL? {
+        repoState.waveStore.wave(for: item.waveId)
+            .map { URL(fileURLWithPath: $0.repo) } ?? repoState.currentRepo
+    }
+}
+
+private func renderAttentionMarkdown(_ text: String) -> AttributedString {
+    (try? AttributedString(
+        markdown: text,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    )) ?? AttributedString(text)
+}
+
+func attentionDesignPreviewText(
+    context: InteractiveAttentionContext,
+    repoRoot: URL?
+) -> String? {
+    guard context.step == "review-design",
+          let designPath = context.designPath,
+          let repoRoot,
+          let text = try? String(
+            contentsOf: repoRoot.appendingPathComponent(designPath),
+            encoding: .utf8
+          ),
+          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+        return nil
+    }
+    return previewAttentionText(text, maxLines: 12)
+}
+
+func attentionMutationSummary(_ context: InteractiveAttentionContext) -> String? {
+    guard context.step == "wave/review",
+          let summary = context.mutationSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !summary.isEmpty
+    else {
+        return nil
+    }
+    return summary
+}
+
+private func previewAttentionText(_ text: String, maxLines: Int) -> String {
+    let lines = text.components(separatedBy: .newlines)
+    if lines.count <= maxLines {
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return lines.prefix(maxLines).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }

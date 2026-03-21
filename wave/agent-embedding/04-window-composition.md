@@ -3,29 +3,34 @@ asana_id: '1213718096104955'
 linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 notion_id: 32af8f99-3d81-81c8-a089-d47185436add
 ---
-# 05: Window Composition — Polish
+# 04: Window Composition — Polish
 
 **Finish line:** The multiplexer panes are rich enough to stay open. Markdown has a file picker, diff shows unified hunks, splitting offers a type choice, and directional focus works across the whole layout.
 
 ## Context
 
-The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and four pane types (terminal, markdown, diff, launchpad). Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
+The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and first-party workspace panes for roadmap, README, runs, launcher, markdown, diff, terminal, and launchpad. Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
+
+Current pane types (8): terminal, roadmap, readme, runs, launcher, markdown, diff, launchpad. Default workspace opens as roadmap + runs (vertical split) on the left, terminal on the right. The command palette (`Cmd+K`) focuses existing panes before creating duplicates and supports wave switching.
 
 Current pane state:
-- **Terminal:** Fully functional — Ghostty embedding, tmux-backed splits, session lifecycle
-- **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no FSEvents
+- **Terminal:** Fully functional — Ghostty embedding, tmux-backed sessions (`lf-{waveId}-{paneId}`), session lifecycle
+- **Roadmap / README / Runs / Launcher:** Shipped and useful, but still simple projections over existing stores rather than deeply interactive tools
+- **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no file watching
 - **Diff:** Shows `git diff --stat main...HEAD`. No per-file unified diff, no file list sidebar
 - **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
-Current shortcuts: `Cmd+D` split vertical, `Cmd+Shift+D` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Enter` new shell, `Cmd+←/→` focus next/previous pane.
+Current shortcuts: split vertical/horizontal, close pane, new shell, focus next/previous pane. Smart pane rotation on split: terminal → launchpad → roadmap → runs → readme → launcher → diff → launchpad.
+
+This work should deepen the per-wave workspace that already shipped. Do not treat it as a back door to a second dashboard architecture; always-on wave terminals across the portfolio stay downstream of daemon-owned tmux sessions in `wave/lfd/`.
 
 ## What to build
 
 ### 1. Pane type picker
 
-When splitting, a popover lets you choose the new pane type. Currently splits always create a terminal pane.
+When splitting, a popover lets you choose the new pane type. Currently splits auto-cycle through pane types (terminal splits default to launchpad; non-terminal splits cycle through roadmap → runs → readme → launcher → diff → launchpad).
 
-- Small popover at the split point
+- Small popover at the split point instead of auto-cycling
 - Options: Terminal (grayed if one exists), Markdown, Diff, Launchpad
 - Default: terminal if none exists, otherwise markdown
 
@@ -71,9 +76,14 @@ Replace next/previous with spatial navigation.
 
 - Drag-to-resize split boundaries
 - Focus ring that clearly shows which layer is active (outer pane border vs terminal focus)
-- Cross-pane interaction: click a file path in terminal → open in markdown viewer (later)
+- Cross-pane interaction: click a file path in terminal → open in markdown viewer
 
-### 8. IME input source validation
+### 8. Layout persistence safety
+
+- Version `MultiplexerLayout` persistence so future schema changes can migrate cleanly
+- Add a reset path for invalid or stale layouts instead of stranding a wave in a broken workspace
+
+### 9. IME input source validation
 
 The direct-key typing path bypasses `interpretKeyEvents` for ordinary printable input but defers to AppKit text input when `selectedKeyboardInputSource` contains `inputmethod` or when Option is held. Validate with Japanese (Kotoeri), Korean, Chinese (Pinyin), and third-party input methods (e.g. RIME, Google Japanese Input) to confirm composition still starts correctly.
 

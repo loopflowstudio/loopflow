@@ -47,7 +47,7 @@ struct ContentView: View {
         } message: {
             Text(repoState.errorMessage ?? "An unknown error occurred")
         }
-        .navigationTitle(repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
+        .navigationTitle(repoState.selectedWave?.displayName ?? repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
         .background(palette.background)
         .background(WindowAccessor { window in
             let number = window?.windowNumber
@@ -156,6 +156,7 @@ struct ContentView: View {
         actions.append(PaletteAction("Refresh Waves", icon: "arrow.clockwise") {
             Task { await repoState.refreshWaves() }
         })
+        actions.append(contentsOf: buildWavePaletteActions())
 
         if let wave = repoState.selectedWave,
            let worktreePath = wave.worktreePath {
@@ -197,6 +198,10 @@ struct ContentView: View {
             }
         }
 
+        if repoState.selectedWave != nil {
+            actions.append(contentsOf: buildPanePaletteActions())
+        }
+
         if multiplexerContext() != nil {
             actions.append(PaletteAction(
                 "Split vertical",
@@ -229,6 +234,22 @@ struct ContentView: View {
         }
 
         return actions
+    }
+
+    private func buildWavePaletteActions() -> [PaletteAction] {
+        repoState.waveStore.ordered.map { wave in
+            PaletteAction("Switch to \(wave.displayName)", id: "wave-\(wave.id)", icon: wave.status.icon) {
+                repoState.selectedWaveId = wave.id
+            }
+        }
+    }
+
+    private func buildPanePaletteActions() -> [PaletteAction] {
+        panePaletteTypes.map { paneType in
+            PaletteAction("\(paneType.displayName) Pane", id: "pane-\(paneType.rawValue)", icon: paneType.systemImage) {
+                focusOrCreatePane(paneType)
+            }
+        }
     }
 
     private func handleShortcut(_ action: ShortcutAction) {
@@ -394,15 +415,11 @@ struct ContentView: View {
 
     private func multiplexerContext() -> MultiplexerContext? {
         guard let wave = repoState.selectedWave,
-              (wave.worktreePath ?? wave.api.localWorktree) != nil,
               let focusedPane = repoState.multiplexerStore.focusedPane(for: wave.id) else {
             return nil
         }
 
-        return MultiplexerContext(
-            waveId: wave.id,
-            focusedPane: focusedPane
-        )
+        return MultiplexerContext(waveId: wave.id, focusedPane: focusedPane)
     }
 
     private func splitPaneType(for pane: PaneState) -> PaneType {
@@ -412,12 +429,43 @@ struct ContentView: View {
     private func nextCompanionPaneType(after paneType: PaneType) -> PaneType {
         switch paneType {
         case .terminal, .launchpad:
-            .markdown
-        case .markdown:
+            .roadmap
+        case .roadmap:
+            .runs
+        case .runs:
+            .readme
+        case .readme:
+            .launcher
+        case .launcher:
             .diff
-        case .diff:
+        case .diff, .markdown:
             .launchpad
         }
+    }
+
+    private func focusOrCreatePane(_ paneType: PaneType) {
+        guard let wave = repoState.selectedWave else { return }
+
+        if let existingPane = repoState.multiplexerStore.pane(ofType: paneType, for: wave.id) {
+            repoState.multiplexerStore.setFocusedPane(existingPane.id, for: wave.id)
+            return
+        }
+
+        let anchorPane = repoState.multiplexerStore.focusedPane(for: wave.id)
+            ?? repoState.multiplexerStore.layout(for: wave.id).firstPane
+        guard let anchorPane else { return }
+
+        let axis: SplitAxis = anchorPane.type == .terminal ? .horizontal : .vertical
+        _ = repoState.multiplexerStore.splitPane(
+            anchorPane.id,
+            axis: axis,
+            newPaneType: paneType,
+            for: wave.id
+        )
+    }
+
+    private var panePaletteTypes: [PaneType] {
+        [.roadmap, .readme, .runs, .launcher, .terminal, .diff, .launchpad]
     }
 
     private func openIDEForSelectedWave() {

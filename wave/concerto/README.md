@@ -2,7 +2,9 @@
 
 ## Vision
 
-The app humans use to steer agents. Mobile experience, voice input, interaction patterns, and app-level polish live here. Vertical feature UI (chords viz, cross-repo portfolio, context breakdown) stays with its domain wave.
+The app humans use to steer agents.
+
+Mobile experience, voice input, interaction patterns, and app-level polish live here. Vertical feature UI (chords viz, cross-repo portfolio, context breakdown) stays with its domain wave.
 
 Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-in surface, not a shrunken desktop.
 

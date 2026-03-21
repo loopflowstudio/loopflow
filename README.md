@@ -324,14 +324,17 @@ lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens
 ```
 
-PM provider roles:
+PM provider config:
 
 ```yaml
 # .lf/config.yaml
 pm:
-  rw_provider: linear
-  export_providers:
-    - asana
+  provider: notion
+notion:
+  title_property: Name        # optional schema overrides
+  status_property: Status
+  done_value: Done
+  priority_property: Priority
 ```
 
 ```bash

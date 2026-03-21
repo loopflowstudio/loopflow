@@ -20,7 +20,7 @@ Bidirectional conversion so items are real pages on both sides. Headings, paragr
 
 ### Notion OAuth (`provider_auth.rs`)
 
-`NotionOAuthBroker` following the `LinearOAuthBroker` pattern. PKCE flow, localhost redirect listener on port 19223. No API key fallback.
+`NotionOAuthBroker` following the `LinearOAuthBroker` pattern. Browser-based OAuth with a localhost redirect listener on port 19223, Basic-auth token exchange, no API key fallback.
 
 ### Provider wiring
 

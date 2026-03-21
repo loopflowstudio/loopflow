@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tokio::process::Command;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
@@ -498,6 +498,12 @@ impl WaveExecutor {
             }
         };
 
+        debug!(
+            source_wave_id = %source_wave_id,
+            trigger_count = triggers.len(),
+            "trigger_listeners_on_completion: found triggers"
+        );
+
         for mut trigger in triggers {
             if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
                 continue;
@@ -528,6 +534,11 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
+            debug!(
+                listener_wave_id = %listener_wave.id(),
+                listener_workers = listener_wave.workers(),
+                "trigger_listeners_on_completion: dispatching activation"
+            );
             let activated = dispatch_or_enqueue_activation(
                 &self.store,
                 self,
@@ -538,6 +549,11 @@ impl WaveExecutor {
                 envelope,
             )
             .await;
+            debug!(
+                listener_wave_id = %listener_wave.id(),
+                activated,
+                "trigger_listeners_on_completion: activation result"
+            );
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {
@@ -947,6 +963,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_starts_listen_wave_on_completion() {
+        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step a");
@@ -1035,6 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn listen_trigger_queues_when_listener_running() {
+        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step");
@@ -1109,6 +1127,7 @@ mod tests {
 
     #[tokio::test]
     async fn listen_trigger_queues_when_scheduler_full() {
+        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step");

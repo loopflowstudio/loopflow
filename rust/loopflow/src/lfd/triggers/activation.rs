@@ -251,7 +251,10 @@ pub async fn spawn_immediate_activation(
         return None;
     }
     if scheduler.has_active_session(wave.id().as_str()) {
-        eprintln!("[DIAG] spawn_immediate: wave {} has active session", wave.id());
+        eprintln!(
+            "[DIAG] spawn_immediate: wave {} has active session",
+            wave.id()
+        );
         return None;
     }
 
@@ -259,7 +262,10 @@ pub async fn spawn_immediate_activation(
     let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
         Ok(guard) => guard,
         Err(reason) => {
-            eprintln!("[DIAG] spawn_immediate: scheduler full for wave {}: {reason}", wave.id());
+            eprintln!(
+                "[DIAG] spawn_immediate: scheduler full for wave {}: {reason}",
+                wave.id()
+            );
             // Fall back to queue when scheduler is full.
             let enqueue_result = enqueue_pending_activation(store, event_hub, envelope).await;
             eprintln!("[DIAG] spawn_immediate: fallback enqueue result={enqueue_result:?}");
@@ -289,10 +295,16 @@ pub async fn spawn_immediate_activation(
     } else {
         Some(envelope.target_branch.as_str())
     };
-    eprintln!("[DIAG] spawn_immediate: creating wave run for wave {} target={target:?}", wave.id());
+    eprintln!(
+        "[DIAG] spawn_immediate: creating wave run for wave {} target={target:?}",
+        wave.id()
+    );
     let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => {
-            eprintln!("[DIAG] spawn_immediate: wave run created: {} worktree={}", run.id, run.worktree);
+            eprintln!(
+                "[DIAG] spawn_immediate: wave run created: {} worktree={}",
+                run.id, run.worktree
+            );
             run
         }
         Err(err) => {
@@ -353,7 +365,11 @@ pub async fn dispatch_or_enqueue_activation(
         }
     };
 
-    eprintln!("[DIAG] dispatch_or_enqueue: wave={} active_runs={active_runs} workers={}", wave.id(), wave.workers());
+    eprintln!(
+        "[DIAG] dispatch_or_enqueue: wave={} active_runs={active_runs} workers={}",
+        wave.id(),
+        wave.workers()
+    );
 
     if active_runs >= wave.workers() {
         let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
@@ -374,7 +390,10 @@ pub async fn dispatch_or_enqueue_activation(
         envelope,
     )
     .await;
-    eprintln!("[DIAG] dispatch_or_enqueue: spawn_immediate result={}", result.is_some());
+    eprintln!(
+        "[DIAG] dispatch_or_enqueue: spawn_immediate result={}",
+        result.is_some()
+    );
     result.is_some()
 }
 

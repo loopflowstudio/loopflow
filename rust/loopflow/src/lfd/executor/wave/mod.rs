@@ -355,7 +355,11 @@ impl WaveExecutor {
             outcome.exit_code
         };
 
-        eprintln!("[DIAG] execute: exit_code={exit_code} run={} wave={}", run.id, wave.id());
+        eprintln!(
+            "[DIAG] execute: exit_code={exit_code} run={} wave={}",
+            run.id,
+            wave.id()
+        );
         if exit_code == 0 {
             self.finish_completed_run(&wave, &mut run).await
         } else {
@@ -496,7 +500,10 @@ impl WaveExecutor {
             }
         };
 
-        eprintln!("[DIAG] trigger_listeners_on_completion: source={source_wave_id} triggers={}", triggers.len());
+        eprintln!(
+            "[DIAG] trigger_listeners_on_completion: source={source_wave_id} triggers={}",
+            triggers.len()
+        );
 
         for mut trigger in triggers {
             if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
@@ -508,18 +515,27 @@ impl WaveExecutor {
             let listener_wave = match self.store.get_wave(&trigger.wave_id).await {
                 Ok(Some(wave)) => wave,
                 Ok(None) => {
-                    eprintln!("[DIAG] trigger_listeners_on_completion: listener wave {} not found", trigger.wave_id);
+                    eprintln!(
+                        "[DIAG] trigger_listeners_on_completion: listener wave {} not found",
+                        trigger.wave_id
+                    );
                     continue;
                 }
                 Err(err) => {
-                    eprintln!("[DIAG] trigger_listeners_on_completion: error loading wave {}: {err}", trigger.wave_id);
+                    eprintln!(
+                        "[DIAG] trigger_listeners_on_completion: error loading wave {}: {err}",
+                        trigger.wave_id
+                    );
                     warn!(trigger_id = %trigger.id, error = %err, "failed to load listening wave");
                     continue;
                 }
             };
 
             if listener_wave.status() == WaveStatus::Paused {
-                eprintln!("[DIAG] trigger_listeners_on_completion: listener {} is paused", listener_wave.id());
+                eprintln!(
+                    "[DIAG] trigger_listeners_on_completion: listener {} is paused",
+                    listener_wave.id()
+                );
                 continue;
             }
 

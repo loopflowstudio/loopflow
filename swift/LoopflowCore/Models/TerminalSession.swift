@@ -67,18 +67,34 @@ public struct TerminalSession: Sendable, Identifiable, Codable, Equatable {
     }
 }
 
-public struct TerminalLaunchSpec: Sendable, Equatable {
+public struct TerminalConnectionInfo: Sendable, Equatable {
+    public let sessionName: String
+    public let host: String
     public let cwd: String
-    public let argv: [String]
-    public let env: [String: String]
+    public let status: TerminalSessionStatus
 
     public init(
+        sessionName: String,
+        host: String,
         cwd: String,
-        argv: [String],
-        env: [String: String]
+        status: TerminalSessionStatus
     ) {
+        self.sessionName = sessionName
+        self.host = host
         self.cwd = cwd
-        self.argv = argv
-        self.env = env
+        self.status = status
+    }
+
+    public var usesLocalTmux: Bool {
+        let normalized = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .lowercased()
+        return switch normalized {
+        case "localhost", "127.0.0.1", "::1":
+            true
+        default:
+            false
+        }
     }
 }

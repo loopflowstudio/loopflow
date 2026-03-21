@@ -97,8 +97,8 @@ struct LocalWaveServiceAuthTests {
         #expect(result.status == .none)
     }
 
-    @Test("attachTerminalSession decodes launch command only")
-    func attachTerminalSessionDecodesLaunchCommand() async throws {
+    @Test("attachTerminalSession decodes tmux connection info")
+    func attachTerminalSessionDecodesConnectionInfo() async throws {
         let service = makeService { request in
             #expect(request.httpMethod == "POST")
             #expect(request.url?.path == "/v0/terminal-sessions/session-1/attach")
@@ -108,20 +108,22 @@ struct LocalWaveServiceAuthTests {
                 body: Data(
                     """
                     {
+                      "session_name": "lfd-session-1",
+                      "host": "localhost",
                       "cwd": "/tmp/repo",
-                      "argv": ["/bin/zsh", "-lc", "echo hi"],
-                      "env": {"LF_WAVE_ID": "wave-1"}
+                      "status": "running"
                     }
                     """.utf8
                 )
             )
         }
 
-        let spec = try await service.attachTerminalSession("session-1")
+        let info = try await service.attachTerminalSession("session-1")
 
-        #expect(spec.cwd == "/tmp/repo")
-        #expect(spec.argv == ["/bin/zsh", "-lc", "echo hi"])
-        #expect(spec.env == ["LF_WAVE_ID": "wave-1"])
+        #expect(info.sessionName == "lfd-session-1")
+        #expect(info.host == "localhost")
+        #expect(info.cwd == "/tmp/repo")
+        #expect(info.status == .running)
     }
 
     @Test("createWave sends initial paused status when requested")

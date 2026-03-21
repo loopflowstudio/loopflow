@@ -821,7 +821,7 @@ public final class RepoState {
         return session
     }
 
-    public func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec {
+    public func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {
         try await waveService.attachTerminalSession(id)
     }
 

@@ -50,7 +50,7 @@ public protocol WaveServiceProtocol: Sendable {
     func markAttentionViewed(_ id: String) async throws -> AttentionItem
     func listTerminalSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [TerminalSession]
     func getTerminalSession(_ id: String) async throws -> TerminalSession
-    func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec
+    func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo
     func startTerminalSession(_ id: String) async throws -> TerminalSession
     func cancelTerminalSession(_ id: String) async throws -> TerminalSession
     func landWave(_ id: String) async throws

@@ -636,11 +636,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parsedObject(from: data, parse: Self.parseTerminalSessionFromJSON)
     }
 
-    public func attachTerminalSession(_ id: String) async throws -> TerminalLaunchSpec {
+    public func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {
         try await performTerminalSessionAction(
             id,
             action: "attach",
-            parse: Self.parseTerminalLaunchSpecFromJSON
+            parse: Self.parseTerminalConnectionInfoFromJSON
         )
     }
 
@@ -1561,15 +1561,22 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    static func parseTerminalLaunchSpecFromJSON(_ json: [String: Any]) -> TerminalLaunchSpec? {
-        guard let cwd = json["cwd"] as? String else {
+    static func parseTerminalConnectionInfoFromJSON(_ json: [String: Any]) -> TerminalConnectionInfo? {
+        guard
+            let sessionName = json["session_name"] as? String,
+            let host = json["host"] as? String,
+            let cwd = json["cwd"] as? String,
+            let statusRaw = json["status"] as? String,
+            let status = TerminalSessionStatus(rawValue: statusRaw)
+        else {
             return nil
         }
 
-        return TerminalLaunchSpec(
+        return TerminalConnectionInfo(
+            sessionName: sessionName,
+            host: host,
             cwd: cwd,
-            argv: json["argv"] as? [String] ?? [],
-            env: json["env"] as? [String: String] ?? [:]
+            status: status
         )
     }
 

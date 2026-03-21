@@ -276,10 +276,23 @@ pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TerminalLaunchSpecDto {
+pub struct TerminalConnectionInfoDto {
+    pub session_name: String,
+    pub host: String,
     pub cwd: String,
-    pub argv: Vec<String>,
-    pub env: BTreeMap<String, String>,
+    pub status: String,
+}
+
+pub fn terminal_connection_info_dto(
+    session: &TerminalSession,
+    host: String,
+) -> TerminalConnectionInfoDto {
+    TerminalConnectionInfoDto {
+        session_name: session.tmux_name.clone(),
+        host,
+        cwd: session.cwd.clone(),
+        status: session.status.as_str().to_string(),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

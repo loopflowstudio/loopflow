@@ -320,6 +320,7 @@ impl WaveExecutor {
             } else {
                 "wave_run".to_string()
             },
+            tmux_name: tmux_session_name(&run.branch),
             status: TerminalSessionStatus::Pending,
             attached_at: None,
             started_at: None,
@@ -623,7 +624,7 @@ impl WaveExecutor {
         &self,
         session: TerminalSession,
     ) -> Result<TerminalSession> {
-        let session_name = tmux_session_name(&session.id);
+        let session_name = &session.tmux_name;
         let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
         let exit_dir = exit_file
             .parent()
@@ -650,7 +651,7 @@ impl WaveExecutor {
                 "new-session",
                 "-d",
                 "-s",
-                &session_name,
+                session_name,
                 "-c",
                 &session.cwd,
                 "/bin/zsh",
@@ -663,6 +664,12 @@ impl WaveExecutor {
             return Err(anyhow!("tmux failed to launch terminal session"));
         }
 
+        // Enable mouse mode so scroll events reach tmux rather than the inner shell.
+        let _ = Command::new("tmux")
+            .args(["set-option", "-t", session_name, "mouse", "on"])
+            .status()
+            .await;
+
         let mut running = session.clone();
         let _ = running.start();
         self.store.update_terminal_session(&running).await?;
@@ -673,12 +680,11 @@ impl WaveExecutor {
 
     /// Block until the tmux session exits and return the exit code.
     async fn wait_for_tmux_session_exit(&self, session: &TerminalSession) -> Result<i32> {
-        let session_name = tmux_session_name(&session.id);
         let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
 
         loop {
             let status = Command::new("tmux")
-                .args(["has-session", "-t", &session_name])
+                .args(["has-session", "-t", &session.tmux_name])
                 .status()
                 .await;
             match status {

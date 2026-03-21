@@ -7,8 +7,12 @@ use crate::lfd::id::LfdId;
 
 pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
 
-pub fn tmux_session_name(session_id: &LfdId) -> String {
-    format!("lfd-{session_id}")
+/// Build a human-readable tmux session name from the branch name.
+///
+/// Tmux session names cannot contain dots or colons, so those are replaced
+/// with hyphens.
+pub fn tmux_session_name(branch: &str) -> String {
+    format!("lf-{}", branch.replace(['.', ':'], "-"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +89,10 @@ pub struct TerminalSession {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
     pub source: String,
+    /// Human-readable tmux session name (e.g. `lf-engbot-6aec3220`).
+    /// Set at creation, used for attach and cleanup.
+    #[serde(default)]
+    pub tmux_name: String,
     pub status: TerminalSessionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attached_at: Option<OffsetDateTime>,
@@ -98,6 +106,10 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
+    pub fn is_tmux_backed(&self) -> bool {
+        self.source == TMUX_TERMINAL_SOURCE
+    }
+
     pub fn attach(&mut self) -> bool {
         if self.status.is_terminal() {
             return false;
@@ -162,6 +174,7 @@ mod tests {
             argv: vec!["lf".to_string(), "design".to_string()],
             env: Default::default(),
             source: "wave_step".to_string(),
+            tmux_name: "lf-test-branch".to_string(),
             status,
             attached_at: None,
             started_at: None,

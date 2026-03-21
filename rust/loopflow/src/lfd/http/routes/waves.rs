@@ -31,8 +31,7 @@ use crate::lfd::triggers::{
     spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
-    tmux_session_name, AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus,
-    WaveStatus, TMUX_TERMINAL_SOURCE,
+    AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -1013,9 +1012,9 @@ async fn cancel_active_terminal_session(state: &HttpState, run: &WaveRun) -> Res
         .event_hub
         .send(Event::terminal_session_updated(session.clone()));
 
-    if session.source == TMUX_TERMINAL_SOURCE {
+    if session.is_tmux_backed() {
         match TokioCommand::new("tmux")
-            .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+            .args(["kill-session", "-t", &session.tmux_name])
             .status()
             .await
         {
@@ -1868,6 +1867,7 @@ mod tests {
             argv: vec!["lf".to_string(), "design".to_string()],
             env: Default::default(),
             source: "wave_step".to_string(),
+            tmux_name: "lf-test-branch".to_string(),
             status: TerminalSessionStatus::Running,
             attached_at: Some(OffsetDateTime::now_utc()),
             started_at: Some(OffsetDateTime::now_utc()),

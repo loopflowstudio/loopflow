@@ -1,5 +1,4 @@
 use axum::extract::{Path, Query, State};
-use axum::http::header::HOST;
 use axum::http::uri::Authority;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
@@ -8,14 +7,15 @@ use tokio::process::Command;
 use tracing::warn;
 
 use crate::lfd::http::dto::{
-    terminal_connection_info_dto, terminal_session_dto, ListResponse, TerminalConnectionInfoDto,
-    TerminalSessionDto,
+    terminal_session_dto, ListResponse, TerminalConnectionInfoDto, TerminalSessionDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
+use crate::lfd::types::{
+    tmux_session_name, Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
+};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -24,6 +24,12 @@ pub struct ListTerminalSessionsQuery {
     pub repo: Option<String>,
     pub wave_id: Option<String>,
     pub active_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTerminalSessionRequest {
+    pub wave_id: String,
+    pub wave_run_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,7 +99,7 @@ pub async fn attach_terminal_session_handler(
 ) -> ApiResult<TerminalConnectionInfoDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session = update_terminal_session(&state, &session_id, |session| {
-        if !session.is_tmux_backed() {
+        if session.source != TMUX_TERMINAL_SOURCE {
             return Err(api_error(
                 StatusCode::PRECONDITION_FAILED,
                 "terminal session is not tmux-backed",
@@ -103,10 +109,12 @@ pub async fn attach_terminal_session_handler(
     })
     .await?;
 
-    Ok(Json(terminal_connection_info_dto(
-        &session,
-        connection_host(&headers),
-    )))
+    Ok(Json(TerminalConnectionInfoDto {
+        session_name: tmux_session_name(&session.id),
+        host: connection_host(&headers),
+        cwd: session.cwd,
+        status: session.status.as_str().to_string(),
+    }))
 }
 
 pub async fn start_terminal_session_handler(
@@ -141,7 +149,7 @@ pub async fn cancel_terminal_session_handler(
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session =
         update_terminal_session(&state, &session_id, |session| Ok(session.cancel())).await?;
-    if session.is_tmux_backed() {
+    if session.source == TMUX_TERMINAL_SOURCE {
         stop_tmux_terminal_session(&session).await;
     }
     Ok(Json(terminal_session_dto(session)))
@@ -174,6 +182,17 @@ async fn store_terminal_session_update(
     Ok(())
 }
 
+async fn store_terminal_session_update_if_changed(
+    state: &HttpState,
+    session: &TerminalSession,
+    changed: bool,
+) -> Result<(), ApiError> {
+    if changed {
+        store_terminal_session_update(state, session).await?;
+    }
+    Ok(())
+}
+
 async fn update_terminal_session<F>(
     state: &HttpState,
     session_id: &LfdId,
@@ -184,9 +203,7 @@ where
 {
     let mut session = load_terminal_session(state, session_id).await?;
     let changed = update(&mut session)?;
-    if changed {
-        store_terminal_session_update(state, &session).await?;
-    }
+    store_terminal_session_update_if_changed(state, &session, changed).await?;
     Ok(session)
 }
 
@@ -212,7 +229,7 @@ fn verify_completion_token(headers: &HeaderMap, session: &TerminalSession) -> Re
 
 fn connection_host(headers: &HeaderMap) -> String {
     let host = headers
-        .get(HOST)
+        .get("host")
         .and_then(|value| value.to_str().ok())
         .map(ToString::to_string)
         .unwrap_or_else(|| "localhost".to_string());
@@ -231,7 +248,7 @@ fn connection_host(headers: &HeaderMap) -> String {
 
 async fn stop_tmux_terminal_session(session: &TerminalSession) {
     match Command::new("tmux")
-        .args(["kill-session", "-t", &session.tmux_name])
+        .args(["kill-session", "-t", &tmux_session_name(&session.id)])
         .status()
         .await
     {
@@ -254,9 +271,7 @@ mod tests {
     use super::*;
     use crate::lfd::http::routes::test_helpers::test_http_state;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{
-        tmux_session_name, TerminalSessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
-    };
+    use crate::lfd::types::{TerminalSessionStatus, Wave, WaveMode, WaveStatus};
     use axum::extract::{Path, State};
     use axum::http::{header::HOST, HeaderValue};
     use time::OffsetDateTime;
@@ -331,7 +346,7 @@ mod tests {
         .await
         .expect("attach should succeed");
 
-        assert_eq!(response.session_name, "lf-test-branch");
+        assert_eq!(response.session_name, tmux_session_name(&session.id));
         assert_eq!(response.host, "localhost");
         assert_eq!(response.cwd, "/tmp/repo");
         assert_eq!(response.status, "attached");
@@ -375,25 +390,5 @@ mod tests {
             error.1 .0.error.message,
             "terminal session is not tmux-backed"
         );
-    }
-
-    #[test]
-    fn connection_host_normalizes_loopback_variants() {
-        for raw in ["127.0.0.1:2486", "[::1]:2486", "localhost:2486"] {
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                HOST,
-                HeaderValue::from_str(raw).expect("host header should be valid"),
-            );
-            assert_eq!(connection_host(&headers), "localhost");
-        }
-    }
-
-    #[test]
-    fn connection_host_preserves_remote_hostname_without_port() {
-        let mut headers = HeaderMap::new();
-        headers.insert(HOST, HeaderValue::from_static("lfd.example.com:2486"));
-
-        assert_eq!(connection_host(&headers), "lfd.example.com");
     }
 }

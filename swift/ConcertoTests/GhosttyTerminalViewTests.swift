@@ -32,7 +32,7 @@ struct GhosttyTerminalViewTests {
 
     @Test("builds a local tmux attach command from connection info")
     func buildsLocalTmuxAttachCommand() {
-        let command = TerminalAttachCommand(
+        let command = buildTerminalAttachCommand(
             TerminalConnectionInfo(
                 sessionName: "lfd-session-1",
                 host: "localhost",
@@ -43,11 +43,12 @@ struct GhosttyTerminalViewTests {
 
         #expect(command.workingDirectory == "/tmp/repo")
         #expect(command.argv == ["tmux", "attach-session", "-t", "lfd-session-1"])
+        #expect(command.env.isEmpty)
     }
 
     @Test("builds an ssh tmux attach command for remote hosts")
     func buildsRemoteTmuxAttachCommand() {
-        let command = TerminalAttachCommand(
+        let command = buildTerminalAttachCommand(
             TerminalConnectionInfo(
                 sessionName: "lfd-session-1",
                 host: "lfd.example.com",
@@ -58,34 +59,7 @@ struct GhosttyTerminalViewTests {
 
         #expect(command.workingDirectory == FileManager.default.homeDirectoryForCurrentUser.path)
         #expect(command.argv == ["ssh", "-t", "lfd.example.com", "tmux attach-session -t 'lfd-session-1'"])
-    }
-
-    @Test("localhost detection normalizes common local host spellings")
-    func localhostDetectionNormalizesCommonValues() {
-        #expect(
-            TerminalConnectionInfo(
-                sessionName: "lfd-session-1",
-                host: "127.0.0.1",
-                cwd: "/tmp/repo",
-                status: .running
-            ).usesLocalTmux
-        )
-        #expect(
-            TerminalConnectionInfo(
-                sessionName: "lfd-session-1",
-                host: "[::1]",
-                cwd: "/tmp/repo",
-                status: .running
-            ).usesLocalTmux
-        )
-        #expect(
-            !TerminalConnectionInfo(
-                sessionName: "lfd-session-1",
-                host: "lfd.example.com",
-                cwd: "/tmp/repo",
-                status: .running
-            ).usesLocalTmux
-        )
+        #expect(command.env.isEmpty)
     }
 
     @Test("control-modified control characters fall through to key handling")

@@ -60,7 +60,7 @@ struct TerminalWorkspaceView: View {
                         .accessibilityHidden(session.id != selectedSession.id)
                 }
             }
-            .background(LoopflowPalette.dark.background)
+            .background(Color.black)
         }
     }
 }
@@ -126,16 +126,16 @@ private struct SessionTerminalSurface: View {
               !session.argv.isEmpty else {
             return nil
         }
-        return TerminalAttachCommand(workingDirectory: session.cwd, argv: session.argv)
+        return TerminalAttachCommand(workingDirectory: session.cwd, argv: session.argv, env: session.env)
     }
 
     var body: some View {
         Group {
-            if let command = directAttachCommand ?? connectionInfo.map({ TerminalAttachCommand($0) }) {
+            if let command = directAttachCommand ?? connectionInfo.map(buildTerminalAttachCommand) {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
-                    env: session.env,
+                    env: command.env,
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
@@ -176,27 +176,46 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
+    let env: [String: String]
+}
 
-    init(workingDirectory: String, argv: [String]) {
-        self.workingDirectory = workingDirectory
-        self.argv = argv
+func buildTerminalAttachCommand(_ connection: TerminalConnectionInfo) -> TerminalAttachCommand {
+    if terminalAttachUsesLocalTmux(host: connection.host) {
+        return TerminalAttachCommand(
+            workingDirectory: connection.cwd,
+            argv: ["tmux", "attach-session", "-t", connection.sessionName],
+            env: [:]
+        )
     }
 
-    init(_ connection: TerminalConnectionInfo) {
-        if connection.usesLocalTmux {
-            self.workingDirectory = connection.cwd
-            self.argv = ["tmux", "attach-session", "-t", connection.sessionName]
-            return
-        }
-
-        self.workingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
-        self.argv = [
+    return TerminalAttachCommand(
+        workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+        argv: [
             "ssh",
             "-t",
             connection.host,
-            "tmux attach-session -t \(shellEscape(connection.sessionName))",
-        ]
+            "tmux attach-session -t \(terminalAttachShellEscape(connection.sessionName))",
+        ],
+        env: [:]
+    )
+}
+
+func terminalAttachUsesLocalTmux(host: String) -> Bool {
+    let normalized = host
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        .lowercased()
+    return switch normalized {
+    case "localhost", "127.0.0.1", "::1":
+        true
+    default:
+        false
     }
+}
+
+private func terminalAttachShellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
 }
 
 private struct WorkspaceShell {

@@ -281,46 +281,6 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     }
 }
 
-/// The builtin wave-reduce flow should expand to 3 items:
-/// and(reduce×3), update-wave, deploy (which itself expands).
-#[test]
-fn builtin_wave_reduce_expands_to_update_wave() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_flow(repo, "wave-reduce");
-
-    // and + update-wave + deploy (gate + op:land + op:pm push-diff) = 5
-    assert!(
-        items.len() >= 3,
-        "wave-reduce should expand into at least and + update-wave + deploy items, got {}",
-        items.len()
-    );
-
-    // Step 0: and (reduce × 3 directions)
-    assert!(
-        matches!(&items[0], ConcreteItem::And(_)),
-        "expected and at index 0"
-    );
-    if let ConcreteItem::And(and) = &items[0] {
-        let branch_directions: Vec<Vec<String>> = and
-            .branches
-            .iter()
-            .map(|branch| branch.directions.clone())
-            .collect();
-        assert_eq!(
-            branch_directions,
-            vec![
-                vec!["infra".to_string()],
-                vec!["ux".to_string()],
-                vec!["ceo".to_string()]
-            ]
-        );
-    }
-    // Step 1: update-wave
-    assert_step_name(&items[1], "update-wave");
-}
-
 #[test]
 fn builtin_deploy_uses_ops_land_item() {
     let temp = TempDir::new().unwrap();

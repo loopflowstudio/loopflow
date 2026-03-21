@@ -20,7 +20,7 @@ pub const SURFACE_CONCERTO_IPHONE: &str = include_str!("builtins/surfaces/concer
 
 /// Returns the content of a built-in step, if it exists.
 ///
-/// Namespaced steps (e.g., "scan/scan-report") are registered with their prefix.
+/// Namespaced steps (e.g., "garden/scan") are registered with their prefix.
 /// The auto-registration in build.rs uses file stems as keys, so namespaced
 /// steps need explicit overrides here.
 pub fn get_builtin_step(name: &str) -> Option<&'static str> {
@@ -30,21 +30,13 @@ pub fn get_builtin_step(name: &str) -> Option<&'static str> {
         .or_else(|| NAMESPACED_STEPS.get(name).copied())
 }
 
-/// Steps whose key includes a directory prefix (e.g., "scan/scan-report").
+/// Steps whose key includes a directory prefix (e.g., "garden/scan").
 /// build.rs auto-registers these under their file stem ("scan-report"), but
 /// the user-facing name includes the namespace.
 static NAMESPACED_STEPS: std::sync::LazyLock<
     std::collections::HashMap<&'static str, &'static str>,
 > = std::sync::LazyLock::new(|| {
     std::collections::HashMap::from([
-        (
-            "scan/scan-report",
-            include_str!("builtins/steps/scan/scan-report.md"),
-        ),
-        (
-            "scan/scan-plan",
-            include_str!("builtins/steps/scan/scan-plan.md"),
-        ),
         ("garden/scan", include_str!("builtins/steps/garden/scan.md")),
         (
             "garden/assess",

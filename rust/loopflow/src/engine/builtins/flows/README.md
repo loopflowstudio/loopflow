@@ -12,8 +12,6 @@ Inner loops — composable building blocks that don't land.
 | `pair` | design → code | Interactive design then build |
 | `deploy` | gate → op: land → op: pm push-diff | Gate, land PR, push PM changes |
 | `sync` | rebase → integrate-upstream → op: pm pull | Rebase and pull fresh PM state |
-| `qa-deploy` | qa → triage → xor(code, deploy) | QA gate with fix-or-ship branch |
-| `reorg` | update-wave | Wave coherence pass |
 
 ## Build flows (`build/`)
 
@@ -32,8 +30,8 @@ Chord-level scanning, assessment, and mutation of member waves.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `garden` | wave/mutate → wave/review → deploy | Apply, review, and ship wave mutations |
-| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) | Pull PM, scan, assess, mutate if needed |
+| `garden` | garden/scan → garden/assess → xor(garden-act, silence) | Scan, assess, mutate if needed |
+| `garden-act` | wave/mutate → wave/review | Apply and review wave mutations |
 
 ## Algedonic flows (`algedonic/`)
 
@@ -49,26 +47,11 @@ Viable system model governance — scan a specific system dimension and mutate.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
+| `govern-operations` | ingest → xor(s1-build, silence) | Pick operational item and build |
 | `govern-identity` | s5-scan → s5-assess → wave/mutate | Identity and structural drift |
 | `govern-intelligence` | s4-scan → s4-assess → wave/mutate | Environmental change response |
 | `govern-control` | s3-scan → s3-assess → wave/mutate | Control health and capacity |
 | `govern-coordination` | s2-scan → s2-assess → wave/mutate | Coordination risk and interference |
-
-## Plan flows (`plan/`)
-
-Multi-perspective analysis via `and` branches.
-
-| Flow | Steps | Use case |
-|------|-------|----------|
-| `wave-reduce` | and(reduce×3) → update-wave → deploy | Find simplification opportunities |
-| `wave-polish` | and(polish×3) → update-wave → deploy | Find polish priorities |
-| `wave-expand` | and(expand×3) → update-wave → deploy | Find expansion opportunities |
-
-## Scan flows (`scan/`)
-
-| Flow | Steps | Use case |
-|------|-------|----------|
-| `scan` | scan-report → scan-plan → code | Scan environment, plan response, build |
 
 ## Ops flows (`ops/`)
 

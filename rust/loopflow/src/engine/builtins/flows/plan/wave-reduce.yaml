@@ -1,8 +1,0 @@
-- and:
-    step: reduce
-    drafts:
-      - direction: infra
-      - direction: ux
-      - direction: ceo
-- update-wave
-- deploy

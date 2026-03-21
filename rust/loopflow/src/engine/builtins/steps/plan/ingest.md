@@ -6,6 +6,8 @@ fast-path: lf op ingest
 ---
 Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
+Fast path: `lf ops ingest --item <filename-or-slug>` targets a specific roadmap item instead of auto-picking.
+
 ## Wave context
 
 **Finding the wave name:**

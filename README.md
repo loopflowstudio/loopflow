@@ -56,6 +56,7 @@ Every new wave ships with two default triggers: `repo` (whole repo → integrate
 
 ```bash
 lf debug -c    # paste an error, watch it fix
+lf ops ingest --item 2-daemon-integrity.md   # move one roadmap item to scratch/
 lf design      # interactive design session
 lf npx:explain-code   # fetch from npx skills ecosystem and run
 ```

@@ -348,14 +348,27 @@ pub async fn dispatch_or_enqueue_activation(
         }
     };
 
+    tracing::debug!(
+        wave_id = %wave.id(),
+        active_runs,
+        workers = wave.workers(),
+        "dispatch_or_enqueue_activation: checked active runs"
+    );
+
     if active_runs >= wave.workers() {
+        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
+        tracing::debug!(
+            wave_id = %wave.id(),
+            outcome = ?outcome,
+            "dispatch_or_enqueue_activation: enqueued (at capacity)"
+        );
         return matches!(
-            enqueue_pending_activation(store, event_hub, envelope).await,
+            outcome,
             Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
         );
     }
 
-    spawn_immediate_activation(
+    let result = spawn_immediate_activation(
         store,
         executor,
         scheduler,
@@ -364,8 +377,13 @@ pub async fn dispatch_or_enqueue_activation(
         flow_override,
         envelope,
     )
-    .await
-    .is_some()
+    .await;
+    tracing::debug!(
+        wave_id = %wave.id(),
+        spawned = result.is_some(),
+        "dispatch_or_enqueue_activation: spawn result"
+    );
+    result.is_some()
 }
 
 pub async fn dispatch_pending_activations(

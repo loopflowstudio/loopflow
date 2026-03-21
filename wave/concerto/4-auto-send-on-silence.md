@@ -1,5 +1,6 @@
 ---
 linear_id: 9a28df2e-8cef-418e-994b-31715ae4e074
+notion_id: 32af8f99-3d81-8160-b2ac-e01969ea9301
 ---
 # 03: Auto-Send on Silence
 

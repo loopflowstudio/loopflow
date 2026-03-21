@@ -1,3 +1,6 @@
+---
+notion_id: 32af8f99-3d81-8192-a1a6-e8fabd3f624f
+---
 # Asana rich text via html_notes
 
 **Finish line:** Asana item descriptions round-trip as markdown instead of plaintext, using Asana's `html_notes` field.

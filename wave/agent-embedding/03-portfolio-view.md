@@ -1,6 +1,7 @@
 ---
 asana_id: '1213718096105435'
 linear_id: f055918b-3e00-4f1f-ad40-9aa25b72f1a1
+notion_id: 32af8f99-3d81-817f-96ff-d7e5bca1c64d
 ---
 # 03: Portfolio View
 

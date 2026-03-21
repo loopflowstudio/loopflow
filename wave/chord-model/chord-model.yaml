@@ -12,5 +12,6 @@ direction:
 - care
 pm:
   asana_project: '1213717740994598'
-  provider: linear
   linear_project: fa675b42-6683-4197-8272-ea56583ef226
+  provider: notion
+  notion_project: 32af8f99-3d81-8182-97d3-d6f2f7d5e10f

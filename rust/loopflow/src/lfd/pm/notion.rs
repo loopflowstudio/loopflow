@@ -155,6 +155,9 @@ impl NotionClient {
     }
 
     async fn resolve_team_for_project_bootstrap(&self) -> PmResult<String> {
+        if let Some(parent) = &self.config.parent_page {
+            return Ok(parent.clone());
+        }
         if let Some(team_id) = self.find_team(DEFAULT_TEAM_NAME).await? {
             return Ok(team_id);
         }
@@ -348,7 +351,7 @@ impl PmProvider for NotionClient {
                 self.request(Method::POST, "/databases").json(&json!({
                     "parent": { "type": "page_id", "page_id": team_id },
                     "title": [text_span(name)],
-                    "description": [text_span(description)],
+                    "description": [text_span(&truncate_text(description, 2000))],
                     "properties": {
                         self.title_property_name(): { "title": {} },
                         self.status_property_name(): {
@@ -494,6 +497,17 @@ impl PmProvider for NotionClient {
             .await?;
         Ok(())
     }
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let mut end = max_len.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end - 1])
 }
 
 fn text_span(text: &str) -> Value {

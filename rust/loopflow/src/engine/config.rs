@@ -200,6 +200,9 @@ pub struct LinearConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct NotionConfig {
+    /// Parent page or teamspace ID under which databases are created.
+    #[serde(default)]
+    pub parent_page: Option<String>,
     #[serde(default)]
     pub title_property: Option<String>,
     #[serde(default)]

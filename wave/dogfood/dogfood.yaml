@@ -10,5 +10,6 @@ direction:
 - reliability
 pm:
   asana_project: '1213718081100756'
-  provider: linear
   linear_project: aa49c58f-8f88-4d57-afbb-8ab51a443224
+  provider: notion
+  notion_project: 32af8f99-3d81-811d-8eb5-dd87fd4c56ca

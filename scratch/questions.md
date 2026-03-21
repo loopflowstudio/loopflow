@@ -1,2 +1,1 @@
-- Assumption: daemon-managed interactive waiting only applies to top-level dispatched steps. Interactive steps reached inside nested xor/loop execution still run headless today because `WaveRun.step_index` only persists top-level position.
-- Assumption: `LFD_SESSION_ID` is only injected for terminal-backed interactive sessions. Headless per-step `lf` child processes receive `LFD_WAVE_ID`, `LFD_RUN_ID`, and `LF_RUN_ID`.
+- No open questions. Nested interactive xor/loop steps now persist execution cursors and resume through daemon-hosted tmux sessions.

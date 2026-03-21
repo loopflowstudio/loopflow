@@ -15,9 +15,7 @@ use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    tmux_session_name, Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
-};
+use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -233,7 +231,7 @@ fn connection_host(headers: &HeaderMap) -> String {
 
 async fn stop_tmux_terminal_session(session: &TerminalSession) {
     match Command::new("tmux")
-        .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+        .args(["kill-session", "-t", &session.tmux_name])
         .status()
         .await
     {
@@ -331,7 +329,7 @@ mod tests {
         .await
         .expect("attach should succeed");
 
-        assert_eq!(response.session_name, tmux_session_name(&session.id));
+        assert_eq!(response.session_name, session.tmux_name);
         assert_eq!(response.host, "localhost");
         assert_eq!(response.cwd, "/tmp/repo");
         assert_eq!(response.status, "attached");

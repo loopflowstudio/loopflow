@@ -12,7 +12,7 @@ Wave-level PM import/export now happens automatically at PR-oriented run start/e
 
 `AsanaClient`, `LinearClient`, and `NotionClient` all implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
 
-Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload (not a paragraph block wrapper). The `NotionClient::comment` implementation already handles this correctly.
+Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload (not a paragraph block wrapper). The `NotionClient::comment` implementation already handles this correctly. Notion comments are plaintext-only — rich-text formatting in comments is not supported by the current implementation and was explicitly deferred when shipping the Notion client.
 
 ## What to build
 
@@ -42,7 +42,7 @@ Apply those actions to every configured provider role that has a linked item ID.
 
 ### Error handling
 
-Best-effort: if a PM API call fails, log a warning and continue. Never block wave execution, PR creation, or merge handling on external sync. Both providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
+Best-effort: if a PM API call fails, log a warning and continue. Never block wave execution, PR creation, or merge handling on external sync. All three providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
 
 ## Constraints
 

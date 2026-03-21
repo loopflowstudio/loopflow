@@ -20,6 +20,7 @@ The real reason Notion is interesting is not just another task backend. It is th
 - This item is about one canonical page, not arbitrary doc trees.
 - Hook into the existing PM lifecycle verbs rather than inventing a separate doc-sync command.
 - The block-replacement pattern (delete all top-level blocks, re-append) means concurrent edits to the same page will conflict — document this.
+- The blocks converter (`notion_blocks.rs`) handles one level of nesting (e.g., bulleted list items with children). Deeper nesting flattens. This is sufficient for README content but should be documented as a known limitation.
 
 ## Done when
 

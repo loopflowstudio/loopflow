@@ -20,6 +20,7 @@ README sync proves the core shape. The next step is bringing in the nearby suppo
 - Keep naming and overwrite rules obvious.
 - Do not turn this into arbitrary workspace sync.
 - The block-replacement write pattern means push-back of supporting docs has the same concurrent-edit conflict risk as item bodies.
+- The blocks converter preserves one level of nesting. Deeply nested block trees (common in long-form Notion docs) will flatten beyond that depth. Consider whether supporting docs need deeper fidelity than task items.
 
 ## Done when
 

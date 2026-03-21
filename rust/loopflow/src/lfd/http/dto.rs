@@ -9,8 +9,8 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    tmux_session_name, ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, TerminalSession, Trigger, WaveRun, WaveRunStatus,
+    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState,
+    TerminalSession, Trigger, WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -288,7 +288,7 @@ pub fn terminal_connection_info_dto(
     host: String,
 ) -> TerminalConnectionInfoDto {
     TerminalConnectionInfoDto {
-        session_name: tmux_session_name(&session.id),
+        session_name: session.tmux_name.clone(),
         host,
         cwd: session.cwd.clone(),
         status: session.status.as_str().to_string(),

@@ -31,7 +31,8 @@ fn main() -> Result<(), String> {
     )
     .map_err(|err| err.to_string())?;
 
-    let items = fetch_remote_items(temp.path(), provider, &result.project_id)?;
+    let first_provider = result.providers.first().ok_or("no providers bootstrapped")?;
+    let items = fetch_remote_items(temp.path(), provider, &first_provider.project_id)?;
     let names = items
         .iter()
         .map(|item| item.name.as_str())
@@ -40,7 +41,7 @@ fn main() -> Result<(), String> {
 
     println!("provider: {provider:?}");
     println!("wave: {name}");
-    println!("project_id: {}", result.project_id);
+    println!("project_id: {}", first_provider.project_id);
     println!("remote order:");
     for (index, item) in items.iter().enumerate() {
         println!("  {}. {}", index + 1, item.name);

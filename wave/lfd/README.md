@@ -51,6 +51,8 @@ Serialization remains useful, but only as explicit policy.
 
 Local-first use does not wait for daemon PTYs. Execution state flows into the shared store via journal events, and Concerto can open ordinary local Ghostty sessions while presenting a coherent workspace. The minimal interactive-step path (tmux sessions with execution cursor persistence) is shipped; full PTY ownership is next.
 
+Journal ingestion is currently poll-based (file scan). Push-based ingestion (inotify/kqueue or IPC) is a natural optimization once the event schema and daemon-hosted shell transport stabilize.
+
 ### Daemon-hosted shells
 
 Daemon-owned shells / PTYs are still the right longer-term model, especially for remote work, reconnect, and multi-client attachment.

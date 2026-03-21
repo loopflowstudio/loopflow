@@ -307,6 +307,18 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
         }
         Ok(waves)
     };
+    let resolve_pm_waves =
+        |wave: &Option<String>, wave_flag: &Option<String>, all: bool| -> Result<Vec<String>> {
+            if all {
+                return list_pm_waves();
+            }
+
+            Ok(vec![wave
+                .clone()
+                .or_else(|| wave_flag.clone())
+                .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
+                .ok_or_else(|| anyhow!("cannot determine wave name"))?])
+        };
 
     match cmd {
         PmCommand::Init {
@@ -400,15 +412,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             wave_flag,
             all,
         } => {
-            let waves = if *all {
-                list_pm_waves()?
-            } else {
-                vec![wave
-                    .clone()
-                    .or_else(|| wave_flag.clone())
-                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
-                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
-            };
+            let waves = resolve_pm_waves(wave, wave_flag, *all)?;
             for wave in waves {
                 let result = crate::ops::pm::pm_pull(
                     &repo_root,
@@ -430,15 +434,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             wave_flag,
             all,
         } => {
-            let waves = if *all {
-                list_pm_waves()?
-            } else {
-                vec![wave
-                    .clone()
-                    .or_else(|| wave_flag.clone())
-                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
-                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
-            };
+            let waves = resolve_pm_waves(wave, wave_flag, *all)?;
             for wave in waves {
                 let result = crate::ops::pm::pm_export(
                     &repo_root,

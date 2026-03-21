@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{get_default_branch, list_tree, show_file};
@@ -271,6 +271,18 @@ struct LocalRoadmapItem {
     doc: RoadmapItemDocument,
 }
 
+impl LocalRoadmapItem {
+    fn title(&self) -> String {
+        extract_heading(&self.doc.body)
+            .map(str::to_string)
+            .unwrap_or_else(|| title_case(&self.item.slug))
+    }
+
+    fn description(&self) -> String {
+        body_without_heading(&self.doc.body).trim().to_string()
+    }
+}
+
 struct BootstrapArgs<'a> {
     repo: &'a Path,
     wave: &'a str,
@@ -291,12 +303,6 @@ fn read_local_roadmap_items(wave_dir: &Path) -> OpsResult<Vec<LocalRoadmapItem>>
         });
     }
     Ok(items)
-}
-
-fn local_item_title(item: &LocalRoadmapItem) -> String {
-    extract_heading(&item.doc.body)
-        .map(str::to_string)
-        .unwrap_or_else(|| title_case(&item.item.slug))
 }
 
 fn project_key(provider: PmProviderKind) -> &'static str {
@@ -467,7 +473,7 @@ async fn pm_status_async(
         };
         let local_titles = local_items
             .iter()
-            .map(local_item_title)
+            .map(LocalRoadmapItem::title)
             .map(|title| normalize_title(&title))
             .collect::<HashSet<_>>();
 
@@ -549,7 +555,7 @@ async fn bootstrap_read_write_provider(
     let mut pending_remote_creates = Vec::new();
 
     for (index, local_item) in local_items.iter_mut().enumerate() {
-        let local_title = local_item_title(local_item);
+        let local_title = local_item.title();
         let local_key = normalize_title(&local_title);
         if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
             if let Some(remote_item) = remote_by_id.get(pm_id) {
@@ -650,6 +656,16 @@ fn write_local_item(wave_dir: &Path, item: &LocalRoadmapItem) -> OpsResult<()> {
     Ok(())
 }
 
+fn require_wave_dir(repo: &Path, wave: &str) -> OpsResult<PathBuf> {
+    let wave_dir = repo.join("wave").join(wave);
+    if !wave_dir.is_dir() {
+        return Err(OpsError::Message(format!(
+            "wave directory not found: wave/{wave}/"
+        )));
+    }
+    Ok(wave_dir)
+}
+
 fn apply_remote_match(
     wave_dir: &Path,
     local_item: &mut LocalRoadmapItem,
@@ -680,9 +696,7 @@ async fn create_remote_for_local_item(
             project_id,
             &PmItemCreate {
                 name: title.to_string(),
-                description: body_without_heading(&local_item.doc.body)
-                    .trim()
-                    .to_string(),
+                description: local_item.description(),
                 rank: local_item.item.rank(),
             },
         )
@@ -877,13 +891,7 @@ async fn pm_pull_async(
     options: &PmPullOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmPullResult> {
-    let wave_dir = repo.join("wave").join(&options.wave);
-    if !wave_dir.is_dir() {
-        return Err(OpsError::Message(format!(
-            "wave directory not found: wave/{}/",
-            options.wave
-        )));
-    }
+    let wave_dir = require_wave_dir(repo, &options.wave)?;
 
     let ctx = build_wave_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
@@ -913,13 +921,7 @@ async fn pm_export_async(
     options: &PmExportOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmExportResult> {
-    let wave_dir = repo.join("wave").join(&options.wave);
-    if !wave_dir.is_dir() {
-        return Err(OpsError::Message(format!(
-            "wave directory not found: wave/{}/",
-            options.wave
-        )));
-    }
+    let wave_dir = require_wave_dir(repo, &options.wave)?;
 
     let ctx = build_wave_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
@@ -945,13 +947,7 @@ async fn pm_sync_async(
     options: &PmSyncOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmSyncResult> {
-    let wave_dir = repo.join("wave").join(&options.wave);
-    if !wave_dir.is_dir() {
-        return Err(OpsError::Message(format!(
-            "wave directory not found: wave/{}/",
-            options.wave
-        )));
-    }
+    let wave_dir = require_wave_dir(repo, &options.wave)?;
 
     let ctx = build_wave_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
@@ -1222,10 +1218,8 @@ async fn export_local_wave_to_remote(
     let mut local_items = read_local_roadmap_items(wave_dir)?;
 
     for local_item in &mut local_items {
-        let title = local_item_title(local_item);
-        let description = body_without_heading(&local_item.doc.body)
-            .trim()
-            .to_string();
+        let title = local_item.title();
+        let description = local_item.description();
 
         match local_item.doc.frontmatter.id_for(ctx.provider) {
             Some(pm_id) => {

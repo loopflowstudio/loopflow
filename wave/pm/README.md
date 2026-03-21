@@ -26,12 +26,12 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 ### Invariants
 
 - Provider clients stay thin. They translate API semantics; they do not read config files, mutate wave markdown, or own credential lookup policy.
-- `lf ops auth` remains the single local credential surface. PM auth should converge on browser-based OAuth rather than a mix of OAuth and API-key setup paths.
+- `lf op auth` remains the single local credential surface. PM auth should converge on browser-based OAuth rather than a mix of OAuth and API-key setup paths.
 - `RoadmapItemDocument` stays the only writer for roadmap frontmatter. PM sync code should use `id_for(provider)` / `set_id(provider, id)` for provider-ID access, not open-coding frontmatter mutations.
 - Provider roles stay explicit: one read/write provider drives local state; export providers mirror writes but never become import sources.
 - Import is a pull: the read/write PM state wins on conflicts. Export is a push: loopflow only writes back on explicit push events with known local diffs or lifecycle payloads.
 - The shared roadmap model should be semantic first: broken/unblock-now, clear next step, committed later, speculative. Providers should speak their native vocabulary where possible.
-- Default day-to-day usage is pull. `lf ops pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
+- Default day-to-day usage is pull. `lf op pm pull` rewrites local wave files from PM without consulting `main`; push paths stay explicit and event-scoped.
 
 ## Goals
 

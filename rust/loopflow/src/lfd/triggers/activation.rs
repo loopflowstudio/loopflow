@@ -52,7 +52,7 @@ async fn pause_wave_after_activation_conflict(
     event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
-async fn create_activation_run(
+async fn create_wave_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
@@ -289,7 +289,7 @@ pub async fn spawn_immediate_activation(
     } else {
         Some(envelope.target_branch.as_str())
     };
-    let mut run = match create_activation_run(store, wave, &run_id, target).await {
+    let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -463,7 +463,7 @@ pub async fn dispatch_wave_if_ready(
     } else {
         Some(activation.target_branch.as_str())
     };
-    let mut run = match create_activation_run(store, wave, &run_id, target).await {
+    let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");

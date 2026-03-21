@@ -56,7 +56,7 @@ That baseline is the setup for the real remaining proof: boot lfd, register the 
 
 5. **Capture the operating recipe.** Leave one reviewer-friendly script or command sequence showing how to start lfd, bootstrap the waves, run tend, and inspect the resulting artifacts.
 
-6. **Keep the rename separate.** `lf ops` → `lf op` is still a worthwhile cleanup, but it is not part of proving tend live. Do it after the first real cycle exists.
+6. **Keep the rename separate.** `lf ops` → `lf op` has been done. This item is about proving tend live.
 
 ## Done when
 

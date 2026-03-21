@@ -65,36 +65,36 @@ repo:
 ```
 
 The sibling naming convention (`<repo>.<name>`) is load-bearing.
-Wave rotation, `lf ops wt switch`, `lf ops wt prune`, and `lf ops land`
+Wave rotation, `lf op wt switch`, `lf op wt prune`, and `lf op land`
 all derive the wave name from the directory name. Worktrees created
 elsewhere (nested inside the repo, in `.claude/worktrees/`, etc.) won't
 be recognized and may be corrupted during land rotation.
 
-Always use `lf ops wt create` to create worktrees. Never use
+Always use `lf op wt create` to create worktrees. Never use
 agent-provided worktree tools (e.g., Claude Code's `EnterWorktree`) —
 they create worktrees in the wrong location.
 
 ```bash
-lf ops wt create my-feature            # ../myproject.my-feature
-lf ops wt create my-feature --stack    # branch from current branch
-lf ops wt switch my-feature            # cd to existing worktree
-lf ops wt list                         # show all worktrees
-lf ops wt prune                        # clean up merged worktrees
+lf op wt create my-feature            # ../myproject.my-feature
+lf op wt create my-feature --stack    # branch from current branch
+lf op wt switch my-feature            # cd to existing worktree
+lf op wt list                         # show all worktrees
+lf op wt prune                        # clean up merged worktrees
 ```
 
 ---
 
 ## Operations
 
-`lf ops` handles mechanical git operations. Use these instead of raw
+`lf op` handles mechanical git operations. Use these instead of raw
 git/gh when the operation has loopflow-specific behavior:
 
 ```bash
-lf ops commit -m "message" -p          # commit and push
-lf ops pr --title "..." --body "..."   # create/update PR
-lf ops land                            # submit to merge queue
-lf ops rebase                          # rebase onto main
-lf ops next                            # preserve worktree, fresh branch
+lf op commit -m "message" -p          # commit and push
+lf op pr --title "..." --body "..."   # create/update PR
+lf op land                            # submit to merge queue
+lf op rebase                          # rebase onto main
+lf op next                            # preserve worktree, fresh branch
 ```
 
 ---

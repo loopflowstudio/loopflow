@@ -70,7 +70,7 @@ git worktree prune
 Remove merged worktrees:
 
 ```bash
-lf ops wt prune
+lf op wt prune
 ```
 
 ## Loop stuck in WAITING
@@ -112,7 +112,7 @@ lf init
 Check installation:
 
 ```bash
-lf ops doctor
+lf op doctor
 ```
 
 ## See Also

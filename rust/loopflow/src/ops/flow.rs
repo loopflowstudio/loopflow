@@ -15,16 +15,16 @@ use crate::ops::{
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
-    let mut argv = vec!["lf".to_string(), "ops".to_string(), item.command.clone()];
+    let mut argv = vec!["lf".to_string(), "op".to_string(), item.command.clone()];
     argv.extend(item.args.iter().cloned());
 
     let cli = Cli::try_parse_from(argv)
-        .map_err(|err| OpsError::Message(format!("invalid ops item: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("invalid op item: {err}")))?;
     let op = match cli.command {
-        Some(Commands::Ops { op }) => op,
+        Some(Commands::Op { op }) => op,
         _ => {
             return Err(OpsError::Message(
-                "ops item must parse as `lf ops <command>`".to_string(),
+                "op item must parse as `lf op <command>`".to_string(),
             ));
         }
     };

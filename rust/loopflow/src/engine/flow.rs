@@ -560,9 +560,6 @@ fn parse_flow_mapping_with_options(
     if let Some(op_value) = map.get(key("op")) {
         return parse_op_value(op_value, "op");
     }
-    if let Some(ops_value) = map.get(key("ops")) {
-        return parse_op_value(ops_value, "ops");
-    }
     if let Some(xor_value) = map.get(key("xor")) {
         return parse_xor_value(xor_value);
     }

@@ -27,5 +27,5 @@ Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
 
 3. Open or update the PR with explicit fields.
    ```bash
-   lf ops pr --title "<title>" --body "<body>"
+   lf op pr --title "<title>" --body "<body>"
    ```

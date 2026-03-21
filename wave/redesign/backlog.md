@@ -16,7 +16,7 @@ Auto-send on VAD silence with confidence-based behavior and continuous conversat
 
 ## concerto/03 — Release UI
 
-Per-repo release config (cron toggle) and "Release Now" button with version picker. Nice quality-of-life, but `lf ops release` from CLI works. Save until Concerto has more fundamental workflows.
+Per-repo release config (cron toggle) and "Release Now" button with version picker. Nice quality-of-life, but `lf op release` from CLI works. Save until Concerto has more fundamental workflows.
 
 ## context/01 — Direction Aliases
 

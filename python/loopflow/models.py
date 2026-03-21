@@ -53,7 +53,7 @@ class FlowStep(BaseModel):
         if isinstance(value, dict):
             return cls.model_validate(value)
         if isinstance(value, str):
-            for prefix in ("op:", "ops:"):
+            for prefix in ("op:",):
                 if value.startswith(prefix):
                     return cls(type="op", name=value.split(":", 1)[1].strip())
             for marker, step_type in (

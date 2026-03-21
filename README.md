@@ -143,7 +143,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `validate` | Validate flows, steps, and directions |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
-| `pr` | Generate PR title/body and call `lf ops pr --title --body` |
+| `pr` | Generate PR title/body and call `lf op pr --title --body` |
 
 ## Flows
 
@@ -307,10 +307,10 @@ lfq delete engbot    # remove wave and history
 lfq usage            # token usage summary (group by wave)
 lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
-lf ops auth status   # local provider auth for lf steps and ops
-lf ops auth asana    # connect Asana locally for `lf ops` / step integrations
-lf ops auth notion   # connect Notion locally for `lf ops` / step integrations
-lf ops auth configure linear  # store Linear API key locally for `lf ops` / step integrations
+lf op auth status   # local provider auth for lf steps and ops
+lf op auth asana    # connect Asana locally for `lf op` / step integrations
+lf op auth notion   # connect Notion locally for `lf op` / step integrations
+lf op auth configure linear  # store Linear API key locally for `lf op` / step integrations
 lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
@@ -339,10 +339,10 @@ notion:
 ```
 
 ```bash
-lf ops pm init             # create fresh PM projects for all waves
-lf ops pm pull pm          # rewrite one wave from PM; remote changes win
-lf ops pm pull --all       # rewrite every wave from PM; remote changes win
-lf ops pm status           # show linked waves and local/remote counts
+lf op pm init             # create fresh PM projects for all waves
+lf op pm pull pm          # rewrite one wave from PM; remote changes win
+lf op pm pull --all       # rewrite every wave from PM; remote changes win
+lf op pm status           # show linked waves and local/remote counts
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

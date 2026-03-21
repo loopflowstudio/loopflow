@@ -18,7 +18,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 
 **Both:**
 - Mock side effects, but don't test mock wiring or reshape production code for tests
-- Design docs go under `scratch/`; `lf ops pr land` removes `scratch/*` contents
+- Design docs go under `scratch/`; `lf op pr land` removes `scratch/*` contents
 - Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
 
 ## File-Type Guidelines
@@ -50,7 +50,7 @@ When editing `README.md` files:
 When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
 - `lf review` writes its assessment under `scratch/`
-- `lf ops pr land` removes `scratch/*` contents automatically
+- `lf op pr land` removes `scratch/*` contents automatically
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
@@ -210,7 +210,7 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf ops pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf op pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
 
 ## User-Facing Documentation
 

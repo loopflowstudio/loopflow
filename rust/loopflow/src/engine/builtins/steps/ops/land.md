@@ -6,13 +6,13 @@ Land the current branch. Rebase, create/update the PR, and enable auto-merge.
 
 ## API
 
-`lf ops land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge.
+`lf op land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge.
 
 ```
-lf ops land [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
+lf op land [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-**Do not run git commit, git push, gh pr create, or gh pr merge directly.** `lf ops land` does all of this. Running those commands manually means auto-merge never gets enabled.
+**Do not run git commit, git push, gh pr create, or gh pr merge directly.** `lf op land` does all of this. Running those commands manually means auto-merge never gets enabled.
 
 ## Workflow
 
@@ -29,7 +29,7 @@ Stage and include all changes — committed and uncommitted — in the PR. If th
 
 ### 2. Prepare PR copy
 
-If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf ops land` reuses them automatically.
+If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf op land` reuses them automatically.
 
 If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
 
@@ -49,22 +49,22 @@ Examples:
 ### 3. Land
 
 ```bash
-lf ops land --create-pr
+lf op land --create-pr
 ```
 
 If you wrote title/body manually, include them:
 
 ```bash
-lf ops land --create-pr --title "<title>" --body "<body>"
+lf op land --create-pr --title "<title>" --body "<body>"
 ```
 
 Include `-m "<message>"` if the working tree was dirty in step 1.
 
-If `lf ops land` fails due to rebase conflicts, launch a sub-agent to run the `rebase` step, then retry `lf ops land`.
+If `lf op land` fails due to rebase conflicts, launch a sub-agent to run the `rebase` step, then retry `lf op land`.
 
 ## Notes
 
-- If the PR already has a good title and body, run `lf ops land` without `--title`/`--body` to keep existing content.
+- If the PR already has a good title and body, run `lf op land` without `--title`/`--body` to keep existing content.
 
 ## Adaptation
 

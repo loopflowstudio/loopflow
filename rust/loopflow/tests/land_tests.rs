@@ -412,7 +412,7 @@ fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "ops",
+            "op",
             "land",
             "--strict",
             "--create-pr",
@@ -424,8 +424,8 @@ fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
         .current_dir(&worktree.path)
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf ops land");
-    assert!(status.success(), "lf ops land should succeed");
+        .expect("run lf op land");
+    assert!(status.success(), "lf op land should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive file");
     let target = directive

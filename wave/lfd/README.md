@@ -128,8 +128,8 @@ Most of the current HTTP surface disappears. If the user runs `lf` commands in a
 
 - No `POST /waves/{id}/run` — they ran `lf build`
 - No `POST /waves/{id}/stop` — they hit Ctrl-C
-- No `POST /waves/{id}/land` — they ran `lf ops land`
-- No `POST /waves/{id}/next` — they ran `lf ops next`
+- No `POST /waves/{id}/land` — they ran `lf op land`
+- No `POST /waves/{id}/next` — they ran `lf op next`
 - No `PATCH /waves/{id}` — they edited the yaml
 - No `POST /terminal-sessions/*` — Concerto manages tmux locally
 

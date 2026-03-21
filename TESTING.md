@@ -79,7 +79,7 @@ tests/e2e/test_smoke.sh
 uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
 ```
 
-Long-running workflow tests for `lf ops`:
+Long-running workflow tests for `lf op`:
 
 ```bash
 tests/e2e/test_full_cycle.sh

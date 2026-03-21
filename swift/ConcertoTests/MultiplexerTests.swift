@@ -129,7 +129,7 @@ struct MultiplexerLayoutTests {
             type: .terminal,
             config: PaneConfig(
                 terminalSessionName: "lf-wave-a",
-                launchCommand: "lf design && lf ops commit --push"
+                launchCommand: "lf design && lf op commit --push"
             )
         )
         let paneB = PaneState(id: "b", type: .markdown, config: PaneConfig(filePath: "wave/test/README.md"))
@@ -142,7 +142,7 @@ struct MultiplexerLayoutTests {
         #expect(decoded.allPanes[0].id == "a")
         #expect(decoded.allPanes[0].type == .terminal)
         #expect(decoded.allPanes[0].config.terminalSessionName == "lf-wave-a")
-        #expect(decoded.allPanes[0].config.launchCommand == "lf design && lf ops commit --push")
+        #expect(decoded.allPanes[0].config.launchCommand == "lf design && lf op commit --push")
         #expect(decoded.allPanes[1].id == "b")
         #expect(decoded.allPanes[1].config.filePath == "wave/test/README.md")
     }
@@ -303,14 +303,14 @@ struct MultiplexerStoreTests {
         let replacement = store.replacePane(
             launchpad.id,
             with: .terminal,
-            config: PaneConfig(launchCommand: "lf design && lf ops commit --push"),
+            config: PaneConfig(launchCommand: "lf design && lf op commit --push"),
             for: "wave-1"
         )
 
         #expect(replacement?.id == launchpad.id)
         #expect(replacement?.type == .terminal)
         #expect(replacement?.config.terminalSessionName == "lf-wave-1-\(launchpad.id)")
-        #expect(replacement?.config.launchCommand == "lf design && lf ops commit --push")
+        #expect(replacement?.config.launchCommand == "lf design && lf op commit --push")
         #expect(store.layout(for: "wave-1").pane(for: launchpad.id)?.type == .terminal)
     }
 }

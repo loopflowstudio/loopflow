@@ -5,9 +5,9 @@ notion_id: 32af8f99-3d81-8163-a3e7-f73692a324e6
 ---
 # PM sync steps and flow
 
-**Finish line:** `lf import-pm` and `lf export-pm` exist as thin step surfaces over `lf ops pm import|export`, and `pm-sync` composes them for manual or non-PR flows.
+**Finish line:** `lf import-pm` and `lf export-pm` exist as thin step surfaces over `lf op pm import|export`, and `pm-sync` composes them for manual or non-PR flows.
 
-The mechanical sync core already exists: `lf ops pm import`, `lf ops pm export`, and `lf ops pm sync` resolve provider roles, use `id_for(provider)` / `set_id(provider, id)`, and the executor already runs import/export automatically around PR-oriented runs. This item is about making that machinery composable in the normal step/flow surface, not rebuilding sync semantics.
+The mechanical sync core already exists: `lf op pm import`, `lf op pm export`, and `lf op pm sync` resolve provider roles, use `id_for(provider)` / `set_id(provider, id)`, and the executor already runs import/export automatically around PR-oriented runs. This item is about making that machinery composable in the normal step/flow surface, not rebuilding sync semantics.
 
 ## What to build
 

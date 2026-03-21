@@ -11,14 +11,14 @@ Notion shipped OAuth-only (no `api_key_env_name`, Basic-auth token exchange on p
 
 ## What to build
 
-1. Remove PM-provider API-key setup flows from `lfq` / `lf ops`.
+1. Remove PM-provider API-key setup flows from `lfq` / `lf op`.
 2. Make PM sync load stored OAuth credentials rather than PM-specific env var API keys.
 3. Use the existing Asana/Linear broker path as the baseline and add any missing CLI / route cleanup so the PM experience is consistently browser-connect first.
 4. Leave model-provider API-key behavior alone; this item is about PM auth only.
 
 ## Constraints
 
-- Keep `lf ops auth` / `lfq auth` as the only local auth surface.
+- Keep `lf op auth` / `lfq auth` as the only local auth surface.
 - PM sync should not silently fall back to `ASANA_ACCESS_TOKEN`, `LINEAR_API_KEY`, or future `NOTION_API_KEY` paths.
 - This is a prerequisite for Notion work, not a side quest.
 

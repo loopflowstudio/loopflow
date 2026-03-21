@@ -8,7 +8,7 @@ notion_id: 32af8f99-3d81-81ef-bd7e-d9317a168132
 
 ## Context
 
-The release machinery already exists in CLI form. `lf release <version>` runs the full workflow, and `lf ops release check|notes|bump|tag|status` expose the mechanical pieces underneath it. Repo config already has a `release.targets` model in `.lf/config.yaml`; what is missing is a Concerto surface that makes those capabilities visible without dropping to a terminal.
+The release machinery already exists in CLI form. `lf release <version>` runs the full workflow, and `lf op release check|notes|bump|tag|status` expose the mechanical pieces underneath it. Repo config already has a `release.targets` model in `.lf/config.yaml`; what is missing is a Concerto surface that makes those capabilities visible without dropping to a terminal.
 
 There is no current Swift release view, model, or service. This item should start from read-only visibility plus a clear run action rather than trying to turn Concerto into a full release-config editor on day one.
 

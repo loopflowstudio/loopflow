@@ -50,6 +50,9 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         description
         prioritySortOrder
         sortOrder
+        assignee {
+          id
+        }
         state {
           type
         }
@@ -75,6 +78,20 @@ const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title:
     issue {
       id
     }
+  }
+}"#;
+
+const CLAIM_ITEM_MUTATION: &str = r#"mutation ClaimIssue($id: String!, $assigneeId: String!, $branchName: String!) {
+  issueUpdate(id: $id, input: { assigneeId: $assigneeId, branchName: $branchName }) {
+    issue {
+      id
+    }
+  }
+}"#;
+
+const VIEWER_QUERY: &str = r#"query Viewer {
+  viewer {
+    id
   }
 }"#;
 
@@ -363,6 +380,28 @@ impl PmProvider for LinearClient {
             .await?;
         Ok(())
     }
+
+    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
+        // Look up the authenticated user's ID
+        let viewer: Value = self.graphql(VIEWER_QUERY, json!({})).await?;
+        let viewer_id = viewer
+            .pointer("/viewer/id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| PmError::Message("failed to resolve viewer ID".to_string()))?
+            .to_string();
+
+        let _: Value = self
+            .graphql(
+                CLAIM_ITEM_MUTATION,
+                json!({
+                    "id": item_id,
+                    "assigneeId": viewer_id,
+                    "branchName": branch,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -442,6 +481,8 @@ struct IssueNode {
     #[serde(rename = "sortOrder", default)]
     sort_order: f64,
     #[serde(default)]
+    assignee: Option<IdNode>,
+    #[serde(default)]
     state: Option<WorkflowStateRef>,
 }
 
@@ -458,6 +499,7 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
+            assignee: self.assignee.map(|a| a.id),
         }
     }
 }
@@ -830,6 +872,7 @@ mod tests {
                     description: "two".to_string(),
                     rank: 0,
                     completed: true,
+                    assignee: None,
                 },
                 PmItem {
                     id: "issue-3".to_string(),
@@ -837,6 +880,7 @@ mod tests {
                     description: "".to_string(),
                     rank: 1,
                     completed: false,
+                    assignee: None,
                 },
                 PmItem {
                     id: "issue-1".to_string(),
@@ -844,6 +888,7 @@ mod tests {
                     description: "one".to_string(),
                     rank: 2,
                     completed: false,
+                    assignee: None,
                 },
             ]
         );

@@ -378,37 +378,6 @@ impl WaveExecutor {
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
         debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
 
-        if run_is_pr_oriented
-            && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
-        {
-            let worktree = run.worktree.clone();
-            let wave_name = wave.name().clone();
-            match tokio::task::spawn_blocking(move || {
-                crate::ops::pm::pm_sync(
-                    Path::new(&worktree),
-                    &crate::ops::pm::PmSyncOptions { wave: wave_name },
-                    &crate::ops::NullProgress,
-                )
-            })
-            .await
-            {
-                Ok(Ok(result)) => {
-                    info!(
-                        run_id = %run.id,
-                        pushed = result.pushed.len(),
-                        pulled = result.pulled.len(),
-                        "synced roadmap with PM provider at run start"
-                    );
-                }
-                Ok(Err(err)) => {
-                    warn!(run_id = %run.id, error = %err, "PM sync failed at run start; continuing");
-                }
-                Err(err) => {
-                    warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
-                }
-            }
-        }
-
         loop {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
             if run.flow_parents != current_flow_parents {
@@ -787,35 +756,6 @@ impl WaveExecutor {
                     run.ended_at = Some(OffsetDateTime::now_utc());
 
                     let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
-                    if run_is_pr_oriented
-                        && crate::ops::pm::wave_pm_is_enabled(Path::new(&run.worktree), wave.name())
-                    {
-                        let worktree = run.worktree.clone();
-                        let branch = run.branch.clone();
-                        let wave_name = wave.name().clone();
-                        match tokio::task::spawn_blocking(move || -> Result<()> {
-                            crate::ops::pm::pm_sync(
-                                Path::new(&worktree),
-                                &crate::ops::pm::PmSyncOptions { wave: wave_name },
-                                &crate::ops::NullProgress,
-                            )
-                            .map_err(|err| anyhow!(err.to_string()))?;
-                            post_step_sync(Path::new(&worktree), &branch, "ops pm sync")?;
-                            Ok(())
-                        })
-                        .await
-                        {
-                            Ok(Ok(())) => {
-                                info!(run_id = %run.id, "synced roadmap with PM provider at run end");
-                            }
-                            Ok(Err(err)) => {
-                                warn!(run_id = %run.id, error = %err, "PM sync failed at run end; continuing");
-                            }
-                            Err(err) => {
-                                warn!(run_id = %run.id, error = %err, "PM sync task join failed; continuing");
-                            }
-                        }
-                    }
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     // Activations targeting "main" produce new branches and PRs.

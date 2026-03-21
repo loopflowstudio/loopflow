@@ -141,8 +141,6 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `split-wave` | Split a wave into smaller independent waves |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
-| `import-pm` | Pull PM state into the current wave |
-| `export-pm` | Push the current wave into PM |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `pr` | Generate PR title/body and call `lf op pr --title --body` |
@@ -170,8 +168,8 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land → op: pm sync |
-| `sync` | rebase → integrate-upstream → op: pm sync |
+| `deploy` | gate → op: land → op: pm push-diff |
+| `sync` | rebase → integrate-upstream → op: pm pull |
 | `qa-deploy` | qa → triage → xor(code, deploy) |
 | `reorg` | update-wave (coherence pass) |
 
@@ -188,8 +186,8 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `garden` | wave/mutate → wave/review |
-| `garden-or-silent` | garden/scan → garden/assess → xor(garden, silence) |
+| `garden` | wave/mutate → wave/review → deploy |
+| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) |
 
 ### Algedonic flows (`algedonic/`)
 
@@ -210,21 +208,15 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | and(reduce×3) → update-wave |
-| `wave-polish` | and(polish×3) → update-wave |
-| `wave-expand` | and(expand×3) → update-wave |
+| `wave-reduce` | and(reduce×3) → update-wave → deploy |
+| `wave-polish` | and(polish×3) → update-wave → deploy |
+| `wave-expand` | and(expand×3) → update-wave → deploy |
 
 ### Scan flows (`scan/`)
 
 | Flow | Steps |
 |------|-------|
 | `scan` | scan/scan-report → scan/scan-plan → code |
-
-### Ops flows (`ops/`)
-
-| Flow | Steps |
-|------|-------|
-| `pm-sync` | import-pm → implement → export-pm |
 
 ### Forks (and)
 
@@ -353,10 +345,9 @@ lf op pm pull pm           # rewrite one wave from PM; remote changes win
 lf op pm pull --all        # rewrite every wave from PM; remote changes win
 lf op pm export pm         # push one wave to PM; local changes win
 lf op pm export --all      # push every PM-enabled wave
+lf op pm push-diff pm      # push only branch-changed items to PM
+lf op pm push-diff --all   # push-diff every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
-lf import-pm               # step wrapper around `lf op pm pull`
-lf export-pm               # step wrapper around `lf op pm export`
-lf pm-sync                 # import-pm → implement → export-pm
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

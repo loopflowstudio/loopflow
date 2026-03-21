@@ -115,6 +115,8 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
+    /// Provider user ID of the assignee, if any.
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +172,8 @@ pub trait PmProvider: Send + Sync {
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;
     async fn complete_item(&self, item_id: &str) -> PmResult<()>;
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<()>;
+    /// Claim an item: assign to the API token owner and set the working branch.
+    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

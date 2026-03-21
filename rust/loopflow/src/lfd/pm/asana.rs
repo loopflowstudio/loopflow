@@ -13,7 +13,7 @@ use crate::lfd::pm::{
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const TASK_FIELDS: &str = "name,notes,completed,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
+const TASK_FIELDS: &str = "name,notes,completed,assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
 const PROJECT_PRIORITY_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
@@ -368,6 +368,21 @@ impl PmProvider for AsanaClient {
             .await?;
         Ok(())
     }
+
+    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
+        // Assign to "me" (the API token owner) and leave a comment with the branch.
+        let path = format!("/tasks/{item_id}");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| {
+                self.request(Method::PUT, &path, &[])
+                    .json(&json!({ "data": { "assignee": "me" } }))
+            })
+            .await?;
+        // Record the branch as a comment since Asana has no native branch field.
+        self.comment(item_id, &format!("Working branch: `{branch}`"))
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -429,6 +444,8 @@ struct AsanaTask {
     #[serde(default)]
     completed: bool,
     #[serde(default)]
+    assignee: Option<AsanaGid>,
+    #[serde(default)]
     custom_fields: Vec<AsanaCustomFieldValue>,
 }
 
@@ -440,12 +457,14 @@ struct AsanaGid {
 impl AsanaTask {
     fn into_pm_item(self) -> PmItem {
         let rank = self.priority_bucket().rank();
+        let assignee = self.assignee.map(|a| a.gid);
         PmItem {
             id: self.gid,
             name: self.name,
             description: self.notes,
             rank,
             completed: self.completed,
+            assignee,
         }
     }
 
@@ -884,6 +903,7 @@ mod tests {
                     description: "two".to_string(),
                     rank: 0,
                     completed: true,
+                    assignee: None,
                 },
                 PmItem {
                     id: "task-3".to_string(),
@@ -891,6 +911,7 @@ mod tests {
                     description: "three".to_string(),
                     rank: 1,
                     completed: false,
+                    assignee: None,
                 },
                 PmItem {
                     id: "task-1".to_string(),
@@ -898,6 +919,7 @@ mod tests {
                     description: "one".to_string(),
                     rank: 2,
                     completed: false,
+                    assignee: None,
                 },
             ]
         );

@@ -3,7 +3,10 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{get_default_branch, list_tree, show_file};
+use crate::engine::git::{
+    current_branch, diff_names_under, get_default_branch, list_tree, log_grep, merge_base,
+    show_file,
+};
 use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
@@ -85,6 +88,21 @@ pub struct PmExportResult {
     pub created: usize,
     pub updated: usize,
     pub skipped: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmPushDiffOptions {
+    pub wave: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmPushDiffResult {
+    pub wave: String,
+    pub provider: PmProviderKind,
+    pub project_id: String,
+    pub created: usize,
+    pub updated: usize,
+    pub unchanged: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -756,7 +774,7 @@ fn overwrite_local_wave_from_remote(
     Ok(removed)
 }
 
-fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
+pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let wave_dir = repo.join("wave");
     if !wave_dir.is_dir() {
         return Ok(Vec::new());
@@ -886,6 +904,85 @@ pub fn pm_export(
     block_on_pm(pm_export_async(repo, options, progress))
 }
 
+// ── Claim (for ingest) ─────────────────────────────────────────────
+
+/// Try to claim the highest-priority unassigned PM item for this wave.
+///
+/// Returns the filename of the local wave item that was claimed, or `None`
+/// if PM is not enabled, no unassigned items exist, or claim fails.
+pub fn pm_try_claim(
+    repo: &Path,
+    wave: &str,
+    progress: &impl Progress,
+) -> Option<String> {
+    if !wave_pm_is_enabled(repo, wave) {
+        return None;
+    }
+    block_on_pm(pm_try_claim_async(repo, wave, progress)).ok().flatten()
+}
+
+async fn pm_try_claim_async(
+    repo: &Path,
+    wave: &str,
+    progress: &impl Progress,
+) -> OpsResult<Option<String>> {
+    let wave_dir = require_wave_dir(repo, wave)?;
+    let ctx = build_wave_provider(repo, wave).await?;
+    require_project(&ctx, wave)?;
+
+    // Fetch remote items and find unassigned ones
+    let remote_items = ctx.client.list_items(&ctx.project).await.map_err(pm_to_ops)?;
+    let unassigned: Vec<&PmItem> = remote_items
+        .iter()
+        .filter(|item| item.assignee.is_none() && !item.completed)
+        .collect();
+
+    if unassigned.is_empty() {
+        progress.status("no unassigned PM items");
+        return Ok(None);
+    }
+
+    // Match remote items to local files by PM ID
+    let local_items = read_local_roadmap_items(&wave_dir)?;
+
+    // Walk unassigned items in order (already sorted by priority from provider)
+    for remote in &unassigned {
+        let local_match = local_items.iter().find(|local| {
+            local
+                .doc
+                .frontmatter
+                .id_for(ctx.provider)
+                .is_some_and(|id| id == remote.id)
+        });
+
+        if let Some(local) = local_match {
+            let branch = current_branch(repo)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            progress.status(&format!(
+                "claiming {} ({})",
+                local.item.filename, remote.name
+            ));
+
+            match ctx.client.claim_item(&remote.id, &branch).await {
+                Ok(()) => return Ok(Some(local.item.filename.clone())),
+                Err(err) => {
+                    progress.status(&format!(
+                        "  claim failed for {}: {err}",
+                        local.item.filename
+                    ));
+                    // Try next item
+                    continue;
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 async fn pm_pull_async(
     repo: &Path,
     options: &PmPullOptions,
@@ -939,6 +1036,180 @@ async fn pm_export_async(
         created: export.created,
         updated: export.updated,
         skipped: export.skipped,
+    })
+}
+
+// ── Push-diff ───────────────────────────────────────────────────────
+
+pub fn pm_push_diff(
+    repo: &Path,
+    options: &PmPushDiffOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmPushDiffResult> {
+    block_on_pm(pm_push_diff_async(repo, options, progress))
+}
+
+/// Find the baseline commit for diffing wave changes.
+///
+/// Looks for the most recent `pm pull` commit on the current branch.
+/// Falls back to `merge-base HEAD <main>`.
+fn find_push_diff_baseline(repo: &Path) -> OpsResult<String> {
+    // Try to find a pm pull commit on this branch
+    if let Some(sha) = log_grep(repo, "pm pull")
+        .map_err(|err| OpsError::Message(format!("git log --grep failed: {err}")))?
+    {
+        return Ok(sha);
+    }
+
+    // Fall back to merge-base with main
+    let main = get_default_branch(repo)
+        .map_err(|err| OpsError::Message(format!("failed to determine main branch: {err}")))?;
+    let branch = current_branch(repo)
+        .map_err(|err| OpsError::Message(format!("failed to determine current branch: {err}")))?
+        .unwrap_or_else(|| "HEAD".to_string());
+    merge_base(repo, &branch, &format!("origin/{main}"))
+        .map_err(|err| OpsError::Message(format!("merge-base failed: {err}")))
+}
+
+async fn pm_push_diff_async(
+    repo: &Path,
+    options: &PmPushDiffOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmPushDiffResult> {
+    let wave_dir = require_wave_dir(repo, &options.wave)?;
+    let ctx = build_wave_provider(repo, &options.wave).await?;
+    require_project(&ctx, &options.wave)?;
+
+    let baseline = find_push_diff_baseline(repo)?;
+    let wave_path = format!("wave/{}/", options.wave);
+
+    progress.status(&format!(
+        "push-diff wave/{} from baseline {} to {:?} project {}",
+        options.wave,
+        &baseline[..7.min(baseline.len())],
+        ctx.provider,
+        ctx.project,
+    ));
+
+    let changed_files = diff_names_under(repo, &baseline, "HEAD", &wave_path)
+        .map_err(|err| OpsError::Message(format!("git diff failed: {err}")))?;
+
+    let mut created = 0usize;
+    let mut updated = 0usize;
+    let mut unchanged = 0usize;
+
+    // Fetch remote items for comparison
+    let remote_items = ctx
+        .client
+        .list_items(&ctx.project)
+        .await
+        .map_err(pm_to_ops)?;
+    let remote_by_id: HashMap<&str, &PmItem> = remote_items
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect();
+
+    // Re-read all local items so we can write back IDs for newly created items
+    let mut local_items = read_local_roadmap_items(&wave_dir)?;
+    let local_by_filename: HashMap<String, usize> = local_items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (item.item.filename.clone(), i))
+        .collect();
+
+    for path in &changed_files {
+        let filename = match path.file_name().and_then(|f| f.to_str()) {
+            Some(f) => f,
+            None => continue,
+        };
+
+        if !filename.ends_with(".md") || filename.eq_ignore_ascii_case("README.md") {
+            continue;
+        }
+
+        // Read baseline version (if it existed)
+        let rel_path = path.to_string_lossy();
+        let base_doc = show_file(repo, &baseline, &rel_path)
+            .ok()
+            .flatten()
+            .and_then(|content| RoadmapItemDocument::parse(&content).ok());
+
+        // Read current version from local items
+        let Some(&local_idx) = local_by_filename.get(filename) else {
+            // File was deleted on this branch — skip (additive-only)
+            continue;
+        };
+        let local_item = &local_items[local_idx];
+        let current_title = local_item.title();
+        let current_desc = local_item.description();
+
+        match local_item.doc.frontmatter.id_for(ctx.provider) {
+            Some(pm_id) => {
+                // Item has a provider ID — check if it actually changed vs baseline
+                if let Some(ref base) = base_doc {
+                    let base_title = extract_heading(&base.body)
+                        .map(str::to_string)
+                        .unwrap_or_default();
+                    let base_desc = body_without_heading(&base.body).trim().to_string();
+
+                    if current_title == base_title && current_desc == base_desc {
+                        unchanged += 1;
+                        continue;
+                    }
+                }
+
+                // Changed — push update if remote item exists
+                let Some(remote_item) = remote_by_id.get(pm_id) else {
+                    progress.status(&format!("  skipped {filename} (remote {pm_id} missing)"));
+                    unchanged += 1;
+                    continue;
+                };
+
+                let update = build_text_update(&current_title, &current_desc, remote_item);
+                if update.name.is_none() && update.description.is_none() {
+                    unchanged += 1;
+                    continue;
+                }
+
+                ctx.client
+                    .update_item(pm_id, &update)
+                    .await
+                    .map_err(pm_to_ops)?;
+                progress.status(&format!("  updated {filename}"));
+                updated += 1;
+            }
+            None => {
+                // New item without provider ID — create in PM
+                let pm_id = ctx
+                    .client
+                    .create_item(
+                        &ctx.project,
+                        &PmItemCreate {
+                            name: current_title,
+                            description: current_desc,
+                            rank: local_items[local_idx].item.rank(),
+                        },
+                    )
+                    .await
+                    .map_err(pm_to_ops)?;
+                local_items[local_idx]
+                    .doc
+                    .frontmatter
+                    .set_id(ctx.provider, pm_id);
+                write_local_item(&wave_dir, &local_items[local_idx])?;
+                progress.status(&format!("  created {filename}"));
+                created += 1;
+            }
+        }
+    }
+
+    Ok(PmPushDiffResult {
+        wave: options.wave.clone(),
+        provider: ctx.provider,
+        project_id: ctx.project,
+        created,
+        updated,
+        unchanged,
     })
 }
 
@@ -1435,6 +1706,10 @@ mod tests {
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
             panic!("comment should not be called in this test");
         }
+
+        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
+            panic!("claim_item should not be called in this test");
+        }
     }
 
     #[async_trait]
@@ -1472,6 +1747,10 @@ mod tests {
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
             panic!("comment should not be called in this test");
         }
+
+        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
+            panic!("claim_item should not be called in this test");
+        }
     }
 
     #[async_trait]
@@ -1498,6 +1777,7 @@ mod tests {
                 description: item.description.clone(),
                 rank: item.rank,
                 completed: false,
+                assignee: None,
             });
             Ok(id)
         }
@@ -1524,6 +1804,10 @@ mod tests {
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
             panic!("comment should not be called in this test");
         }
+
+        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
+            panic!("claim_item should not be called in this test");
+        }
     }
 
     #[test]
@@ -1549,6 +1833,7 @@ mod tests {
             description: "Some details here.".to_string(),
             rank: 0,
             completed: false,
+            assignee: None,
         };
 
         let doc = remote_item_to_document(&item, PmProviderKind::Linear);
@@ -1567,6 +1852,7 @@ mod tests {
             description: String::new(),
             rank: 0,
             completed: false,
+            assignee: None,
         };
 
         let doc = remote_item_to_document(&item, PmProviderKind::Asana);
@@ -1676,6 +1962,7 @@ mod tests {
                         description: "Remote body should not replace local.".to_string(),
                         rank: 0,
                         completed: false,
+                        assignee: None,
                     },
                     PmItem {
                         id: "lin-2".to_string(),
@@ -1683,6 +1970,7 @@ mod tests {
                         description: "Imported from remote.".to_string(),
                         rank: 1,
                         completed: false,
+                        assignee: None,
                     },
                 ],
             }),
@@ -1831,6 +2119,7 @@ mod tests {
                 description: "Same remote text.".to_string(),
                 rank: 1,
                 completed: false,
+                assignee: None,
             },
             PmItem {
                 id: "lin-3".to_string(),
@@ -1838,6 +2127,7 @@ mod tests {
                 description: "Old remote text.".to_string(),
                 rank: 2,
                 completed: false,
+                assignee: None,
             },
         ]));
         let ctx = PmContext {
@@ -1889,6 +2179,7 @@ mod tests {
             description: "Remote body.".to_string(),
             rank: 0,
             completed: false,
+            assignee: None,
         };
 
         let unchanged = build_text_update("Existing", "Remote body.", &remote);
@@ -1916,6 +2207,7 @@ mod tests {
                 description: "Pulled from PM.".to_string(),
                 rank: 1,
                 completed: false,
+                assignee: None,
             },
             PmItem {
                 id: "lin-1".to_string(),
@@ -1923,6 +2215,7 @@ mod tests {
                 description: "Higher priority.".to_string(),
                 rank: 0,
                 completed: false,
+                assignee: None,
             },
         ];
 

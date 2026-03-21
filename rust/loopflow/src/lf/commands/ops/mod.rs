@@ -452,6 +452,29 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 );
             }
         }
+        PmCommand::PushDiff {
+            wave,
+            wave_flag,
+            all,
+        } => {
+            let waves = resolve_pm_waves(wave, wave_flag, *all)?;
+            for wave in waves {
+                let result = crate::ops::pm::pm_push_diff(
+                    &repo_root,
+                    &crate::ops::pm::PmPushDiffOptions { wave: wave.clone() },
+                    progress,
+                )?;
+                println!(
+                    "{}: {:?} project {} ({} created, {} updated, {} unchanged)",
+                    result.wave,
+                    result.provider,
+                    result.project_id,
+                    result.created,
+                    result.updated,
+                    result.unchanged
+                );
+            }
+        }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
                 &repo_root,

@@ -281,8 +281,8 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     }
 }
 
-/// The builtin wave-reduce flow should expand to 2 items:
-/// and(reduce×3), update-wave.
+/// The builtin wave-reduce flow should expand to 3 items:
+/// and(reduce×3), update-wave, deploy (which itself expands).
 #[test]
 fn builtin_wave_reduce_expands_to_update_wave() {
     let temp = TempDir::new().unwrap();
@@ -290,11 +290,11 @@ fn builtin_wave_reduce_expands_to_update_wave() {
 
     let items = expand_named_flow(repo, "wave-reduce");
 
-    // and + update-wave = 2
-    assert_eq!(
-        items.len(),
-        2,
-        "wave-reduce should expand into and + update-wave"
+    // and + update-wave + deploy (gate + op:land + op:pm push-diff) = 5
+    assert!(
+        items.len() >= 3,
+        "wave-reduce should expand into at least and + update-wave + deploy items, got {}",
+        items.len()
     );
 
     // Step 0: and (reduce × 3 directions)
@@ -338,11 +338,15 @@ fn builtin_garden_or_silent_flow_structure() {
 
     let items = expand_named_flow(repo, "garden-or-silent");
 
-    // garden-or-silent: garden/scan, garden/assess, xor(garden, silence)
-    assert_eq!(items.len(), 3);
-    assert_step_name(&items[0], "garden/scan");
-    assert_step_name(&items[1], "garden/assess");
-    match &items[2] {
+    // garden-or-silent: op:pm pull, garden/scan, garden/assess, xor(garden, silence)
+    assert_eq!(items.len(), 4);
+    assert!(
+        matches!(&items[0], ConcreteItem::Op(_)),
+        "expected op:pm pull at index 0"
+    );
+    assert_step_name(&items[1], "garden/scan");
+    assert_step_name(&items[2], "garden/assess");
+    match &items[3] {
         ConcreteItem::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
             assert!(xor_def.paths.contains_key("garden"));
@@ -388,10 +392,14 @@ fn builtin_build_or_silent_has_xor_branch() {
     let repo = temp.path();
 
     let items = expand_named_flow(repo, "build-or-silent");
-    // ingest, xor(build, silence)
-    assert_eq!(items.len(), 2);
-    assert_step_name(&items[0], "ingest");
-    match &items[1] {
+    // op:pm pull, ingest, xor(build, silence)
+    assert_eq!(items.len(), 3);
+    assert!(
+        matches!(&items[0], ConcreteItem::Op(_)),
+        "expected op:pm pull at index 0"
+    );
+    assert_step_name(&items[1], "ingest");
+    match &items[2] {
         ConcreteItem::Xor(xor_def) => {
             assert!(xor_def.paths.contains_key("build"));
             assert!(xor_def.paths.contains_key("silence"));

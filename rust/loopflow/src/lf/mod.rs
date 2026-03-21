@@ -301,6 +301,18 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
+    /// Push only branch-changed wave items to PM
+    #[command(name = "push-diff")]
+    PushDiff {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Push-diff every PM-enabled wave
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+    },
     /// Show PM provider status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)

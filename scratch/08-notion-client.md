@@ -28,6 +28,7 @@ PM ops against Notion:
 pm:
   provider: notion
 notion:
+  parent_page: 32af8f99-...   # optional existing parent page for pm init
   title_property: Name
   status_property: Status
   done_value: Done

@@ -331,6 +331,7 @@ PM provider config:
 pm:
   provider: notion
 notion:
+  parent_page: 32af8f99-...  # optional: reuse an existing parent page/teamspace
   title_property: Name        # optional schema overrides
   status_property: Status
   done_value: Done

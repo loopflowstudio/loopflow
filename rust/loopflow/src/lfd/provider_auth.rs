@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -394,22 +395,11 @@ impl AsanaOAuthBroker {
     }
 
     fn oauth_app() -> Result<AsanaOAuthApp, AuthError> {
-        let client_id = read_nonempty_env(ASANA_CLIENT_ID_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Asana,
-                command: format!(
-                    "set {ASANA_CLIENT_ID_ENV} and {ASANA_CLIENT_SECRET_ENV} to enable Asana OAuth"
-                ),
-            }
-        })?;
-        let client_secret = read_nonempty_env(ASANA_CLIENT_SECRET_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Asana,
-                command: format!(
-                    "set {ASANA_CLIENT_ID_ENV} and {ASANA_CLIENT_SECRET_ENV} to enable Asana OAuth"
-                ),
-            }
-        })?;
+        let (client_id, client_secret) = oauth_client_credentials(
+            Provider::Asana,
+            ASANA_CLIENT_ID_ENV,
+            ASANA_CLIENT_SECRET_ENV,
+        )?;
         let scope = read_nonempty_env(ASANA_OAUTH_SCOPE_ENV)
             .unwrap_or_else(|| ASANA_OAUTH_DEFAULT_SCOPE.to_string());
 
@@ -675,22 +665,11 @@ impl LinearOAuthBroker {
     }
 
     fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
-        let client_id = read_nonempty_env(LINEAR_CLIENT_ID_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Linear,
-                command: format!(
-                    "set {LINEAR_CLIENT_ID_ENV} and {LINEAR_CLIENT_SECRET_ENV} to enable Linear OAuth"
-                ),
-            }
-        })?;
-        let client_secret = read_nonempty_env(LINEAR_CLIENT_SECRET_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Linear,
-                command: format!(
-                    "set {LINEAR_CLIENT_ID_ENV} and {LINEAR_CLIENT_SECRET_ENV} to enable Linear OAuth"
-                ),
-            }
-        })?;
+        let (client_id, client_secret) = oauth_client_credentials(
+            Provider::Linear,
+            LINEAR_CLIENT_ID_ENV,
+            LINEAR_CLIENT_SECRET_ENV,
+        )?;
 
         Ok(LinearOAuthApp {
             client_id,
@@ -807,80 +786,24 @@ impl AuthBroker for LinearOAuthBroker {
         let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-
-        // Spin up a localhost listener to catch the OAuth redirect
-        let listener = std::net::TcpListener::bind("127.0.0.1:19222").map_err(|err| {
-            AuthError::OAuthRequest {
-                provider: Provider::Linear,
-                message: format!("failed to bind localhost:19222 for OAuth callback: {err}"),
-            }
-        })?;
-        listener.set_nonblocking(true).ok();
-        let listener =
-            tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
-                message: format!("failed to create async listener: {err}"),
-            })?;
-
+        let listener = oauth_callback_listener(Provider::Linear, "127.0.0.1:19222")?;
         let completed_token = self.completed_token.clone();
-        let monitor = tokio::spawn(async move {
-            let deadline = Instant::now() + Duration::from_secs(15 * 60);
-            loop {
-                if Instant::now() >= deadline {
-                    return Err(AuthError::CommandFailed {
-                        provider: Provider::Linear,
-                        message: "linear OAuth timed out".to_string(),
-                    });
+        let monitor = tokio::spawn(monitor_oauth_callback(
+            Provider::Linear,
+            listener,
+            Duration::from_secs(15 * 60),
+            "linear OAuth timed out",
+            completed_token,
+            move |code| {
+                let app = app.clone();
+                let code_verifier = code_verifier.clone();
+                async move {
+                    LinearOAuthBroker::new()
+                        .exchange_code(&app, &code_verifier, &code)
+                        .await
                 }
-                let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
-                let (stream, _) = match accept {
-                    Ok(Ok(conn)) => conn,
-                    Ok(Err(_)) | Err(_) => continue,
-                };
-
-                // Read the HTTP request to extract the code
-                let (mut reader, mut writer) = stream.into_split();
-                let mut buf = vec![0u8; 4096];
-                let n = match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let code = extract_oauth_code_from_request(&request);
-
-                // Send a response to the browser
-                let response_body = if code.is_some() {
-                    "Authenticated! You can close this tab."
-                } else {
-                    "Authentication failed — no code found."
-                };
-                let http_response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
-                );
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes())
-                    .await;
-                let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
-
-                let Some(code) = code else {
-                    continue;
-                };
-
-                // Exchange the code for a token
-                let broker = LinearOAuthBroker::new();
-                match broker.exchange_code(&app, &code_verifier, &code).await {
-                    Ok(token) => {
-                        *completed_token.lock().await = Some(token);
-                        return Ok(());
-                    }
-                    Err(err) => {
-                        return Err(AuthError::CommandFailed {
-                            provider: Provider::Linear,
-                            message: err.to_string(),
-                        });
-                    }
-                }
-            }
-        });
+            },
+        ));
 
         let response = AuthFlowResponse {
             provider: Provider::Linear,
@@ -925,22 +848,11 @@ impl NotionOAuthBroker {
     }
 
     fn oauth_app() -> Result<NotionOAuthApp, AuthError> {
-        let client_id = read_nonempty_env(NOTION_CLIENT_ID_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Notion,
-                command: format!(
-                    "set {NOTION_CLIENT_ID_ENV} and {NOTION_CLIENT_SECRET_ENV} to enable Notion OAuth"
-                ),
-            }
-        })?;
-        let client_secret = read_nonempty_env(NOTION_CLIENT_SECRET_ENV).ok_or_else(|| {
-            AuthError::CommandUnavailable {
-                provider: Provider::Notion,
-                command: format!(
-                    "set {NOTION_CLIENT_ID_ENV} and {NOTION_CLIENT_SECRET_ENV} to enable Notion OAuth"
-                ),
-            }
-        })?;
+        let (client_id, client_secret) = oauth_client_credentials(
+            Provider::Notion,
+            NOTION_CLIENT_ID_ENV,
+            NOTION_CLIENT_SECRET_ENV,
+        )?;
         Ok(NotionOAuthApp {
             client_id,
             client_secret,
@@ -1046,76 +958,19 @@ impl AuthBroker for NotionOAuthBroker {
         let app = Self::oauth_app()?;
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &state);
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:19223").map_err(|err| {
-            AuthError::OAuthRequest {
-                provider: Provider::Notion,
-                message: format!("failed to bind localhost:19223 for OAuth callback: {err}"),
-            }
-        })?;
-        listener.set_nonblocking(true).ok();
-        let listener =
-            tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Notion,
-                message: format!("failed to create async listener: {err}"),
-            })?;
-
+        let listener = oauth_callback_listener(Provider::Notion, "127.0.0.1:19223")?;
         let completed_token = self.completed_token.clone();
-        let monitor = tokio::spawn(async move {
-            let deadline = Instant::now() + Duration::from_secs(15 * 60);
-            loop {
-                if Instant::now() >= deadline {
-                    return Err(AuthError::CommandFailed {
-                        provider: Provider::Notion,
-                        message: "notion OAuth timed out".to_string(),
-                    });
-                }
-                let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
-                let (stream, _) = match accept {
-                    Ok(Ok(conn)) => conn,
-                    Ok(Err(_)) | Err(_) => continue,
-                };
-
-                let (mut reader, mut writer) = stream.into_split();
-                let mut buf = vec![0u8; 4096];
-                let n = match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let code = extract_oauth_code_from_request(&request);
-
-                let response_body = if code.is_some() {
-                    "Authenticated! You can close this tab."
-                } else {
-                    "Authentication failed — no code found."
-                };
-                let http_response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
-                );
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes())
-                    .await;
-                let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
-
-                let Some(code) = code else {
-                    continue;
-                };
-
-                let broker = NotionOAuthBroker::new();
-                match broker.exchange_code(&app, &code).await {
-                    Ok(token) => {
-                        *completed_token.lock().await = Some(token);
-                        return Ok(());
-                    }
-                    Err(err) => {
-                        return Err(AuthError::CommandFailed {
-                            provider: Provider::Notion,
-                            message: err.to_string(),
-                        });
-                    }
-                }
-            }
-        });
+        let monitor = tokio::spawn(monitor_oauth_callback(
+            Provider::Notion,
+            listener,
+            Duration::from_secs(15 * 60),
+            "notion OAuth timed out",
+            completed_token,
+            move |code| {
+                let app = app.clone();
+                async move { NotionOAuthBroker::new().exchange_code(&app, &code).await }
+            },
+        ));
 
         let response = AuthFlowResponse {
             provider: Provider::Notion,
@@ -2403,6 +2258,102 @@ fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+fn oauth_client_credentials(
+    provider: Provider,
+    client_id_env: &str,
+    client_secret_env: &str,
+) -> Result<(String, String), AuthError> {
+    let missing_credentials = || AuthError::CommandUnavailable {
+        provider,
+        command: format!("set {client_id_env} and {client_secret_env} to enable {provider} OAuth"),
+    };
+    let client_id = read_nonempty_env(client_id_env).ok_or_else(missing_credentials)?;
+    let client_secret = read_nonempty_env(client_secret_env).ok_or_else(missing_credentials)?;
+    Ok((client_id, client_secret))
+}
+
+fn oauth_callback_listener(
+    provider: Provider,
+    address: &str,
+) -> Result<tokio::net::TcpListener, AuthError> {
+    let listener = std::net::TcpListener::bind(address).map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to bind {address} for OAuth callback: {err}"),
+    })?;
+    listener.set_nonblocking(true).ok();
+    tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to create async listener: {err}"),
+    })
+}
+
+async fn monitor_oauth_callback<F, Fut>(
+    provider: Provider,
+    listener: tokio::net::TcpListener,
+    timeout: Duration,
+    timeout_message: &'static str,
+    completed_token: Arc<Mutex<Option<ProviderToken>>>,
+    exchange_code: F,
+) -> Result<(), AuthError>
+where
+    F: Fn(String) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<ProviderToken, AuthError>> + Send,
+{
+    let deadline = Instant::now() + timeout;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(AuthError::CommandFailed {
+                provider,
+                message: timeout_message.to_string(),
+            });
+        }
+
+        let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
+        let (stream, _) = match accept {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(_)) | Err(_) => continue,
+        };
+        let Some(code) = read_oauth_callback_code(stream).await else {
+            continue;
+        };
+
+        match exchange_code(code).await {
+            Ok(token) => {
+                *completed_token.lock().await = Some(token);
+                return Ok(());
+            }
+            Err(err) => {
+                return Err(AuthError::CommandFailed {
+                    provider,
+                    message: err.to_string(),
+                });
+            }
+        }
+    }
+}
+
+async fn read_oauth_callback_code(stream: tokio::net::TcpStream) -> Option<String> {
+    let (mut reader, mut writer) = stream.into_split();
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::io::AsyncReadExt::read(&mut reader, &mut buf)
+        .await
+        .ok()?;
+    let request = String::from_utf8_lossy(&buf[..n]);
+    let code = extract_oauth_code_from_request(&request);
+
+    let response_body = if code.is_some() {
+        "Authenticated! You can close this tab."
+    } else {
+        "Authentication failed — no code found."
+    };
+    let http_response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
+    code
 }
 
 fn read_nonempty_env(name: &str) -> Option<String> {

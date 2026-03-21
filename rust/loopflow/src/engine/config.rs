@@ -612,6 +612,7 @@ pm:
         assert_eq!(
             config.notion,
             NotionConfig {
+                parent_page: None,
                 title_property: Some("Task".to_string()),
                 status_property: Some("State".to_string()),
                 done_value: Some("Shipped".to_string()),

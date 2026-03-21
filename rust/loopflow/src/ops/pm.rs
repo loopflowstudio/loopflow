@@ -238,7 +238,7 @@ async fn resolve_provider_token(
         .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp())
     {
         return Err(OpsError::Message(format!(
-            "Stored {provider} token has expired. Run `lf ops auth {provider}` again."
+            "Stored {provider} token has expired. Run `lf op auth {provider}` again."
         )));
     }
 

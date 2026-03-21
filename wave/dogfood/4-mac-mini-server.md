@@ -8,7 +8,7 @@ notion_id: 32af8f99-3d81-81b6-933c-ca5bbe3968cb
 
 ## What to build
 
-1. **launchd plist.** `lf ops install` generates and loads a LaunchDaemon. Auto-restart on crash. Log rotation via `stdout_path`/`stderr_path`.
+1. **launchd plist.** `lf op install` generates and loads a LaunchDaemon. Auto-restart on crash. Log rotation via `stdout_path`/`stderr_path`.
 
 2. **Remote behavior parity.** Every feature that works locally must work over the network. Specifically validate:
    - Wave creation, running, stopping via `lfq` pointed at remote lfd

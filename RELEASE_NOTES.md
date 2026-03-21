@@ -11,4 +11,4 @@ Changes since `v0.9.8`.
 
 ## Release safety
 
-- **`lf ops land` fails fast on existing tags** — if a release tag already exists on origin, land aborts immediately instead of proceeding to a merge queue that will fail later
+- **`lf op land` fails fast on existing tags** — if a release tag already exists on origin, land aborts immediately instead of proceeding to a merge queue that will fail later

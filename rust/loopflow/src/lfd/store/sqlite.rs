@@ -216,7 +216,7 @@ impl SqliteStore {
                 wave.iteration() as i64,
                 wave.cycle_start_iteration() as i64,
                 created_at,
-                if wave.serialized { 1i64 } else { 0i64 },
+                wave.workers() as i64,
                 wave.mode().as_str(),
                 wave.primary_flow(),
                 wave.cron.as_deref(),
@@ -1108,6 +1108,21 @@ impl SqliteStore {
             )
             .optional()?;
         run.transpose()
+    }
+
+    pub fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::CountActiveWaveRuns))?;
+        let count = stmt.query_row(
+            params![
+                wave_id,
+                WaveRunStatus::Pending.as_i32() as i64,
+                WaveRunStatus::Running.as_i32() as i64,
+                WaveRunStatus::Waiting.as_i32() as i64,
+            ],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(count.max(0) as u32)
     }
 
     pub fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {

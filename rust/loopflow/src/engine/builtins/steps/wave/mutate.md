@@ -42,7 +42,7 @@ of what changed and why. This step is both composer and performer.
    - create or remove wave directories only when lifecycle pressure requires it
 
 5. **Sync runtime state.** For changes that affect registered wave config,
-   update runtime state through `lf ops update-wave` or the equivalent API.
+   update runtime state through `lf op update-wave` or the equivalent API.
 
 6. **Verify.** Read back every changed config and make sure the YAML still
    parses. If a mutation cannot be applied cleanly, skip it and record why.

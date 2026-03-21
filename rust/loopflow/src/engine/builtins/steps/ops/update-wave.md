@@ -38,7 +38,7 @@ Design docs for already-shipped work and other purely historical content can be 
 5. Delete shipped items. Before deleting, fold context that remaining items need into those items.
 6. Fold scratch content into `wave/<wave>/`. Merge into existing items where there's a clear match. Create new items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
 7. If destination files already exist, merge/dedupe — but keep both sides' content. When in doubt, include it.
-8. **Trim scratch docs for shipped work.** Don't delete them — `lf ops land` handles that. But strip implementation details that are now in the code. Keep only:
+8. **Trim scratch docs for shipped work.** Don't delete them — `lf op land` handles that. But strip implementation details that are now in the code. Keep only:
    - **Validation procedures** — "Done when" checks, commands to run, expected output
    - **Measurement instructions** — benchmarks, before/after comparisons, how to reproduce results
    - **Try-it recipes** — quick ways for a reviewer to exercise the change

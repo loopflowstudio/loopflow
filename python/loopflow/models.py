@@ -53,16 +53,16 @@ class FlowStep(BaseModel):
         if isinstance(value, dict):
             return cls.model_validate(value)
         if isinstance(value, str):
-            if value.startswith("op:"):
-                return cls(type="op", name=value.split(":", 1)[1].strip())
-            if value.startswith("ops:"):
-                return cls(type="op", name=value.split(":", 1)[1].strip())
-            if value == "[branch]":
-                return cls(type="branch", name="branch")
-            if value == "[fork]":
-                return cls(type="fork", name="fork")
-            if value == "[loop]":
-                return cls(type="loop", name="loop")
+            for prefix in ("op:",):
+                if value.startswith(prefix):
+                    return cls(type="op", name=value.split(":", 1)[1].strip())
+            for marker, step_type in (
+                ("[branch]", "branch"),
+                ("[fork]", "fork"),
+                ("[loop]", "loop"),
+            ):
+                if value == marker:
+                    return cls(type=step_type, name=step_type)
             return cls(type="step", name=value)
         raise TypeError(f"Unsupported flow step value: {value!r}")
 
@@ -74,6 +74,7 @@ class Wave(BaseModel):
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
     cron: Optional[str] = None
+    workers: int = 1
     direction: list[str]
     area: list[str]
     triggers: list[Trigger] = Field(default_factory=list)

@@ -136,7 +136,7 @@ pub enum Commands {
         prompt: Vec<String>,
     },
     /// Git operations
-    Ops {
+    Op {
         #[command(subcommand)]
         op: OpsCommand,
     },
@@ -311,7 +311,7 @@ pub enum AuthCommand {
         /// Provider name
         provider: String,
     },
-    /// External: provider name (so `lf ops auth asana` works)
+    /// External: provider name (so `lf op auth asana` works)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -436,10 +436,10 @@ mod tests {
 
     #[test]
     fn pm_init_parses() {
-        let cli = Cli::try_parse_from(["lf", "ops", "pm", "init"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "init"]).expect("parse");
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops {
+            Some(Commands::Op {
                 op: OpsCommand::Pm {
                     cmd: PmCommand::Init {},
                 },
@@ -449,8 +449,8 @@ mod tests {
 
     #[test]
     fn pm_pull_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "ops", "pm", "pull", "pm"]).expect("parse");
-        let Some(Commands::Ops {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "pull", "pm"]).expect("parse");
+        let Some(Commands::Op {
             op:
                 OpsCommand::Pm {
                     cmd:
@@ -472,8 +472,8 @@ mod tests {
 
     #[test]
     fn pm_pull_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "ops", "pm", "pull", "--all"]).expect("parse");
-        let Some(Commands::Ops {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "pull", "--all"]).expect("parse");
+        let Some(Commands::Op {
             op:
                 OpsCommand::Pm {
                     cmd:

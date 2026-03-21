@@ -112,7 +112,7 @@ pub struct WaveDto {
     pub open_pr_count: u32,
     pub stack_count: u32,
     pub has_stale_pr_state: bool,
-    pub serialized: bool,
+    pub workers: u32,
     pub triggers: Vec<TriggerDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
@@ -582,6 +582,7 @@ mod contract_tests {
         assert_eq!(wave.mode, "loop");
         assert_eq!(wave.status, "running");
         assert_eq!(wave.iteration, 3);
+        assert_eq!(wave.workers, 1);
         assert_eq!(wave.direction, vec!["ux", "clarity"]);
         assert_eq!(wave.area, vec!["src/"]);
         assert_eq!(wave.open_pr_count, 1);

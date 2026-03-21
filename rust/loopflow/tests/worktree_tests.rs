@@ -261,12 +261,12 @@ fn wt_switch_prefers_exact_branch_match_over_wave_name_path() {
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["ops", "wt", "switch", old_branch])
+        .args(["op", "wt", "switch", old_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf ops wt switch");
-    assert!(status.success(), "lf ops wt switch should succeed");
+        .expect("run lf op wt switch");
+    assert!(status.success(), "lf op wt switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -299,12 +299,12 @@ fn wt_switch_finds_exact_branch_match_with_custom_schema() {
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["ops", "wt", "switch", "jack/feature"])
+        .args(["op", "wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf ops wt switch");
-    assert!(status.success(), "lf ops wt switch should succeed");
+        .expect("run lf op wt switch");
+    assert!(status.success(), "lf op wt switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -343,13 +343,13 @@ fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
     assert!(status.success(), "git branch should succeed");
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["ops", "wt", "switch", "jack/feature"])
+        .args(["op", "wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .output()
-        .expect("run lf ops wt switch");
+        .expect("run lf op wt switch");
     assert!(
         !output.status.success(),
-        "lf ops wt switch should fail for unrelated branch/worktree reuse"
+        "lf op wt switch should fail for unrelated branch/worktree reuse"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);

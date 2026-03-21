@@ -560,9 +560,6 @@ fn parse_flow_mapping_with_options(
     if let Some(op_value) = map.get(key("op")) {
         return parse_op_value(op_value, "op");
     }
-    if let Some(ops_value) = map.get(key("ops")) {
-        return parse_op_value(ops_value, "ops");
-    }
     if let Some(xor_value) = map.get(key("xor")) {
         return parse_xor_value(xor_value);
     }
@@ -578,7 +575,7 @@ fn parse_flow_mapping_with_options(
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, op, ops, flow, and, xor, or, or loop".to_string(),
+        "flow item mapping must include step, op, flow, and, xor, or, or loop".to_string(),
     ))
 }
 
@@ -757,11 +754,7 @@ fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("or must be mapping".to_string()))?;
-    let or_def = parse_xor_def(map, "or")?;
-    Ok(FlowItem::Or(OrDef {
-        router: or_def.router,
-        paths: or_def.paths,
-    }))
+    parse_xor_def(map, "or").map(FlowItem::Or)
 }
 
 fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, LoadError> {
@@ -940,6 +933,19 @@ pub fn load_xor_path_items(or_path: &XorPath, repo: &Path) -> Result<Vec<Concret
     Ok(Vec::new())
 }
 
+fn expand_branch_def(
+    branch_def: &XorDef,
+    repo: &Path,
+    chain: &[String],
+) -> Result<ConcreteXor, LoadError> {
+    validate_xor_paths(branch_def, repo)?;
+    Ok(ConcreteXor {
+        router: branch_def.router.clone(),
+        paths: branch_def.paths.clone(),
+        flow_parents: chain.to_vec(),
+    })
+}
+
 fn parse_xor_path_steps(
     map: &serde_yaml_ng::Mapping,
     path_name: &str,
@@ -1084,31 +1090,18 @@ fn expand_with_chain(
                 items.push(ConcreteItem::And(fork));
             }
             FlowItem::Xor(branch_def) => {
-                validate_xor_paths(branch_def, repo)?;
-                items.push(ConcreteItem::Xor(ConcreteXor {
-                    router: branch_def.router.clone(),
-                    paths: branch_def.paths.clone(),
-                    flow_parents: chain.clone(),
-                }));
+                items.push(ConcreteItem::Xor(expand_branch_def(
+                    branch_def, repo, &chain,
+                )?));
             }
             FlowItem::Or(or_def) => {
-                validate_xor_paths(or_def, repo)?;
-                items.push(ConcreteItem::Or(ConcreteOr {
-                    router: or_def.router.clone(),
-                    paths: or_def.paths.clone(),
-                    flow_parents: chain.clone(),
-                }));
+                items.push(ConcreteItem::Or(expand_branch_def(or_def, repo, &chain)?));
             }
             FlowItem::Loop(loop_def) => {
                 let steps = expand_items_with_chain(&loop_def.steps, repo, &chain, depth)?;
-                validate_xor_paths(&loop_def.exit, repo)?;
                 items.push(ConcreteItem::Loop(ConcreteLoop {
                     steps,
-                    exit: ConcreteXor {
-                        router: loop_def.exit.router.clone(),
-                        paths: loop_def.exit.paths.clone(),
-                        flow_parents: chain.clone(),
-                    },
+                    exit: expand_branch_def(&loop_def.exit, repo, &chain)?,
                     flow_parents: chain.clone(),
                 }));
             }
@@ -1750,7 +1743,7 @@ Be careful.
     #[test]
     fn parse_ops_mapping_accepts_command_and_args() {
         let yaml = r#"
-- ops: land --create-pr
+- op: land --create-pr
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();

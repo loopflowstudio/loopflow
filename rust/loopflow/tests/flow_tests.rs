@@ -180,7 +180,7 @@ fn ops_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- ops: land --create-pr
+- op: land --create-pr
 "#,
     );
 

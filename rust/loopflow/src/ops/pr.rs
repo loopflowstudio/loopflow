@@ -66,7 +66,7 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: true,
-        message: Some("lf ops pr: prepare branch".to_string()),
+        message: Some("lf op pr: prepare branch".to_string()),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
@@ -753,13 +753,13 @@ Body:
 ## Usage
 
 ```bash
-lf ops linear init
+lf op linear init
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf ops linear init\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf op linear init\n```".to_string(),
             })
         );
     }
@@ -823,12 +823,12 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf ops pr" after gating to open or update the PR."}"###;
+Use "lf op pr" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body: "## Summary\n\nUse \"lf ops pr\" after gating to open or update the PR."
+                body: "## Summary\n\nUse \"lf op pr\" after gating to open or update the PR."
                     .to_string(),
             })
         );

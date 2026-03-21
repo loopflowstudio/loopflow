@@ -567,7 +567,7 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
 
     if !write_shell_directive(&format!("cd {}", result.path.display()))? {
         println!("cd {}", result.path.display());
-        println!("Tip: Run 'lf ops shell install' for auto-cd");
+        println!("Tip: Run 'lf op shell install' for auto-cd");
     }
 
     Ok(())
@@ -995,7 +995,7 @@ fn shell_install(shell: Option<&str>) -> Result<()> {
     };
 
     if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if content.contains("lf ops shell init") {
+        if content.contains("lf op shell init") {
             println!("Already installed in {}", config_path.display());
             return Ok(());
         }
@@ -1048,7 +1048,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
 #
 # Enables directory switching after commands that emit shell directives
-# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
+# (for example `lf op wt create`, `lf op wt switch`, `lf op land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {
@@ -1073,7 +1073,7 @@ fi
 const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
 #
 # Enables directory switching after commands that emit shell directives
-# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
+# (for example `lf op wt create`, `lf op wt switch`, `lf op land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {
@@ -1096,9 +1096,9 @@ fi
 "#;
 
 const SHELL_INSTALL_LINE_ZSH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init zsh)\"; fi";
+    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf op shell init zsh)\"; fi";
 const SHELL_INSTALL_LINE_BASH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init bash)\"; fi";
+    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf op shell init bash)\"; fi";
 
 // ==========================================================================
 // Step agent fallback
@@ -1152,7 +1152,7 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
 }
 
 // ==========================================================================
-// lf ops cp
+// lf op cp
 // ==========================================================================
 
 fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: bool) -> Result<()> {
@@ -1232,7 +1232,7 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 }
 
 // ==========================================================================
-// lf ops doctor
+// lf op doctor
 // ==========================================================================
 
 fn doctor() -> Result<()> {

@@ -348,7 +348,7 @@ async fn create_running_wave_and_run(
         iteration: 0,
         cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
-        serialized: false,
+        workers: 1,
     };
     store
         .create_wave(&wave)
@@ -592,7 +592,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         iteration: 0,
         cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
-        serialized: false,
+        workers: 1,
     };
     store
         .create_wave(&wave)

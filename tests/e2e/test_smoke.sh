@@ -39,7 +39,7 @@
     --diff false \
     | grep -q "Test"
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- ops wt create smoke-test >/dev/null
+  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- op wt create smoke-test >/dev/null
 
   repo_name=$(basename "$repo_dir")
   wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"
@@ -54,7 +54,7 @@
   git add file.txt
 
   cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- \
-    ops commit -m "smoke test" >/dev/null
+    op commit -m "smoke test" >/dev/null
 
   git log -1 --pretty=%B | grep -q "smoke test"
 

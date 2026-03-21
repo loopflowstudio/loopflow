@@ -548,7 +548,7 @@ pub fn launch_agent(
     }
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
-    // can request parent-shell actions (for example auto-cd after `lf ops wt create`).
+    // can request parent-shell actions (for example auto-cd after `lf op wt create`).
     // Agent sessions run arbitrary nested commands; those must not mutate the
     // invoking shell state via the top-level directive file.
     cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");

@@ -152,7 +152,7 @@ pub async fn build_wave_dto(
         open_pr_count: live_snapshot.open_pr_count(),
         stack_count: stack_runs.len() as u32,
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
-        serialized: wave.serialized,
+        workers: wave.workers(),
         triggers,
         active_run,
     })
@@ -476,7 +476,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         }
     }
 

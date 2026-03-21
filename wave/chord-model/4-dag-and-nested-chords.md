@@ -5,11 +5,13 @@ notion_id: 32af8f99-3d81-81ee-bb97-ddf1d3b929d9
 ---
 # 07: DAG and Nested Chords
 
-**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced. A VSM chord (five waves, one per system) is representable as a nested structure.
+**Finish line:** Chord-waves can contain other chord-waves, forming a DAG. Acyclicity is enforced. Worker capacity budgets flow down the tree correctly.
 
 ## Context
 
 The redesign chord-wave already proves the first level: a wave can coordinate other waves by pointing its `area` at their directories. The remaining question is how far that model stretches. This item validates nesting and uses the same area-derived membership model to introduce a default top-level chord-wave.
+
+Worker capacity (`workers: N`) now flows as a budget down the chord tree. Intermediate waves split their budget among children and themselves — e.g., an `api` wave with 6 workers keeps 1 for cross-cutting work and distributes 3 to `api-auth` and 2 to `api-billing`. This is a policy decision (s5-level, slow-changing), not recomputed each cycle. The root wave is not special — it's just the wave at the top of the tree. Any wave with children can run the planning flow.
 
 ## What to build
 

@@ -30,7 +30,7 @@ When target context is provided (target name, tag prefix, area scope), include o
 
 Lead with outcomes, not mechanisms. What can users do now? What got better?
 
-Good: "`lf ops next` now starts fresh from main after merged PRs — no manual cleanup"
+Good: "`lf op next` now starts fresh from main after merged PRs — no manual cleanup"
 Bad: "Refactored release.rs to extract helper functions"
 
 Skip internal refactors unless they affect what users experience.

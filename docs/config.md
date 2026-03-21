@@ -311,7 +311,7 @@ ide:
 
 ### Branch Names
 
-Customize branch naming for `lf ops wt create`.
+Customize branch naming for `lf op wt create`.
 
 ```yaml
 branch_names:
@@ -319,7 +319,7 @@ branch_names:
 ```
 
 Available placeholders:
-- `{name}` — short name passed to `lf ops wt create`
+- `{name}` — short name passed to `lf op wt create`
 - `{user}` — git `user.name` (sanitized)
 - `{date}` — `YYYYMMDD`
 - `{ts}` — `YYYYMMDD_HHMM`

@@ -89,11 +89,11 @@ lf : "add type hints to utils.py"
 Design, implement, gate, ship.
 
 ```bash
-lf ops wt create auth-feature       # create worktree
+lf op wt create auth-feature       # create worktree
 lf design: add OAuth login         # discuss approach
 lf implement                       # build it
 lf gate                            # ship-ready check
-lf ops pr                           # open PR
+lf op pr                           # open PR
 ```
 
 ### Steps chain
@@ -143,8 +143,8 @@ lf audit    # runs your custom step
 ### Shipping
 
 ```bash
-lf ops pr      # create or update PR
-lf ops land    # submit to merge queue
+lf op pr      # create or update PR
+lf op land    # submit to merge queue
 ```
 
 ---
@@ -201,9 +201,9 @@ Concerto mobile connects to remote `lfd` — monitor and manage waves from your 
 Auth connects your providers:
 
 ```bash
-lf ops auth asana    # connect Asana for local `lf` commands like `lf ops export`
-lf ops auth configure linear  # store Linear API key for local `lf` PM commands
-lf ops auth status   # check local lf credentials
+lf op auth asana    # connect Asana for local `lf` commands like `lf op export`
+lf op auth configure linear  # store Linear API key for local `lf` PM commands
+lf op auth status   # check local lf credentials
 
 lfq auth github      # connect GitHub
 lfq auth claude      # connect Claude
@@ -240,4 +240,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf ops` commands](lfops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)
+[`lf` commands](lf.md) · [`lf op` commands](lfop.md) · [`lfd` commands](lfd.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)

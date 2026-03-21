@@ -3,8 +3,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::activation::{enqueue_pending_activation, ActivationEnvelope, EnqueueOutcome};
-use super::spawn_immediate_activation;
+use super::activation::{dispatch_or_enqueue_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -100,32 +99,21 @@ async fn handle_ci_failure_event(
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("wave {} not found", activation.wave_id))?;
 
-    if wave.serialized {
-        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
-        if outcome.is_none() {
-            return Err(format!(
-                "failed to enqueue CI failure activation for wave {}",
-                activation.wave_id
-            ));
-        }
-        if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
-            tracing::warn!(
-                wave_id = %activation.wave_id,
-                trigger_id = %trigger.id,
-                "dropped CI failure activation because queue is full"
-            );
-        }
-    } else {
-        let _ = spawn_immediate_activation(
-            store,
-            executor,
-            scheduler,
-            event_hub,
-            &wave,
-            trigger.flow.clone(),
-            envelope,
-        )
-        .await;
+    if !dispatch_or_enqueue_activation(
+        store,
+        executor,
+        scheduler,
+        event_hub,
+        &wave,
+        trigger.flow.clone(),
+        envelope,
+    )
+    .await
+    {
+        return Err(format!(
+            "failed to dispatch CI failure activation for wave {}",
+            activation.wave_id
+        ));
     }
     Ok(())
 }
@@ -169,7 +157,7 @@ mod tests {
     use super::*;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus};
     use std::sync::Arc;
 
     async fn create_store() -> SharedStore {
@@ -194,7 +182,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: false,
+            workers: 1,
         };
         store.create_wave(&wave).await.expect("create wave");
         wave
@@ -266,7 +254,7 @@ mod tests {
             iteration: 0,
             cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            serialized: true,
+            workers: 1,
         };
         store.create_wave(&wave).await.expect("create wave");
         wave
@@ -314,6 +302,14 @@ mod tests {
         let event_hub = EventHub::new(16);
         let wave = create_serialized_wave(&store).await;
         let trigger = create_ci_failure_trigger(&store, &wave).await;
+        let mut active_run = WaveRun::new(LfdId::new(), wave.id.clone());
+        active_run.status = WaveRunStatus::Running;
+        active_run.snapshot.repo = wave.repo.clone();
+        active_run.snapshot.flow = wave.primary_flow.clone();
+        store
+            .create_wave_run(&active_run)
+            .await
+            .expect("seed active run");
         let activation = CiFailureActivation {
             wave_id: wave.id.clone(),
             pr_number: 42,

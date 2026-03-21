@@ -7,7 +7,7 @@ notion_id: 32af8f99-3d81-8121-b592-d35ee90a848d
 
 **Finish line:** `ingest` refreshes from the PM tracker before picking the next item when the wave has a `pm` block.
 
-`lf ops pm pull` exists as the deterministic remote-wins refresh (`ops/pm.rs::pm_pull`). The executor imports from the read/write provider at PR-oriented run start. But `lf ops ingest` still works off whatever currently happens to be in `wave/`. Manual roadmap pickup should see the same state the executor would see.
+`lf op pm pull` exists as the deterministic remote-wins refresh (`ops/pm.rs::pm_pull`). The executor imports from the read/write provider at PR-oriented run start. But `lf op ingest` still works off whatever currently happens to be in `wave/`. Manual roadmap pickup should see the same state the executor would see.
 
 ## What to build
 

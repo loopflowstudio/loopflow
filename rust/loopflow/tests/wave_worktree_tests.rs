@@ -38,7 +38,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         iteration: 0,
         cycle_start_iteration: 0,
         created_at: None,
-        serialized: false,
+        workers: 1,
     }
 }
 

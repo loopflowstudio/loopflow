@@ -150,6 +150,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "032_terminal_sessions",
         sql: include_str!("migrations/032_terminal_sessions.sql"),
     },
+    Migration {
+        version: "033_wave_workers",
+        sql: include_str!("migrations/033_wave_workers.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

@@ -31,13 +31,13 @@ if (( cols < 120 )); then
     if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
         tmux send-keys "watch -n 5 lfq list" Enter
     elif loopflow_has_cmd lf; then
-        tmux send-keys "watch -n 5 lf ops wt list" Enter
+        tmux send-keys "watch -n 5 lf op wt list" Enter
     fi
 
     # Bottom: worker
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf ops wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
+        tmux send-keys "# lf op wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
     fi
 else
     # Full layout: top leader + 3 bottom workers
@@ -54,25 +54,25 @@ else
     if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
         tmux send-keys "watch -n 5 lfq list" Enter
     elif loopflow_has_cmd lf; then
-        tmux send-keys "watch -n 5 lf ops wt list" Enter
+        tmux send-keys "watch -n 5 lf op wt list" Enter
     fi
 
     # Worker 1 (1)
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf ops wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
+        tmux send-keys "# lf op wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
     fi
 
     # Worker 2 (2)
     tmux select-pane -t 2
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf ops wt create b && cd ../\$(git branch --show-current)-b && lf implement" Enter
+        tmux send-keys "# lf op wt create b && cd ../\$(git branch --show-current)-b && lf implement" Enter
     fi
 
     # Worker 3 (3)
     tmux select-pane -t 3
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf ops wt create c && cd ../\$(git branch --show-current)-c && lf implement" Enter
+        tmux send-keys "# lf op wt create c && cd ../\$(git branch --show-current)-c && lf implement" Enter
     fi
 
     # Focus worker 1

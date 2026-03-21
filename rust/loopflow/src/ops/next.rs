@@ -55,7 +55,7 @@ pub fn next_branch(
         add: true,
         push: true,
         create_draft_pr: true,
-        message: Some("lf ops next: checkpoint".to_string()),
+        message: Some("lf op next: checkpoint".to_string()),
         ..CommitOptions::for_task("commit")
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;

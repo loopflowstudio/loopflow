@@ -239,7 +239,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(
-            "'{}' CLI not found. Run `lf ops doctor` to check dependencies.",
+            "'{}' CLI not found. Run `lf op doctor` to check dependencies.",
             built.harness
         ));
     }
@@ -273,7 +273,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     process.stream_format = StreamFormat::Human(use_color);
 
     // Set up directive relay so agent steps can issue shell directives
-    // (e.g. `cd` after `lf ops land` rotates worktrees).
+    // (e.g. `cd` after `lf op land` rotates worktrees).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = built.agent_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {

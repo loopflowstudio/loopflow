@@ -145,7 +145,7 @@ public struct InteractiveSession: Sendable, Identifiable {
         if let prompt = prompt {
             cmd += " \(shellEscape(prompt))"
         }
-        cmd += " && lf ops commit --push"
+        cmd += " && lf op commit --push"
         return cmd
     }
 }

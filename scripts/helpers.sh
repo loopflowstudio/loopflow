@@ -188,7 +188,7 @@ loopflow_pick_wave() {
         items="$(lfq list 2>/dev/null | tail -n +2)"
     else
         if loopflow_has_cmd lf; then
-            items="$(lf ops wt list 2>/dev/null)"
+            items="$(lf op wt list 2>/dev/null)"
         elif loopflow_has_cmd git; then
             items="$(git worktree list --porcelain 2>/dev/null | grep '^worktree ' | sed 's/^worktree //')"
         fi
@@ -323,7 +323,7 @@ loopflow_dispatch() {
                 _loopflow_container_wave_cmd land
             else
                 if loopflow_has_cmd lf; then
-                    tmux send-keys "lf ops $action" Enter
+                    tmux send-keys "lf op $action" Enter
                 else
                     loopflow_display "lf not found"
                 fi

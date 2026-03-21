@@ -43,6 +43,8 @@ pub(crate) struct WaveConfig {
     pub mode: Option<String>,
     pub primary_flow: Option<String>,
     pub cron: Option<String>,
+    pub workers: Option<u32>,
+    pub serialized: Option<bool>,
     pub area: Option<Vec<String>>,
     pub triggers: Option<TriggerDef>,
     pub direction: Option<Vec<String>>,
@@ -142,6 +144,7 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.flow.as_deref(), Some("build"));
         assert_eq!(config.area, Some(vec![".".to_string()]));
+        assert_eq!(config.workers, None);
     }
 
     #[test]

@@ -28,7 +28,7 @@ The local-first terminal workspace is now in place: `lfd` persists `terminal_ses
 
 But the transport is still transitional. `attach` currently returns a local wrapped shell command built from agent argv, completion still depends on callback POSTs, and the terminal does not yet show a daemon-owned `lf <step-or-flow>` PTY. The next move should not deepen that shim. It should lean into the shared-store contract and local terminal embedding first, then ask whether remote should begin as SSH into a host/container before `lfd` grows a custom PTY transport.
 
-The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `05-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
+The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items and `04-window-composition.md`) clarifies the transport boundary. Concerto is a client in tmux terms — it should never own PTYs, session lifecycle, or process supervision. It attaches to sessions, sends input, receives output, and manages layout. All persistent state lives in `lfd`. This means agent-embedding work should:
 - Build around `TerminalSession` IDs from `lfd`, not locally-invented session handles
 - Treat Ghostty embedding as a rendering surface, not a session owner
 - Layout serialization is shipped (`MultiplexerLayout` encodes split trees as `Codable` data, persisted per wave via `MultiplexerStore`)
@@ -37,6 +37,8 @@ The tmux architecture study (shipped, guidance propagated into `wave/lfd/` items
 The workspace multiplexer is now in place: a recursive binary split tree per wave, persisted via `MultiplexerStore`, with roadmap, README, runs, launcher, terminal, markdown, diff, and launchpad panes. The default workspace opens into roadmap + runs + terminal, and the command palette focuses existing panes before creating duplicates. The terminal pane is backed by tmux (`TmuxSession`), and focus-aware keyboard routing dispatches to SwiftUI or tmux based on first-responder detection. `TerminalWorkspaceStore` manages session ordering and selection per repo; the multiplexer extends that model with spatial layout. Remaining composition work (richer pane content, directional focus, named layouts, layout migrations) should deepen these surfaces rather than introducing parallel state.
 
 Derive cross-wave and cross-repo views from the same stores that already power the queue and terminal sidebar. The existing portfolio window already proves the repo-card shell: basic per-repo wave counts, blocked counts, and diff summaries. Future portfolio work should deepen that surface with shared wave/run/attention/session queries instead of building a second dashboard stack beside it. The persisted `terminal_sessions` records in `lfd` are also the source of truth for adoption and latency measurement: portfolio trend lines, in-app completion rate, and resume-latency work should query those rows rather than inventing a second analytics cache.
+
+A terminal-per-wave dashboard remains plausible, but it belongs after `wave/lfd/` ships daemon-owned tmux sessions. Until then, agent-embedding work should expose terminal presence, session state, and drill-in paths without growing a second Swift-owned terminal model.
 
 ## Goals
 

@@ -3,7 +3,7 @@ asana_id: '1213718096104955'
 linear_id: c41ad0f6-255a-42b6-8aae-43a49ce99263
 notion_id: 32af8f99-3d81-81c8-a089-d47185436add
 ---
-# 05: Window Composition — Polish
+# 04: Window Composition — Polish
 
 **Finish line:** The multiplexer panes are rich enough to stay open. Markdown has a file picker, diff shows unified hunks, splitting offers a type choice, and directional focus works across the whole layout.
 
@@ -19,6 +19,8 @@ Current pane state:
 - **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
 Current shortcuts: `Ctrl+Shift+5` split vertical, `Ctrl+Shift+'` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Return` new shell, `Cmd+Option+←/→` focus next/previous pane.
+
+This work should deepen the per-wave workspace that already shipped. Do not treat it as a back door to a second dashboard architecture; always-on wave terminals across the portfolio stay downstream of daemon-owned tmux sessions in `wave/lfd/`.
 
 ## What to build
 

@@ -3,7 +3,7 @@ asana_id: '1213718347010726'
 linear_id: 23581d6d-b363-463a-936d-f7e29efbcac7
 notion_id: 32af8f99-3d81-81f8-87ac-decf31e198c2
 ---
-# 04: Calibration View
+# 03: Calibration View
 
 **Finish line:** The garden flow's human checkpoint has a dedicated UX. Not a notification, not a PR review — a trajectory review across all waves. The highest-leverage human moment in the system.
 
@@ -16,7 +16,7 @@ Three kinds of human intervention, each with different UX needs:
 
 Design and code review have existing UX patterns (PR review, design doc review). Calibration is new — there's no established pattern for "review the trajectory of a coordinated system of agents."
 
-Item 01 keeps the queue contract coarse: calibration should ride the same `interactive` path as other human checkpoints, keyed by `context.step`. This item starts after that routing exists. Its job is the dedicated all-waves review surface, not a new top-level attention kind.
+The shipped interactive-checkpoint work keeps the queue contract coarse: calibration should ride the same `interactive` path as other human checkpoints, keyed by `context.step`. This item starts from that routing. Its job is the dedicated all-waves review surface, not a new top-level attention kind.
 
 ## What to build
 

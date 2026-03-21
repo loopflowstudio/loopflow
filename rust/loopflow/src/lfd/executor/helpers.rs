@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -452,6 +453,68 @@ pub(crate) fn build_agent_for_step(
         agent: agent.to_string(),
         run_mode: "auto".to_string(),
     }
+}
+
+pub(crate) fn resolve_lf_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("LF_BIN") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Ok(current) = std::env::current_exe() {
+        if current
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "lf")
+        {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lf");
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+
+    PathBuf::from("lf")
+}
+
+pub(crate) fn build_lf_step_command(
+    step_name: &str,
+    batch: bool,
+    directions: &[String],
+    area: &[String],
+    wave_name: &str,
+) -> Vec<String> {
+    let mut cmd = vec![
+        resolve_lf_binary().to_string_lossy().to_string(),
+        step_name.to_string(),
+    ];
+    if batch {
+        cmd.push("-b".to_string());
+    }
+    cmd.push("--no-direction".to_string());
+    for direction in directions {
+        cmd.push("-d".to_string());
+        cmd.push(direction.clone());
+    }
+    for scope in area {
+        cmd.push("-a".to_string());
+        cmd.push(scope.clone());
+    }
+    cmd.push("-w".to_string());
+    cmd.push(wave_name.to_string());
+    cmd
 }
 
 /// Commit any remaining changes, push, and create a draft PR.

@@ -1,7 +1,5 @@
 use crate::engine::flow::expand_direction_names;
-use crate::engine::flow::{
-    build_xor_routing_suffix, load_step, load_xor_path_items, read_xor_verdict,
-};
+use crate::engine::flow::load_xor_path_items;
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
@@ -9,8 +7,9 @@ use crate::engine::fork::{
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
-    expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor, Flow,
-    FlowAction,
+    expand_flow, xor_verdict_path, ConcreteAnd, ConcreteItem, ConcreteLoop, ExecutionContext,
+    ExecutionStep, Flow, FlowEngine, FlowOutcome, FlowProgress, StepExecutor, StepOutcome,
+    TEMP_XOR_ROUTE_STEP_NAME,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
@@ -20,11 +19,10 @@ use crate::lfd::executor::{
 };
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};
 use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
-const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -39,7 +37,20 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
             ..LfEventFields::default()
         },
     );
-    let result = run_steps(&items, message, cli, repo);
+    let executor = CliFlowExecutor {
+        cli,
+        message,
+        repo: repo.to_path_buf(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build flow runtime")?;
+    let result = runtime
+        .block_on(FlowEngine::new(executor).run(&items, 0))
+        .map(|outcome| match outcome {
+            FlowOutcome::Completed | FlowOutcome::Waiting => (),
+        });
     match &result {
         Ok(_) => journal::emit(
             repo,
@@ -219,75 +230,102 @@ fn tree_prefix(index: usize, total: usize) -> &'static str {
     }
 }
 
-fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    let total = items.len();
+struct CliFlowExecutor<'a> {
+    cli: &'a Cli,
+    message: Option<&'a str>,
+    repo: PathBuf,
+}
 
-    for index in 0..total {
-        let action = next_action(items, index);
-        match action {
-            FlowAction::RunStep { step } | FlowAction::WaitInteractive { step } => {
-                run_flow_step(&step.step.name, (index, total), message, cli, repo)?
-            }
-            FlowAction::RunOps { ops } => {
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}op:{reset} {cmd}",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                    cmd = ops.item.display_name(),
-                );
-                crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
-            }
-            FlowAction::And { fork } => {
-                run_and(&fork, message, cli, repo)?;
-                commit_step_work(repo, "and")?;
-            }
-            FlowAction::Xor { branch } => {
-                run_xor(&branch, message, cli, repo, index)?;
-                commit_step_work(repo, "xor")?;
-            }
-            FlowAction::Or { .. } => {
-                anyhow::bail!("or (multi-select) execution is not yet implemented");
-            }
-            FlowAction::Loop { body } => {
-                run_loop(&body, message, cli, repo)?;
-                commit_step_work(repo, "loop")?;
-            }
-            FlowAction::Complete => break,
-        }
+#[async_trait]
+impl StepExecutor for CliFlowExecutor<'_> {
+    fn repo_root(&self) -> &Path {
+        &self.repo
     }
 
-    Ok(())
-}
+    async fn run_step(&self, step: &ExecutionStep, ctx: ExecutionContext) -> Result<StepOutcome> {
+        if let Some(progress) = ctx.progress {
+            print_step_progress(progress, &step.display_name);
+        } else {
+            print_nested_step_progress(&step.display_name);
+        }
 
-fn run_flow_step(
-    step_name: &str,
-    progress: (usize, usize),
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-) -> Result<()> {
-    let (index, total) = progress;
-    print_step_progress(index, total, step_name);
-    run_step_with_journal(repo, step_name, index, || {
-        crate::lf::commands::run::run(Some(step_name), message, cli)?;
-        commit_step_work(repo, step_name)?;
+        run_step_with_journal(
+            &self.repo,
+            &step.display_name,
+            ctx.progress.map(|progress| progress.index),
+            || {
+                if let Some(prompt) = step.temporary_content.as_deref() {
+                    let _guard = write_temp_step(&self.repo, &step.invoke_as, prompt)?;
+                    crate::lf::commands::run::run(
+                        Some(step.invoke_as.as_str()),
+                        self.message,
+                        self.cli,
+                    )?;
+                } else {
+                    crate::lf::commands::run::run(
+                        Some(step.invoke_as.as_str()),
+                        self.message,
+                        self.cli,
+                    )?;
+                }
+                commit_step_work(&self.repo, &step.display_name)?;
+                Ok(())
+            },
+        )?;
+        Ok(StepOutcome::Completed)
+    }
+
+    async fn run_op(&self, ops: &crate::engine::ConcreteOp, ctx: ExecutionContext) -> Result<()> {
+        if let Some(progress) = ctx.progress {
+            let colors = Colors::new();
+            eprintln!(
+                "{dim}[{current}/{total}]{reset} {bold}op:{reset} {cmd}",
+                dim = colors.dim,
+                reset = colors.reset,
+                bold = colors.bold,
+                current = progress.index + 1,
+                total = progress.total,
+                cmd = ops.item.display_name(),
+            );
+        } else {
+            eprintln!("op: {}", ops.item.display_name());
+        }
+        crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress)?;
         Ok(())
-    })
+    }
+
+    async fn run_and(&self, fork: &ConcreteAnd, _ctx: ExecutionContext) -> Result<()> {
+        run_and(fork, self.message, self.cli, &self.repo)?;
+        commit_step_work(&self.repo, "and")?;
+        Ok(())
+    }
+
+    async fn read_xor_verdict(&self, branch: &crate::engine::ConcreteXor) -> Result<String> {
+        crate::engine::flow::read_xor_verdict(&xor_verdict_path(&self.repo), branch)
+            .map_err(anyhow::Error::msg)
+    }
 }
 
-fn print_step_progress(index: usize, total: usize, step_name: &str) {
+fn print_step_progress(progress: FlowProgress, step_name: &str) {
     let colors = Colors::new();
     eprintln!(
         "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
         dim = colors.dim,
         reset = colors.reset,
         bold = colors.bold,
-        current = index + 1,
-        total = total,
+        current = progress.index + 1,
+        total = progress.total,
+        name = step_name,
+    );
+}
+
+fn print_nested_step_progress(step_name: &str) {
+    let colors = Colors::new();
+    eprintln!(
+        "{dim}[*]{reset} {bold}{name}{reset}",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
         name = step_name,
     );
 }
@@ -295,7 +333,7 @@ fn print_step_progress(index: usize, total: usize, step_name: &str) {
 fn run_step_with_journal(
     repo: &Path,
     step_name: &str,
-    index: usize,
+    index: Option<usize>,
     run: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
     journal::emit(
@@ -304,7 +342,7 @@ fn run_step_with_journal(
         LfEventType::Started,
         LfEventFields {
             step: Some(step_name.to_string()),
-            index: Some(index as u32),
+            index: index.map(|value| value as u32),
             ..LfEventFields::default()
         },
     );
@@ -316,7 +354,7 @@ fn run_step_with_journal(
             LfEventType::Completed,
             LfEventFields {
                 step: Some(step_name.to_string()),
-                index: Some(index as u32),
+                index: index.map(|value| value as u32),
                 ..LfEventFields::default()
             },
         ),
@@ -326,7 +364,7 @@ fn run_step_with_journal(
             LfEventType::Errored,
             LfEventFields {
                 step: Some(step_name.to_string()),
-                index: Some(index as u32),
+                index: index.map(|value| value as u32),
                 error: Some(err.to_string()),
                 ..LfEventFields::default()
             },
@@ -345,109 +383,24 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     commit_workflow(repo, &options, &NullProgress)?;
     Ok(())
 }
-
-/// Run xor-routing: execute a routing step, read the verdict, then run the
-/// selected sub-flow inline.
-fn run_xor(
-    xor_def: &ConcreteXor,
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-    index: usize,
-) -> Result<String> {
-    let colors = Colors::new();
-    let verdict_path = repo.join("scratch/route-xor.md");
-
-    let router_name = xor_def
-        .router
-        .as_deref()
-        .unwrap_or(TEMP_XOR_ROUTE_STEP_NAME);
-
-    eprintln!(
-        "{dim}[xor]{reset} {bold}{step}{reset} choosing between {n} paths",
-        dim = colors.dim,
-        reset = colors.reset,
-        bold = colors.bold,
-        step = router_name,
-        n = xor_def.paths.len(),
-    );
-
-    // Build routing instructions that get appended to the step's prompt.
-    let routing_suffix = build_xor_routing_suffix(xor_def);
-
-    // Write the routing step — either a wrapper around the router step's
-    // content + routing instructions, or a standalone generic routing prompt.
-    let prompt = if let Some(ref router_name) = xor_def.router {
-        let router = load_step(router_name, repo)?;
-        let base = router.content.as_deref().unwrap_or("");
-        format!("{base}\n\n{routing_suffix}")
-    } else {
-        format!(
-            "---\nagent: claude:sonnet\n---\n\
-             Previous steps have analyzed the current state and written their findings to scratch/.\n\
-             Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
-             {routing_suffix}"
-        )
-    };
-
-    let temp_step = write_xor_route_step(repo, &prompt)?;
-    let result = run_step_with_journal(repo, router_name, index, || {
-        crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli)?;
-        commit_step_work(repo, router_name)?;
-        Ok(())
-    });
-    drop(temp_step);
-
-    result?;
-
-    let selected = read_xor_verdict(&verdict_path, xor_def).map_err(anyhow::Error::msg)?;
-
-    eprintln!(
-        "{dim}[xor]{reset} {bold}{selected}{reset} selected",
-        dim = colors.dim,
-        reset = colors.reset,
-        bold = colors.bold,
-    );
-
-    // Load and execute the selected sub-flow.
-    let xor_path = xor_def
-        .paths
-        .get(&selected)
-        .expect("selected path validated by read_xor_verdict");
-
-    let sub_items = load_xor_path_items(xor_path, repo)?;
-    run_steps(&sub_items, message, cli, repo)?;
-    Ok(selected)
-}
-
-fn run_loop(loop_def: &ConcreteLoop, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    loop {
-        run_steps(&loop_def.steps, message, cli, repo)?;
-        let selected = run_xor(&loop_def.exit, message, cli, repo, loop_def.steps.len())?;
-        if selected == "done" {
-            return Ok(());
-        }
-    }
-}
-
-fn write_xor_route_step(repo: &Path, prompt: &str) -> Result<XorRouteStepGuard> {
+fn write_temp_step(repo: &Path, name: &str, prompt: &str) -> Result<TempStepGuard> {
     let tmp_step_dir = repo.join(".lf/steps");
     std::fs::create_dir_all(&tmp_step_dir)?;
-    let path = tmp_step_dir.join(format!("{TEMP_XOR_ROUTE_STEP_NAME}.md"));
+    let path = tmp_step_dir.join(format!("{name}.md"));
     let original_content = std::fs::read_to_string(&path).ok();
     std::fs::write(&path, prompt)?;
-    Ok(XorRouteStepGuard {
+    Ok(TempStepGuard {
         path,
         original_content,
     })
 }
 
-struct XorRouteStepGuard {
+struct TempStepGuard {
     path: PathBuf,
     original_content: Option<String>,
 }
 
-impl Drop for XorRouteStepGuard {
+impl Drop for TempStepGuard {
     fn drop(&mut self) {
         let result = match &self.original_content {
             Some(content) => std::fs::write(&self.path, content),
@@ -460,7 +413,7 @@ impl Drop for XorRouteStepGuard {
 
         if let Err(err) = result {
             eprintln!(
-                "failed to restore temporary xor-route step {}: {}",
+                "failed to restore temporary step {}: {}",
                 self.path.display(),
                 err
             );
@@ -708,7 +661,7 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{render_pipeline_lines, write_xor_route_step};
+    use super::{render_pipeline_lines, write_temp_step};
     use crate::engine::{ConcreteItem, Flow};
     use std::fs;
     use tempfile::tempdir;
@@ -720,7 +673,8 @@ mod tests {
         let step_path = temp.path().join(".lf/steps/xor-route.md");
 
         {
-            let _guard = write_xor_route_step(temp.path(), "temporary route prompt").unwrap();
+            let _guard =
+                write_temp_step(temp.path(), "xor-route", "temporary route prompt").unwrap();
             assert_eq!(
                 fs::read_to_string(&step_path).unwrap(),
                 "temporary route prompt"
@@ -742,7 +696,8 @@ mod tests {
         fs::write(&step_path, "existing route prompt").unwrap();
 
         {
-            let _guard = write_xor_route_step(temp.path(), "temporary route prompt").unwrap();
+            let _guard =
+                write_temp_step(temp.path(), "xor-route", "temporary route prompt").unwrap();
             assert_eq!(
                 fs::read_to_string(&step_path).unwrap(),
                 "temporary route prompt"

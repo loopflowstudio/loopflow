@@ -47,14 +47,15 @@ pub(crate) fn cleanup_workspace_worktree(worktree: &Path) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct AgentRunContext<'a> {
-    pub wave_id: &'a str,
-    pub agent_id: &'a str,
-    pub wave_run_id: &'a str,
-    pub branch: Option<&'a str>,
-    pub output: &'a OutputHub,
-    pub output_prefix: Option<&'a str>,
+#[derive(Debug, Clone)]
+pub struct AgentRunContext {
+    pub wave_id: String,
+    pub agent_id: String,
+    pub wave_run_id: String,
+    pub branch: Option<String>,
+    pub output: OutputHub,
+    pub output_prefix: Option<String>,
+    pub extra_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,21 +67,21 @@ pub(crate) struct OutputContext {
     pub(crate) output_prefix: Option<String>,
 }
 
-impl<'a> From<AgentRunContext<'a>> for OutputContext {
-    fn from(context: AgentRunContext<'a>) -> Self {
+impl From<AgentRunContext> for OutputContext {
+    fn from(context: AgentRunContext) -> Self {
         Self {
-            wave_id: context.wave_id.to_string(),
-            wave_run_id: context.wave_run_id.to_string(),
-            agent_id: context.agent_id.to_string(),
-            output: context.output.clone(),
-            output_prefix: context.output_prefix.map(str::to_string),
+            wave_id: context.wave_id,
+            wave_run_id: context.wave_run_id,
+            agent_id: context.agent_id,
+            output: context.output,
+            output_prefix: context.output_prefix,
         }
     }
 }
 
 #[async_trait]
 pub trait AgentExecutor: Send + Sync {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32>;
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
     async fn write_to_workspace(
         &self,

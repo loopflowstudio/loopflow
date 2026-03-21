@@ -40,13 +40,14 @@ impl LocalProcessExecutor {
 
 #[async_trait]
 impl AgentExecutor for LocalProcessExecutor {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
 
-        let agent_id_string = context.agent_id.to_string();
-        let output_context: OutputContext = context.into();
+        let agent_id_string = context.agent_id.clone();
+        let extra_env = context.extra_env.clone();
+        let output_context: OutputContext = context.clone().into();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -66,12 +67,15 @@ impl AgentExecutor for LocalProcessExecutor {
             }
             command.env(&key, &value);
         }
+        for (key, value) in extra_env {
+            command.env(&key, &value);
+        }
 
         let mut child = command.spawn()?;
 
         // Record the PID so the process can be killed on stop.
         if let Some(pid) = child.id() {
-            let agent_lfd_id = LfdId::from_raw(context.agent_id);
+            let agent_lfd_id = LfdId::from_raw(&context.agent_id);
             let _ = self
                 .store
                 .update_agent_status(
@@ -172,12 +176,13 @@ mod tests {
                 vec!["sh".to_string(), "-c".to_string(), "sleep 1".to_string()],
                 tmp.path(),
                 AgentRunContext {
-                    wave_id: "wave-timeout",
-                    agent_id: "agent-timeout",
-                    wave_run_id: "run-timeout",
+                    wave_id: "wave-timeout".to_string(),
+                    agent_id: "agent-timeout".to_string(),
+                    wave_run_id: "run-timeout".to_string(),
                     branch: None,
-                    output: &output,
+                    output,
                     output_prefix: None,
+                    extra_env: Vec::new(),
                 },
             )
             .await;

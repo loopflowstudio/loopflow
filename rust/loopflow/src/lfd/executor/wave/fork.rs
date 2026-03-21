@@ -35,7 +35,7 @@ impl WaveExecutor {
         &self,
         wave: &Wave,
         run: &mut WaveRun,
-        plan: &[ConcreteItem],
+        _plan: &[ConcreteItem],
         fork: &ConcreteAnd,
     ) -> Result<()> {
         let expanded_snapshot_directions =
@@ -186,6 +186,7 @@ impl WaveExecutor {
                             agent,
                             cmd,
                             output_prefix: Some(format!("[{}] ", branch_label)),
+                            extra_env: Vec::new(),
                         })
                         .await
                     {
@@ -343,7 +344,6 @@ impl WaveExecutor {
                 .await?;
             return Ok(());
         }
-        self.advance_run_step(run, plan, wave.id()).await?;
         Ok(())
     }
 

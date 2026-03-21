@@ -2,33 +2,32 @@ mod fork;
 mod launch;
 mod summary;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::{build_agent_command, build_agent_env, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
-    build_xor_routing_suffix, expand_flow, load_flow, load_step, load_xor_path_items, next_action,
-    read_xor_verdict, ConcreteItem, ConcreteStep, FlowAction, Step,
+    expand_flow, load_flow, next_action, read_xor_verdict, ConcreteItem, ConcreteStep, FlowAction,
 };
-use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
-use crate::engine::prompt::{write_prompt_log, Surface};
-use crate::engine::structured_reply::ClientContext;
 use crate::engine::worktree::remove_worktree;
+use crate::engine::{
+    ConcreteAnd, ConcreteOp, ConcreteXor, ExecutionContext, ExecutionStep, FlowEngine, FlowOutcome,
+    StepExecutor, StepOutcome,
+};
 use crate::lfd::attention::resolve_attention_item;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
-use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
@@ -44,8 +43,8 @@ use crate::lfd::types::{
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
-    build_step_prompt, cleanup_run_worktree, flow_parents_for_index, is_active_wave_run_status,
+    advance_branch, auto_commit_if_dirty, auto_create_pr, build_lf_step_command,
+    cleanup_run_worktree, flow_parents_for_index, is_active_wave_run_status,
     is_ephemeral_worktree_path, post_step_sync, pre_step_sync,
 };
 use super::local::LocalProcessExecutor;
@@ -78,6 +77,238 @@ struct GitStatePollerTask {
 impl Drop for GitStatePollerTask {
     fn drop(&mut self) {
         self.handle.abort();
+    }
+}
+
+async fn execute_step_process(
+    executor: &DaemonFlowExecutor<'_>,
+    run: &mut WaveRun,
+    step: &ExecutionStep,
+    ctx: ExecutionContext,
+) -> Result<StepOutcome> {
+    let exit_code = executor
+        .owner
+        .run_step_without_fast_path(executor.wave.name(), run, step, ctx)
+        .await?;
+    if exit_code != 0 {
+        executor
+            .owner
+            .fail_run(
+                run,
+                executor.wave,
+                format!("step {} failed", step.display_name),
+            )
+            .await?;
+        return Err(anyhow!("step {} failed", step.display_name));
+    }
+    if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, &step.display_name) {
+        executor
+            .owner
+            .fail_run(
+                run,
+                executor.wave,
+                format!("post-step sync failed for {}: {err}", step.display_name),
+            )
+            .await?;
+        return Err(anyhow!("post-step sync failed for {}", step.display_name));
+    }
+    Ok(StepOutcome::Completed)
+}
+
+#[derive(Clone)]
+struct DaemonFlowExecutor<'a> {
+    owner: &'a WaveExecutor,
+    wave: &'a Wave,
+    plan: &'a [ConcreteItem],
+    repo_root: PathBuf,
+    run: Arc<Mutex<WaveRun>>,
+}
+
+#[async_trait]
+impl StepExecutor for DaemonFlowExecutor<'_> {
+    fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
+
+    async fn before_top_level_item(
+        &self,
+        _index: usize,
+        _total: usize,
+        _item: &ConcreteItem,
+    ) -> Result<()> {
+        let mut run = self.run.lock().await;
+        let current_flow_parents = flow_parents_for_index(self.plan, run.step_index);
+        if run.flow_parents != current_flow_parents {
+            run.flow_parents = current_flow_parents;
+            self.owner.store.update_wave_run(&run).await?;
+        }
+        Ok(())
+    }
+
+    async fn after_top_level_item(
+        &self,
+        _index: usize,
+        _total: usize,
+        _item: &ConcreteItem,
+    ) -> Result<()> {
+        let mut run = self.run.lock().await;
+        self.owner
+            .advance_run_step(&mut run, self.plan, self.wave.id())
+            .await
+    }
+
+    async fn run_step(&self, step: &ExecutionStep, ctx: ExecutionContext) -> Result<StepOutcome> {
+        let mut run = self.run.lock().await;
+
+        if let Err(err) = pre_step_sync(
+            Path::new(&run.snapshot.repo),
+            Path::new(&run.worktree),
+            &run.branch,
+        ) {
+            warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
+        }
+
+        if ctx.progress.is_some() && step.step.step.interactive.unwrap_or(false) {
+            let terminal_session = self
+                .owner
+                .create_terminal_session(self.wave, &run, &step.step)
+                .await
+                .map_err(|err| anyhow!("failed to create terminal session: {err}"))?;
+            let terminal_session_id = terminal_session.id.clone();
+            self.owner.spawn_terminal_session_watcher(
+                self.wave.id().clone(),
+                run.id.clone(),
+                terminal_session_id.clone(),
+            );
+
+            run.status = WaveRunStatus::Waiting;
+            run.flow_parents = step.step.flow_parents.clone();
+            self.owner.store.update_wave_run(&run).await?;
+            self.owner
+                .set_wave_status(self.wave.id(), WaveStatus::Waiting)
+                .await;
+            self.owner.event_hub.send(Event::wave_waiting(
+                self.wave.id().clone(),
+                run.id.clone(),
+                step.display_name.clone(),
+                None,
+                Some(terminal_session_id),
+                None,
+            ));
+            return Ok(StepOutcome::Waiting);
+        }
+
+        if let Some(ref cmd) = step.step.step.fast_path {
+            info!(run_id = %run.id, step = %step.display_name, cmd = cmd, "trying fast-path");
+            match try_fast_path(cmd, Path::new(&run.worktree)) {
+                Ok(FastPathResult::Success) => {
+                    info!(run_id = %run.id, step = %step.display_name, "fast-path succeeded, skipping lf child");
+                    return Ok(StepOutcome::Completed);
+                }
+                Ok(FastPathResult::Failed {
+                    exit_code,
+                    stdout,
+                    stderr,
+                }) => {
+                    info!(run_id = %run.id, step = %step.display_name, exit_code, "fast-path failed, falling back to lf child");
+                    let failure = FailureContext {
+                        cmd,
+                        exit_code,
+                        stdout: &stdout,
+                        stderr: &stderr,
+                    };
+                    let body = step.step.step.content.as_deref().unwrap_or("");
+                    let mut fallback_step = step.clone();
+                    fallback_step.step.step.content = Some(format!("{failure}{body}"));
+                    return execute_step_process(self, &mut run, &fallback_step, ctx).await;
+                }
+                Err(err) => {
+                    warn!(run_id = %run.id, step = %step.display_name, error = %err, "fast-path execution error, falling back to lf child");
+                }
+            }
+        }
+
+        execute_step_process(self, &mut run, step, ctx).await
+    }
+
+    async fn run_op(&self, ops: &ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
+        let mut run = self.run.lock().await;
+
+        if let Err(err) = pre_step_sync(
+            Path::new(&run.snapshot.repo),
+            Path::new(&run.worktree),
+            &run.branch,
+        ) {
+            warn!(run_id = %run.id, error = %err, "pre-ops sync failed, continuing");
+        }
+
+        let worktree = run.worktree.clone();
+        let item = ops.item.clone();
+        let command = item.display_name();
+        match tokio::task::spawn_blocking(move || {
+            crate::ops::execute_flow_ops(Path::new(&worktree), &item, &crate::ops::NullProgress)
+        })
+        .await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => {
+                self.owner
+                    .fail_run(
+                        &mut run,
+                        self.wave,
+                        format!("ops item '{command}' failed: {err}"),
+                    )
+                    .await?;
+                Err(anyhow!("ops item '{command}' failed"))
+            }
+            Err(err) => {
+                self.owner
+                    .fail_run(
+                        &mut run,
+                        self.wave,
+                        format!("ops item '{command}' panicked: {err}"),
+                    )
+                    .await?;
+                Err(anyhow!("ops item '{command}' panicked"))
+            }
+        }
+    }
+
+    async fn run_and(&self, fork: &ConcreteAnd, _ctx: ExecutionContext) -> Result<()> {
+        let mut run = self.run.lock().await;
+
+        if let Err(err) = pre_step_sync(
+            Path::new(&run.snapshot.repo),
+            Path::new(&run.worktree),
+            &run.branch,
+        ) {
+            warn!(run_id = %run.id, error = %err, "pre-and sync failed, continuing");
+        }
+
+        self.owner
+            .run_fork(self.wave, &mut run, self.plan, fork)
+            .await?;
+        if run.status == WaveRunStatus::Failed {
+            return Err(anyhow!("fork execution failed"));
+        }
+
+        if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, "and") {
+            self.owner
+                .fail_run(&mut run, self.wave, format!("post-and sync failed: {err}"))
+                .await?;
+            return Err(anyhow!("post-and sync failed"));
+        }
+
+        Ok(())
+    }
+
+    async fn read_xor_verdict(&self, branch: &ConcreteXor) -> Result<String> {
+        let run = self.run.lock().await;
+        read_xor_verdict(
+            &Path::new(&run.worktree).join("scratch/route-xor.md"),
+            branch,
+        )
+        .map_err(anyhow::Error::msg)
     }
 }
 
@@ -353,7 +584,7 @@ impl WaveExecutor {
     }
 
     pub async fn execute(&self, run_id: &LfdId) -> Result<()> {
-        let mut run = self
+        let run = self
             .store
             .get_wave_run(run_id)
             .await?
@@ -374,512 +605,143 @@ impl WaveExecutor {
         );
         let run_is_pr_oriented = run.target_branch == "main" || run.target_branch.is_empty();
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
-        let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
-        let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
+        let flow = load_flow(&run.snapshot.flow, Path::new(&run.worktree))?;
+        let plan = expand_flow(&flow, Path::new(&run.worktree))?;
         debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
+        let shared_run = Arc::new(Mutex::new(run));
+        let executor = DaemonFlowExecutor {
+            owner: self,
+            wave: &wave,
+            plan: &plan,
+            repo_root: PathBuf::from(&shared_run.lock().await.worktree),
+            run: shared_run.clone(),
+        };
 
-        loop {
-            let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
-            if run.flow_parents != current_flow_parents {
-                run.flow_parents = current_flow_parents;
-                self.store.update_wave_run(&run).await?;
-            }
+        let outcome = FlowEngine::new(executor)
+            .run(&plan, shared_run.lock().await.step_index as usize)
+            .await;
 
-            match next_action(&plan, run.step_index as usize) {
-                FlowAction::RunStep { mut step } => {
-                    // Pre-step sync: pick up sibling pushes.
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
-                    }
-
-                    // Try fast-path before spinning up an agent.
-                    if let Some(ref cmd) = step.step.fast_path {
-                        info!(run_id = %run.id, step = %step.step.name, cmd = cmd, "trying fast-path");
-                        match try_fast_path(cmd, Path::new(&run.worktree)) {
-                            Ok(FastPathResult::Success) => {
-                                info!(run_id = %run.id, step = %step.step.name, "fast-path succeeded, skipping agent");
-                                // Skip agent AND post_step_sync — the command handled everything.
-                                // post_step_sync would fail here anyway (e.g. branch merged, worktree renamed).
-                                self.advance_run_step(&mut run, &plan, wave.id()).await?;
-                                continue;
-                            }
-                            Ok(FastPathResult::Failed {
-                                exit_code,
-                                stdout,
-                                stderr,
-                            }) => {
-                                info!(run_id = %run.id, step = %step.step.name, exit_code, "fast-path failed, falling back to agent");
-                                let ctx = FailureContext {
-                                    cmd,
-                                    exit_code,
-                                    stdout: &stdout,
-                                    stderr: &stderr,
-                                };
-                                let body = step.step.content.as_deref().unwrap_or("");
-                                step.step.content = Some(format!("{ctx}{body}"));
-                            }
-                            Err(err) => {
-                                warn!(run_id = %run.id, step = %step.step.name, error = %err, "fast-path execution error, falling back to agent");
-                            }
-                        }
-                    }
-
-                    // Ensure area summary is fresh before each step
-                    if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
-                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
-                    }
-                    info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
-                    let exit_code = self.run_step(&wave, &mut run, &step).await?;
-                    if exit_code == 0 {
-                        // Post-step sync: commit and push changes.
-                        let step_name = step.step.name.clone();
-                        if let Err(err) =
-                            post_step_sync(Path::new(&run.worktree), &run.branch, &step_name)
-                        {
-                            self.fail_run(
-                                &mut run,
-                                &wave,
-                                format!("post-step sync failed for {step_name}: {err}"),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        self.advance_run_step(&mut run, &plan, wave.id()).await?;
-                    } else {
-                        self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))
-                            .await?;
-                        return Ok(());
-                    }
-                }
-                FlowAction::RunOps { ops } => {
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-ops sync failed, continuing");
-                    }
-
-                    let command = ops.item.display_name();
-                    info!(
-                        run_id = %run.id,
-                        command = %command,
-                        step_index = run.step_index,
-                        "running ops item"
-                    );
-
-                    let worktree = run.worktree.clone();
-                    let item = ops.item.clone();
-                    let op_result = tokio::task::spawn_blocking(move || {
-                        crate::ops::execute_flow_ops(
-                            Path::new(&worktree),
-                            &item,
-                            &crate::ops::NullProgress,
-                        )
-                    })
-                    .await;
-
-                    match op_result {
-                        Ok(Ok(())) => {
-                            self.advance_run_step(&mut run, &plan, wave.id()).await?;
-                        }
-                        Ok(Err(err)) => {
-                            self.fail_run(
-                                &mut run,
-                                &wave,
-                                format!("ops item '{command}' failed: {err}"),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Err(err) => {
-                            self.fail_run(
-                                &mut run,
-                                &wave,
-                                format!("ops item '{command}' panicked: {err}"),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-                }
-                FlowAction::WaitInteractive { step } => {
-                    let terminal_session =
-                        self.create_terminal_session(&wave, &run, &step)
-                            .await
-                            .map_err(|err| anyhow!("failed to create terminal session: {err}"))?;
-                    let attention_item =
-                        create_interactive_attention_item(&wave, &run, &step, &terminal_session);
-                    self.store.upsert_attention_item(&attention_item).await?;
-                    self.event_hub
-                        .send(Event::attention_created(attention_item));
-                    let terminal_session_id = terminal_session.id.clone();
-                    self.spawn_terminal_session_watcher(
-                        wave.id().clone(),
-                        run.id.clone(),
-                        terminal_session_id.clone(),
-                    );
-
-                    run.status = WaveRunStatus::Waiting;
-                    run.flow_parents = step.flow_parents.clone();
-                    self.store.update_wave_run(&run).await?;
-                    self.set_wave_status(wave.id(), WaveStatus::Waiting).await;
-                    self.event_hub.send(Event::wave_waiting(
-                        wave.id().clone(),
-                        run.id.clone(),
-                        step.step.name.clone(),
-                        None,
-                        Some(terminal_session_id),
-                        None,
-                    ));
-                    return Ok(());
-                }
-                FlowAction::And { fork } => {
-                    // Pre-and sync: pick up sibling pushes.
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-and sync failed, continuing");
-                    }
-                    info!(
-                        run_id = %run.id,
-                        branches = fork.branches.len(),
-                        step_index = run.step_index,
-                        "running and (all branches)"
-                    );
-                    self.run_fork(&wave, &mut run, &plan, &fork).await?;
-                    if run.status == WaveRunStatus::Failed {
-                        return Ok(());
-                    }
-                    // Post-and sync: commit and push changes.
-                    if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, "and") {
-                        self.fail_run(&mut run, &wave, format!("post-and sync failed: {err}"))
-                            .await?;
-                        return Ok(());
-                    }
-                }
-                FlowAction::Xor { branch } => {
-                    // Pre-or sync: pick up sibling pushes.
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-or sync failed, continuing");
-                    }
-
-                    let router_name = branch.router.as_deref().unwrap_or("xor-route");
-
-                    info!(
-                        run_id = %run.id,
-                        router = router_name,
-                        paths = branch.paths.len(),
-                        step_index = run.step_index,
-                        "running or router"
-                    );
-
-                    // Build routing instructions to append to the router step.
-                    let routing_suffix = build_xor_routing_suffix(&branch);
-
-                    let routing_content = if let Some(ref router_name) = branch.router {
-                        let router = load_step(router_name, Path::new(&run.snapshot.repo))?;
-                        let base = router.content.as_deref().unwrap_or("");
-                        format!("{base}\n\n{routing_suffix}")
-                    } else {
-                        format!(
-                            "Previous steps have analyzed the current state and written their \
-                             findings to scratch/.\nRead scratch/ to understand what's been \
-                             decided, then choose the right path forward.\n\n{routing_suffix}"
-                        )
-                    };
-
-                    let router = ConcreteStep {
-                        step: Step {
-                            name: router_name.to_string(),
-                            agent: None,
-                            default_agent: Some("claude:sonnet".to_string()),
-                            directions: Vec::new(),
-                            action_style: None,
-                            interactive: None,
-                            content: Some(routing_content),
-                            fast_path: None,
-                        },
-                        flow_parents: branch.flow_parents.clone(),
-                    };
-
-                    let exit_code = self.run_step(&wave, &mut run, &router).await?;
-                    if exit_code != 0 {
-                        self.fail_run(&mut run, &wave, "xor router step failed".to_string())
-                            .await?;
-                        return Ok(());
-                    }
-
-                    // Post-routing sync: commit the verdict.
-                    if let Err(err) =
-                        post_step_sync(Path::new(&run.worktree), &run.branch, router_name)
-                    {
-                        self.fail_run(
-                            &mut run,
-                            &wave,
-                            format!("post-xor-route sync failed: {err}"),
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-
-                    // Read the verdict.
-                    let verdict_path = Path::new(&run.worktree).join("scratch/route-xor.md");
-                    let selected_path = match read_xor_verdict(&verdict_path, &branch) {
-                        Ok(path) => path,
-                        Err(err) => {
-                            self.fail_run(&mut run, &wave, err).await?;
-                            return Ok(());
-                        }
-                    };
-
-                    info!(
-                        run_id = %run.id,
-                        selected = %selected_path,
-                        "xor routed"
-                    );
-
-                    // Load and execute the selected sub-flow inline.
-                    let or_path = branch
-                        .paths
-                        .get(&selected_path)
-                        .expect("selected path validated by read_or_verdict");
-
-                    let sub_items = load_xor_path_items(or_path, Path::new(&run.snapshot.repo))?;
-
-                    for sub_item in &sub_items {
-                        let sub_step = match sub_item {
-                            ConcreteItem::Step(step) => step,
-                            other => {
-                                warn!(
-                                    run_id = %run.id,
-                                    item = ?other,
-                                    "xor sub-flow contains non-step item, skipping"
-                                );
-                                continue;
-                            }
-                        };
-
-                        // Pre-step sync for each sub-step.
-                        if let Err(err) = pre_step_sync(
-                            Path::new(&run.snapshot.repo),
-                            Path::new(&run.worktree),
-                            &run.branch,
-                        ) {
-                            warn!(run_id = %run.id, error = %err, "pre-step sync failed in or sub-step, continuing");
-                        }
-
-                        if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
-                            warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
-                        }
-
-                        info!(
-                            run_id = %run.id,
-                            step = %sub_step.step.name,
-                            "running or sub-step"
-                        );
-
-                        let exit_code = self.run_step(&wave, &mut run, sub_step).await?;
-                        if exit_code != 0 {
-                            self.fail_run(
-                                &mut run,
-                                &wave,
-                                format!("xor sub-step {} failed", sub_step.step.name),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-
-                        if let Err(err) = post_step_sync(
-                            Path::new(&run.worktree),
-                            &run.branch,
-                            &sub_step.step.name,
-                        ) {
-                            self.fail_run(
-                                &mut run,
-                                &wave,
-                                format!(
-                                    "post-step sync failed for or sub-step {}: {err}",
-                                    sub_step.step.name
-                                ),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-
-                    self.advance_run_step(&mut run, &plan, wave.id()).await?;
-                }
-                FlowAction::Or { .. } => {
-                    self.fail_run(
-                        &mut run,
-                        &wave,
-                        "or (multi-select) execution is not yet implemented".to_string(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                FlowAction::Loop { body } => loop {
-                    info!(
-                        run_id = %run.id,
-                        step_index = run.step_index,
-                        "running loop body"
-                    );
-
-                    self.run_inline_items(&wave, &mut run, &body.steps).await?;
-                    if run.status == WaveRunStatus::Failed {
-                        return Ok(());
-                    }
-
-                    let selected = self.run_inline_xor(&wave, &mut run, &body.exit).await?;
-                    if run.status == WaveRunStatus::Failed {
-                        return Ok(());
-                    }
-
-                    if selected == "done" {
-                        self.advance_run_step(&mut run, &plan, wave.id()).await?;
-                        break;
-                    }
-                },
-                FlowAction::Complete => {
-                    run.status = WaveRunStatus::Completed;
-                    run.ended_at = Some(OffsetDateTime::now_utc());
-
-                    let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
-
-                    // Auto-create PR as draft; queue reconciliation promotes the queue head.
-                    // Activations targeting "main" produce new branches and PRs.
-                    // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
-                    // push directly to that branch — no new PR needed.
-                    if run_is_pr_oriented {
-                        let worktree = run.worktree.clone();
-                        let wave_name = wave.name().clone();
-                        match tokio::task::spawn_blocking(move || {
-                            auto_create_pr(Path::new(&worktree), Some(wave_name))
-                        })
-                        .await
-                        {
-                            Ok(Some(pr)) => {
-                                info!(run_id = %run.id, url = %pr.url, "auto-created PR");
-                                run.pr = Some(pr);
-                            }
-                            Ok(None) => {}
-                            Err(err) => {
-                                warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
-                            }
-                        }
-                    }
-
-                    if let Some(pr) = run.pr.as_ref() {
-                        if let Some(pr_number) = pr.number {
-                            let live_state = LivePullRequestState {
-                                repo_id: run.snapshot.repo.clone(),
-                                pr_number,
-                                state: LivePrState::Open,
-                                is_draft: pr
-                                    .state
-                                    .as_deref()
-                                    .is_some_and(|value| value.eq_ignore_ascii_case("draft")),
-                                head_ref: run.branch.clone(),
-                                head_sha: String::new(),
-                                base_ref: "main".to_string(),
-                                updated_at: OffsetDateTime::now_utc(),
-                                merged_at: None,
-                                synced_at: OffsetDateTime::now_utc(),
-                            };
-                            if let Err(err) = self.store.upsert_live_pr_state(&live_state).await {
-                                warn!(
-                                    run_id = %run.id,
-                                    error = %err,
-                                    "failed to upsert live PR state after PR creation"
-                                );
-                            }
-                        }
-                    }
-
-                    // For recurring waves, advance to a new branch so the
-                    // next iteration gets its own PR.
-                    if run_is_pr_oriented && run.pr.is_some() && is_recurring {
-                        let wt = run.worktree.clone();
-                        let name = wave.name().clone();
-                        match tokio::task::spawn_blocking(move || {
-                            advance_branch(Path::new(&wt), &name)
-                        })
-                        .await
-                        {
-                            Ok(Ok(new_branch)) => {
-                                info!(
-                                    run_id = %run.id,
-                                    new_branch = %new_branch,
-                                    "advanced to new branch for next iteration"
-                                );
-                            }
-                            Ok(Err(err)) => {
-                                warn!(
-                                    run_id = %run.id,
-                                    error = %err,
-                                    "failed to advance branch"
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    run_id = %run.id,
-                                    error = %err,
-                                    "advance_branch task panicked"
-                                );
-                            }
-                        }
-                    }
-
-                    self.store.update_wave_run(&run).await?;
-                    self.output.close_writer(&run.id.to_string());
-                    self.trigger_listeners_on_completion(wave.id(), &run.branch)
-                        .await;
-                    if run_is_pr_oriented && run.pr.is_some() {
-                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
-                            &self.store,
-                            &self.github_config,
-                            wave.id(),
-                            crate::lfd::queue::QueueTrigger::RunCompleted,
-                            Some(&self.event_hub),
-                        )
-                        .await
-                        {
-                            warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
-                        }
-                    }
-                    // Clean up run-scoped worktrees (parallel execution).
-                    let wt = Path::new(&run.worktree);
-                    if let Err(err) = cleanup_run_worktree(wt) {
-                        warn!(run_id = %run.id, error = %err, "failed to clean up run worktree");
-                    }
-
-                    // Only go Idle if no other active runs remain for this wave.
-                    let other_active = self
-                        .store
-                        .get_active_wave_run(wave.id())
-                        .await
-                        .ok()
-                        .flatten()
-                        .is_some();
-                    if !other_active {
-                        self.set_wave_status(wave.id(), WaveStatus::Idle).await;
-                    }
-                    self.event_hub.send(Event::wave_updated(wave.id().clone()));
-                    return Ok(());
+        let mut run = shared_run.lock().await.clone();
+        match outcome {
+            Ok(FlowOutcome::Waiting) => Ok(()),
+            Ok(FlowOutcome::Completed) => self.finish_completed_run(&wave, &mut run).await,
+            Err(err) => {
+                if run.status == WaveRunStatus::Failed {
+                    Ok(())
+                } else {
+                    Err(err)
                 }
             }
         }
+    }
+
+    async fn finish_completed_run(&self, wave: &Wave, run: &mut WaveRun) -> Result<()> {
+        run.status = WaveRunStatus::Completed;
+        run.ended_at = Some(OffsetDateTime::now_utc());
+
+        let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
+        let should_manage_pr = run.target_branch == "main" || run.target_branch.is_empty();
+        if should_manage_pr {
+            let worktree = run.worktree.clone();
+            let wave_name = wave.name().clone();
+            match tokio::task::spawn_blocking(move || {
+                auto_create_pr(Path::new(&worktree), Some(wave_name))
+            })
+            .await
+            {
+                Ok(Some(pr)) => {
+                    info!(run_id = %run.id, url = %pr.url, "auto-created PR");
+                    run.pr = Some(pr);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                }
+            }
+        }
+
+        if let Some(pr) = run.pr.as_ref() {
+            if let Some(pr_number) = pr.number {
+                let live_state = LivePullRequestState {
+                    repo_id: run.snapshot.repo.clone(),
+                    pr_number,
+                    state: LivePrState::Open,
+                    is_draft: pr
+                        .state
+                        .as_deref()
+                        .is_some_and(|value| value.eq_ignore_ascii_case("draft")),
+                    head_ref: run.branch.clone(),
+                    head_sha: String::new(),
+                    base_ref: "main".to_string(),
+                    updated_at: OffsetDateTime::now_utc(),
+                    merged_at: None,
+                    synced_at: OffsetDateTime::now_utc(),
+                };
+                if let Err(err) = self.store.upsert_live_pr_state(&live_state).await {
+                    warn!(
+                        run_id = %run.id,
+                        error = %err,
+                        "failed to upsert live PR state after PR creation"
+                    );
+                }
+            }
+        }
+
+        if should_manage_pr && run.pr.is_some() && is_recurring {
+            let wt = run.worktree.clone();
+            let name = wave.name().clone();
+            match tokio::task::spawn_blocking(move || advance_branch(Path::new(&wt), &name)).await {
+                Ok(Ok(new_branch)) => {
+                    info!(
+                        run_id = %run.id,
+                        new_branch = %new_branch,
+                        "advanced to new branch for next iteration"
+                    );
+                }
+                Ok(Err(err)) => {
+                    warn!(run_id = %run.id, error = %err, "failed to advance branch");
+                }
+                Err(err) => {
+                    warn!(run_id = %run.id, error = %err, "advance_branch task panicked");
+                }
+            }
+        }
+
+        self.store.update_wave_run(run).await?;
+        self.output.close_writer(&run.id.to_string());
+        self.trigger_listeners_on_completion(wave.id(), &run.branch)
+            .await;
+        if should_manage_pr && run.pr.is_some() {
+            if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
+                &self.store,
+                &self.github_config,
+                wave.id(),
+                crate::lfd::queue::QueueTrigger::RunCompleted,
+                Some(&self.event_hub),
+            )
+            .await
+            {
+                warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
+            }
+        }
+
+        let wt = Path::new(&run.worktree);
+        if let Err(err) = cleanup_run_worktree(wt) {
+            warn!(run_id = %run.id, error = %err, "failed to clean up run worktree");
+        }
+
+        let other_active = self
+            .store
+            .get_active_wave_run(wave.id())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !other_active {
+            self.set_wave_status(wave.id(), WaveStatus::Idle).await;
+        }
+        self.event_hub.send(Event::wave_updated(wave.id().clone()));
+        Ok(())
     }
 
     async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId, source_branch: &str) {
@@ -976,289 +838,6 @@ impl WaveExecutor {
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
-    }
-
-    async fn run_inline_items(
-        &self,
-        wave: &Wave,
-        run: &mut WaveRun,
-        items: &[ConcreteItem],
-    ) -> Result<()> {
-        for item in items {
-            match item {
-                ConcreteItem::Step(step) => {
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-step sync failed in inline execution, continuing");
-                    }
-
-                    if let Err(err) = self.ensure_summary_fresh(wave, run).await {
-                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
-                    }
-
-                    let exit_code = self.run_step(wave, run, step).await?;
-                    if exit_code != 0 {
-                        self.fail_run(run, wave, format!("inline step {} failed", step.step.name))
-                            .await?;
-                        return Ok(());
-                    }
-
-                    if let Err(err) =
-                        post_step_sync(Path::new(&run.worktree), &run.branch, &step.step.name)
-                    {
-                        self.fail_run(
-                            run,
-                            wave,
-                            format!(
-                                "post-step sync failed for inline step {}: {err}",
-                                step.step.name
-                            ),
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                }
-                ConcreteItem::Op(ops) => {
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-op sync failed in inline execution, continuing");
-                    }
-
-                    let worktree = run.worktree.clone();
-                    let item = ops.item.clone();
-                    let command = item.display_name();
-                    match tokio::task::spawn_blocking(move || {
-                        crate::ops::execute_flow_ops(
-                            Path::new(&worktree),
-                            &item,
-                            &crate::ops::NullProgress,
-                        )
-                    })
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(err)) => {
-                            self.fail_run(
-                                run,
-                                wave,
-                                format!("inline op '{command}' failed: {err}"),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Err(err) => {
-                            self.fail_run(
-                                run,
-                                wave,
-                                format!("inline op '{command}' panicked: {err}"),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-                }
-                ConcreteItem::And(_) => {
-                    self.fail_run(
-                        run,
-                        wave,
-                        "inline and constructs are not supported inside loop bodies".to_string(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                ConcreteItem::Xor(branch) => {
-                    let _ = self.run_inline_xor(wave, run, branch).await?;
-                    if run.status == WaveRunStatus::Failed {
-                        return Ok(());
-                    }
-                }
-                ConcreteItem::Or(_) => {
-                    self.fail_run(
-                        run,
-                        wave,
-                        "or (multi-select) execution is not yet implemented".to_string(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                ConcreteItem::Loop(_) => {
-                    self.fail_run(
-                        run,
-                        wave,
-                        "nested loop constructs are not supported in inline execution".to_string(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn run_inline_xor(
-        &self,
-        wave: &Wave,
-        run: &mut WaveRun,
-        branch: &crate::engine::ConcreteXor,
-    ) -> Result<String> {
-        if let Err(err) = pre_step_sync(
-            Path::new(&run.snapshot.repo),
-            Path::new(&run.worktree),
-            &run.branch,
-        ) {
-            warn!(run_id = %run.id, error = %err, "pre-or sync failed in inline execution, continuing");
-        }
-
-        let router_name = branch.router.as_deref().unwrap_or("xor-route");
-        let routing_suffix = build_xor_routing_suffix(branch);
-        let routing_content = if let Some(ref router_name) = branch.router {
-            let router = load_step(router_name, Path::new(&run.snapshot.repo))?;
-            let base = router.content.as_deref().unwrap_or("");
-            format!("{base}\n\n{routing_suffix}")
-        } else {
-            format!(
-                "Previous steps have analyzed the current state and written their findings to scratch/.\n\
-                 Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
-                 {routing_suffix}"
-            )
-        };
-
-        let router = ConcreteStep {
-            step: Step {
-                name: router_name.to_string(),
-                agent: None,
-                default_agent: Some("claude:sonnet".to_string()),
-                directions: Vec::new(),
-                action_style: None,
-                interactive: None,
-                content: Some(routing_content),
-                fast_path: None,
-            },
-            flow_parents: branch.flow_parents.clone(),
-        };
-
-        let exit_code = self.run_step(wave, run, &router).await?;
-        if exit_code != 0 {
-            self.fail_run(run, wave, "xor router step failed".to_string())
-                .await?;
-            return Ok("done".to_string());
-        }
-
-        if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, router_name) {
-            self.fail_run(run, wave, format!("post-xor-route sync failed: {err}"))
-                .await?;
-            return Ok("done".to_string());
-        }
-
-        let verdict_path = Path::new(&run.worktree).join("scratch/route-xor.md");
-        let selected = match read_xor_verdict(&verdict_path, branch) {
-            Ok(path) => path,
-            Err(err) => {
-                self.fail_run(run, wave, err).await?;
-                return Ok("done".to_string());
-            }
-        };
-
-        let or_path = branch
-            .paths
-            .get(&selected)
-            .expect("selected path validated by read_or_verdict");
-        let sub_items = load_xor_path_items(or_path, Path::new(&run.snapshot.repo))?;
-        for sub_item in &sub_items {
-            match sub_item {
-                ConcreteItem::Step(step) => {
-                    if let Err(err) = pre_step_sync(
-                        Path::new(&run.snapshot.repo),
-                        Path::new(&run.worktree),
-                        &run.branch,
-                    ) {
-                        warn!(run_id = %run.id, error = %err, "pre-step sync failed in inline or sub-step, continuing");
-                    }
-
-                    if let Err(err) = self.ensure_summary_fresh(wave, run).await {
-                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
-                    }
-
-                    let exit_code = self.run_step(wave, run, step).await?;
-                    if exit_code != 0 {
-                        self.fail_run(run, wave, format!("xor sub-step {} failed", step.step.name))
-                            .await?;
-                        return Ok(selected);
-                    }
-
-                    if let Err(err) =
-                        post_step_sync(Path::new(&run.worktree), &run.branch, &step.step.name)
-                    {
-                        self.fail_run(
-                            run,
-                            wave,
-                            format!(
-                                "post-step sync failed for or sub-step {}: {err}",
-                                step.step.name
-                            ),
-                        )
-                        .await?;
-                        return Ok(selected);
-                    }
-                }
-                ConcreteItem::Op(ops) => {
-                    let worktree = run.worktree.clone();
-                    let item = ops.item.clone();
-                    let command = item.display_name();
-                    match tokio::task::spawn_blocking(move || {
-                        crate::ops::execute_flow_ops(
-                            Path::new(&worktree),
-                            &item,
-                            &crate::ops::NullProgress,
-                        )
-                    })
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(err)) => {
-                            self.fail_run(
-                                run,
-                                wave,
-                                format!("xor sub-op '{command}' failed: {err}"),
-                            )
-                            .await?;
-                            return Ok(selected);
-                        }
-                        Err(err) => {
-                            self.fail_run(
-                                run,
-                                wave,
-                                format!("xor sub-op '{command}' panicked: {err}"),
-                            )
-                            .await?;
-                            return Ok(selected);
-                        }
-                    }
-                }
-                ConcreteItem::And(_)
-                | ConcreteItem::Xor(_)
-                | ConcreteItem::Or(_)
-                | ConcreteItem::Loop(_) => {
-                    self.fail_run(
-                        run,
-                        wave,
-                        "nested and/or/loop constructs are not supported inside inline or paths"
-                            .to_string(),
-                    )
-                    .await?;
-                    return Ok(selected);
-                }
-            }
-        }
-
-        Ok(selected)
     }
 
     /// Create a repair run in the same worktree/branch as the failed run.
@@ -1371,28 +950,30 @@ impl WaveExecutor {
         run: &WaveRun,
         step: &ConcreteStep,
     ) -> Result<TerminalSession> {
-        let (launch, process, agent) = build_terminal_launch_config(wave, run, step).await?;
+        let session_id = LfdId::new();
+        let env = flow_step_env(wave.id(), &run.id, Some(&session_id));
         let terminal_session = TerminalSession {
-            id: LfdId::new(),
+            id: session_id.clone(),
             wave_id: wave.id().clone(),
             wave_run_id: Some(run.id.clone()),
             step: step.step.name.clone(),
-            agent,
-            cwd: launch
-                .cwd
-                .clone()
-                .unwrap_or_else(|| PathBuf::from(&run.worktree))
-                .to_string_lossy()
-                .to_string(),
-            argv: build_agent_command(&launch, &process, &build_agent_capabilities(&run.worktree)),
-            env: build_agent_env(&launch, &process),
+            agent: "lf".to_string(),
+            cwd: run.worktree.clone(),
+            argv: build_lf_step_command(
+                &step.step.name,
+                false,
+                &run.snapshot.direction,
+                &run.snapshot.area,
+                wave.name(),
+            ),
+            env: env.into_iter().collect::<BTreeMap<_, _>>(),
             source: "wave_step".to_string(),
             status: TerminalSessionStatus::Pending,
             attached_at: None,
             started_at: None,
             completed_at: None,
             created_at: OffsetDateTime::now_utc(),
-            completion_token: Some(LfdId::new().to_string()),
+            completion_token: Some(session_id.to_string()),
         };
         self.store
             .create_terminal_session(&terminal_session)
@@ -1542,24 +1123,45 @@ impl WaveExecutor {
     }
 
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
-        let worktree = run.worktree.clone();
-        debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
-        let agent_override =
-            wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name);
-        let (launch, process) = build_step_prompt(
-            &worktree,
-            step,
-            &run.snapshot.direction,
-            Some(wave.name()),
-            Some((&self.store, wave.id())),
-            agent_override,
-            None,
+        self.run_step_without_fast_path(
+            wave.name(),
+            run,
+            &ExecutionStep::regular(step.clone()),
+            ExecutionContext { progress: None },
         )
-        .await?;
-        let capabilities = build_agent_capabilities(&worktree);
-        let agent = launch.agent.clone().unwrap_or_else(|| "claude".to_string());
+        .await
+    }
 
-        info!(run_id = %run.id, step = %step.step.name, agent = %agent, "launching agent");
+    async fn run_step_without_fast_path(
+        &self,
+        wave_name: &str,
+        run: &mut WaveRun,
+        step: &ExecutionStep,
+        _ctx: ExecutionContext,
+    ) -> Result<i32> {
+        let worktree = run.worktree.clone();
+        debug!(run_id = %run.id, step = %step.display_name, worktree = %worktree, "launching lf step");
+
+        let _temp_step = if step.invoke_as == crate::engine::TEMP_XOR_ROUTE_STEP_NAME {
+            step.temporary_content
+                .as_deref()
+                .or(step.step.step.content.as_deref())
+                .map(|content| write_temp_step(Path::new(&run.worktree), &step.invoke_as, content))
+                .transpose()?
+        } else {
+            None
+        };
+
+        let cmd = build_lf_step_command(
+            &step.invoke_as,
+            true,
+            &run.snapshot.direction,
+            &run.snapshot.area,
+            wave_name,
+        );
+        let extra_env = flow_step_env(&run.wave_id, &run.id, None);
+
+        info!(run_id = %run.id, step = %step.display_name, cmd = ?cmd, "launching lf child");
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {
@@ -1568,10 +1170,11 @@ impl WaveExecutor {
                 branch: Some(run.branch.clone()),
                 repo: run.snapshot.repo.clone(),
                 worktree,
-                step: step.clone(),
-                agent: agent.clone(),
-                cmd: build_agent_command(&launch, &process, &capabilities),
+                step: step.step.clone(),
+                agent: "lf".to_string(),
+                cmd,
                 output_prefix: None,
+                extra_env,
             })
             .await;
 
@@ -1579,7 +1182,7 @@ impl WaveExecutor {
 
         debug!(
             run_id = %run.id,
-            step = %step.step.name,
+            step = %step.display_name,
             agent_id = %outcome.agent_id,
             exit_code = outcome.exit_code,
             "step agent finished"
@@ -1589,79 +1192,54 @@ impl WaveExecutor {
     }
 }
 
-fn wave_agent_override(repo: &Path, wave_name: &str, step_name: &str) -> Option<String> {
-    let wave_config = read_wave_config(repo, wave_name)?;
-    wave_config
-        .step_agents
-        .as_ref()
-        .and_then(|step_agents| step_agents.get(step_name).cloned())
-        .or(wave_config.agent)
+fn flow_step_env(
+    wave_id: &LfdId,
+    run_id: &LfdId,
+    session_id: Option<&LfdId>,
+) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("LFD_WAVE_ID".to_string(), wave_id.to_string()),
+        ("LFD_RUN_ID".to_string(), run_id.to_string()),
+        ("LF_RUN_ID".to_string(), run_id.to_string()),
+    ];
+    if let Some(session_id) = session_id {
+        env.push(("LFD_SESSION_ID".to_string(), session_id.to_string()));
+    }
+    env
 }
 
-async fn build_terminal_launch_config(
-    wave: &Wave,
-    run: &WaveRun,
-    step: &ConcreteStep,
-) -> Result<(AgentConfig, ProcessConfig, String)> {
-    let repo_root = Path::new(&run.worktree);
-    let repo_config = load_config_or_default(Some(repo_root));
-    let summary = None;
-    let agent = wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name)
-        .or_else(|| step.step.agent.clone())
-        .or_else(|| repo_config.agent.clone())
-        .or_else(|| step.step.default_agent.clone())
-        .unwrap_or_else(|| "claude:opus".to_string());
+struct TempStepGuard {
+    path: PathBuf,
+    original_content: Option<String>,
+}
 
-    let prepared = prepare_launch_prompt(
-        &repo_config,
-        LaunchPromptInput {
-            repo_root: repo_root.to_path_buf(),
-            step: Some(step.step.name.clone()),
-            resolved_step: None,
-            surface: Surface::ConcertoMac,
-            directions: run.snapshot.direction.clone(),
-            area: None,
-            wave: Some(wave.name().clone()),
-            message: None,
-            agent: Some(agent.clone()),
-            cwd: None,
-            max_turns: None,
-            yolo_mode: false,
-            include_config_directions: false,
-            include_config_area: true,
-            source_overrides: Default::default(),
-            summary,
-            client_context: ClientContext::default(),
-            related_repos: Vec::new(),
-        },
-    )?;
+impl Drop for TempStepGuard {
+    fn drop(&mut self) {
+        let result = match &self.original_content {
+            Some(content) => std::fs::write(&self.path, content),
+            None => match std::fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err),
+            },
+        };
 
-    let _ = write_prompt_log(repo_root, &prepared.prompt, &step.step.name, None);
-    let mut launch = prepared.config;
-    let cwd = launch
-        .cwd
-        .clone()
-        .unwrap_or_else(|| repo_root.to_path_buf());
-    let context_file = write_prompt_log(
-        &cwd,
-        &launch.system_prompt,
-        &format!("{}.context", step.step.name),
-        None,
-    )
-    .ok();
-    launch.cwd = Some(cwd);
-    launch.skip_permissions = repo_config.yolo;
+        if let Err(err) = result {
+            warn!(path = %self.path.display(), error = %err, "failed restoring temporary step");
+        }
+    }
+}
 
-    Ok((
-        launch,
-        ProcessConfig {
-            auto: false,
-            stream: false,
-            context_file,
-            ..Default::default()
-        },
-        agent,
-    ))
+fn write_temp_step(repo: &Path, name: &str, content: &str) -> Result<TempStepGuard> {
+    let steps_dir = repo.join(".lf/steps");
+    std::fs::create_dir_all(&steps_dir)?;
+    let path = steps_dir.join(format!("{name}.md"));
+    let original_content = std::fs::read_to_string(&path).ok();
+    std::fs::write(&path, content)?;
+    Ok(TempStepGuard {
+        path,
+        original_content,
+    })
 }
 
 fn create_interactive_attention_item(
@@ -1851,7 +1429,6 @@ mod tests {
     use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
-    use std::path::PathBuf;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -1863,7 +1440,7 @@ mod tests {
             &self,
             _cmd: Vec<String>,
             _cwd: &Path,
-            _context: super::super::AgentRunContext<'_>,
+            _context: super::super::AgentRunContext,
         ) -> Result<i32> {
             Ok(0)
         }
@@ -1894,12 +1471,12 @@ mod tests {
             &self,
             _cmd: Vec<String>,
             cwd: &Path,
-            context: super::super::AgentRunContext<'_>,
+            context: super::super::AgentRunContext,
         ) -> Result<i32> {
             let call = ForkRunnerCall {
                 cwd: cwd.to_string_lossy().to_string(),
-                branch: context.branch.map(str::to_string),
-                output_prefix: context.output_prefix.map(str::to_string),
+                branch: context.branch,
+                output_prefix: context.output_prefix,
                 prompt_logs: read_prompt_logs(cwd),
             };
             self.calls.lock().expect("runner mutex").push(call);
@@ -2792,19 +2369,37 @@ mod tests {
             .await
             .expect("run lookup should succeed")
             .expect("run should exist");
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
         let step = ConcreteStep {
             step: crate::engine::flow::Step::named("design"),
             flow_parents: Vec::new(),
         };
 
-        let (launch, process, _) = build_terminal_launch_config(&wave, &run, &step)
+        let session = executor
+            .create_terminal_session(&wave, &run, &step)
             .await
-            .expect("launch config should build");
+            .expect("terminal session should build");
 
-        assert_eq!(launch.cwd.expect("cwd"), PathBuf::from(&run.worktree));
-        assert!(!process.auto);
-        assert!(!process.stream);
-        assert!(process.context_file.is_some());
+        assert_eq!(session.cwd, run.worktree);
+        assert_eq!(session.agent, "lf");
+        assert_eq!(
+            session.argv[0],
+            crate::lfd::executor::helpers::resolve_lf_binary()
+                .to_string_lossy()
+                .to_string()
+        );
+        assert!(session.argv.iter().any(|arg| arg == "-w"));
+        assert!(session.env.contains_key("LFD_SESSION_ID"));
     }
 
     #[tokio::test]

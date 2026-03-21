@@ -123,12 +123,15 @@ public enum WaveContentParser {
             return []
         }
 
-        return files.compactMap(parseRoadmapMetadata).compactMap(parseRoadmapItem).sorted { lhs, rhs in
-            if lhs.priority != rhs.priority {
-                return lhs.priority.rawValue < rhs.priority.rawValue
+        return files
+            .compactMap(parseRoadmapMetadata)
+            .sorted { lhs, rhs in
+                if lhs.order != rhs.order {
+                    return lhs.order < rhs.order
+                }
+                return lhs.fileName < rhs.fileName
             }
-            return lhs.fileName < rhs.fileName
-        }
+            .compactMap(parseRoadmapItem)
     }
 
     private static func parseRoadmapItem(_ metadata: RoadmapMetadata) -> RoadmapItem? {
@@ -173,6 +176,25 @@ public enum WaveContentParser {
         let slug: String
         let number: Int
         let priority: RoadmapPriority
+        let order: RoadmapOrder
+    }
+
+    private enum RoadmapOrder: Comparable {
+        case bucket(RoadmapPriority)
+        case legacy(Int)
+
+        fileprivate static func < (lhs: RoadmapOrder, rhs: RoadmapOrder) -> Bool {
+            lhs.sortKey < rhs.sortKey
+        }
+
+        private var sortKey: (Int, Int) {
+            switch self {
+            case let .bucket(priority):
+                (0, priority.rawValue)
+            case let .legacy(number):
+                (1, number)
+            }
+        }
     }
 
     private static func parseRoadmapMetadata(for fileURL: URL) -> RoadmapMetadata? {
@@ -184,9 +206,10 @@ public enum WaveContentParser {
 
         let prefix = String(parts[0])
         let slug = String(parts[1])
+        let normalizedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !slug.isEmpty,
               let priority = RoadmapPriority.from(prefix: prefix),
-              let number = Int(prefix.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+              let number = Int(normalizedPrefix) else {
             return nil
         }
 
@@ -196,8 +219,24 @@ public enum WaveContentParser {
             fileName: fileName,
             slug: slug,
             number: number,
-            priority: priority
+            priority: priority,
+            order: bucketPriority(from: prefix).map(RoadmapOrder.bucket) ?? .legacy(number)
         )
+    }
+
+    private static func bucketPriority(from prefix: String) -> RoadmapPriority? {
+        switch prefix {
+        case "1":
+            .urgent
+        case "2":
+            .high
+        case "3":
+            .medium
+        case "4":
+            .low
+        default:
+            nil
+        }
     }
 
     private static func extractContent(from lines: [String]) -> String? {

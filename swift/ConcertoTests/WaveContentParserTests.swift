@@ -267,10 +267,44 @@ struct WaveContentParserTests {
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "bucket-wave")
         let items = try #require(content?.roadmapItems)
 
-        #expect(items.map(\.fileName) == ["1-urgent.md", "02-legacy.md", "3-medium.md"])
+        #expect(items.map(\.fileName) == ["1-urgent.md", "3-medium.md", "02-legacy.md"])
         #expect(items[0].priority == .urgent)
-        #expect(items[1].priority == .high)
-        #expect(items[2].priority == .medium)
+        #expect(items[1].priority == .medium)
+        #expect(items[2].priority == .high)
+    }
+
+    @Test("sorts canonical priority buckets ahead of legacy numbers in the same rank")
+    func sortsBucketedItemsAheadOfLegacyNumbers() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("mixed-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        try "# Minimal".write(
+            to: waveDir.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try "# Canonical".write(
+            to: waveDir.appendingPathComponent("2-canonical.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# Legacy".write(
+            to: waveDir.appendingPathComponent("02-legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "mixed-wave")
+        let items = try #require(content?.roadmapItems)
+
+        #expect(items.map(\.fileName) == ["2-canonical.md", "02-legacy.md"])
+        #expect(items.map(\.priority) == [.high, .high])
     }
 
     private func makeTempRepo() throws -> URL {

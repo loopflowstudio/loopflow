@@ -20,13 +20,9 @@ public enum RoadmapPriority: Int, Sendable, CaseIterable, Equatable, Hashable {
     }
 
     public static func from(prefix: String) -> RoadmapPriority? {
-        switch prefix.trimmingCharacters(in: .whitespacesAndNewlines) {
-        case "1", "01": return .urgent
-        case "2", "02": return .high
-        case "3", "03": return .medium
-        case "4", "04": return .low
-        default: return nil
-        }
+        let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(normalized) else { return nil }
+        return Self(rawValue: value)
     }
 }
 

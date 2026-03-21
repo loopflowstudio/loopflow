@@ -85,11 +85,7 @@ fn select_wave_item<'a>(items: &'a [WaveItem], requested: Option<&str>) -> OpsRe
     let requested_stem = requested.strip_suffix(".md").unwrap_or(requested);
     items
         .iter()
-        .find(|item| {
-            item.filename == requested
-                || item.slug == requested
-                || item.filename_stem() == requested_stem
-        })
+        .find(|item| item.matches_request(requested, requested_stem))
         .ok_or_else(|| OpsError::Message(format!("roadmap item not found: {requested}")))
 }
 
@@ -116,6 +112,12 @@ impl WaveItem {
 
     fn filename_stem(&self) -> &str {
         self.filename.strip_suffix(".md").unwrap_or(&self.filename)
+    }
+
+    fn matches_request(&self, requested: &str, requested_stem: &str) -> bool {
+        self.filename == requested
+            || self.slug == requested
+            || self.filename_stem() == requested_stem
     }
 }
 
@@ -184,6 +186,23 @@ mod tests {
     use crate::ops::NullProgress;
     use tempfile::TempDir;
 
+    fn init_test_wave() -> (TempDir, PathBuf) {
+        let dir = TempDir::new().expect("temp dir");
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+
+        let wave_dir = dir.path().join("wave").join("test-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        (dir, wave_dir)
+    }
+
+    fn write_wave_file(wave_dir: &Path, name: &str, contents: &str) {
+        std::fs::write(wave_dir.join(name), contents).expect("write wave file");
+    }
+
     #[test]
     fn parse_wave_item_filename_parses_bucketed_files() {
         let item = parse_wave_item_filename("2-setup.md").expect("bucketed item");
@@ -234,21 +253,13 @@ mod tests {
 
     #[test]
     fn ingest_prefers_bucketed_items() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
 
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("README.md"), "# Test").expect("write readme");
-        std::fs::write(wave_dir.join("01-legacy.md"), "# Legacy").expect("write legacy");
-        std::fs::write(wave_dir.join("2-next.md"), "# Next").expect("write high");
-        std::fs::write(wave_dir.join("1-broken.md"), "# Broken").expect("write urgent");
+        write_wave_file(&wave_dir, "README.md", "# Test");
+        write_wave_file(&wave_dir, "01-legacy.md", "# Legacy");
+        write_wave_file(&wave_dir, "2-next.md", "# Next");
+        write_wave_file(&wave_dir, "1-broken.md", "# Broken");
 
         let result = ingest(
             repo,
@@ -271,19 +282,11 @@ mod tests {
 
     #[test]
     fn ingest_uses_filename_order_within_the_same_bucket() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
 
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("2-alpha.md"), "# Alpha").expect("write alpha");
-        std::fs::write(wave_dir.join("2-beta.md"), "# Beta").expect("write beta");
+        write_wave_file(&wave_dir, "2-alpha.md", "# Alpha");
+        write_wave_file(&wave_dir, "2-beta.md", "# Beta");
 
         let result = ingest(
             repo,
@@ -302,17 +305,8 @@ mod tests {
 
     #[test]
     fn ingest_empty_wave_errors() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, _) = init_test_wave();
         let repo = dir.path();
-
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
 
         let result = ingest(
             repo,
@@ -332,19 +326,11 @@ mod tests {
 
     #[test]
     fn ingest_accepts_targeted_filename() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
 
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
-        std::fs::write(wave_dir.join("4-beta.md"), "# Beta").expect("write beta");
+        write_wave_file(&wave_dir, "1-alpha.md", "# Alpha");
+        write_wave_file(&wave_dir, "4-beta.md", "# Beta");
 
         let result = ingest(
             repo,
@@ -363,19 +349,11 @@ mod tests {
 
     #[test]
     fn ingest_accepts_targeted_slug() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
 
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
-        std::fs::write(wave_dir.join("4-beta.md"), "# Beta").expect("write beta");
+        write_wave_file(&wave_dir, "1-alpha.md", "# Alpha");
+        write_wave_file(&wave_dir, "4-beta.md", "# Beta");
 
         let result = ingest(
             repo,
@@ -394,18 +372,10 @@ mod tests {
 
     #[test]
     fn ingest_errors_when_targeted_item_is_missing() {
-        let dir = TempDir::new().expect("temp dir");
+        let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
 
-        std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(repo)
-            .output()
-            .expect("git init");
-
-        let wave_dir = repo.join("wave").join("test-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
+        write_wave_file(&wave_dir, "1-alpha.md", "# Alpha");
 
         let result = ingest(
             repo,

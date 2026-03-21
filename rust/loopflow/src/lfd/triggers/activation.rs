@@ -99,6 +99,14 @@ impl ActivationEnvelope {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ImmediateActivation<'a> {
+    pub wave: &'a Wave,
+    pub flow_override: Option<String>,
+    pub roadmap_item: Option<String>,
+    pub envelope: ActivationEnvelope,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnqueueOutcome {
     Queued,
@@ -246,11 +254,15 @@ pub async fn spawn_immediate_activation(
     executor: &WaveExecutor,
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
-    wave: &Wave,
-    flow_override: Option<String>,
-    roadmap_item: Option<String>,
-    envelope: ActivationEnvelope,
+    activation: ImmediateActivation<'_>,
 ) -> anyhow::Result<Option<WaveRun>> {
+    let ImmediateActivation {
+        wave,
+        flow_override,
+        roadmap_item,
+        envelope,
+    } = activation;
+
     if wave.status() == WaveStatus::Paused {
         return Ok(None);
     }

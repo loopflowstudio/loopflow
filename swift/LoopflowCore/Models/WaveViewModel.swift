@@ -162,23 +162,9 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     /// Short diff summary like "+42 −8" for display, when there's an active diff.
     public var diffIndicator: String? {
-        guard hasDiff, let stat = diffStat else { return nil }
-        // diffStat is a git stat summary; extract insertions/deletions
-        var adds = 0
-        var dels = 0
-        let parts = stat.components(separatedBy: ",")
-        for part in parts {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            if trimmed.contains("insertion") {
-                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
-                    adds = num
-                }
-            } else if trimmed.contains("deletion") {
-                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
-                    dels = num
-                }
-            }
-        }
+        guard hasDiff, let diffCounts else { return nil }
+        let adds = diffCounts.additions
+        let dels = diffCounts.deletions
         if adds == 0 && dels == 0 { return nil }
         var result: [String] = []
         if adds > 0 { result.append("+\(adds)") }
@@ -188,23 +174,8 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     /// Whether the diff is net-positive (green) or net-negative (red).
     public var diffIsPositive: Bool {
-        guard let stat = diffStat else { return true }
-        var adds = 0
-        var dels = 0
-        let parts = stat.components(separatedBy: ",")
-        for part in parts {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            if trimmed.contains("insertion") {
-                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
-                    adds = num
-                }
-            } else if trimmed.contains("deletion") {
-                if let num = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") {
-                    dels = num
-                }
-            }
-        }
-        return adds >= dels
+        guard let diffCounts else { return true }
+        return diffCounts.additions >= diffCounts.deletions
     }
 
     public var areaDisplay: String {
@@ -219,6 +190,27 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
     public var flowSteps: [String] { api.flowSteps }
+    private var diffCounts: (additions: Int, deletions: Int)? {
+        guard let diffStat else { return nil }
+
+        var additions = 0
+        var deletions = 0
+        for part in diffStat.components(separatedBy: ",") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            guard let count = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") else {
+                continue
+            }
+
+            if trimmed.contains("insertion") {
+                additions = count
+            } else if trimmed.contains("deletion") {
+                deletions = count
+            }
+        }
+
+        return (additions, deletions)
+    }
+
     private var activeRunFlow: String? {
         let runFlow = activeRun?.flow.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return runFlow.isEmpty ? nil : runFlow

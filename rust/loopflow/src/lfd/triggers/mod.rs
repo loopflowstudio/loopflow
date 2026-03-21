@@ -10,8 +10,8 @@ mod token_refresh;
 mod watch;
 
 pub use activation::{
-    dispatch_or_enqueue_activation, dispatch_wave_if_ready, enqueue_pending_activation,
-    spawn_activation_dispatcher, spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome,
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_activation_dispatcher,
+    spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome, ImmediateActivation,
     DEFAULT_ACTIVATION_QUEUE_LIMIT,
 };
 pub use ci_failure::spawn_ci_failure_handler;

@@ -123,9 +123,7 @@ public enum WaveContentParser {
             return []
         }
 
-        let roadmapFiles = files.filter { parseRoadmapMetadata(for: $0) != nil }
-
-        return roadmapFiles.compactMap(parseRoadmapItem).sorted { lhs, rhs in
+        return files.compactMap(parseRoadmapMetadata).compactMap(parseRoadmapItem).sorted { lhs, rhs in
             if lhs.priority != rhs.priority {
                 return lhs.priority.rawValue < rhs.priority.rawValue
             }
@@ -133,10 +131,8 @@ public enum WaveContentParser {
         }
     }
 
-    private static func parseRoadmapItem(_ fileURL: URL) -> RoadmapItem? {
-        guard let metadata = parseRoadmapMetadata(for: fileURL) else { return nil }
-
-        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+    private static func parseRoadmapItem(_ metadata: RoadmapMetadata) -> RoadmapItem? {
+        guard let text = try? String(contentsOf: metadata.fileURL, encoding: .utf8) else {
             return RoadmapItem(
                 id: metadata.stem,
                 number: metadata.number,
@@ -144,7 +140,8 @@ public enum WaveContentParser {
                 slug: metadata.slug,
                 fileName: metadata.fileName,
                 priority: metadata.priority,
-                isShipped: false
+                isShipped: false,
+                filePath: metadata.fileURL.path
             )
         }
 
@@ -165,11 +162,12 @@ public enum WaveContentParser {
             priority: metadata.priority,
             isShipped: isShipped,
             content: content,
-            filePath: fileURL.path
+            filePath: metadata.fileURL.path
         )
     }
 
     private struct RoadmapMetadata {
+        let fileURL: URL
         let stem: String
         let fileName: String
         let slug: String
@@ -193,6 +191,7 @@ public enum WaveContentParser {
         }
 
         return RoadmapMetadata(
+            fileURL: fileURL,
             stem: stem,
             fileName: fileName,
             slug: slug,

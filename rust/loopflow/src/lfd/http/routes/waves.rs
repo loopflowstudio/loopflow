@@ -28,7 +28,7 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::{
-    spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope,
+    spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
     AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
@@ -762,10 +762,12 @@ async fn start_wave_run(
         &state.executor,
         &state.scheduler,
         &state.event_hub,
-        wave,
-        flow_override,
-        roadmap_item,
-        envelope,
+        ImmediateActivation {
+            wave,
+            flow_override,
+            roadmap_item,
+            envelope,
+        },
     )
     .await
     .map_err(|err| {

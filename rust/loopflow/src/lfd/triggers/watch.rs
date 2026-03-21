@@ -5,7 +5,9 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
+use super::{
+    enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope, ImmediateActivation,
+};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
@@ -92,21 +94,21 @@ async fn check_repo_triggers(
                 );
                 if wave.serialized {
                     let _ = enqueue_pending_activation(store, event_hub, envelope).await;
-                } else {
-                    if let Err(err) = spawn_immediate_activation(
-                        store,
-                        executor,
-                        scheduler,
-                        event_hub,
-                        &wave,
-                        trigger.flow.clone(),
-                        None,
+                } else if let Err(err) = spawn_immediate_activation(
+                    store,
+                    executor,
+                    scheduler,
+                    event_hub,
+                    ImmediateActivation {
+                        wave: &wave,
+                        flow_override: trigger.flow.clone(),
+                        roadmap_item: None,
                         envelope,
-                    )
-                    .await
-                    {
-                        tracing::warn!(wave_id = %wave.id(), trigger_id = %trigger.id, error = %err, "repo activation failed");
-                    }
+                    },
+                )
+                .await
+                {
+                    tracing::warn!(wave_id = %wave.id(), trigger_id = %trigger.id, error = %err, "repo activation failed");
                 }
             }
             Err(err) => {

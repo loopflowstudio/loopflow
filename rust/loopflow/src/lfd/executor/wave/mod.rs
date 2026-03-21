@@ -22,7 +22,7 @@ use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
     dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
-    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
+    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome, ImmediateActivation,
 };
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Signal, TerminalSession,
@@ -554,10 +554,12 @@ impl WaveExecutor {
                     self,
                     &self.scheduler,
                     &self.event_hub,
-                    &listener_wave,
-                    trigger.flow.clone(),
-                    None,
-                    envelope,
+                    ImmediateActivation {
+                        wave: &listener_wave,
+                        flow_override: trigger.flow.clone(),
+                        roadmap_item: None,
+                        envelope,
+                    },
                 )
                 .await
                 {

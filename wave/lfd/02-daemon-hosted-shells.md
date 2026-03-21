@@ -7,25 +7,25 @@ linear_id: ff6c534b-b5ff-4bf4-a2c4-07ff4239ee0e
 
 ## Context
 
-Interactive execution should not be a launch-spec shim wrapped around a raw agent command. The real interactive model is a daemon-hosted shell: `lfd` owns the session, clients attach to it, and the terminal shows the same `lf design` or `lf build` command a human would type anywhere else.
+The real CLI executor refactor shipped a minimal interactive-step path: `lfd` launches tmux sessions for interactive flow steps, injects `LFD_WAVE_ID`/`LFD_RUN_ID`/`LF_RUN_ID`/`LFD_SESSION_ID`, persists nested execution cursors across waits, and cancels active sessions on wave stop. The wrapped-command fallback remains when tmux is unavailable but is less integrated.
 
-This needs to work locally first, but it should be shaped like the long-term remote model. "SSH-like" is the product goal: attach to a real shell in the right worktree, detach, reattach, and keep the run/session relationship intact.
+This item takes that foundation to the full daemon-hosted shell model. `lfd` owns PTY lifecycles, clients attach/detach/reattach, and sessions survive client disconnects. "SSH-like" is the product goal: attach to a real shell in the right worktree, detach, reattach, and keep the run/session/worktree relationship intact.
 
 ## What to build
 
-1. **PTY/session manager.** Create, attach, read, write, resize, detach, reattach, and close daemon-owned terminal sessions.
+1. **PTY/session manager.** Replace the current tmux-session creation (`create_terminal_session` in `wave/mod.rs`) with direct PTY ownership via `openpty()`. `lfd` keeps the master fd, forks `lf <step>` as the child, and routes all I/O through the daemon. The existing `TerminalSession` type and session watcher already handle lifecycle — extend them with PTY-specific state.
 
 2. **Worktree selection.** Support both:
    - fresh shell in a new or prepared worktree
    - attach to an existing shell tied to a live run or workspace
 
-3. **Session identity.** Make terminal sessions first-class records with stable IDs, run/worktree association, lifecycle status, and reconnect-friendly metadata.
+3. **Session identity.** Terminal sessions are already first-class records with stable IDs and run/worktree association. Extend with reconnect-friendly metadata (scrollback position, client size, attached client list).
 
-4. **Client transport.** Replace launch specs with an attach protocol. HTTP plus websocket streaming is fine if it keeps `lfd` as the process owner.
+4. **Client transport.** Replace launch specs with an attach protocol. The existing WebSocket event stream can carry raw PTY output alongside structured events. HTTP plus websocket streaming keeps `lfd` as the process owner.
 
 5. **SSH-style path.** Shape the interface so a future remote client can "ssh into lfd" in product terms even if the first implementation is not literal OpenSSH.
 
-6. **Exit-driven reconciliation.** Session exit should resume, fail, or otherwise advance the relevant run through daemon-owned process observation rather than a shell callback.
+6. **Exit-driven reconciliation.** The session watcher already resumes flow via `advance_cursor_after_wait()` when sessions complete. Extend to handle PTY-observed exit codes and signal propagation.
 
 ## Design guidance from tmux study
 

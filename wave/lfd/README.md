@@ -22,15 +22,9 @@ Without this split, terminal transport, app workspace UX, daemon execution seman
 
 ### One execution model
 
-There should be one real execution path:
-- `lf design`
-- `lf build`
-- `lf build-or-silent`
-- `lf ci-fix`
+There is one real execution path. `FlowEngine` drives flow sequencing, xor routing, loops, and fork/and for both the CLI (`CliExecutor`) and daemon (`DaemonFlowExecutor`). They differ only in step execution: in-process for CLI, process-supervised for daemon.
 
-No second bespoke in-daemon flow executor as the long-term architecture.
-
-`lfd` remains responsible for scheduling, supervision, persistence, and fanout. `lf` remains responsible for flow semantics and execution.
+`lfd` remains responsible for scheduling, supervision, persistence, and fanout. `lf` remains responsible for flow semantics and execution. The daemon spawns `lf <step> -b` for headless steps and hosts tmux sessions for interactive steps, injecting `LFD_WAVE_ID`, `LFD_RUN_ID`, `LF_RUN_ID`, and `LFD_SESSION_ID` for run correlation.
 
 ### Shared runtime store first
 
@@ -55,9 +49,7 @@ Serialization remains useful, but only as explicit policy.
 
 ### Local terminals before daemon-hosted shells
 
-Local-first use should not wait for daemon PTYs.
-
-If execution state is already flowing into the shared store, Concerto can open ordinary local Ghostty sessions and still present a coherent workspace. That gets embedded local work sooner while keeping the runtime contract simple.
+Local-first use does not wait for daemon PTYs. Execution state flows into the shared store via journal events, and Concerto can open ordinary local Ghostty sessions while presenting a coherent workspace. The minimal interactive-step path (tmux sessions with execution cursor persistence) is shipped; full PTY ownership is next.
 
 ### Daemon-hosted shells
 

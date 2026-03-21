@@ -2,6 +2,7 @@ use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{Cli, Commands};
 
 /// Flags that take a value (next arg is the value).
@@ -133,15 +134,71 @@ fn join_args(args: &[String]) -> Option<String> {
     }
 }
 
-fn run_target(name: &str, message: Option<&str>, cli: &Cli) -> anyhow::Result<()> {
+fn with_runtime<T>(
+    repo_root: &std::path::Path,
+    command: &[String],
+    run: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    journal::emit(
+        repo_root,
+        LfNode::Run,
+        LfEventType::Started,
+        LfEventFields {
+            wave_name: loopflow::engine::worktrees::main_repo_root(repo_root)
+                .ok()
+                .and_then(|main_repo| {
+                    loopflow::engine::worktrees::wave_name_from_worktree_and_main(
+                        repo_root, &main_repo,
+                    )
+                }),
+            worktree: Some(repo_root.display().to_string()),
+            command: Some(command.to_vec()),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run();
+    match &result {
+        Ok(_) => journal::emit(
+            repo_root,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        ),
+        Err(err) => journal::emit(
+            repo_root,
+            LfNode::Run,
+            LfEventType::Errored,
+            LfEventFields {
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
+}
+
+fn in_repo_runtime<T>(
+    command: &[String],
+    run: impl FnOnce(&std::path::Path) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    with_runtime(&repo_root, command, || run(&repo_root))
+}
+
+fn run_target(
+    name: &str,
+    message: Option<&str>,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
     match loopflow::lf::discovery::discover_target(&repo_root, name)? {
-        loopflow::lf::discovery::Target::Step(_) => {
+        loopflow::lf::discovery::Target::Step(_) => with_runtime(&repo_root, command, || {
             loopflow::lf::commands::run::run(Some(name), message, cli)
-        }
-        loopflow::lf::discovery::Target::Flow(flow) => {
+        }),
+        loopflow::lf::discovery::Target::Flow(flow) => with_runtime(&repo_root, command, || {
             loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root)
-        }
+        }),
     }
 }
 
@@ -170,25 +227,31 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let args = reorder_args(args);
 
-    let cli = Cli::parse_from(args);
+    let cli = Cli::parse_from(args.clone());
     debug!(?cli, "parsed CLI arguments");
 
     if cli.list {
-        return loopflow::lf::commands::list::show_all();
+        return in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all());
     }
 
     match &cli.command {
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            loopflow::lf::commands::run::run(None, Some(&text), &cli)
+            in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::run::run(None, Some(&text), &cli)
+            })
         }
-        Some(Commands::Ops { op }) => loopflow::lf::commands::ops::run(op),
-        Some(Commands::External(args)) => {
-            let (name, step_args) = loopflow::lf::commands::run::split_step_args(args)?;
+        Some(Commands::Ops { op }) => {
+            in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run(op))
+        }
+        Some(Commands::External(external_args)) => {
+            let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
             let message = join_args(&step_args);
-            run_target(&name, message.as_deref(), &cli)
+            run_target(&name, message.as_deref(), &cli, &args)
         }
-        None => loopflow::lf::commands::run::run(None, None, &cli),
+        None => in_repo_runtime(&args, |_| {
+            loopflow::lf::commands::run::run(None, None, &cli)
+        }),
     }
 }
 

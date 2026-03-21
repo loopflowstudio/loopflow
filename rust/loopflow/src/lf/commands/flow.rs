@@ -12,6 +12,7 @@ use crate::engine::{
     expand_flow, next_action, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor, Flow,
     FlowAction,
 };
+use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::lfd::executor::{
@@ -29,7 +30,34 @@ const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
-    run_steps(&items, message, cli, repo)
+    journal::emit(
+        repo,
+        LfNode::Flow,
+        LfEventType::Started,
+        LfEventFields {
+            flow: Some(flow.name.clone()),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run_steps(&items, message, cli, repo);
+    match &result {
+        Ok(_) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        ),
+        Err(err) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Errored,
+            LfEventFields {
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
 }
 
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -> Result<()> {
@@ -195,19 +223,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
         let action = next_action(items, index);
         match action {
             FlowAction::RunStep { step } | FlowAction::WaitInteractive { step } => {
-                let step_name = step.step.name.clone();
-                let colors = Colors::new();
-                eprintln!(
-                    "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
-                    dim = colors.dim,
-                    reset = colors.reset,
-                    bold = colors.bold,
-                    current = index + 1,
-                    total = total,
-                    name = step_name,
-                );
-                crate::lf::commands::run::run(Some(&step_name), message, cli)?;
-                commit_step_work(repo, &step_name)?;
+                run_flow_step(&step.step.name, (index, total), message, cli, repo)?
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
@@ -227,7 +243,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 commit_step_work(repo, "and")?;
             }
             FlowAction::Xor { branch } => {
-                run_xor(&branch, message, cli, repo)?;
+                run_xor(&branch, message, cli, repo, index)?;
                 commit_step_work(repo, "xor")?;
             }
             FlowAction::Or { .. } => {
@@ -244,6 +260,78 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
     Ok(())
 }
 
+fn run_flow_step(
+    step_name: &str,
+    progress: (usize, usize),
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+) -> Result<()> {
+    let (index, total) = progress;
+    print_step_progress(index, total, step_name);
+    run_step_with_journal(repo, step_name, index, || {
+        crate::lf::commands::run::run(Some(step_name), message, cli)?;
+        commit_step_work(repo, step_name)?;
+        Ok(())
+    })
+}
+
+fn print_step_progress(index: usize, total: usize, step_name: &str) {
+    let colors = Colors::new();
+    eprintln!(
+        "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+        current = index + 1,
+        total = total,
+        name = step_name,
+    );
+}
+
+fn run_step_with_journal(
+    repo: &Path,
+    step_name: &str,
+    index: usize,
+    run: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    journal::emit(
+        repo,
+        LfNode::Step,
+        LfEventType::Started,
+        LfEventFields {
+            step: Some(step_name.to_string()),
+            index: Some(index as u32),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run();
+    match &result {
+        Ok(_) => journal::emit(
+            repo,
+            LfNode::Step,
+            LfEventType::Completed,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(index as u32),
+                ..LfEventFields::default()
+            },
+        ),
+        Err(err) => journal::emit(
+            repo,
+            LfNode::Step,
+            LfEventType::Errored,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(index as u32),
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
+}
+
 /// Commit any uncommitted changes left by the previous step.
 fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     let options = CommitOptions {
@@ -255,9 +343,15 @@ fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run or-routing: execute a routing step, read the verdict, then run the
+/// Run xor-routing: execute a routing step, read the verdict, then run the
 /// selected sub-flow inline.
-fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<String> {
+fn run_xor(
+    xor_def: &ConcreteXor,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+    index: usize,
+) -> Result<String> {
     let colors = Colors::new();
     let verdict_path = repo.join("scratch/route-xor.md");
 
@@ -294,11 +388,14 @@ fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path)
     };
 
     let temp_step = write_xor_route_step(repo, &prompt)?;
-    let result = crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli);
+    let result = run_step_with_journal(repo, router_name, index, || {
+        crate::lf::commands::run::run(Some(TEMP_XOR_ROUTE_STEP_NAME), message, cli)?;
+        commit_step_work(repo, router_name)?;
+        Ok(())
+    });
     drop(temp_step);
 
     result?;
-    commit_step_work(repo, router_name)?;
 
     let selected = read_xor_verdict(&verdict_path, xor_def).map_err(anyhow::Error::msg)?;
 
@@ -323,7 +420,7 @@ fn run_xor(xor_def: &ConcreteXor, message: Option<&str>, cli: &Cli, repo: &Path)
 fn run_loop(loop_def: &ConcreteLoop, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     loop {
         run_steps(&loop_def.steps, message, cli, repo)?;
-        let selected = run_xor(&loop_def.exit, message, cli, repo)?;
+        let selected = run_xor(&loop_def.exit, message, cli, repo, loop_def.steps.len())?;
         if selected == "done" {
             return Ok(());
         }

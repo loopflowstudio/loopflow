@@ -74,6 +74,22 @@ impl TestRepo {
         run_git(self.repo.as_path(), &["push", "-u", "origin", branch]);
     }
 
+    pub fn create_wave_worktree(&self, wave_name: &str) -> PathBuf {
+        let parent = self.repo.parent().expect("repo parent");
+        let repo_name = self
+            .repo
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("repo name utf8");
+        let worktree = parent.join(format!("{repo_name}.{wave_name}"));
+        let worktree_str = worktree.to_str().expect("worktree path utf8");
+        run_git(
+            self.repo.as_path(),
+            &["worktree", "add", "-b", wave_name, worktree_str, "main"],
+        );
+        worktree
+    }
+
     pub fn head_sha(&self) -> String {
         run_git_output(self.repo.as_path(), &["rev-parse", "HEAD"])
     }

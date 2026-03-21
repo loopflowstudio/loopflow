@@ -10,6 +10,7 @@ pub mod github;
 pub mod http;
 pub mod http_client;
 pub mod id;
+pub mod journal;
 pub mod live_pr;
 pub mod machine_id;
 pub mod obs;

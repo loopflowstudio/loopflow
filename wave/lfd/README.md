@@ -18,10 +18,6 @@ This is a runtime architecture shift, not just terminal embedding polish.
 
 Without this split, terminal transport, app workspace UX, daemon execution semantics, and CLI/daemon protocol all get tangled into one wave.
 
-## Status
-
-This wave is newly split out. The current `agent-embedding` diff improves the terminal workspace seam and bundled-daemon behavior, but it does **not** finish interactive sessions end to end inside the Swift app, and it does not yet replace the bespoke daemon executor with a shared runtime-store model plus real `lf` process supervision. Treat the docs here as the next build target.
-
 ## Strategy
 
 ### One execution model
@@ -78,7 +74,7 @@ This should feel SSH-like in product terms even if the first transport is not li
 
 ### tmux lessons, applied
 
-The tmux architecture study (shipped, guidance propagated into remaining items and `agent-embedding/06`) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
+The tmux architecture study (shipped, see git history) established which ideas to borrow and which to avoid. The actionable design choices that flow from it:
 
 - **Monotonic, type-prefixed, never-reused IDs** for sessions and runs. tmux does this with `$session`, `@window`, `%pane`. Loopflow's `LfdId` scheme already fits.
 - **Server owns all persistent state.** Clients are disposable renderers. `lfd` owns run state, session state, scrollback buffers. Concerto reconstructs on reconnect.
@@ -107,12 +103,6 @@ That makes manual, automated, and eventually remote execution reconcilable insid
 Concerto should observe, launch, attach, render, and foreground the right run.
 
 It should not need its own launch shim or a private interpretation of how loopflow commands execute.
-
-## Milestone docs
-
-1. `02-daemon-aware-cli-contract.md` — define the shared runtime-store contract and how `lf` discovers and writes to it
-2. `03-real-cli-executor.md` — make automated runs spawn normal `lf <flow-or-step>` commands against that same store
-3. `04-daemon-hosted-shells.md` — add daemon-owned shells / PTYs when local-first observation is solid and remote transport is the next pressure point
 
 ## Three roles
 
@@ -155,29 +145,6 @@ What stays:
 **`lf` owns**: flow expansion, step execution, structured lifecycle events.
 
 **Concerto owns**: tmux session management (local shells), pane layout, rendering the event stream into a workspace UI.
-
-## Milestones
-
-1. **Shared-store observation**
-   - `lf` can discover a runtime store and write structured lifecycle events to it
-   - manual CLI runs become visible without going through a bespoke daemon executor
-
-2. **Automated runs via real `lf` processes**
-   - `lfd` starts normal `lf <flow-or-step>` commands
-   - automated and manual runs converge on one event model
-
-3. **Local client convergence**
-   - Concerto consumes the same store and can open ordinary local terminals
-   - no new launch shim becomes the product contract
-
-4. **Daemon-hosted PTY / shell model**
-   - attach/read/write/resize/close
-   - fresh or existing worktree shells
-   - reconnect support
-
-5. **Remote access**
-   - decide whether remote should begin as SSH into a host/container before inventing a custom PTY transport
-   - keep the shared store and CLI contract stable across that move
 
 ## Relationship to existing waves
 

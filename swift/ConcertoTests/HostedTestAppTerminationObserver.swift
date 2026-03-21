@@ -1,8 +1,7 @@
-import XCTest
-
 #if os(macOS)
 import AppKit
 import Foundation
+import XCTest
 
 private final class HostedTestAppTerminationObserver: NSObject, XCTestObservation, @unchecked Sendable {
     func testBundleDidFinish(_ testBundle: Bundle) {

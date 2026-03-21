@@ -18,14 +18,7 @@ struct AttentionStoreTests {
                 status: .viewed,
                 title: "viewed",
                 summary: "",
-                context: .interactive(
-                    InteractiveAttentionContext(
-                        step: nil,
-                        terminalSessionId: nil,
-                        designPath: nil,
-                        mutationSummary: nil
-                    )
-                ),
+                context: .interactive(InteractiveAttentionContext()),
                 surfacedAt: now.addingTimeInterval(-10)
             ),
             AttentionItem(
@@ -36,9 +29,7 @@ struct AttentionStoreTests {
                 status: .surfaced,
                 title: "older escalation",
                 summary: "",
-                context: .algedonic(
-                    AlgedonicAttentionContext(step: nil, error: nil, reason: nil, conflictFiles: [])
-                ),
+                context: .algedonic(AlgedonicAttentionContext()),
                 surfacedAt: now.addingTimeInterval(-100)
             ),
             AttentionItem(
@@ -49,9 +40,7 @@ struct AttentionStoreTests {
                 status: .surfaced,
                 title: "newer escalation",
                 summary: "",
-                context: .algedonic(
-                    AlgedonicAttentionContext(step: nil, error: nil, reason: nil, conflictFiles: [])
-                ),
+                context: .algedonic(AlgedonicAttentionContext()),
                 surfacedAt: now.addingTimeInterval(-20)
             ),
         ])

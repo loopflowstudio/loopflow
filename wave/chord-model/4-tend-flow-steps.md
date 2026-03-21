@@ -1,6 +1,7 @@
 ---
 asana_id: '1213718081081138'
 linear_id: d670a31d-8cdf-4381-8858-e70098e644e2
+notion_id: 32af8f99-3d81-8165-a9ab-cac4f0022694
 ---
 # 02: Tend Flow Steps
 

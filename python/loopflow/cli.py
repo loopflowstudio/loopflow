@@ -41,6 +41,7 @@ _PROVIDER_LABELS = {
     "opencodezen": "OpenCode Zen",
     "asana": "Asana",
     "linear": "Linear",
+    "notion": "Notion",
 }
 
 _PROVIDER_API_KEY_CONFIG = {
@@ -696,6 +697,11 @@ def auth_asana() -> None:
 def auth_linear() -> None:
     env_name, prompt_label = _require_provider_api_key_config("linear")
     _configure_provider_token("linear", env_name, prompt_label)
+
+
+@auth_app.command("notion", help="Start Notion OAuth authentication.")
+def auth_notion() -> None:
+    _connect_provider("notion")
 
 
 @auth_app.command("disconnect", help="Disconnect a provider.")

@@ -1,10 +1,13 @@
 flow: build-or-silent
 mode: manual
 area:
-  - rust/loopflow/src/lfd/
-  - rust/loopflow/src/lf/
-  - python/loopflow/
-  - wave/lfd/
+- rust/loopflow/src/lfd/
+- rust/loopflow/src/lf/
+- python/loopflow/
+- wave/lfd/
 direction:
-  - clarity
-  - simplicity
+- clarity
+- simplicity
+pm:
+  provider: notion
+  notion_project: 32af8f99-3d81-816c-9756-dfb16aaa93bf

@@ -1,5 +1,6 @@
 ---
 linear_id: 2b2f8d4f-ef39-42a5-b8ba-36ebf60b87b7
+notion_id: 32af8f99-3d81-81a0-af5e-ea6214b0711f
 ---
 # 10: Notion supporting docs import
 
@@ -10,7 +11,7 @@ README sync proves the core shape. The next step is bringing in the nearby suppo
 ## What to build
 
 1. Decide how a wave points at the supporting pages to import: explicit links, child pages, or a small rooted subtree.
-2. Pull those pages into durable local docs next to the wave.
+2. Pull those pages into durable local docs next to the wave using `NotionClient` and `blocks_to_markdown` from `pm/notion_blocks.rs`.
 3. Keep overwrite behavior explicit so imported docs do not surprise users.
 4. Stay narrow: import the pages that matter to the wave, not a whole workspace crawler.
 
@@ -19,6 +20,8 @@ README sync proves the core shape. The next step is bringing in the nearby suppo
 - Build on top of the canonical README page link from item 09.
 - Keep naming and overwrite rules obvious.
 - Do not turn this into arbitrary workspace sync.
+- The block-replacement write pattern means push-back of supporting docs has the same concurrent-edit conflict risk as item bodies.
+- The blocks converter preserves one level of nesting. Deeply nested block trees (common in long-form Notion docs) will flatten beyond that depth. Consider whether supporting docs need deeper fidelity than task items.
 
 ## Done when
 

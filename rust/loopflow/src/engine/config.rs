@@ -198,6 +198,21 @@ pub struct LinearConfig {
     pub team: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct NotionConfig {
+    /// Parent page or teamspace ID under which databases are created.
+    #[serde(default)]
+    pub parent_page: Option<String>,
+    #[serde(default)]
+    pub title_property: Option<String>,
+    #[serde(default)]
+    pub status_property: Option<String>,
+    #[serde(default)]
+    pub done_value: Option<String>,
+    #[serde(default)]
+    pub priority_property: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PmRolesConfig {
     pub provider: crate::lfd::pm::PmProviderKind,
@@ -310,6 +325,10 @@ pub struct Config {
     #[serde(default)]
     pub linear: LinearConfig,
 
+    /// Notion configuration for PM integration.
+    #[serde(default)]
+    pub notion: NotionConfig,
+
     /// Default PM provider roles for PM-enabled waves.
     #[serde(default)]
     pub pm: Option<PmRolesConfig>,
@@ -368,6 +387,7 @@ impl Default for Config {
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
             linear: LinearConfig::default(),
+            notion: NotionConfig::default(),
             pm: None,
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
@@ -566,8 +586,13 @@ asana:
   default_team: "9876543210"
 linear:
   team: "TEAM-ID"
+notion:
+  title_property: "Task"
+  status_property: "State"
+  done_value: "Shipped"
+  priority_property: "Severity"
 pm:
-  provider: linear
+  provider: notion
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
@@ -585,9 +610,19 @@ pm:
             }
         );
         assert_eq!(
+            config.notion,
+            NotionConfig {
+                parent_page: None,
+                title_property: Some("Task".to_string()),
+                status_property: Some("State".to_string()),
+                done_value: Some("Shipped".to_string()),
+                priority_property: Some("Severity".to_string()),
+            }
+        );
+        assert_eq!(
             config.pm,
             Some(PmRolesConfig {
-                provider: crate::lfd::pm::PmProviderKind::Linear,
+                provider: crate::lfd::pm::PmProviderKind::Notion,
             })
         );
     }

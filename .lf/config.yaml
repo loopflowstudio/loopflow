@@ -5,7 +5,7 @@ branch_names:
   schema: "{user}.{name}.{ts}"
 
 pm:
-  provider: linear
+  provider: notion
 
 internal:
   use_rust: true

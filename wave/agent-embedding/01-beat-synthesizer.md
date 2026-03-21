@@ -1,5 +1,6 @@
 ---
 linear_id: 0ce5a1bd-f5ee-425b-8dae-325ea09d4e56
+notion_id: 32af8f99-3d81-8123-89d7-c8fb5d86549c
 ---
 # Beat Synthesizer
 

@@ -1,6 +1,7 @@
 ---
 asana_id: '1213718558913209'
 linear_id: 7a55ed19-182c-4f44-9715-7d4814a7f425
+notion_id: 32af8f99-3d81-817f-a79a-fdb318a8af4e
 ---
 # 05: Chord-Wave Area Model
 

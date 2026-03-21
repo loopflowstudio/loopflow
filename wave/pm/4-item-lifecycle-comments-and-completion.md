@@ -1,6 +1,7 @@
 ---
 asana_id: '1213718325464924'
 linear_id: b0795b6d-e133-41db-8155-6a553d4cbd21
+notion_id: 32af8f99-3d81-8156-a053-fc22fb6bb807
 ---
 # 06: Item lifecycle comments and completion
 
@@ -10,7 +11,9 @@ Wave-level PM import/export now happens automatically at PR-oriented run start/e
 
 **Open design question:** Push scope — should lifecycle comments push the whole item state or just the event payload (PR URL, error message)? Event-only is simpler and avoids accidentally overwriting human edits in the PM tool.
 
-Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
+`AsanaClient`, `LinearClient`, and `NotionClient` all implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
+
+Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload (not a paragraph block wrapper). The `NotionClient::comment` implementation already handles this correctly. Notion comments are plaintext-only — rich-text formatting in comments is not supported by the current implementation and was explicitly deferred when shipping the Notion client.
 
 ## What to build
 
@@ -40,14 +43,14 @@ Apply those actions to every configured provider role that has a linked item ID.
 
 ### Error handling
 
-Best-effort: if a PM API call fails, log a warning and continue. Never block wave execution, PR creation, or merge handling on external sync. Both providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
+Best-effort: if a PM API call fails, log a warning and continue. Never block wave execution, PR creation, or merge handling on external sync. All three providers already have rate-limit retry logic (`RATE_LIMIT_RETRIES` and `retry_after_delay` in `pm::mod.rs`), so transient 429s are handled automatically.
 
 ## Constraints
 
 - PM sync failures must not affect wave execution.
 - Stable item identity must survive `ingest` moving files into `scratch/`.
 - No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter (`id_for(provider)` on `RoadmapItemDocument`) / run metadata.
-- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`); do not create a second PM transport path for lifecycle events.
+- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`/`NotionClient`); do not create a second PM transport path for lifecycle events.
 
 ## Done when
 

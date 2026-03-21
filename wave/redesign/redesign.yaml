@@ -8,5 +8,6 @@ direction:
 - clarity
 pm:
   asana_project: '1213718558946552'
-  provider: linear
   linear_project: bb56cb54-560c-470d-91eb-f49bd8e23f07
+  provider: notion
+  notion_project: 32af8f99-3d81-812e-80b4-cf61cf0c721f

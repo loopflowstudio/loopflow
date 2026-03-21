@@ -2,11 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{get_default_branch, list_tree, show_file};
 use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
+use crate::lfd::pm::notion::NotionClient;
 use crate::lfd::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, PriorityBucket,
     RoadmapItemDocument, RoadmapItemFrontmatter,
@@ -136,13 +137,27 @@ async fn build_client_with_team(
     let config = load_config_or_default(Some(repo));
     let client: Box<dyn PmProvider> = match provider {
         PmProviderKind::Asana => {
-            let token = resolve_provider_token("asana", "ASANA_ACCESS_TOKEN").await?;
+            let token = resolve_provider_token(
+                "asana",
+                Some("ASANA_ACCESS_TOKEN"),
+                "lf ops auth configure asana",
+            )
+            .await?;
             Box::new(AsanaClient::new(token, config.asana.clone()))
         }
         PmProviderKind::Linear => {
-            let token = resolve_provider_token("linear", "LINEAR_API_KEY").await?;
+            let token = resolve_provider_token(
+                "linear",
+                Some("LINEAR_API_KEY"),
+                "lf ops auth configure linear",
+            )
+            .await?;
             let effective_team = team_id.or_else(|| config.linear.team.clone());
             Box::new(LinearClient::new(token, effective_team))
+        }
+        PmProviderKind::Notion => {
+            let token = resolve_provider_token("notion", None, "lf ops auth notion").await?;
+            Box::new(NotionClient::new(token, config.notion.clone()))
         }
     };
     Ok(client)
@@ -191,11 +206,17 @@ fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     Ok(())
 }
 
-async fn resolve_provider_token(provider: &str, env_name: &str) -> OpsResult<String> {
-    if let Ok(token) = std::env::var(env_name) {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
+async fn resolve_provider_token(
+    provider: &str,
+    env_name: Option<&str>,
+    auth_hint: &str,
+) -> OpsResult<String> {
+    if let Some(env_name) = env_name {
+        if let Ok(token) = std::env::var(env_name) {
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
         }
     }
 
@@ -208,7 +229,7 @@ async fn resolve_provider_token(provider: &str, env_name: &str) -> OpsResult<Str
         .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "No {provider} credential found. Run `lf ops auth configure {provider}`."
+                "No {provider} credential found. Run `{auth_hint}`."
             ))
         })?;
 
@@ -274,6 +295,7 @@ fn project_key(provider: PmProviderKind) -> &'static str {
     match provider {
         PmProviderKind::Asana => "asana_project",
         PmProviderKind::Linear => "linear_project",
+        PmProviderKind::Notion => "notion_project",
     }
 }
 
@@ -370,11 +392,12 @@ async fn pm_init_async(repo: &Path, progress: &impl Progress) -> OpsResult<PmIni
 
     // Resolve provider from first wave (all waves use the same provider for init).
     let provider_kind = resolve_provider(repo, &waves[0])?;
+    let config = load_config_or_default(Some(repo));
     let client = build_client(repo, provider_kind).await?;
 
-    // Create a fresh team. If "Loopflow" already exists, use a timestamped name.
-    progress.status("creating PM team");
-    let team_id = create_fresh_team(&*client).await.map_err(pm_to_ops)?;
+    let team_id = resolve_project_parent_id(&*client, provider_kind, &config, progress)
+        .await
+        .map_err(pm_to_ops)?;
 
     // Clear stale provider IDs from wave item frontmatter before creating fresh projects.
     for wave in &waves {
@@ -435,6 +458,22 @@ async fn pm_init_async(repo: &Path, progress: &impl Progress) -> OpsResult<PmIni
 }
 
 const DEFAULT_TEAM_NAME: &str = "Waves";
+
+async fn resolve_project_parent_id(
+    client: &dyn PmProvider,
+    provider: PmProviderKind,
+    config: &Config,
+    progress: &impl Progress,
+) -> crate::lfd::pm::PmResult<String> {
+    if provider == PmProviderKind::Notion {
+        if let Some(parent_page) = config.notion.parent_page.as_deref() {
+            return Ok(parent_page.to_string());
+        }
+    }
+
+    progress.status("creating PM team");
+    create_fresh_team(client).await
+}
 
 async fn create_fresh_team(client: &dyn PmProvider) -> crate::lfd::pm::PmResult<String> {
     let existing = client.find_team(DEFAULT_TEAM_NAME).await?;
@@ -1229,7 +1268,122 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
     use tempfile::TempDir;
+
+    use crate::engine::config::NotionConfig;
+    use crate::lfd::pm::PmResult;
+    use crate::ops::progress::NullProgress;
+
+    #[derive(Debug)]
+    struct FakePmProvider {
+        create_team_calls: AtomicUsize,
+        existing_team_id: Option<String>,
+        created_team_id: String,
+    }
+
+    impl FakePmProvider {
+        fn new(existing_team_id: Option<&str>, created_team_id: &str) -> Self {
+            Self {
+                create_team_calls: AtomicUsize::new(0),
+                existing_team_id: existing_team_id.map(str::to_string),
+                created_team_id: created_team_id.to_string(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl PmProvider for FakePmProvider {
+        async fn create_team(&self, _name: &str) -> PmResult<String> {
+            self.create_team_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.created_team_id.clone())
+        }
+
+        async fn find_team(&self, _name: &str) -> PmResult<Option<String>> {
+            Ok(self.existing_team_id.clone())
+        }
+
+        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
+            panic!("unused in test")
+        }
+
+        async fn create_project_in_team(
+            &self,
+            _team_id: &str,
+            _name: &str,
+            _description: &str,
+        ) -> PmResult<String> {
+            panic!("unused in test")
+        }
+
+        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            panic!("unused in test")
+        }
+
+        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
+            panic!("unused in test")
+        }
+
+        async fn create_item(&self, _project_id: &str, _item: &PmItemCreate) -> PmResult<String> {
+            panic!("unused in test")
+        }
+
+        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
+            panic!("unused in test")
+        }
+
+        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
+            panic!("unused in test")
+        }
+
+        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
+            panic!("unused in test")
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_project_parent_id_uses_configured_notion_parent_page() {
+        let progress = NullProgress;
+        let client = FakePmProvider::new(None, "created-team");
+        let config = Config {
+            notion: NotionConfig {
+                parent_page: Some("page-123".to_string()),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
+        };
+
+        let team_id =
+            resolve_project_parent_id(&client, PmProviderKind::Notion, &config, &progress)
+                .await
+                .expect("resolve notion parent");
+
+        assert_eq!(team_id, "page-123");
+        assert_eq!(client.create_team_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn resolve_project_parent_id_creates_fresh_team_for_non_notion_providers() {
+        let progress = NullProgress;
+        let client = FakePmProvider::new(None, "created-team");
+        let config = Config {
+            notion: NotionConfig {
+                parent_page: Some("page-123".to_string()),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
+        };
+
+        let team_id =
+            resolve_project_parent_id(&client, PmProviderKind::Linear, &config, &progress)
+                .await
+                .expect("create fresh team");
+
+        assert_eq!(team_id, "created-team");
+        assert_eq!(client.create_team_calls.load(Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn slugify_converts_name_to_filename_slug() {
@@ -1259,6 +1413,7 @@ mod tests {
         let doc = remote_item_to_document(&item, PmProviderKind::Linear);
         assert_eq!(doc.frontmatter.linear_id.as_deref(), Some("item-42"));
         assert_eq!(doc.frontmatter.asana_id, None);
+        assert_eq!(doc.frontmatter.notion_id, None);
         assert!(doc.body.starts_with("# Build the thing\n"));
         assert!(doc.body.contains("Some details here."));
     }

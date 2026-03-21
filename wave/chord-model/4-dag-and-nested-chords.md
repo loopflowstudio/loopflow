@@ -1,6 +1,7 @@
 ---
 asana_id: '1213718347017619'
 linear_id: ed3c82de-b25b-4def-8ca7-c7dd09d591ad
+notion_id: 32af8f99-3d81-81ee-bb97-ddf1d3b929d9
 ---
 # 07: DAG and Nested Chords
 

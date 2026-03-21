@@ -490,113 +490,6 @@ impl Event {
         }
     }
 
-    pub fn run_started(
-        run_id: LfdId,
-        wave_name: String,
-        worktree: String,
-        command: Vec<String>,
-    ) -> Self {
-        Self::RunStarted {
-            run_id,
-            wave_name,
-            worktree,
-            command,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn flow_started(run_id: LfdId, flow: String) -> Self {
-        Self::FlowStarted {
-            run_id,
-            flow,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn flow_completed(run_id: LfdId) -> Self {
-        Self::FlowCompleted {
-            run_id,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn flow_errored(run_id: LfdId, error: String) -> Self {
-        Self::FlowErrored {
-            run_id,
-            error,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn flow_escalated(run_id: LfdId, signal: String) -> Self {
-        Self::FlowEscalated {
-            run_id,
-            signal,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn step_started(run_id: LfdId, step: String, index: u32) -> Self {
-        Self::StepStarted {
-            run_id,
-            step,
-            index,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn step_completed(run_id: LfdId, step: String, index: u32) -> Self {
-        Self::StepCompleted {
-            run_id,
-            step,
-            index,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn step_errored(run_id: LfdId, step: String, index: u32, error: String) -> Self {
-        Self::StepErrored {
-            run_id,
-            step,
-            index,
-            error,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn step_escalated(run_id: LfdId, step: String, index: u32, signal: String) -> Self {
-        Self::StepEscalated {
-            run_id,
-            step,
-            index,
-            signal,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn run_completed(run_id: LfdId) -> Self {
-        Self::RunCompleted {
-            run_id,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn run_errored(run_id: LfdId, error: String) -> Self {
-        Self::RunErrored {
-            run_id,
-            error,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn run_escalated(run_id: LfdId, signal: String) -> Self {
-        Self::RunEscalated {
-            run_id,
-            signal,
-            timestamp: Self::now(),
-        }
-    }
-
     pub fn wave_waiting(
         wave_id: LfdId,
         wave_run_id: LfdId,
@@ -880,21 +773,53 @@ mod tests {
     #[test]
     fn event_roundtrips_through_json() {
         let id = || LfdId::new();
+        let timestamp = Event::now();
         let events = vec![
             Event::wave_waiting(id(), id(), "step".to_string(), None, None, None),
-            Event::run_started(
-                id(),
-                "wave".to_string(),
-                "/tmp/wt".to_string(),
-                vec!["lf".to_string(), "build".to_string()],
-            ),
-            Event::flow_started(id(), "build".to_string()),
-            Event::step_started(id(), "implement".to_string(), 0),
-            Event::step_completed(id(), "implement".to_string(), 0),
-            Event::step_errored(id(), "review".to_string(), 1, "boom".to_string()),
-            Event::flow_completed(id()),
-            Event::run_completed(id()),
-            Event::run_errored(id(), "boom".to_string()),
+            Event::RunStarted {
+                run_id: id(),
+                wave_name: "wave".to_string(),
+                worktree: "/tmp/wt".to_string(),
+                command: vec!["lf".to_string(), "build".to_string()],
+                timestamp,
+            },
+            Event::FlowStarted {
+                run_id: id(),
+                flow: "build".to_string(),
+                timestamp,
+            },
+            Event::StepStarted {
+                run_id: id(),
+                step: "implement".to_string(),
+                index: 0,
+                timestamp,
+            },
+            Event::StepCompleted {
+                run_id: id(),
+                step: "implement".to_string(),
+                index: 0,
+                timestamp,
+            },
+            Event::StepErrored {
+                run_id: id(),
+                step: "review".to_string(),
+                index: 1,
+                error: "boom".to_string(),
+                timestamp,
+            },
+            Event::FlowCompleted {
+                run_id: id(),
+                timestamp,
+            },
+            Event::RunCompleted {
+                run_id: id(),
+                timestamp,
+            },
+            Event::RunErrored {
+                run_id: id(),
+                error: "boom".to_string(),
+                timestamp,
+            },
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
@@ -976,24 +901,35 @@ mod tests {
 
     #[test]
     fn runtime_events_use_dotted_type_names() {
-        let event = Event::run_started(
-            test_id("run-1"),
-            "lfd".to_string(),
-            "/tmp/repo.lfd".to_string(),
-            vec!["lf".to_string(), "build".to_string()],
-        );
+        let timestamp = Event::now();
+        let event = Event::RunStarted {
+            run_id: test_id("run-1"),
+            wave_name: "lfd".to_string(),
+            worktree: "/tmp/repo.lfd".to_string(),
+            command: vec!["lf".to_string(), "build".to_string()],
+            timestamp,
+        };
         let json = serde_json::to_value(&event).expect("serialize");
         assert_eq!(json["type"], "run.started");
         assert_eq!(json["run_id"], "run-1");
         assert_eq!(json["wave_name"], "lfd");
         assert!(json.get("flow").is_none());
 
-        let flow = Event::flow_started(test_id("run-1"), "build".to_string());
+        let flow = Event::FlowStarted {
+            run_id: test_id("run-1"),
+            flow: "build".to_string(),
+            timestamp,
+        };
         let flow_json = serde_json::to_value(&flow).expect("serialize flow");
         assert_eq!(flow_json["type"], "flow.started");
         assert_eq!(flow_json["flow"], "build");
 
-        let step = Event::step_completed(test_id("run-1"), "implement".to_string(), 1);
+        let step = Event::StepCompleted {
+            run_id: test_id("run-1"),
+            step: "implement".to_string(),
+            index: 1,
+            timestamp,
+        };
         let step_json = serde_json::to_value(&step).expect("serialize step");
         assert_eq!(step_json["type"], "step.completed");
         assert!(step_json.get("exit_code").is_none());

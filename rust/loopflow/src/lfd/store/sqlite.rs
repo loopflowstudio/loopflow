@@ -1141,6 +1141,7 @@ impl SqliteStore {
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
         let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+        let execution_cursor = run.execution_cursor.clone();
         conn.execute(
             Self::sql(Query::InsertWaveRun),
             params![
@@ -1160,6 +1161,7 @@ impl SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.pr)?,
                 flow_parents_json,
+                execution_cursor,
                 run.activation_log_id.as_ref(),
                 run.parent_run_id.as_ref(),
                 run.parent_pr_number.map(|value| value as i64),
@@ -1177,6 +1179,7 @@ impl SqliteStore {
     pub fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+        let execution_cursor = run.execution_cursor.clone();
         let updated = conn.execute(
             Self::sql(Query::UpdateWaveRun),
             params![
@@ -1194,6 +1197,7 @@ impl SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.pr)?,
                 flow_parents_json,
+                execution_cursor,
                 run.activation_log_id.as_ref(),
                 run.parent_run_id.as_ref(),
                 run.parent_pr_number.map(|value| value as i64),

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::{list_worktrees, main_repo_root, wave_name_from_worktree_and_main};
-use crate::journal::{events_path, runs_root, LfEvent};
+use crate::journal::{events_path, read_events, runs_root};
 use crate::lfd::events::EventHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
@@ -70,11 +69,6 @@ impl LfObserver {
                 continue;
             }
 
-            let event_path = events_path(&path);
-            if !event_path.exists() {
-                continue;
-            }
-
             if let Err(err) = self.replay_new_lines(&path, event_hub) {
                 debug!(error = %err, run_dir = %path.display(), "skipping invalid journal");
             }
@@ -83,24 +77,12 @@ impl LfObserver {
     }
 
     fn replay_new_lines(&mut self, run_dir: &Path, event_hub: &EventHub) -> Result<(), String> {
-        let events_path = events_path(run_dir);
-        if !events_path.exists() {
-            return Ok(());
-        }
-
-        let file = std::fs::File::open(&events_path)
-            .map_err(|err| format!("failed reading {}: {err}", events_path.display()))?;
         let seen = self.line_cursors.get(run_dir).copied().unwrap_or(0);
-        let mut processed = 0_usize;
-        for line in BufReader::new(file).lines() {
-            processed += 1;
-            let line =
-                line.map_err(|err| format!("failed reading {}: {err}", events_path.display()))?;
-            if processed <= seen || line.trim().is_empty() {
-                continue;
-            }
-            let event: LfEvent = serde_json::from_str(&line)
-                .map_err(|err| format!("invalid journal event: {err}"))?;
+        let path = events_path(run_dir);
+        let events = read_events(run_dir)
+            .map_err(|err| format!("failed reading {}: {err}", path.display()))?;
+        let processed = events.len();
+        for event in events.into_iter().skip(seen) {
             event_hub.send(Event::from(event));
         }
         self.line_cursors.insert(run_dir.to_path_buf(), processed);

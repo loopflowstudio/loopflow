@@ -322,7 +322,6 @@ impl DockerExecutor {
             rehydrated_agents: plan.reattach.len() as u32,
             lost_agents_failed: plan.lost.len() as u32,
             orphaned_containers_removed,
-            ..Default::default()
         })
     }
 }

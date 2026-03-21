@@ -113,6 +113,7 @@ impl WaveExecutor {
                 agent: agent.clone(),
                 cmd,
                 output_prefix: None,
+                extra_env: Vec::new(),
             })
             .await?;
 

@@ -3,16 +3,20 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
+use tokio::process::Command;
+use tracing::warn;
 
 use crate::lfd::auth::AuthProvider;
 use crate::lfd::http::dto::{
     terminal_session_dto, ListResponse, TerminalLaunchSpecDto, TerminalSessionDto,
 };
-use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
+use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
+use crate::lfd::types::{
+    tmux_session_name, Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
+};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -80,29 +84,6 @@ pub async fn list_terminal_sessions_handler(
     )))
 }
 
-pub async fn create_terminal_session_handler(
-    State(state): State<HttpState>,
-    Json(payload): Json<CreateTerminalSessionRequest>,
-) -> ApiResult<TerminalSessionDto> {
-    let wave_id = resolve_wave_id(&state, &payload.wave_id).await?;
-    let wave_run_id = payload
-        .wave_run_id
-        .as_deref()
-        .map(|value| parse_lfd_id(value, "invalid wave run id"))
-        .transpose()?;
-    let session = state
-        .executor
-        .create_terminal_session_for_waiting_wave(&wave_id, wave_run_id.as_ref())
-        .await
-        .map_err(|error| {
-            api_error(
-                StatusCode::PRECONDITION_FAILED,
-                ApiMessage::Untrusted(error),
-            )
-        })?;
-    Ok(Json(terminal_session_dto(session)))
-}
-
 pub async fn get_terminal_session_handler(
     State(state): State<HttpState>,
     Path(session_id): Path<String>,
@@ -120,6 +101,19 @@ pub async fn attach_terminal_session_handler(
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session =
         update_terminal_session(&state, &session_id, |session| Ok(session.attach())).await?;
+
+    if session.source == TMUX_TERMINAL_SOURCE {
+        return Ok(Json(TerminalLaunchSpecDto {
+            cwd: session.cwd,
+            argv: vec![
+                "tmux".to_string(),
+                "attach-session".to_string(),
+                "-t".to_string(),
+                tmux_session_name(&session.id),
+            ],
+            env: Default::default(),
+        }));
+    }
 
     let completion_token = session.completion_token.clone().ok_or_else(|| {
         api_error(
@@ -174,6 +168,9 @@ pub async fn cancel_terminal_session_handler(
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session =
         update_terminal_session(&state, &session_id, |session| Ok(session.cancel())).await?;
+    if session.source == TMUX_TERMINAL_SOURCE {
+        stop_tmux_terminal_session(&session).await;
+    }
     Ok(Json(terminal_session_dto(session)))
 }
 
@@ -263,6 +260,26 @@ fn local_auth_header(auth: &AuthProvider) -> String {
         AuthProvider::Studio { local_token, .. } => local_token,
     };
     format!("Authorization: Bearer {}", token.expose_secret())
+}
+
+async fn stop_tmux_terminal_session(session: &TerminalSession) {
+    match Command::new("tmux")
+        .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+        .status()
+        .await
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => warn!(
+            session_id = %session.id,
+            status = ?status.code(),
+            "failed to kill tmux terminal session"
+        ),
+        Err(err) => warn!(
+            session_id = %session.id,
+            error = %err,
+            "failed to kill tmux terminal session"
+        ),
+    }
 }
 
 fn build_wrapped_command(

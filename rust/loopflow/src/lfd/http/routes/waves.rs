@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::path::{Path as FsPath, PathBuf};
 use std::str::FromStr;
 use time::OffsetDateTime;
+use tokio::process::Command as TokioCommand;
 use tracing::warn;
 
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
@@ -14,11 +15,10 @@ use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
-use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
     activation_log_dto, trigger_dto, ActivationLogDto, CombineResponse, CombineResponseResult,
-    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
-    NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
+    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{
     read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig,
@@ -31,7 +31,8 @@ use crate::lfd::triggers::{
     spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
-    AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
+    tmux_session_name, AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus,
+    WaveStatus, TMUX_TERMINAL_SOURCE,
 };
 
 #[derive(Debug, Deserialize)]
@@ -947,6 +948,7 @@ pub async fn stop_wave_handler(
             .update_wave_run(&run)
             .await
             .map_err(map_store_error)?;
+        cancel_active_terminal_session(&state, &run).await?;
         let wave_id_for_update = run.wave_id.clone();
         if let Some(mut wave) = state
             .store
@@ -986,6 +988,52 @@ pub async fn stop_wave_handler(
     state.event_hub.send(Event::wave_stopped(wave_id));
 
     Ok(Json(StopWaveResponse { stopped: true }))
+}
+
+async fn cancel_active_terminal_session(state: &HttpState, run: &WaveRun) -> Result<(), ApiError> {
+    let Some(mut session) = state
+        .store
+        .get_active_terminal_session_for_wave_run(&run.id)
+        .await
+        .map_err(map_store_error)?
+    else {
+        return Ok(());
+    };
+
+    if !session.cancel() {
+        return Ok(());
+    }
+
+    state
+        .store
+        .update_terminal_session(&session)
+        .await
+        .map_err(map_store_error)?;
+    state
+        .event_hub
+        .send(Event::terminal_session_updated(session.clone()));
+
+    if session.source == TMUX_TERMINAL_SOURCE {
+        match TokioCommand::new("tmux")
+            .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => warn!(
+                session_id = %session.id,
+                exit_code = ?status.code(),
+                "failed to kill tmux terminal session while stopping wave"
+            ),
+            Err(err) => warn!(
+                session_id = %session.id,
+                error = %err,
+                "failed to kill tmux terminal session while stopping wave"
+            ),
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn restart_step_handler(
@@ -1084,71 +1132,6 @@ async fn respawn_run_task(
     );
 
     Ok(())
-}
-
-pub async fn continue_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<ContinueWaveResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let mut run = state
-        .store
-        .get_active_wave_run(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
-
-    if run.status != WaveRunStatus::Waiting {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "wave run is not waiting for interactive input",
-        ));
-    }
-
-    let mut wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    // Resolve worktree and check for uncommitted changes.
-    let worktree = run.worktree.clone();
-
-    // Resolve the current step name for the commit message.
-    let step_name = resolve_current_step_name(&run, run.step_index);
-    run_blocking_result(
-        move || auto_commit_if_dirty(std::path::Path::new(&worktree), &step_name),
-        StatusCode::INTERNAL_SERVER_ERROR,
-    )
-    .await?;
-
-    // Advance to the next step.
-    run.step_index += 1;
-    run.status = WaveRunStatus::Running;
-    state
-        .store
-        .update_wave_run(&run)
-        .await
-        .map_err(map_store_error)?;
-    wave.status = WaveStatus::Running;
-    state
-        .store
-        .update_wave(&wave)
-        .await
-        .map_err(map_store_error)?;
-
-    state.event_hub.send(Event::wave_updated(wave_id.clone()));
-
-    // Re-acquire scheduler slot (idempotent for same run_id).
-    let wave_run_id = run.id.to_string();
-    respawn_run_task(&state, run).await?;
-
-    Ok(Json(ContinueWaveResponse {
-        continued: true,
-        wave_id: wave_id.to_string(),
-        wave_run_id,
-    }))
 }
 
 pub async fn land_wave_handler(
@@ -1494,7 +1477,9 @@ mod tests {
     use super::*;
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{
+        Signal, TerminalSession, TerminalSessionStatus, Wave, WaveMode, WaveStatus,
+    };
     use std::path::Path;
     use std::process::Command;
     use tempfile::tempdir;
@@ -1844,6 +1829,88 @@ mod tests {
         .expect("create wave");
 
         assert_eq!(created.status, "paused");
+    }
+
+    #[tokio::test]
+    async fn stop_wave_cancels_active_terminal_session_for_waiting_run() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let mut wave = make_wave(&repo, "designer");
+        wave.status = WaveStatus::Running;
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.snapshot.repo = repo.clone();
+        run.snapshot.flow = "build".to_string();
+        run.status = WaveRunStatus::Waiting;
+        run.worktree = repo.clone();
+        run.branch = "main".to_string();
+        state
+            .store
+            .create_wave_run(&run)
+            .await
+            .expect("run should be created");
+
+        let session = TerminalSession {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            wave_run_id: Some(run.id.clone()),
+            step: "design".to_string(),
+            agent: "lf".to_string(),
+            cwd: repo.clone(),
+            argv: vec!["lf".to_string(), "design".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Running,
+            attached_at: Some(OffsetDateTime::now_utc()),
+            started_at: Some(OffsetDateTime::now_utc()),
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: Some("token".to_string()),
+        };
+        state
+            .store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let Json(response) = stop_wave_handler(State(state.clone()), Path(wave.id().to_string()))
+            .await
+            .expect("stop wave");
+        assert!(response.stopped);
+
+        let updated_run = state
+            .store
+            .get_wave_run(&run.id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(updated_run.error.as_deref(), Some("stopped"));
+
+        let updated_wave = state
+            .store
+            .get_wave(wave.id())
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        assert_eq!(updated_wave.status, WaveStatus::Failed);
+
+        let updated_session = state
+            .store
+            .get_terminal_session(&session.id)
+            .await
+            .expect("session lookup should succeed")
+            .expect("session should exist");
+        assert_eq!(updated_session.status, TerminalSessionStatus::Canceled);
+        assert!(updated_session.completed_at.is_some());
     }
 
     #[tokio::test]

@@ -22,10 +22,12 @@ pub(super) struct AgentLaunchRequest {
     pub agent: String,
     pub cmd: Vec<String>,
     pub output_prefix: Option<String>,
+    pub extra_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct AgentLaunchOutcome {
+    #[allow(dead_code)]
     pub agent_id: LfdId,
     pub exit_code: i32,
 }
@@ -45,6 +47,7 @@ impl WaveExecutor {
             agent,
             cmd,
             output_prefix,
+            extra_env,
         } = request;
         let agent = build_agent_for_step(
             &wave_run_id,
@@ -68,12 +71,13 @@ impl WaveExecutor {
                 cmd,
                 Path::new(&worktree),
                 AgentRunContext {
-                    wave_id: wave_id.as_str(),
-                    agent_id: agent_id.as_str(),
-                    wave_run_id: wave_run_id.as_str(),
-                    branch: branch.as_deref(),
-                    output: &self.output,
-                    output_prefix: output_prefix.as_deref(),
+                    wave_id: wave_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    wave_run_id: wave_run_id.to_string(),
+                    branch,
+                    output: self.output.clone(),
+                    output_prefix,
+                    extra_env,
                 },
             )
             .await;

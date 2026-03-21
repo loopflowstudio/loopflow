@@ -79,8 +79,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/sessions", post(sessions::create_session_handler))
         .route(
             "/terminal-sessions",
-            get(terminal_sessions::list_terminal_sessions_handler)
-                .post(terminal_sessions::create_terminal_session_handler),
+            get(terminal_sessions::list_terminal_sessions_handler),
         )
         .route(
             "/terminal-sessions/{id}",
@@ -169,10 +168,6 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/waves/{wave_id}/restart-step",
             post(waves::restart_step_handler),
-        )
-        .route(
-            "/waves/{wave_id}/continue",
-            post(waves::continue_wave_handler),
         )
         .route("/waves/{wave_id}/land", post(waves::land_wave_handler))
         .route("/waves/{wave_id}/next", post(waves::next_wave_handler))

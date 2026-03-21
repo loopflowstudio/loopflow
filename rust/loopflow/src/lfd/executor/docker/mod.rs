@@ -464,26 +464,31 @@ fn container_host_config(mounts: Vec<Mount>, limits: &ExecutorLimitsConfig) -> H
 
 #[async_trait]
 impl AgentExecutor for DockerExecutor {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
 
-        let output_context: OutputContext = context.into();
+        let output_context: OutputContext = context.clone().into();
         let workspace = self
-            .resolve_workspace(context.wave_id, context.wave_run_id, cwd, context.branch)
+            .resolve_workspace(
+                &context.wave_id,
+                &context.wave_run_id,
+                cwd,
+                context.branch.as_deref(),
+            )
             .await
             .inspect_err(
-                |e| warn!(agent_id = context.agent_id, error = %e, "resolve_workspace failed"),
+                |e| warn!(agent_id = %context.agent_id, error = %e, "resolve_workspace failed"),
             )?;
         let agent_image = self
             .ensure_repo_image(&workspace.repo_source)
             .await
             .inspect_err(
-                |e| warn!(agent_id = context.agent_id, error = %e, "ensure_repo_image failed"),
+                |e| warn!(agent_id = %context.agent_id, error = %e, "ensure_repo_image failed"),
             )?;
         self.prepare_workspace(&workspace, cwd).await.inspect_err(
-            |e| warn!(agent_id = context.agent_id, error = %e, "prepare_workspace failed"),
+            |e| warn!(agent_id = %context.agent_id, error = %e, "prepare_workspace failed"),
         )?;
 
         // Sync .lf/ from host worktree to container volume — prompt/context files
@@ -491,20 +496,26 @@ impl AgentExecutor for DockerExecutor {
         // prepare_workspace creates the container worktree from git which doesn't
         // have these runtime artifacts.
         self.sync_lf_to_volume(&workspace, cwd).await.inspect_err(
-            |e| warn!(agent_id = context.agent_id, error = %e, "sync_lf_to_volume failed"),
+            |e| warn!(agent_id = %context.agent_id, error = %e, "sync_lf_to_volume failed"),
         )?;
 
-        let container_name = Self::build_container_name(context.agent_id);
+        let container_name = Self::build_container_name(&context.agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
         // Strip flags that require host-side services unavailable in containers
         let cmd: Vec<String> = cmd.into_iter().filter(|arg| arg != "--chrome").collect();
-        let env = self.collect_env(cmd.first().map(String::as_str)).await;
+        let mut env = self.collect_env(cmd.first().map(String::as_str)).await;
+        env.extend(
+            context
+                .extra_env
+                .iter()
+                .map(|(key, value)| format!("{key}={value}")),
+        );
         let mounts = self.build_mounts(&workspace.volume.volume_name);
         let labels =
-            Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
+            Self::build_agent_labels(&context.agent_id, &context.wave_id, &context.wave_run_id);
 
         info!(
-            agent_id = context.agent_id,
+            agent_id = %context.agent_id,
             image = %agent_image,
             workdir = %workspace.container_worktree,
             volume = %workspace.volume.volume_name,
@@ -537,7 +548,7 @@ impl AgentExecutor for DockerExecutor {
             .await?;
 
         let container_id = container.id;
-        let agent_lfd_id = LfdId::from_raw(context.agent_id);
+        let agent_lfd_id = LfdId::from_raw(&context.agent_id);
         let _ = self
             .store
             .update_agent_status(
@@ -550,14 +561,14 @@ impl AgentExecutor for DockerExecutor {
         self.active
             .lock()
             .await
-            .insert(context.agent_id.to_string(), container_id.clone());
+            .insert(context.agent_id.clone(), container_id.clone());
 
         if let Err(err) = self
             .docker
             .start_container(&container_id, None::<StartContainerOptions>)
             .await
         {
-            self.active.lock().await.remove(context.agent_id);
+            self.active.lock().await.remove(&context.agent_id);
             self.remove_container(&container_id).await;
             return Err(err.into());
         }
@@ -565,7 +576,7 @@ impl AgentExecutor for DockerExecutor {
         let exit_code = self
             .wait_for_container_with_logs(&container_id, output_context)
             .await;
-        self.active.lock().await.remove(context.agent_id);
+        self.active.lock().await.remove(&context.agent_id);
         self.remove_container(&container_id).await;
 
         self.sync_to_host_worktree(&workspace, cwd).await?;

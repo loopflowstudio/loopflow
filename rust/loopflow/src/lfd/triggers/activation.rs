@@ -256,14 +256,9 @@ pub async fn spawn_immediate_activation(
     let run_id = LfdId::new();
     let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
         Ok(guard) => guard,
-        Err(reason) => {
-            tracing::debug!(
-                wave_id = %wave.id(),
-                reason = %reason,
-                "scheduler at capacity; immediate activation deferred to queue"
-            );
+        Err(_reason) => {
             // Fall back to queue when scheduler is full.
-            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            enqueue_pending_activation(store, event_hub, envelope).await;
             return None;
         }
     };
@@ -349,13 +344,14 @@ pub async fn dispatch_or_enqueue_activation(
     };
 
     if active_runs >= wave.workers() {
+        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
         return matches!(
-            enqueue_pending_activation(store, event_hub, envelope).await,
+            outcome,
             Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
         );
     }
 
-    spawn_immediate_activation(
+    let result = spawn_immediate_activation(
         store,
         executor,
         scheduler,
@@ -364,8 +360,8 @@ pub async fn dispatch_or_enqueue_activation(
         flow_override,
         envelope,
     )
-    .await
-    .is_some()
+    .await;
+    result.is_some()
 }
 
 pub async fn dispatch_pending_activations(

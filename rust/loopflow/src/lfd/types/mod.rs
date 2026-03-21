@@ -21,7 +21,9 @@ pub use chat_message::ChatMessage;
 pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use summary::Summary;
-pub use terminal_session::{TerminalSession, TerminalSessionStatus};
+pub use terminal_session::{
+    tmux_session_name, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
+};
 pub use trigger::{
     ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,
 };

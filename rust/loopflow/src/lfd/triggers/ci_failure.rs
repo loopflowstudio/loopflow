@@ -274,7 +274,7 @@ mod tests {
                 &self,
                 _cmd: Vec<String>,
                 _cwd: &Path,
-                _ctx: AgentRunContext<'_>,
+                _ctx: AgentRunContext,
             ) -> anyhow::Result<i32> {
                 Ok(0)
             }

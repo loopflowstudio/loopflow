@@ -5,6 +5,7 @@ pub mod command;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod execution;
 pub mod fast_path;
 pub mod flow;
 pub mod fork;
@@ -26,6 +27,11 @@ pub use agent::{
 pub use command::{run_command, CommandError};
 pub use config::{load_config, load_config_or_default, parse_agent, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
+pub use execution::{
+    advance_cursor_after_wait, current_flow_parents, current_step, xor_verdict_path,
+    ExecutionContext, ExecutionCursor, ExecutionStep, FlowEngine, FlowOutcome, FlowProgress,
+    LoopCursorPhase, NestedCursor, StepExecutor, StepOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+};
 pub use flow::{
     expand_flow, load_direction, load_flow, load_step, next_action, ConcreteAnd, ConcreteAndBranch,
     ConcreteItem, ConcreteLoop, ConcreteOp, ConcreteOr, ConcreteStep, ConcreteXor, Direction, Flow,

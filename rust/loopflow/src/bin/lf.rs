@@ -185,6 +185,48 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
+fn with_step_runtime<T>(
+    repo_root: &std::path::Path,
+    step_name: &str,
+    run: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    journal::emit(
+        repo_root,
+        LfNode::Step,
+        LfEventType::Started,
+        LfEventFields {
+            step: Some(step_name.to_string()),
+            index: Some(0),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run();
+    match &result {
+        Ok(_) => journal::emit(
+            repo_root,
+            LfNode::Step,
+            LfEventType::Completed,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(0),
+                ..LfEventFields::default()
+            },
+        ),
+        Err(err) => journal::emit(
+            repo_root,
+            LfNode::Step,
+            LfEventType::Errored,
+            LfEventFields {
+                step: Some(step_name.to_string()),
+                index: Some(0),
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
+}
+
 fn run_target(
     name: &str,
     message: Option<&str>,
@@ -194,7 +236,9 @@ fn run_target(
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
     match loopflow::lf::discovery::discover_target(&repo_root, name)? {
         loopflow::lf::discovery::Target::Step(_) => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some(name), message, cli)
+            with_step_runtime(&repo_root, name, || {
+                loopflow::lf::commands::run::run(Some(name), message, cli)
+            })
         }),
         loopflow::lf::discovery::Target::Flow(flow) => with_runtime(&repo_root, command, || {
             loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root)

@@ -170,8 +170,6 @@ Flows can include mechanical ops items directly:
 | `pair` | design → code |
 | `deploy` | gate → op: land → op: pm push-diff |
 | `sync` | rebase → integrate-upstream → op: pm pull |
-| `qa-deploy` | qa → triage → xor(code, deploy) |
-| `reorg` | update-wave (coherence pass) |
 
 ### Build flows (`build/`)
 
@@ -179,6 +177,7 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
 | `build-or-silent` | ingest → xor(build, silence) |
+| `s1-build` | kickoff → code → deploy |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | gate → update-wave → deploy |
 
@@ -186,8 +185,8 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `garden` | wave/mutate → wave/review → deploy |
-| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) |
+| `garden` | garden/scan → garden/assess → xor(garden-act, silence) |
+| `garden-act` | wave/mutate → wave/review |
 
 ### Algedonic flows (`algedonic/`)
 
@@ -199,48 +198,25 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `govern-identity` | s5-scan → s5-assess → wave/mutate |
-| `govern-intelligence` | s4-scan → s4-assess → wave/mutate |
-| `govern-control` | s3-scan → s3-assess → wave/mutate |
+| `govern-operations` | ingest → xor(s1-build, silence) |
 | `govern-coordination` | s2-scan → s2-assess → wave/mutate |
-
-### Plan flows (`plan/`)
-
-| Flow | Steps |
-|------|-------|
-| `wave-reduce` | and(reduce×3) → update-wave → deploy |
-| `wave-polish` | and(polish×3) → update-wave → deploy |
-| `wave-expand` | and(expand×3) → update-wave → deploy |
-
-### Scan flows (`scan/`)
-
-| Flow | Steps |
-|------|-------|
-| `scan` | scan/scan-report → scan/scan-plan → code |
-
-### Forks (and)
-
-`and` runs a step in parallel with different directions, then synthesizes the results.
-
-```bash
-lf wave-reduce    # runs reduce 3x with different perspectives
-```
-
-`wave-reduce` runs `reduce` across infra, ux, and ceo directions via `and`, then reconciles results with `update-wave`.
+| `govern-control` | s3-scan → s3-assess → wave/mutate |
+| `govern-intelligence` | s4-scan → s4-assess → wave/mutate |
+| `govern-identity` | s5-scan → s5-assess → wave/mutate |
 
 ### Branches (xor)
 
 Branches route a flow based on an agent's assessment of the current state. Exactly one path runs.
 
 ```yaml
-# flow: garden-or-silent
+# flow: garden
 - garden/scan
 - garden/assess
 - xor:
     router: garden/assess
     paths:
-      garden:
-        flow: garden
+      act:
+        flow: garden-act
         description: "Adjustments needed — mutate waves, then review"
       silence:
         description: "Everything is healthy"

@@ -27,7 +27,7 @@ crons:
     schedule: "0 0 1 * *"
 
 # root wave — no workers, governance on crons
-flow: garden-or-silent
+flow: garden
 workers: 0
 mode: loop
 crons:

@@ -292,24 +292,20 @@ fn builtin_deploy_uses_ops_land_item() {
 }
 
 #[test]
-fn builtin_garden_or_silent_flow_structure() {
+fn builtin_garden_flow_structure() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let items = expand_named_flow(repo, "garden-or-silent");
+    let items = expand_named_flow(repo, "garden");
 
-    // garden-or-silent: op:pm pull, garden/scan, garden/assess, xor(garden, silence)
-    assert_eq!(items.len(), 4);
-    assert!(
-        matches!(&items[0], ConcreteItem::Op(_)),
-        "expected op:pm pull at index 0"
-    );
-    assert_step_name(&items[1], "garden/scan");
-    assert_step_name(&items[2], "garden/assess");
-    match &items[3] {
+    // garden: garden/scan, garden/assess, xor(act, silence)
+    assert_eq!(items.len(), 3);
+    assert_step_name(&items[0], "garden/scan");
+    assert_step_name(&items[1], "garden/assess");
+    match &items[2] {
         ConcreteItem::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
-            assert!(xor_def.paths.contains_key("garden"));
+            assert!(xor_def.paths.contains_key("act"));
             assert!(xor_def.paths.contains_key("silence"));
         }
         other => panic!("expected Xor, got {other:?}"),

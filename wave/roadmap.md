@@ -41,7 +41,7 @@ Build enough to run the first garden cycle. Uses existing flows.
 - **chord-model/04** — Letta integration once live garden output exists to remember
 
 Current bootstrap pressure:
-- governance flows shipped (xor routing, garden-or-silent, four VSM flows); what remains is runtime config (02a–02d) and live validation
+- governance flows shipped (xor routing, garden, four VSM flows); what remains is runtime config (02a–02d) and live validation
 - stall detection, self-healing polish, and signal memory come later inside chord-model rather than as a separate wave
 
 First garden cycle runs. The chord observes its own bootstrap commits.

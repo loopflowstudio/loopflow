@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use crate::engine::config::{load_config_or_default, Config};
+use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
     current_branch, diff_names_under, get_default_branch, list_tree, log_grep, merge_base,
     show_file,
@@ -178,8 +178,7 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dy
                 "lf ops auth configure linear",
             )
             .await?;
-            let effective_team = team_id.or_else(|| config.linear.team.clone());
-            Box::new(LinearClient::new(token, effective_team))
+            Box::new(LinearClient::new(token, config.linear.team.clone()))
         }
         PmProviderKind::Notion => {
             let token = resolve_provider_token("notion", None, "lf ops auth notion").await?;
@@ -910,15 +909,13 @@ pub fn pm_export(
 ///
 /// Returns the filename of the local wave item that was claimed, or `None`
 /// if PM is not enabled, no unassigned items exist, or claim fails.
-pub fn pm_try_claim(
-    repo: &Path,
-    wave: &str,
-    progress: &impl Progress,
-) -> Option<String> {
+pub fn pm_try_claim(repo: &Path, wave: &str, progress: &impl Progress) -> Option<String> {
     if !wave_pm_is_enabled(repo, wave) {
         return None;
     }
-    block_on_pm(pm_try_claim_async(repo, wave, progress)).ok().flatten()
+    block_on_pm(pm_try_claim_async(repo, wave, progress))
+        .ok()
+        .flatten()
 }
 
 async fn pm_try_claim_async(
@@ -931,7 +928,11 @@ async fn pm_try_claim_async(
     require_project(&ctx, wave)?;
 
     // Fetch remote items and find unassigned ones
-    let remote_items = ctx.client.list_items(&ctx.project).await.map_err(pm_to_ops)?;
+    let remote_items = ctx
+        .client
+        .list_items(&ctx.project)
+        .await
+        .map_err(pm_to_ops)?;
     let unassigned: Vec<&PmItem> = remote_items
         .iter()
         .filter(|item| item.assignee.is_none() && !item.completed)

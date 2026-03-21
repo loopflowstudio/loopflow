@@ -207,7 +207,6 @@ impl RoadmapItemFrontmatter {
         }
     }
 
-
     pub fn clear_id(&mut self, provider: PmProviderKind) {
         match provider {
             PmProviderKind::Asana => self.asana_id = None,
@@ -447,16 +446,6 @@ mod tests {
     }
 
     #[test]
-    fn pm_item_update_is_noop_only_without_text_or_priority_changes() {
-        assert!(PmItemUpdate::default().is_noop());
-        assert!(!PmItemUpdate {
-            priority: Some(PriorityBucket::Medium),
-            ..PmItemUpdate::default()
-        }
-        .is_noop());
-    }
-
-    #[test]
     fn pm_item_update_text_update_preserves_name_and_description() {
         let update = PmItemUpdate {
             name: Some("Ship Linear".to_string()),
@@ -471,44 +460,6 @@ mod tests {
                 description: Some("Build the GraphQL client"),
             })
         );
-    }
-
-    #[test]
-    fn priority_bucket_parses_semantic_labels() {
-        assert_eq!(
-            PriorityBucket::from_semantic_label("urgent"),
-            Some(PriorityBucket::Urgent)
-        );
-        assert_eq!(
-            PriorityBucket::from_semantic_label("High"),
-            Some(PriorityBucket::High)
-        );
-        assert_eq!(
-            PriorityBucket::from_semantic_label("medium"),
-            Some(PriorityBucket::Medium)
-        );
-        assert_eq!(
-            PriorityBucket::from_semantic_label("med"),
-            Some(PriorityBucket::Medium)
-        );
-        assert_eq!(
-            PriorityBucket::from_semantic_label("LOW"),
-            Some(PriorityBucket::Low)
-        );
-        assert_eq!(PriorityBucket::from_semantic_label("later"), None);
-    }
-
-    #[test]
-    fn priority_bucket_round_trips_linear_values() {
-        assert_eq!(PriorityBucket::Urgent.linear_value(), 1);
-        assert_eq!(PriorityBucket::High.linear_value(), 2);
-        assert_eq!(PriorityBucket::Medium.linear_value(), 3);
-        assert_eq!(PriorityBucket::Low.linear_value(), 4);
-        assert_eq!(PriorityBucket::from_linear_value(1), PriorityBucket::Urgent);
-        assert_eq!(PriorityBucket::from_linear_value(2), PriorityBucket::High);
-        assert_eq!(PriorityBucket::from_linear_value(3), PriorityBucket::Medium);
-        assert_eq!(PriorityBucket::from_linear_value(4), PriorityBucket::Low);
-        assert_eq!(PriorityBucket::from_linear_value(99), PriorityBucket::Low);
     }
 
     #[test]

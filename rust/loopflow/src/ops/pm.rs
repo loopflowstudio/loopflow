@@ -1347,10 +1347,12 @@ mod tests {
     async fn resolve_project_parent_id_uses_configured_notion_parent_page() {
         let progress = NullProgress;
         let client = FakePmProvider::new(None, "created-team");
-        let mut config = Config::default();
-        config.notion = NotionConfig {
-            parent_page: Some("page-123".to_string()),
-            ..NotionConfig::default()
+        let config = Config {
+            notion: NotionConfig {
+                parent_page: Some("page-123".to_string()),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
         };
 
         let team_id =
@@ -1366,10 +1368,12 @@ mod tests {
     async fn resolve_project_parent_id_creates_fresh_team_for_non_notion_providers() {
         let progress = NullProgress;
         let client = FakePmProvider::new(None, "created-team");
-        let mut config = Config::default();
-        config.notion = NotionConfig {
-            parent_page: Some("page-123".to_string()),
-            ..NotionConfig::default()
+        let config = Config {
+            notion: NotionConfig {
+                parent_page: Some("page-123".to_string()),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
         };
 
         let team_id =

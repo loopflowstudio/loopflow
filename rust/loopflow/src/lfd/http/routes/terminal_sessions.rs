@@ -10,9 +10,9 @@ use crate::lfd::auth::AuthProvider;
 use crate::lfd::http::dto::{
     terminal_session_dto, ListResponse, TerminalLaunchSpecDto, TerminalSessionDto,
 };
-use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
+use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     tmux_session_name, Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
@@ -82,29 +82,6 @@ pub async fn list_terminal_sessions_handler(
         sessions.into_iter().map(terminal_session_dto).collect(),
         false,
     )))
-}
-
-pub async fn create_terminal_session_handler(
-    State(state): State<HttpState>,
-    Json(payload): Json<CreateTerminalSessionRequest>,
-) -> ApiResult<TerminalSessionDto> {
-    let wave_id = resolve_wave_id(&state, &payload.wave_id).await?;
-    let wave_run_id = payload
-        .wave_run_id
-        .as_deref()
-        .map(|value| parse_lfd_id(value, "invalid wave run id"))
-        .transpose()?;
-    let session = state
-        .executor
-        .create_terminal_session_for_waiting_wave(&wave_id, wave_run_id.as_ref())
-        .await
-        .map_err(|error| {
-            api_error(
-                StatusCode::PRECONDITION_FAILED,
-                ApiMessage::Untrusted(error),
-            )
-        })?;
-    Ok(Json(terminal_session_dto(session)))
 }
 
 pub async fn get_terminal_session_handler(

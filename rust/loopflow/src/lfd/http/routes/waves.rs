@@ -14,15 +14,11 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::engine::{
-    advance_cursor_after_wait, current_flow_parents, expand_flow, load_flow, ExecutionCursor,
-};
 use crate::lfd::executor::ensure_wave_worktree;
-use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
     activation_log_dto, trigger_dto, ActivationLogDto, CombineResponse, CombineResponseResult,
-    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
-    NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
+    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{
     read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig,
@@ -1136,123 +1132,6 @@ async fn respawn_run_task(
     );
 
     Ok(())
-}
-
-pub async fn continue_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<ContinueWaveResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let mut run = state
-        .store
-        .get_active_wave_run(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
-
-    if run.status != WaveRunStatus::Waiting {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "wave run is not waiting for interactive input",
-        ));
-    }
-
-    let mut wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    // Resolve worktree and check for uncommitted changes.
-    let worktree = run.worktree.clone();
-
-    // Resolve the current step name for the commit message.
-    let step_name = resolve_current_step_name(&run, run.step_index);
-    run_blocking_result(
-        move || auto_commit_if_dirty(std::path::Path::new(&worktree), &step_name),
-        StatusCode::INTERNAL_SERVER_ERROR,
-    )
-    .await?;
-
-    let worktree_path = FsPath::new(&run.worktree);
-    let flow = load_flow(&run.snapshot.flow, worktree_path).map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(format!("failed to load flow: {err}")),
-        )
-    })?;
-    let plan = expand_flow(&flow, worktree_path).map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(format!("failed to expand flow: {err}")),
-        )
-    })?;
-    let mut cursor = run
-        .execution_cursor
-        .as_deref()
-        .filter(|raw| !raw.trim().is_empty())
-        .map(|raw| {
-            serde_json::from_str::<ExecutionCursor>(raw).map_err(|err| {
-                api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ApiMessage::Untrusted(format!("invalid execution cursor: {err}")),
-                )
-            })
-        })
-        .transpose()?
-        .unwrap_or(ExecutionCursor {
-            index: run.step_index as usize,
-            child: None,
-        });
-    advance_cursor_after_wait(&plan, &mut cursor, worktree_path).map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(format!("failed to advance execution cursor: {err}")),
-        )
-    })?;
-
-    run.status = WaveRunStatus::Running;
-    run.step_index = cursor.index as u32;
-    run.execution_cursor = if cursor.child.is_none() {
-        None
-    } else {
-        Some(serde_json::to_string(&cursor).map_err(|err| {
-            api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ApiMessage::Untrusted(format!("failed to serialize execution cursor: {err}")),
-            )
-        })?)
-    };
-    run.flow_parents = current_flow_parents(&plan, &cursor, worktree_path).map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(format!("failed to resolve current flow parents: {err}")),
-        )
-    })?;
-    state
-        .store
-        .update_wave_run(&run)
-        .await
-        .map_err(map_store_error)?;
-    wave.status = WaveStatus::Running;
-    state
-        .store
-        .update_wave(&wave)
-        .await
-        .map_err(map_store_error)?;
-
-    state.event_hub.send(Event::wave_updated(wave_id.clone()));
-
-    // Re-acquire scheduler slot (idempotent for same run_id).
-    let wave_run_id = run.id.to_string();
-    respawn_run_task(&state, run).await?;
-
-    Ok(Json(ContinueWaveResponse {
-        continued: true,
-        wave_id: wave_id.to_string(),
-        wave_run_id,
-    }))
 }
 
 pub async fn land_wave_handler(

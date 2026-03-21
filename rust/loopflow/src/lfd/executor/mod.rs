@@ -114,8 +114,6 @@ pub struct StartupRecovery {
     pub rehydrated_agents: u32,
     pub lost_agents_failed: u32,
     pub orphaned_containers_removed: u32,
-    pub orphaned_fork_runs_cleaned: u32,
-    pub orphaned_fork_worktrees_removed: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

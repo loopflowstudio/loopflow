@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
@@ -8,34 +7,23 @@ use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::{AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::builtins::get_builtin_step;
 use crate::engine::config::{load_config, load_config_or_default};
-use crate::engine::flow::{
-    expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
-};
+use crate::engine::flow::ConcreteStep;
 use crate::engine::git::{
     create_branch, current_branch, fetch, get_default_branch, push_with_upstream, rev_parse,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
-use crate::engine::prompt::write_prompt_log;
-use crate::engine::prompt::Surface;
 use crate::engine::worktrees::{
     branch_exists, create_with_schema_synced, worktree_path as wave_worktree_path,
 };
-use crate::engine::{current_step, ExecutionCursor};
 
-use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
-use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AgentRun, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
     WaveStatus,
 };
-use crate::ops::{
-    commit_workflow, rebase_with_recovery, CommitOptions, NullProgress, Progress, RebaseOptions,
-};
+use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
 /// Create a wave run using a per-run worktree for parallel execution.
 pub async fn create_parallel_wave_run(
@@ -280,12 +268,6 @@ pub fn create_run_worktree(
     Ok((run_wt.to_string_lossy().to_string(), branch))
 }
 
-pub(crate) fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
-    crate::engine::fork::fork_worktree_path(Path::new(&run.worktree), branch_index as usize)
-        .to_string_lossy()
-        .to_string()
-}
-
 pub(crate) fn is_active_wave_run_status(status: WaveRunStatus) -> bool {
     matches!(
         status,
@@ -313,138 +295,6 @@ fn has_run_suffix(path_component: &str) -> bool {
         return false;
     };
     !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
-}
-
-pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String> {
-    match items.get(step_index as usize) {
-        Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
-        Some(ConcreteItem::Op(ops)) => ops.flow_parents.clone(),
-        Some(ConcreteItem::And(and)) => and.flow_parents.clone(),
-        Some(ConcreteItem::Xor(or_item)) => or_item.flow_parents.clone(),
-        Some(ConcreteItem::Or(or_item)) => or_item.flow_parents.clone(),
-        Some(ConcreteItem::Loop(loop_item)) => loop_item.flow_parents.clone(),
-        None => Vec::new(),
-    }
-}
-
-pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> String {
-    let repo = Path::new(&run.worktree);
-    let cursor = run
-        .execution_cursor
-        .as_deref()
-        .filter(|raw| !raw.trim().is_empty())
-        .and_then(|raw| serde_json::from_str::<ExecutionCursor>(raw).ok())
-        .unwrap_or(ExecutionCursor {
-            index: step_index as usize,
-            child: None,
-        });
-    let name = load_flow(&run.snapshot.flow, repo)
-        .ok()
-        .and_then(|flow| expand_flow(&flow, repo).ok())
-        .and_then(|plan| {
-            current_step(&plan, &cursor, repo)
-                .ok()
-                .flatten()
-                .map(|step| step.step.name)
-                .or_else(|| match next_action(&plan, step_index as usize) {
-                    FlowAction::RunOps { ops } => Some(format!("op {}", ops.item.command)),
-                    FlowAction::Loop { .. } => Some("loop".to_string()),
-                    _ => None,
-                })
-        });
-    name.unwrap_or_else(|| format!("step-{step_index}"))
-}
-
-pub(crate) fn auto_commit_if_dirty(worktree: &Path, step_name: &str) -> Result<()> {
-    let options = CommitOptions {
-        add: true,
-        message: None,
-        ..CommitOptions::for_task(step_name)
-    };
-    commit_workflow(worktree, &options, &NullProgress)
-        .map_err(|err| anyhow!("auto-commit failed: {err}"))?;
-    Ok(())
-}
-
-pub(crate) async fn build_step_prompt(
-    worktree: &str,
-    step: &ConcreteStep,
-    directions: &[String],
-    wave: Option<&str>,
-    summary_source: Option<(&SharedStore, &LfdId)>,
-    agent: Option<String>,
-    message: Option<String>,
-) -> Result<(AgentConfig, ProcessConfig)> {
-    let repo_root = Path::new(worktree);
-    let config = load_config_or_default(Some(repo_root));
-
-    let summary = if let Some((store, wave_id)) = summary_source {
-        store
-            .get_summary(wave_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|record| record.content)
-    } else {
-        None
-    };
-
-    let prepared = prepare_launch_prompt(
-        &config,
-        LaunchPromptInput {
-            repo_root: repo_root.to_path_buf(),
-            step: Some(step.step.name.clone()),
-            resolved_step: None,
-            surface: Surface::Headless,
-            directions: directions.to_vec(),
-            area: None,
-            wave: wave.map(str::to_string),
-            message,
-            agent,
-            cwd: None,
-            max_turns: None,
-            yolo_mode: false,
-            include_config_directions: false,
-            include_config_area: true,
-            source_overrides: Default::default(),
-            summary,
-            client_context: ClientContext::default(),
-            related_repos: Vec::new(),
-        },
-    )?;
-
-    let _ = write_prompt_log(repo_root, &prepared.prompt, &step.step.name, None);
-    let mut agent_config = prepared.config;
-
-    let cwd = agent_config
-        .cwd
-        .clone()
-        .unwrap_or_else(|| repo_root.to_path_buf());
-    let context_file = write_prompt_log(
-        &cwd,
-        &agent_config.system_prompt,
-        &format!("{}.context", step.step.name),
-        None,
-    )
-    .ok();
-    agent_config.cwd = Some(cwd);
-    agent_config.skip_permissions = config.yolo;
-
-    let process = ProcessConfig {
-        auto: true,
-        stream: true,
-        context_file,
-        ..Default::default()
-    };
-
-    Ok((agent_config, process))
-}
-
-pub(crate) fn build_agent_capabilities(worktree: &str) -> AgentCapabilities {
-    let config = load_config_or_default(Some(Path::new(worktree)));
-    AgentCapabilities {
-        chrome: config.chrome,
-    }
 }
 
 pub(crate) fn build_agent_for_step(
@@ -663,146 +513,6 @@ pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result
     Ok(new_branch)
 }
 
-#[derive(Debug, Clone)]
-struct BuiltinAgentOptions {
-    step_name: String,
-    suffix: String,
-    timeout: Option<Duration>,
-}
-
-fn run_builtin_agent(
-    repo: &Path,
-    options: &BuiltinAgentOptions,
-    progress: &impl Progress,
-) -> Result<()> {
-    let config = load_config_or_default(Some(repo));
-    let step_content = get_builtin_step(&options.step_name)
-        .ok_or_else(|| anyhow!("built-in step '{}' not found", options.step_name))?;
-    let prompt = format!(
-        "<lf:step>\n{}\n</lf:step>\n\n{}\n",
-        step_content, options.suffix
-    );
-
-    let launch = AgentConfig {
-        task_prompt: prompt,
-        agent: config.agent.clone(),
-        cwd: Some(repo.to_path_buf()),
-        skip_permissions: true,
-        ..Default::default()
-    };
-    let process = ProcessConfig {
-        auto: true,
-        stream: true,
-        timeout: options.timeout,
-        ..Default::default()
-    };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
-
-    progress.status(&format!("Launching {} agent...", options.step_name));
-    let result = crate::engine::launch_agent(&launch, &process, &capabilities)
-        .map_err(|err| anyhow!("failed to launch builtin agent: {err}"))?;
-    if result.exit_code != 0 {
-        return Err(anyhow!("builtin agent failed: {}", result.stderr));
-    }
-    Ok(())
-}
-
-/// Pre-step sync: fetch and rebase the worktree onto its remote branch.
-///
-/// Used at step boundaries so concurrent runs pick up each other's work.
-/// Silently skips if the worktree has no git directory or no remote.
-pub(crate) fn pre_step_sync(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
-    if branch.is_empty() || !worktree.join(".git").exists() {
-        return Ok(());
-    }
-
-    dual_rebase(main_repo, worktree, branch)
-}
-
-/// Post-step sync: stage, commit, and push changes after a successful step.
-///
-/// On a non-fast-forward push, fetches and rebases then retries. If the retry
-/// also fails, escalates to a debug agent session before giving up.
-/// Silently skips if the worktree has no git directory or no remote.
-pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> Result<()> {
-    if branch.is_empty() || !worktree.join(".git").exists() {
-        return Ok(());
-    }
-
-    let options = CommitOptions {
-        add: true,
-        message: None,
-        ..CommitOptions::for_task(step_name)
-    };
-    let committed = commit_workflow(worktree, &options, &NullProgress)
-        .map_err(|err| anyhow!("commit_workflow failed for step {step_name}: {err}"))?;
-    if !committed {
-        return Ok(());
-    }
-
-    match push_with_upstream(worktree, "origin", branch) {
-        Ok(()) => Ok(()),
-        Err(push_err) => {
-            debug!(branch = %branch, "push failed, retrying after fetch+rebase");
-            let remote_ref = format!("origin/{branch}");
-            fetch(worktree, "origin", branch)?;
-            rebase_with_recovery(
-                worktree,
-                &RebaseOptions {
-                    onto: remote_ref,
-                    push: false,
-                },
-                &TracingProgress,
-            )?;
-            match push_with_upstream(worktree, "origin", branch) {
-                Ok(()) => Ok(()),
-                Err(retry_err) => {
-                    warn!(branch = %branch, "push retry exhausted, escalating to debug agent");
-                    let error_context = format!(
-                        "git push to origin/{branch} failed after fetch+rebase retry.\n\
-                         Error: {retry_err}\n\
-                         Working directory: {}\n\
-                         Branch: {branch}",
-                        worktree.display()
-                    );
-                    let options = BuiltinAgentOptions {
-                        step_name: "debug".to_string(),
-                        suffix: error_context,
-                        timeout: Some(Duration::from_secs(5 * 60)),
-                    };
-
-                    match run_builtin_agent(worktree, &options, &TracingProgress) {
-                        Ok(()) => push_with_upstream(worktree, "origin", branch).map_err(|err| {
-                            anyhow!(
-                                "push failed after debug agent intervention.\n\
-                                 Original error: {push_err}\n\
-                                 Retry error: {retry_err}\n\
-                                 Post-agent error: {err}\n\
-                                 Worktree: {}\n\
-                                 Branch: {branch}\n\
-                                 Manual resolution may be needed.",
-                                worktree.display()
-                            )
-                        }),
-                        Err(agent_err) => Err(anyhow!(
-                            "push failed and debug agent could not resolve it.\n\
-                             Original error: {push_err}\n\
-                             Retry error: {retry_err}\n\
-                             Agent error: {agent_err}\n\
-                             Worktree: {}\n\
-                             Branch: {branch}\n\
-                             Manual resolution needed.",
-                            worktree.display()
-                        )),
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Clean up a run-scoped worktree after the run completes.
 ///
 /// Only removes worktrees with the `-run-` suffix to avoid touching wave worktrees.
@@ -888,7 +598,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{ensure_wave_worktree, is_ephemeral_worktree_path, pre_step_sync};
+    use super::{ensure_wave_worktree, is_ephemeral_worktree_path};
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
 
     fn run_git(dir: &Path, args: &[&str]) {
@@ -904,15 +614,6 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-    }
-
-    fn run_git_status(dir: &Path, args: &[&str]) -> bool {
-        Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("git command should run")
-            .success()
     }
 
     fn write_file(path: &Path, content: &str) {
@@ -970,113 +671,6 @@ mod tests {
     #[test]
     fn is_ephemeral_worktree_path_ignores_non_fork_paths() {
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.main"));
-    }
-
-    #[test]
-    fn pre_step_sync_rebases_onto_wave_and_default_branch() {
-        let (_temp, main_repo, origin) = setup_repo_with_remote();
-
-        run_git(&main_repo, &["checkout", "-b", "wave"]);
-        write_file(&main_repo.join("wave-local.txt"), "local wave work\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "wave local"]);
-        run_git(&main_repo, &["push", "-u", "origin", "wave"]);
-
-        let collaborator = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("collaborator");
-        run_git(
-            main_repo.parent().expect("main repo parent"),
-            &[
-                "clone",
-                origin.to_str().unwrap_or(""),
-                collaborator.to_str().unwrap_or(""),
-            ],
-        );
-        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
-        run_git(&collaborator, &["config", "user.name", "Test User"]);
-        run_git(&collaborator, &["checkout", "wave"]);
-        write_file(&collaborator.join("wave-remote.txt"), "remote wave work\n");
-        run_git(&collaborator, &["add", "."]);
-        run_git(&collaborator, &["commit", "-m", "wave remote"]);
-        run_git(&collaborator, &["push"]);
-        run_git(&collaborator, &["checkout", "main"]);
-        write_file(&collaborator.join("main-remote.txt"), "remote main work\n");
-        run_git(&collaborator, &["add", "."]);
-        run_git(&collaborator, &["commit", "-m", "main remote"]);
-        run_git(&collaborator, &["push"]);
-
-        run_git(&main_repo, &["checkout", "main"]);
-        let worktree = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("wave-wt");
-        run_git(
-            &main_repo,
-            &["worktree", "add", worktree.to_str().unwrap_or(""), "wave"],
-        );
-
-        pre_step_sync(&main_repo, &worktree, "wave").expect("pre-step sync");
-
-        assert!(worktree.join("wave-remote.txt").exists());
-        assert!(worktree.join("main-remote.txt").exists());
-        assert!(run_git_status(
-            &worktree,
-            &["merge-base", "--is-ancestor", "origin/main", "HEAD"]
-        ));
-    }
-
-    #[test]
-    fn pre_step_sync_skips_missing_remote_branch_and_still_rebases_default() {
-        let (_temp, main_repo, origin) = setup_repo_with_remote();
-
-        run_git(&main_repo, &["checkout", "-b", "local-only"]);
-        write_file(&main_repo.join("local-only.txt"), "local branch\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "local only"]);
-
-        let collaborator = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("collaborator-default");
-        run_git(
-            main_repo.parent().expect("main repo parent"),
-            &[
-                "clone",
-                origin.to_str().unwrap_or(""),
-                collaborator.to_str().unwrap_or(""),
-            ],
-        );
-        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
-        run_git(&collaborator, &["config", "user.name", "Test User"]);
-        write_file(&collaborator.join("main-update.txt"), "updated main\n");
-        run_git(&collaborator, &["add", "."]);
-        run_git(&collaborator, &["commit", "-m", "main update"]);
-        run_git(&collaborator, &["push"]);
-
-        run_git(&main_repo, &["checkout", "main"]);
-        let worktree = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("local-only-wt");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                worktree.to_str().unwrap_or(""),
-                "local-only",
-            ],
-        );
-
-        pre_step_sync(&main_repo, &worktree, "local-only").expect("pre-step sync");
-
-        assert!(worktree.join("main-update.txt").exists());
-        assert!(run_git_status(
-            &worktree,
-            &["merge-base", "--is-ancestor", "origin/main", "HEAD"]
-        ));
     }
 
     #[test]

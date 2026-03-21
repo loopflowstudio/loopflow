@@ -27,6 +27,7 @@ pub(super) struct AgentLaunchRequest {
 
 #[derive(Debug, Clone)]
 pub(super) struct AgentLaunchOutcome {
+    #[allow(dead_code)]
     pub agent_id: LfdId,
     pub exit_code: i32,
 }

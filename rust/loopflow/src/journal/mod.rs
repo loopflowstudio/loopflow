@@ -13,6 +13,7 @@ use crate::lfd::id::LfdId;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
+const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
@@ -178,7 +179,7 @@ fn ensure_run_context(
     };
 
     ensure_journal_ignored(repo_root)?;
-    let run_id = LfdId::new();
+    let run_id = configured_run_id(repo_root).unwrap_or_default();
     let run_dir = runs_root(repo_root).join(run_id.as_str());
     fs::create_dir_all(&run_dir)?;
 
@@ -195,6 +196,28 @@ fn ensure_run_context(
     }
 
     Ok(Some(context))
+}
+
+fn configured_run_id(repo_root: &Path) -> Option<LfdId> {
+    let value = std::env::var(LF_RUN_ID_ENV).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    match trimmed.parse() {
+        Ok(run_id) => Some(run_id),
+        Err(err) => {
+            debug!(
+                env = LF_RUN_ID_ENV,
+                value = trimmed,
+                repo = %repo_root.display(),
+                error = %err,
+                "ignoring invalid journal run id override"
+            );
+            None
+        }
+    }
 }
 
 fn append_event(run_dir: &Path, event: &LfEvent) -> Result<(), std::io::Error> {
@@ -262,7 +285,29 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 mod tests {
     use super::{emit, read_events, runs_root, LfEventFields, LfEventType, LfNode};
     use crate::engine::git::is_clean;
+    use crate::lfd::id::LfdId;
     use loopflow_test_support::TestRepo;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
+        match value {
+            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
+            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+        }
+        let result = run();
+        match previous {
+            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
+            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+        }
+        result
+    }
 
     fn started_fields(
         command: &[String],
@@ -429,5 +474,67 @@ mod tests {
             .expect("read runs")
             .count();
         assert_eq!(entries, 2);
+    }
+
+    #[test]
+    fn journal_uses_configured_run_id_when_present() {
+        with_run_id_env(Some("7c22895f-e4c1-49cc-a95d-2267e2356f16"), || {
+            let repo = TestRepo::new();
+            let worktree = repo.create_wave_worktree("runtime");
+            let command = vec!["lf".to_string(), "build".to_string()];
+
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Started,
+                started_fields(&command, &worktree, "runtime"),
+            );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Completed,
+                LfEventFields::default(),
+            );
+
+            let run_dir = only_run_dir(&worktree);
+            let run_id = run_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("run dir name");
+            assert_eq!(run_id, "7c22895f-e4c1-49cc-a95d-2267e2356f16");
+        });
+    }
+
+    #[test]
+    fn invalid_configured_run_id_falls_back_to_generated_id() {
+        with_run_id_env(Some("not-a-uuid"), || {
+            let repo = TestRepo::new();
+            let worktree = repo.create_wave_worktree("runtime");
+            let command = vec!["lf".to_string(), "build".to_string()];
+
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Started,
+                started_fields(&command, &worktree, "runtime"),
+            );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Completed,
+                LfEventFields::default(),
+            );
+
+            let run_dir = only_run_dir(&worktree);
+            let run_id = run_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("run dir name");
+            assert!(
+                LfdId::parse(run_id).is_ok(),
+                "expected generated UUID run id"
+            );
+            assert_ne!(run_id, "not-a-uuid");
+        });
     }
 }

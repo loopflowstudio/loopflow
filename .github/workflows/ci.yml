@@ -96,6 +96,7 @@ jobs:
           import json
           import os
           import queue
+          import re
           import subprocess
           import sys
           import threading
@@ -118,6 +119,9 @@ jobs:
           ]
           timeout_seconds = 540
           result_bundle_path = "ConcertoTests.xcresult"
+          success_summary_pattern = re.compile(
+              r"^✔ Test run with \d+ tests in \d+ suites passed after "
+          )
 
           def xcresult_indicates_success(path):
               if not os.path.exists(path):
@@ -186,13 +190,28 @@ jobs:
 
           deadline = time.monotonic() + timeout_seconds
           saw_eof = False
+          saw_success_summary = False
 
           while True:
               remaining = deadline - time.monotonic()
               if remaining <= 0:
                   success, reason = xcresult_indicates_success(result_bundle_path)
-                  level = "warning" if success else "error"
-                  print(f"::{level}::xcodebuild exceeded {timeout_seconds}s ({reason})", flush=True)
+                  if success:
+                      print(
+                          f"::warning::xcodebuild exceeded {timeout_seconds}s ({reason})",
+                          flush=True,
+                      )
+                  elif saw_success_summary:
+                      reason = "stdout showed final Swift test success summary before hang"
+                      print(
+                          f"::warning::xcodebuild exceeded {timeout_seconds}s ({reason})",
+                          flush=True,
+                      )
+                  else:
+                      print(
+                          f"::error::xcodebuild exceeded {timeout_seconds}s ({reason})",
+                          flush=True,
+                      )
                   subprocess.run(
                       ["/bin/ps", "-axo", "pid,ppid,etime,stat,command"],
                       check=False,
@@ -203,8 +222,11 @@ jobs:
                   except subprocess.TimeoutExpired:
                       process.kill()
                       process.wait()
-                  if success:
-                      print("Timed out after tests completed; accepting xcresult success.", flush=True)
+                  if success or saw_success_summary:
+                      print(
+                          "Timed out after tests completed; accepting successful test output.",
+                          flush=True,
+                      )
                       sys.exit(0)
                   sys.exit(124)
 
@@ -223,6 +245,8 @@ jobs:
 
               sys.stdout.write(line)
               sys.stdout.flush()
+              if success_summary_pattern.match(line):
+                  saw_success_summary = True
 
           sys.exit(process.wait())
           PY

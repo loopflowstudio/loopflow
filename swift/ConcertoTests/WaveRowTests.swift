@@ -13,7 +13,9 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         area: [String] = ["src/"],
         flow: String = "build",
-        triggers: [Trigger] = []
+        triggers: [Trigger] = [],
+        hasDiff: Bool = false,
+        diffStat: String? = nil
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -24,8 +26,10 @@ struct WaveRowViewTests {
                 area: area,
                 triggers: triggers,
                 status: .idle,
-                iteration: 0
-            )
+                iteration: 0,
+                diffStat: diffStat
+            ),
+            hasDiff: hasDiff
         )
     }
 
@@ -50,67 +54,22 @@ struct WaveRowViewTests {
         #expect(try nameText.string() == "aurora-melody")
     }
 
-    @Test("Row shows flow badge")
-    func showsFlowBadge() throws {
-        let wave = makeWave(flow: "polish")
+    @Test("Row shows diff indicator when wave has diff")
+    func showsDiffIndicator() throws {
+        let wave = makeWave(hasDiff: true, diffStat: "3 files changed, 42 insertions(+), 8 deletions(-)")
         let row = makeRow(wave: wave)
 
-        let flowText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-flow").text()
-        #expect(try flowText.string() == "polish")
+        let diffText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-diff").text()
+        #expect(try diffText.string() == "+42 −8")
     }
 
-    @Test("Row shows active run flow badge when override is running")
-    func showsActiveRunFlowBadge() throws {
-        let wave = WaveViewModel(
-            api: Wave(
-                id: "test-wave-id",
-                name: "swift-falcon",
-                repo: "/tmp/repo",
-                flow: "ship-roadmap",
-                area: ["src/"],
-                triggers: [],
-                status: .running,
-                iteration: 0,
-                activeRun: WaveRun(
-                    id: "run-1",
-                    waveId: "test-wave-id",
-                    flow: "design",
-                    area: ".",
-                    repo: "/tmp/repo"
-                )
-            )
-        )
+    @Test("Row hides diff indicator when no diff")
+    func hidesDiffWhenNoDiff() throws {
+        let wave = makeWave(hasDiff: false)
         let row = makeRow(wave: wave)
 
-        let flowText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-flow").text()
-        #expect(try flowText.string() == "design")
+        #expect(throws: Error.self) {
+            try row.inspect().find(viewWithAccessibilityIdentifier: "wave-diff")
+        }
     }
-
-    @Test("Row shows area in secondary line")
-    func showsArea() throws {
-        let wave = makeWave(area: ["lib/core"])
-        let row = makeRow(wave: wave)
-
-        let areaText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-area").text()
-        #expect(try areaText.string() == "lib/core")
-    }
-
-    @Test("Row shows trigger signal label")
-    func showsTriggerSignal() throws {
-        let wave = makeWave(triggers: [Trigger(signal: .repo, flow: "integrate")])
-        let row = makeRow(wave: wave)
-
-        let triggerText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-trigger").text()
-        #expect(try triggerText.string() == "repo")
-    }
-
-    @Test("Row shows ci-fix for ci_failure trigger")
-    func showsCiFixTrigger() throws {
-        let wave = makeWave(triggers: [Trigger(signal: .ciFailure, flow: "ci-fix")])
-        let row = makeRow(wave: wave)
-
-        let triggerText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-trigger").text()
-        #expect(try triggerText.string() == "ci-fix")
-    }
-
 }

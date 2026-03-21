@@ -240,6 +240,14 @@ impl Store {
         WaveStateStore::get_attention_item(self, attention_id).await
     }
 
+    pub async fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>> {
+        WaveStateStore::find_attention_item_for_run(self, run_id, kind).await
+    }
+
     pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
         WaveStateStore::upsert_attention_item(self, item).await
     }
@@ -671,6 +679,11 @@ pub trait WaveStateStore: Send + Sync {
         kind: Option<AttentionKind>,
     ) -> StoreResult<Vec<AttentionItem>>;
     async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>>;
+    async fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>>;
     async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()>;
     async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32>;
     async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>>;
@@ -1156,6 +1169,23 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.get_attention_item(&attention_id)).await
             }
             StoreBackend::Postgres(store) => store.get_attention_item(attention_id).await,
+        }
+    }
+
+    async fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let run_id = run_id.clone();
+                run_sqlite(store, move |store| {
+                    store.find_attention_item_for_run(&run_id, kind)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.find_attention_item_for_run(run_id, kind).await,
         }
     }
 

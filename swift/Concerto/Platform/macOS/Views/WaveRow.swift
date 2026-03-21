@@ -45,7 +45,7 @@ struct WaveRow: View {
                 Spacer()
 
                 HStack(spacing: 6) {
-                    // PR badge (if pending review) or Flow badge
+                    // PR badge
                     if let pr = wave.pendingPR {
                         Button {
                             if let url = pr.url {
@@ -62,16 +62,19 @@ struct WaveRow: View {
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
-                    } else if !wave.displayFlow.isEmpty {
-                        Text(wave.displayFlow)
+                    }
+
+                    // Diff indicator
+                    if let diff = wave.diffIndicator {
+                        Text(diff)
                             .font(Typography.caption(10))
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.15))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .background((wave.diffIsPositive ? Color.statusSuccess : Color.statusError).opacity(0.22))
+                            .foregroundStyle(wave.diffIsPositive ? Color.statusSuccess : Color.statusError)
                             .clipShape(Capsule())
-                            .accessibilityIdentifier("wave-flow")
+                            .accessibilityIdentifier("wave-diff")
                     }
 
                     if wave.effectiveOpenPRCount > 1 {
@@ -90,34 +93,29 @@ struct WaveRow: View {
             .lineLimit(1)
             .accessibilityIdentifier("wave-name-row")
 
-            // Secondary info line
+            // Secondary info line: vision tagline + activity
             HStack(spacing: 4) {
-                Text(wave.areaDisplay)
-                    .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(0.5))
-                    .accessibilityIdentifier("wave-area")
+                if let tagline = wave.visionTagline {
+                    Text(tagline)
+                        .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("wave-vision")
+                }
 
                 // Activity timestamp (italic serif per VISUAL_DESIGN.md)
                 if let activity = wave.lastActivityDescription {
-                    Text("•")
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.3))
+                    if wave.visionTagline != nil {
+                        Text("•")
+                            .font(Typography.caption())
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
                     Text(activity)
                         .font(Typography.caption(11))
                         .italic()
                         .foregroundStyle(.white.opacity(0.4))
                         .accessibilityLabel(activityAccessibilityLabel)
                         .accessibilityIdentifier("wave-activity")
-                }
-
-                if let triggerLabel {
-                    Text("•")
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text(triggerLabel)
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("wave-trigger")
                 }
             }
         }
@@ -186,15 +184,6 @@ struct WaveRow: View {
         isEditingName = false
         isEditingAnyName = false
         isNameFocused = false
-    }
-
-    private var triggerLabel: String? {
-        guard let trigger = wave.trigger else { return nil }
-        switch trigger.signal {
-        case .repo: return "repo"
-        case .wave: return "wave"
-        case .ciFailure: return "ci-fix"
-        }
     }
 
     /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").

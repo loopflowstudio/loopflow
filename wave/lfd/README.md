@@ -2,9 +2,9 @@
 
 ## Vision
 
-`lfd` is not just an HTTP daemon that happens to launch some work. It is the runtime host for loopflow.
+The runtime host for loopflow.
 
-The thing that actually executes flows is still the normal `lf` CLI. `lfd` decides when runs start, supervises their processes, persists their state, and streams execution state to clients. Hosting attachable shells / PTYs is a later capability, not the first requirement.
+`lfd` decides when runs start, supervises their processes, persists their state, and streams execution state to clients. The thing that actually executes flows is still the normal `lf` CLI. Hosting attachable shells / PTYs is a later capability, not the first requirement.
 
 The first clean contract is that `lf` emits structured lifecycle state into a globally agreed-upon runtime store when that store is present. `lfd` is one host around that store. Concerto is one client of it. Automated runs can later start because `lfd` forks normal `lf <flow-or-step>` commands in the correct worktree and executor environment. Interactive shells and PTYs can come after that.
 

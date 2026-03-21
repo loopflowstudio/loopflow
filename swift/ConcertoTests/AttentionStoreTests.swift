@@ -18,7 +18,14 @@ struct AttentionStoreTests {
                 status: .viewed,
                 title: "viewed",
                 summary: "",
-                context: .interactive(InteractiveAttentionContext(step: nil, terminalSessionId: nil, designPath: nil)),
+                context: .interactive(
+                    InteractiveAttentionContext(
+                        step: nil,
+                        terminalSessionId: nil,
+                        designPath: nil,
+                        mutationSummary: nil
+                    )
+                ),
                 surfacedAt: now.addingTimeInterval(-10)
             ),
             AttentionItem(
@@ -85,12 +92,14 @@ struct AttentionStoreTests {
             "step": "code/design",
             "terminal_session_id": "ts-123",
             "design_path": "scratch/my-branch.md",
+            "mutation_summary": "- Rebalance the backlog",
         ]
         let parsed = AttentionItem.context(kind: .interactive, json: context)
         if case .interactive(let ctx) = parsed {
             #expect(ctx.step == "code/design")
             #expect(ctx.terminalSessionId == "ts-123")
             #expect(ctx.designPath == "scratch/my-branch.md")
+            #expect(ctx.mutationSummary == "- Rebalance the backlog")
         } else {
             Issue.record("Expected interactive context, got \(parsed)")
         }

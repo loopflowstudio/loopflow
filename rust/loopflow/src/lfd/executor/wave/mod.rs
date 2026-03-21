@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -23,6 +24,7 @@ use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::engine::worktree::remove_worktree;
+use crate::lfd::attention::resolve_attention_item;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
@@ -36,8 +38,9 @@ use crate::lfd::triggers::{
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    Event, LivePrState, LivePullRequestState, Signal, TerminalSession, TerminalSessionStatus, Wave,
-    WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus, CI_FIX_FLOW,
+    AttentionItem, AttentionKind, AttentionStatus, Event, LivePrState, LivePullRequestState,
+    Signal, TerminalSession, TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot,
+    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
 use super::docker::DockerExecutor;
@@ -509,6 +512,11 @@ impl WaveExecutor {
                         self.create_terminal_session(&wave, &run, &step)
                             .await
                             .map_err(|err| anyhow!("failed to create terminal session: {err}"))?;
+                    let attention_item =
+                        create_interactive_attention_item(&wave, &run, &step, &terminal_session);
+                    self.store.upsert_attention_item(&attention_item).await?;
+                    self.event_hub
+                        .send(Event::attention_created(attention_item));
                     let terminal_session_id = terminal_session.id.clone();
                     self.spawn_terminal_session_watcher(
                         wave.id().clone(),
@@ -1452,6 +1460,19 @@ impl WaveExecutor {
             return Ok(());
         };
 
+        if let Some(item) = self
+            .store
+            .find_attention_item_for_run(&run.id, AttentionKind::Interactive)
+            .await?
+        {
+            if let Some(item) = resolve_attention_item(&self.store, &item.id)
+                .await
+                .map_err(|err| anyhow!("failed to resolve interactive attention item: {err}"))?
+            {
+                self.event_hub.send(Event::attention_resolved(item));
+            }
+        }
+
         if matches!(
             session_status,
             TerminalSessionStatus::Failed | TerminalSessionStatus::Canceled
@@ -1662,6 +1683,140 @@ async fn build_terminal_launch_config(
         },
         agent,
     ))
+}
+
+fn create_interactive_attention_item(
+    wave: &Wave,
+    run: &WaveRun,
+    step: &ConcreteStep,
+    terminal_session: &TerminalSession,
+) -> AttentionItem {
+    AttentionItem {
+        id: LfdId::new(),
+        wave_id: wave.id().clone(),
+        run_id: Some(run.id.clone()),
+        kind: AttentionKind::Interactive,
+        status: AttentionStatus::Surfaced,
+        title: interactive_title(step, wave),
+        summary: interactive_summary(step, run),
+        context: build_interactive_context(step, terminal_session, run),
+        surfaced_at: OffsetDateTime::now_utc(),
+        viewed_at: None,
+        resolved_at: None,
+    }
+}
+
+fn build_interactive_context(
+    step: &ConcreteStep,
+    terminal_session: &TerminalSession,
+    run: &WaveRun,
+) -> Value {
+    let mut context = json!({
+        "step": step.step.name.clone(),
+        "terminal_session_id": terminal_session.id.clone(),
+    });
+
+    match step.step.name.as_str() {
+        "review-design" => {
+            if let Some(design_path) =
+                find_review_design_path(Path::new(&run.worktree), &run.branch)
+            {
+                context["design_path"] = Value::String(design_path);
+            }
+        }
+        "wave/review" => {
+            if let Some(summary) =
+                read_context_file(Path::new(&run.worktree), "scratch/wave-mutate.md")
+            {
+                context["mutation_summary"] = Value::String(summary);
+            }
+        }
+        _ => {}
+    }
+
+    context
+}
+
+fn interactive_title(step: &ConcreteStep, wave: &Wave) -> String {
+    match step.step.name.as_str() {
+        "review-design" => format!("Design review: {}", wave.name()),
+        "wave/review" => format!("Wave review: {}", wave.name()),
+        _ => format!("Interactive: {}", step.step.name),
+    }
+}
+
+fn interactive_summary(step: &ConcreteStep, run: &WaveRun) -> String {
+    let worktree = Path::new(&run.worktree);
+    let source = match step.step.name.as_str() {
+        "review-design" => find_review_design_path(worktree, &run.branch)
+            .and_then(|path| std::fs::read_to_string(worktree.join(path)).ok()),
+        "wave/review" => read_context_file(worktree, "scratch/wave-mutate.md"),
+        _ => None,
+    };
+
+    source
+        .as_deref()
+        .and_then(first_meaningful_line)
+        .unwrap_or_default()
+}
+
+fn find_review_design_path(worktree: &Path, branch: &str) -> Option<String> {
+    let branch_candidate = format!("scratch/{branch}.md");
+    if worktree.join(&branch_candidate).is_file() {
+        return Some(branch_candidate);
+    }
+
+    let scratch_dir = worktree.join("scratch");
+    let mut candidates = std::fs::read_dir(scratch_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "md")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        !name.starts_with('.')
+                            && name != "questions.md"
+                            && name != "wave-mutate.md"
+                            && name != "wave-review.md"
+                            && !name.ends_with("-review.md")
+                    })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    });
+    candidates.reverse();
+
+    candidates.into_iter().next().and_then(|path| {
+        path.strip_prefix(worktree)
+            .ok()
+            .map(|relative| relative.to_string_lossy().to_string())
+    })
+}
+
+fn read_context_file(worktree: &Path, relative_path: &str) -> Option<String> {
+    let text = std::fs::read_to_string(worktree.join(relative_path)).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn first_meaningful_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty() && *line != "---" && !line.starts_with('#') && !line.starts_with("```")
+        })
+        .map(ToString::to_string)
 }
 
 // -----------------------------------------------------------------------------
@@ -2342,6 +2497,276 @@ mod tests {
             .expect("wave lookup should succeed")
             .expect("wave should exist");
         assert_eq!(updated_wave.status, WaveStatus::Failed);
+    }
+
+    #[test]
+    fn build_interactive_context_uses_design_and_mutation_artifacts() {
+        let tmp = tempdir().expect("tempdir");
+        let worktree = tmp.path();
+        std::fs::create_dir_all(worktree.join("scratch")).expect("scratch dir");
+        std::fs::write(
+            worktree.join("scratch/feature-branch.md"),
+            "# Design\n\nUse attention items for interactive steps.\n",
+        )
+        .expect("write design doc");
+        std::fs::write(
+            worktree.join("scratch/wave-mutate.md"),
+            "# Mutation summary\n\n- Rebalance the PM wave.\n",
+        )
+        .expect("write mutate summary");
+
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            snapshot: WaveRunSnapshot {
+                repo: worktree.to_string_lossy().to_string(),
+                flow: "build".to_string(),
+                direction: vec![],
+                area: vec![],
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Waiting,
+            worktree: worktree.to_string_lossy().to_string(),
+            branch: "feature-branch".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+            activation_log_id: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: "stack".to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
+            target_branch: "main".to_string(),
+            repair_of: None,
+            pr: None,
+        };
+        let session = TerminalSession {
+            id: LfdId::new(),
+            wave_id: run.wave_id.clone(),
+            wave_run_id: Some(run.id.clone()),
+            step: "review-design".to_string(),
+            agent: "claude".to_string(),
+            cwd: worktree.to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+
+        let review_step = ConcreteStep {
+            step: Step::named("review-design"),
+            flow_parents: vec![],
+        };
+        let review_context = build_interactive_context(&review_step, &session, &run);
+        assert_eq!(review_context["step"], "review-design");
+        assert_eq!(review_context["design_path"], "scratch/feature-branch.md");
+        assert_eq!(
+            interactive_summary(&review_step, &run),
+            "Use attention items for interactive steps."
+        );
+
+        let wave_review_step = ConcreteStep {
+            step: Step::named("wave/review"),
+            flow_parents: vec![],
+        };
+        let wave_review_context = build_interactive_context(&wave_review_step, &session, &run);
+        assert_eq!(wave_review_context["step"], "wave/review");
+        assert!(wave_review_context["mutation_summary"]
+            .as_str()
+            .expect("mutation summary")
+            .contains("Rebalance the PM wave."));
+        assert_eq!(
+            interactive_summary(&wave_review_step, &run),
+            "- Rebalance the PM wave."
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_interactive_creates_attention_item() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- review-design\n");
+        repo.create_file(
+            "scratch/main.md",
+            "# Design review\n\nSurface interactive checkpoints in the queue.\n",
+        );
+        repo.stage_all();
+        repo.commit("add interactive flow");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "test-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should pause");
+
+        let run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(run.status, WaveRunStatus::Waiting);
+
+        let items = store
+            .list_attention_items(None, Some(AttentionKind::Interactive))
+            .await
+            .expect("attention items should load");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.wave_id, wave_id);
+        assert_eq!(item.run_id.as_ref(), Some(&run_id));
+        assert_eq!(item.title, "Design review: fork-wave");
+        assert_eq!(
+            item.summary,
+            "Surface interactive checkpoints in the queue."
+        );
+        assert_eq!(item.context["step"], "review-design");
+        assert_eq!(item.context["design_path"], "scratch/main.md");
+        assert!(item.context["terminal_session_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn completed_terminal_session_resolves_interactive_attention() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- review-design\n");
+        repo.create_file(
+            "scratch/main.md",
+            "# Design review\n\nSurface interactive checkpoints in the queue.\n",
+        );
+        repo.stage_all();
+        repo.commit("add interactive flow");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "test-flow").await;
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Waiting;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run update should succeed");
+
+        let mut wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        wave.status = WaveStatus::Waiting;
+        store
+            .update_wave(&wave)
+            .await
+            .expect("wave update should succeed");
+
+        let session_id = LfdId::new();
+        let session = TerminalSession {
+            id: session_id.clone(),
+            wave_id: wave_id.clone(),
+            wave_run_id: Some(run_id.clone()),
+            step: "review-design".to_string(),
+            agent: "claude".to_string(),
+            cwd: repo.path().to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Succeeded,
+            attached_at: None,
+            started_at: None,
+            completed_at: Some(OffsetDateTime::now_utc()),
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+        store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let attention_item = AttentionItem {
+            id: LfdId::new(),
+            wave_id: wave_id.clone(),
+            run_id: Some(run_id.clone()),
+            kind: AttentionKind::Interactive,
+            status: AttentionStatus::Surfaced,
+            title: "Design review: fork-wave".to_string(),
+            summary: "Surface interactive checkpoints in the queue.".to_string(),
+            context: json!({
+                "step": "review-design",
+                "terminal_session_id": session_id,
+                "design_path": "scratch/main.md",
+            }),
+            surfaced_at: OffsetDateTime::now_utc(),
+            viewed_at: None,
+            resolved_at: None,
+        };
+        store
+            .upsert_attention_item(&attention_item)
+            .await
+            .expect("attention item should be created");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .wait_for_terminal_session_and_resume(
+                wave_id.clone(),
+                run_id.clone(),
+                session_id.clone(),
+            )
+            .await
+            .expect("resume should succeed");
+
+        let resolved = store
+            .get_attention_item(&attention_item.id)
+            .await
+            .expect("attention lookup should succeed")
+            .expect("attention item should exist");
+        assert_eq!(resolved.status, AttentionStatus::Resolved);
+        assert!(resolved.resolved_at.is_some());
     }
 
     #[tokio::test]

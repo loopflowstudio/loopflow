@@ -1,6 +1,8 @@
 # Redesign
 
-The agent layer is commoditizing. Claude Code, Codex, and OpenCode are all good enough — and getting better faster than we can compete. Loopflow's future is the layer above: orchestrating agents, not being one.
+Orchestrating agents, not being one.
+
+The agent layer is commoditizing. Claude Code, Codex, and OpenCode are all good enough — and getting better faster than we can compete. Loopflow's future is the layer above.
 
 Three things differentiate loopflow:
 

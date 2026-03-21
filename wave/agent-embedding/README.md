@@ -2,7 +2,9 @@
 
 ## Vision
 
-Concerto becomes the conductor, not the chat client. The repo window opens on an attention queue that shows what needs human judgment across waves, while coding sessions themselves stay in a real terminal. Concerto's value is everything around the terminal: attention, portfolio awareness, calibration, worktree and PR lifecycle, and native compositions of those surfaces.
+Concerto as conductor, not chat client.
+
+The repo window opens on an attention queue that shows what needs human judgment across waves, while coding sessions stay in a real terminal. Concerto's value is everything around the terminal: attention, portfolio awareness, calibration, worktree and PR lifecycle, and native compositions of those surfaces.
 
 Not transcription, not a chat-shell wrapper. The agent runs in a terminal. Concerto makes parallel agent work legible and steerable.
 

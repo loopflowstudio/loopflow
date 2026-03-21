@@ -47,7 +47,7 @@ struct ContentView: View {
         } message: {
             Text(repoState.errorMessage ?? "An unknown error occurred")
         }
-        .navigationTitle(repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
+        .navigationTitle(repoState.selectedWave?.displayName ?? repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
         .background(palette.background)
         .background(WindowAccessor { window in
             let number = window?.windowNumber

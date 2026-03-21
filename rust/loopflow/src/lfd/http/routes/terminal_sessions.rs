@@ -15,7 +15,7 @@ use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE};
+use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -93,7 +93,7 @@ pub async fn attach_terminal_session_handler(
 ) -> ApiResult<TerminalConnectionInfoDto> {
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session = update_terminal_session(&state, &session_id, |session| {
-        if session.source != TMUX_TERMINAL_SOURCE {
+        if !session.is_tmux_backed() {
             return Err(api_error(
                 StatusCode::PRECONDITION_FAILED,
                 "terminal session is not tmux-backed",
@@ -141,7 +141,7 @@ pub async fn cancel_terminal_session_handler(
     let session_id = parse_lfd_id(&session_id, "invalid terminal session id")?;
     let session =
         update_terminal_session(&state, &session_id, |session| Ok(session.cancel())).await?;
-    if session.source == TMUX_TERMINAL_SOURCE {
+    if session.is_tmux_backed() {
         stop_tmux_terminal_session(&session).await;
     }
     Ok(Json(terminal_session_dto(session)))
@@ -255,7 +255,7 @@ mod tests {
     use crate::lfd::http::routes::test_helpers::test_http_state;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        tmux_session_name, TerminalSessionStatus, Wave, WaveMode, WaveStatus,
+        tmux_session_name, TerminalSessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
     use axum::extract::{Path, State};
     use axum::http::{header::HOST, HeaderValue};
@@ -373,5 +373,25 @@ mod tests {
             error.1 .0.error.message,
             "terminal session is not tmux-backed"
         );
+    }
+
+    #[test]
+    fn connection_host_normalizes_loopback_variants() {
+        for raw in ["127.0.0.1:2486", "[::1]:2486", "localhost:2486"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                HOST,
+                HeaderValue::from_str(raw).expect("host header should be valid"),
+            );
+            assert_eq!(connection_host(&headers), "localhost");
+        }
+    }
+
+    #[test]
+    fn connection_host_preserves_remote_hostname_without_port() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("lfd.example.com:2486"));
+
+        assert_eq!(connection_host(&headers), "lfd.example.com");
     }
 }

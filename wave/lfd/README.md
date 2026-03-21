@@ -141,11 +141,12 @@ Most of the current HTTP surface disappears. If the user runs `lf` commands in a
 - No `POST /waves/{id}/land` — they ran `lf op land`
 - No `POST /waves/{id}/next` — they ran `lf op next`
 - No `PATCH /waves/{id}` — they edited the yaml
-- No `POST /terminal-sessions/*` — Concerto manages tmux locally
+- No daemon-proxied terminal byte routes — Concerto attaches to tmux locally or over SSH from `lfd` connection metadata
 
 What stays:
 - **WebSocket event stream** — the primary interface. `connected` event carries full state snapshot (waves, attention, terminal sessions, worktrees, runs). Every mutation emits an event. Concerto never needs to GET.
 - **Auth flows** — `POST /auth/{provider}` stays because OAuth needs a server
+- **Terminal session lifecycle + attach metadata** — `lfd` still creates, tracks, and tears down tmux-backed sessions, then returns `session_name` / `host` / `cwd` / `status` so clients can attach directly
 - **Content pulls** — diff content, log replay, usage analytics. State is pushed, content is pulled on demand.
 
 ### Boundaries

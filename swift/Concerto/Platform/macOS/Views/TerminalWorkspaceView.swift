@@ -127,7 +127,7 @@ private struct SessionTerminalSurface: View {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
-                    env: command.env,
+                    env: [:],
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
@@ -164,44 +164,22 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
-    let env: [String: String]
-
-    init(
-        workingDirectory: String,
-        argv: [String],
-        env: [String: String]
-    ) {
-        self.workingDirectory = workingDirectory
-        self.argv = argv
-        self.env = env
-    }
 
     init(_ connection: TerminalConnectionInfo) {
         if connection.usesLocalTmux {
-            self.init(
-                workingDirectory: connection.cwd,
-                argv: ["tmux", "attach-session", "-t", connection.sessionName],
-                env: [:]
-            )
+            self.workingDirectory = connection.cwd
+            self.argv = ["tmux", "attach-session", "-t", connection.sessionName]
             return
         }
 
-        self.init(
-            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
-            argv: [
-                "ssh",
-                "-t",
-                connection.host,
-                "tmux attach-session -t \(shellEscape(connection.sessionName))",
-            ],
-            env: [:]
-        )
+        self.workingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+        self.argv = [
+            "ssh",
+            "-t",
+            connection.host,
+            "tmux attach-session -t \(shellEscape(connection.sessionName))",
+        ]
     }
-}
-
-private func shellEscape(_ value: String) -> String {
-    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
 }
 
 private struct TerminalContextSidebar: View {

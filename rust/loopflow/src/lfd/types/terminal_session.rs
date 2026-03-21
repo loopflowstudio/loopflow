@@ -12,11 +12,7 @@ pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
 /// Tmux session names cannot contain dots or colons, so those are replaced
 /// with hyphens.
 pub fn tmux_session_name(branch: &str) -> String {
-    let sanitized: String = branch
-        .chars()
-        .map(|c| if c == '.' || c == ':' { '-' } else { c })
-        .collect();
-    format!("lf-{sanitized}")
+    format!("lf-{}", branch.replace(['.', ':'], "-"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +106,10 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
+    pub fn is_tmux_backed(&self) -> bool {
+        self.source == TMUX_TERMINAL_SOURCE
+    }
+
     pub fn attach(&mut self) -> bool {
         if self.status.is_terminal() {
             return false;

@@ -370,8 +370,8 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
 
     // On main — stash if dirty, reset, then pop.
     let status = run_git(repo, &["status", "--porcelain", "-uno"])?;
-    let dirty = status.status.success()
-        && !String::from_utf8_lossy(&status.stdout).trim().is_empty();
+    let dirty =
+        status.status.success() && !String::from_utf8_lossy(&status.stdout).trim().is_empty();
 
     if dirty {
         let _ = run_git(repo, &["stash", "push", "-m", "sync_main: auto-stash"]);

@@ -9,8 +9,8 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, TerminalSession, Trigger, WaveRun, WaveRunStatus,
+    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState,
+    TerminalSession, Trigger, WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]

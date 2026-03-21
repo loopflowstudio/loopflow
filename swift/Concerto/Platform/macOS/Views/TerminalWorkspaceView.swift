@@ -123,7 +123,7 @@ private struct SessionTerminalSurface: View {
 
     var body: some View {
         Group {
-            if let command = connectionInfo.map(buildTerminalAttachCommand) {
+            if let command = connectionInfo.map({ TerminalAttachCommand($0) }) {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
@@ -165,43 +165,41 @@ struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
     let env: [String: String]
-}
 
-func buildTerminalAttachCommand(_ connection: TerminalConnectionInfo) -> TerminalAttachCommand {
-    if terminalAttachUsesLocalTmux(host: connection.host) {
-        return TerminalAttachCommand(
-            workingDirectory: connection.cwd,
-            argv: ["tmux", "attach-session", "-t", connection.sessionName],
+    init(
+        workingDirectory: String,
+        argv: [String],
+        env: [String: String]
+    ) {
+        self.workingDirectory = workingDirectory
+        self.argv = argv
+        self.env = env
+    }
+
+    init(_ connection: TerminalConnectionInfo) {
+        if connection.usesLocalTmux {
+            self.init(
+                workingDirectory: connection.cwd,
+                argv: ["tmux", "attach-session", "-t", connection.sessionName],
+                env: [:]
+            )
+            return
+        }
+
+        self.init(
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            argv: [
+                "ssh",
+                "-t",
+                connection.host,
+                "tmux attach-session -t \(shellEscape(connection.sessionName))",
+            ],
             env: [:]
         )
     }
-
-    return TerminalAttachCommand(
-        workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
-        argv: [
-            "ssh",
-            "-t",
-            connection.host,
-            "tmux attach-session -t \(terminalAttachShellEscape(connection.sessionName))",
-        ],
-        env: [:]
-    )
 }
 
-func terminalAttachUsesLocalTmux(host: String) -> Bool {
-    let normalized = host
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        .lowercased()
-    return switch normalized {
-    case "localhost", "127.0.0.1", "::1":
-        true
-    default:
-        false
-    }
-}
-
-private func terminalAttachShellEscape(_ value: String) -> String {
+private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }

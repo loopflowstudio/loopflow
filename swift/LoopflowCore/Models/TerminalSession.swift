@@ -84,4 +84,17 @@ public struct TerminalConnectionInfo: Sendable, Equatable {
         self.cwd = cwd
         self.status = status
     }
+
+    public var usesLocalTmux: Bool {
+        let normalized = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .lowercased()
+        return switch normalized {
+        case "localhost", "127.0.0.1", "::1":
+            true
+        default:
+            false
+        }
+    }
 }

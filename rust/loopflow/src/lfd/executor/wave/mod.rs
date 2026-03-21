@@ -750,16 +750,58 @@ impl WaveExecutor {
         .and_then(|text| text.trim().parse::<i32>().ok())
         .unwrap_or(1);
 
-        if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
-            if stored.complete(exit_code) {
-                self.store.update_terminal_session(&stored).await?;
-                self.event_hub
-                    .send(Event::terminal_session_updated(stored.clone()));
+        self.advance_run_step(&mut run, &plan, wave.id()).await?;
+        self.set_wave_status(wave.id(), WaveStatus::Running).await;
+        self.resume_run_execution(run).await?;
+        Ok(())
+    }
+
+    async fn wait_for_terminal_session_status(
+        &self,
+        session_id: &LfdId,
+    ) -> Result<TerminalSessionStatus> {
+        loop {
+            let session = self
+                .store
+                .get_terminal_session(session_id)
+                .await
+                .map_err(|err| anyhow!("failed to load terminal session {session_id}: {err}"))?
+                .ok_or_else(|| anyhow!("terminal session {session_id} not found"))?;
+            if session.status.is_terminal() {
+                return Ok(session.status);
             }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    async fn resume_run_execution(&self, run: WaveRun) -> Result<()> {
+        // Retry for up to 60s (120 × 500ms) waiting for a scheduler slot.
+        for _ in 0..120 {
+            if let Some(current) = self.store.get_wave_run(&run.id).await? {
+                if current.status != WaveRunStatus::Running {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+
+            if let Ok(slot_guard) = self.scheduler.acquire_guard(run.id.as_str()).await {
+                spawn_run_task_with_slot(
+                    self.store.clone(),
+                    self.clone(),
+                    self.event_hub.clone(),
+                    run,
+                    slot_guard,
+                );
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
-        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
-        Ok(exit_code)
+        Err(anyhow!(
+            "unable to resume run {}: no scheduler slots available",
+            run.id
+        ))
     }
 
     #[cfg(test)]
@@ -862,6 +904,272 @@ impl WaveExecutor {
             run.id
         ))
     }
+
+    async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
+        let worktree = run.worktree.clone();
+        debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
+        let agent_override =
+            wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name);
+        let (launch, process) = build_step_prompt(
+            &worktree,
+            step,
+            &run.snapshot.direction,
+            Some(wave.name()),
+            Some((&self.store, wave.id())),
+            agent_override,
+            None,
+        )
+        .await?;
+        let capabilities = build_agent_capabilities(&worktree);
+        let agent = launch.agent.clone().unwrap_or_else(|| "claude".to_string());
+
+        info!(run_id = %run.id, step = %step.step.name, agent = %agent, "launching agent");
+
+        let outcome = self
+            .launch_agent(AgentLaunchRequest {
+                wave_id: run.wave_id.clone(),
+                wave_run_id: run.id.clone(),
+                branch: Some(run.branch.clone()),
+                repo: run.snapshot.repo.clone(),
+                worktree,
+                step: step.clone(),
+                agent: agent.clone(),
+                cmd: build_agent_command(&launch, &process, &capabilities),
+                output_prefix: None,
+            })
+            .await;
+
+        let outcome = outcome?;
+
+        debug!(
+            run_id = %run.id,
+            step = %step.step.name,
+            agent_id = %outcome.agent_id,
+            exit_code = outcome.exit_code,
+            "step agent finished"
+        );
+
+        Ok(outcome.exit_code)
+    }
+}
+
+fn wave_agent_override(repo: &Path, wave_name: &str, step_name: &str) -> Option<String> {
+    let wave_config = read_wave_config(repo, wave_name)?;
+    wave_config
+        .step_agents
+        .as_ref()
+        .and_then(|step_agents| step_agents.get(step_name).cloned())
+        .or(wave_config.agent)
+}
+
+async fn build_terminal_launch_config(
+    wave: &Wave,
+    run: &WaveRun,
+    step: &ConcreteStep,
+) -> Result<(AgentConfig, ProcessConfig, String)> {
+    let repo_root = Path::new(&run.worktree);
+    let repo_config = load_config_or_default(Some(repo_root));
+    let summary = None;
+    let agent = wave_agent_override(Path::new(wave.repo()), wave.name(), &step.step.name)
+        .or_else(|| step.step.agent.clone())
+        .or_else(|| repo_config.agent.clone())
+        .or_else(|| step.step.default_agent.clone())
+        .unwrap_or_else(|| "claude:opus".to_string());
+
+    let prepared = prepare_launch_prompt(
+        &repo_config,
+        LaunchPromptInput {
+            repo_root: repo_root.to_path_buf(),
+            step: Some(step.step.name.clone()),
+            resolved_step: None,
+            surface: Surface::ConcertoMac,
+            directions: run.snapshot.direction.clone(),
+            area: None,
+            wave: Some(wave.name().clone()),
+            message: None,
+            agent: Some(agent.clone()),
+            cwd: None,
+            max_turns: None,
+            yolo_mode: false,
+            include_config_directions: false,
+            include_config_area: true,
+            source_overrides: Default::default(),
+            summary,
+            client_context: ClientContext::default(),
+            related_repos: Vec::new(),
+        },
+    )?;
+
+    let _ = write_prompt_log(repo_root, &prepared.prompt, &step.step.name, None);
+    let mut launch = prepared.config;
+    let cwd = launch
+        .cwd
+        .clone()
+        .unwrap_or_else(|| repo_root.to_path_buf());
+    let context_file = write_prompt_log(
+        &cwd,
+        &launch.system_prompt,
+        &format!("{}.context", step.step.name),
+        None,
+    )
+    .ok();
+    launch.cwd = Some(cwd);
+    launch.skip_permissions = repo_config.yolo;
+
+    Ok((
+        launch,
+        ProcessConfig {
+            auto: false,
+            stream: false,
+            context_file,
+            ..Default::default()
+        },
+        agent,
+    ))
+}
+
+fn create_interactive_attention_item(
+    wave: &Wave,
+    run: &WaveRun,
+    step: &ConcreteStep,
+    terminal_session: &TerminalSession,
+) -> AttentionItem {
+    AttentionItem {
+        id: LfdId::new(),
+        wave_id: wave.id().clone(),
+        run_id: Some(run.id.clone()),
+        kind: AttentionKind::Interactive,
+        status: AttentionStatus::Surfaced,
+        title: interactive_title(step, wave),
+        summary: interactive_summary(step, run),
+        context: build_interactive_context(step, terminal_session, run),
+        surfaced_at: OffsetDateTime::now_utc(),
+        viewed_at: None,
+        resolved_at: None,
+    }
+}
+
+fn build_interactive_context(
+    step: &ConcreteStep,
+    terminal_session: &TerminalSession,
+    run: &WaveRun,
+) -> Value {
+    let mut context = json!({
+        "step": step.step.name.clone(),
+        "terminal_session_id": terminal_session.id.clone(),
+    });
+
+    match step.step.name.as_str() {
+        "review-design" => {
+            if let Some(design_path) =
+                find_review_design_path(Path::new(&run.worktree), &run.branch)
+            {
+                context["design_path"] = Value::String(design_path);
+            }
+        }
+        "wave/review" => {
+            if let Some(summary) =
+                read_context_file(Path::new(&run.worktree), "scratch/wave-mutate.md")
+            {
+                context["mutation_summary"] = Value::String(summary);
+            }
+        }
+        _ => {}
+    }
+
+    context
+}
+
+fn interactive_title(step: &ConcreteStep, wave: &Wave) -> String {
+    match step.step.name.as_str() {
+        "review-design" => format!("Design review: {}", wave.name()),
+        "wave/review" => format!("Wave review: {}", wave.name()),
+        _ => format!("Interactive: {}", step.step.name),
+    }
+}
+
+fn interactive_summary(step: &ConcreteStep, run: &WaveRun) -> String {
+    let worktree = Path::new(&run.worktree);
+    let source = match step.step.name.as_str() {
+        "review-design" => find_review_design_path(worktree, &run.branch)
+            .and_then(|path| std::fs::read_to_string(worktree.join(path)).ok()),
+        "wave/review" => read_context_file(worktree, "scratch/wave-mutate.md"),
+        _ => None,
+    };
+
+    source
+        .as_deref()
+        .and_then(first_meaningful_line)
+        .unwrap_or_default()
+}
+
+fn find_review_design_path(worktree: &Path, branch: &str) -> Option<String> {
+    let branch_candidate = format!("scratch/{branch}.md");
+    if worktree.join(&branch_candidate).is_file() {
+        return Some(branch_candidate);
+    }
+
+    let scratch_dir = worktree.join("scratch");
+    let mut candidates = std::fs::read_dir(scratch_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "md")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        !name.starts_with('.')
+                            && name != "questions.md"
+                            && name != "wave-mutate.md"
+                            && name != "wave-review.md"
+                            && !name.ends_with("-review.md")
+                    })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    });
+    candidates.reverse();
+
+    candidates.into_iter().next().and_then(|path| {
+        path.strip_prefix(worktree)
+            .ok()
+            .map(|relative| relative.to_string_lossy().to_string())
+    })
+}
+
+fn read_context_file(worktree: &Path, relative_path: &str) -> Option<String> {
+    let text = std::fs::read_to_string(worktree.join(relative_path)).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn first_meaningful_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty() && *line != "---" && !line.starts_with('#') && !line.starts_with("```")
+        })
+        .map(ToString::to_string)
+}
+
+// -----------------------------------------------------------------------------
+// Or-routing helpers
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct OrphanedForkCleanup {
+    cleaned_runs: u32,
+    removed_worktrees: u32,
 }
 
 #[cfg(test)]
@@ -1646,9 +1954,582 @@ mod tests {
         );
     }
 
-    // Interactive checkpoint tests removed during rebase — per-step execution
-    // was replaced with flow-level tmux sessions on main. Re-add when
-    // interactive checkpoints are re-integrated.
+    #[tokio::test]
+    async fn wait_interactive_creates_attention_item() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- review-design\n");
+        repo.create_file(
+            "scratch/main.md",
+            "# Design review\n\nSurface interactive checkpoints in the queue.\n",
+        );
+        repo.stage_all();
+        repo.commit("add interactive flow");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "test-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should pause");
+
+        let run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(run.status, WaveRunStatus::Waiting);
+
+        let items = store
+            .list_attention_items(None, Some(AttentionKind::Interactive))
+            .await
+            .expect("attention items should load");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.wave_id, wave_id);
+        assert_eq!(item.run_id.as_ref(), Some(&run_id));
+        assert_eq!(item.title, "Design review: fork-wave");
+        assert_eq!(
+            item.summary,
+            "Surface interactive checkpoints in the queue."
+        );
+        assert_eq!(item.context["step"], "review-design");
+        assert_eq!(item.context["design_path"], "scratch/main.md");
+        assert!(item.context["terminal_session_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn completed_terminal_session_resolves_interactive_attention() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- review-design\n");
+        repo.create_file(
+            "scratch/main.md",
+            "# Design review\n\nSurface interactive checkpoints in the queue.\n",
+        );
+        repo.stage_all();
+        repo.commit("add interactive flow");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "test-flow").await;
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Waiting;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run update should succeed");
+
+        let mut wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        wave.status = WaveStatus::Waiting;
+        store
+            .update_wave(&wave)
+            .await
+            .expect("wave update should succeed");
+
+        let session_id = LfdId::new();
+        let session = TerminalSession {
+            id: session_id.clone(),
+            wave_id: wave_id.clone(),
+            wave_run_id: Some(run_id.clone()),
+            step: "review-design".to_string(),
+            agent: "claude".to_string(),
+            cwd: repo.path().to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Succeeded,
+            attached_at: None,
+            started_at: None,
+            completed_at: Some(OffsetDateTime::now_utc()),
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+            tmux_name: "lf-test-resolve".to_string(),
+        };
+        store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let attention_item = AttentionItem {
+            id: LfdId::new(),
+            wave_id: wave_id.clone(),
+            run_id: Some(run_id.clone()),
+            kind: AttentionKind::Interactive,
+            status: AttentionStatus::Surfaced,
+            title: "Design review: fork-wave".to_string(),
+            summary: "Surface interactive checkpoints in the queue.".to_string(),
+            context: json!({
+                "step": "review-design",
+                "terminal_session_id": session_id,
+                "design_path": "scratch/main.md",
+            }),
+            surfaced_at: OffsetDateTime::now_utc(),
+            viewed_at: None,
+            resolved_at: None,
+        };
+        store
+            .upsert_attention_item(&attention_item)
+            .await
+            .expect("attention item should be created");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .wait_for_terminal_session_and_resume(
+                wave_id.clone(),
+                run_id.clone(),
+                session_id.clone(),
+            )
+            .await
+            .expect("resume should succeed");
+
+        let resolved = store
+            .get_attention_item(&attention_item.id)
+            .await
+            .expect("attention lookup should succeed")
+            .expect("attention item should exist");
+        assert_eq!(resolved.status, AttentionStatus::Resolved);
+        assert!(resolved.resolved_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn terminal_launch_config_uses_concerto_surface() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (wave_id, run_id) = create_wave_and_run(&store, repo, "missing-flow").await;
+        let wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        let run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        let step = ConcreteStep {
+            step: crate::engine::flow::Step::named("design"),
+            flow_parents: Vec::new(),
+        };
+
+        let (launch, process, _) = build_terminal_launch_config(&wave, &run, &step)
+            .await
+            .expect("launch config should build");
+
+        assert_eq!(launch.cwd.expect("cwd"), PathBuf::from(&run.worktree));
+        assert!(!process.auto);
+        assert!(!process.stream);
+        assert!(process.context_file.is_some());
+    }
+
+    #[tokio::test]
+    async fn execute_runs_fork_with_docker_executor() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- and:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor {
+            store: store.clone(),
+            scheduler,
+            output,
+            runner: Arc::new(MockRunner),
+            event_hub,
+            executor_type: ExecutorType::Docker,
+            github_config: GitHubConfig::default(),
+        };
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Completed);
+        assert!(updated_run.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_fork_with_no_branches_fails_cleanly() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- and:
+    branches: []
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler, output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(updated_run.error.as_deref(), Some("fork has no branches"));
+    }
+
+    #[tokio::test]
+    async fn execute_fork_success_cleans_worktrees_and_records() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- and:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler.clone(), output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Completed);
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-0")).exists());
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-1")).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .await
+                .expect("fork runs should load")
+                .len(),
+            0
+        );
+        assert_eq!(scheduler.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_fork_failure_cleans_worktrees_and_releases_slots() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- and:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner {
+            fail_suffix: Some("-fork-1".to_string()),
+            fail_code: 42,
+            ..Default::default()
+        });
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler.clone(), output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(
+            updated_run.error.as_deref(),
+            Some("1 fork branch(es) failed")
+        );
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-0")).exists());
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-1")).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .await
+                .expect("fork runs should load")
+                .len(),
+            0
+        );
+        assert_eq!(scheduler.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_fork_merges_directions_and_prefixes_branch_logs() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- and:
+    branches:
+      - step:
+          name: step-a
+          directions: [branch]
+"#,
+        );
+        repo.create_file(".lf/directions/base.md", "BASE_DIRECTION_MARKER");
+        repo.create_file(".lf/directions/branch.md", "BRANCH_DIRECTION_MARKER");
+        repo.stage_all();
+        repo.commit("add fork direction fixtures");
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run should load")
+            .expect("run should exist");
+        run.snapshot.direction = vec!["base".to_string()];
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run should update");
+        let mut wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave should load")
+            .expect("wave should exist");
+        wave.direction = vec!["base".to_string()];
+        store.update_wave(&wave).await.expect("wave should update");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let runner_ref = runner.clone();
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler, output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let calls = runner_ref.calls.lock().expect("runner mutex");
+        assert_eq!(calls.len(), 2);
+
+        let fork_call = calls
+            .iter()
+            .find(|call| call.output_prefix.as_deref() == Some("[fork-0] "))
+            .expect("fork call should be recorded");
+        assert!(fork_call.cwd.ends_with("-fork-0"));
+        assert_eq!(fork_call.branch, Some(format!("{run_id}-fork-0")));
+        assert!(fork_call.prompt_logs.contains("BASE_DIRECTION_MARKER"));
+        assert!(fork_call.prompt_logs.contains("BRANCH_DIRECTION_MARKER"));
+
+        let synth_call = calls
+            .iter()
+            .find(|call| call.output_prefix.is_none() && !call.cwd.ends_with("-fork-0"))
+            .expect("synthesize call should be recorded");
+        assert_eq!(synth_call.cwd, repo.path().to_string_lossy());
+        assert_eq!(synth_call.branch.as_deref(), Some("main"));
+    }
+
+    #[tokio::test]
+    async fn recover_startup_cleans_orphaned_fork_worktree_records() {
+        let repo = TestRepo::new();
+        let db_dir = tempdir().expect("tempdir");
+        let db_path = db_dir.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run should load")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Failed;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run should update");
+
+        let fork_worktree = format!("{}-fork-0", repo.path().to_string_lossy());
+        create_worktree(
+            repo.path(),
+            Path::new(&fork_worktree),
+            "orphan-fork-recovery-test",
+        )
+        .expect("fork worktree should be created");
+
+        store
+            .upsert_fork_run(&crate::lfd::store::ForkRun {
+                id: LfdId::new(),
+                wave_run_id: run_id.clone(),
+                step_index: 0,
+                branch_index: 0,
+                status: ForkRunStatus::Running,
+                worktree: fork_worktree.clone(),
+            })
+            .await
+            .expect("fork run should be stored");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        let recovery = executor
+            .recover_startup()
+            .await
+            .expect("startup recovery should succeed");
+        assert_eq!(recovery.orphaned_fork_runs_cleaned, 1);
+        assert_eq!(recovery.orphaned_fork_worktrees_removed, 1);
+        assert!(!Path::new(&fork_worktree).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .await
+                .expect("fork runs should load")
+                .len(),
+            0
+        );
+    }
 
     #[test]
     fn classify_repair_flow_returns_debug_for_ci_fix() {

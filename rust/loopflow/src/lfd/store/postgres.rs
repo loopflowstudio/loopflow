@@ -1411,6 +1411,52 @@ impl PostgresStore {
         .await
     }
 
+    pub async fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>> {
+        let run_id = run_id.clone();
+        let kind = kind.as_str().to_string();
+        let resolved = AttentionStatus::Resolved.as_str().to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
+                     FROM attention_items
+                     WHERE run_id = $1 AND kind = $2 AND status != $3
+                     ORDER BY surfaced_at DESC
+                     LIMIT 1",
+                    &[&run_id, &kind, &resolved],
+                )
+                .await?;
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let kind_raw: String = row.try_get(3)?;
+            let status_raw: String = row.try_get(4)?;
+            Ok(Some(AttentionItem {
+                id: LfdId::from_raw(row.try_get::<_, String>(0)?),
+                wave_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
+                run_id: row.try_get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+                kind: kind_raw.parse::<AttentionKind>().map_err(StoreError::InvalidData)?,
+                status: status_raw.parse::<AttentionStatus>().map_err(StoreError::InvalidData)?,
+                title: row.try_get(5)?,
+                summary: row.try_get(6)?,
+                context: serde_json::from_str(&row.try_get::<_, String>(7)?)
+                    .unwrap_or(serde_json::Value::Object(Default::default())),
+                surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(8)?),
+                viewed_at: row
+                    .try_get::<_, Option<i64>>(9)?
+                    .map(crate::lfd::store::rows::unix_to_datetime),
+                resolved_at: row
+                    .try_get::<_, Option<i64>>(10)?
+                    .map(crate::lfd::store::rows::unix_to_datetime),
+            }))
+        })
+        .await
+    }
+
     pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
         let item = item.clone();
         self.with_client(|client| async move {

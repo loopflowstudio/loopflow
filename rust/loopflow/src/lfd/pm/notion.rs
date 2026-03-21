@@ -269,14 +269,6 @@ impl NotionClient {
         })
     }
 
-    fn page_priority_property(&self, priority: PriorityBucket) -> Value {
-        json!({
-            self.priority_property_name(): {
-                "select": { "name": priority.semantic_label() }
-            }
-        })
-    }
-
     fn page_status_property(&self, done: bool) -> Value {
         let name = if done { self.done_value() } else { "Todo" };
         json!({
@@ -289,7 +281,6 @@ impl NotionClient {
     fn item_properties(&self, item: &PmItemCreate) -> Map<String, Value> {
         let mut properties = Map::new();
         properties.extend(value_object(self.page_title_property(&item.name)));
-        properties.extend(value_object(self.page_priority_property(item.priority)));
         properties.extend(value_object(self.page_status_property(false)));
         properties
     }
@@ -305,11 +296,8 @@ impl NotionClient {
         })
         .await
     }
-}
 
-#[async_trait]
-impl PmProvider for NotionClient {
-    async fn create_team(&self, name: &str) -> PmResult<String> {
+    pub async fn create_team(&self, name: &str) -> PmResult<String> {
         let response = self
             .send_json(|| {
                 self.request(Method::POST, "/pages").json(&json!({
@@ -323,7 +311,7 @@ impl PmProvider for NotionClient {
         value_string(&response, "id")
     }
 
-    async fn find_team(&self, name: &str) -> PmResult<Option<String>> {
+    pub async fn find_team(&self, name: &str) -> PmResult<Option<String>> {
         let target = name.trim();
         for page in self.search(target, "page").await? {
             let title = page_title(&page).unwrap_or_default();
@@ -334,13 +322,7 @@ impl PmProvider for NotionClient {
         Ok(None)
     }
 
-    async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
-        let team_id = self.resolve_team_for_project_bootstrap().await?;
-        self.create_project_in_team(&team_id, name, description)
-            .await
-    }
-
-    async fn create_project_in_team(
+    pub async fn create_project_in_team(
         &self,
         team_id: &str,
         name: &str,
@@ -378,6 +360,15 @@ impl PmProvider for NotionClient {
             .await?;
         value_string(&response, "id")
     }
+}
+
+#[async_trait]
+impl PmProvider for NotionClient {
+    async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
+        let team_id = self.resolve_team_for_project_bootstrap().await?;
+        self.create_project_in_team(&team_id, name, description)
+            .await
+    }
 
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
         let mut projects = Vec::new();
@@ -404,12 +395,13 @@ impl PmProvider for NotionClient {
                 id,
                 name: page_item_name(&page, self.title_property_name())?,
                 description,
-                priority: page_item_priority(&page, self.priority_property_name()),
+                rank: 0,
                 completed: page_item_completed(
                     &page,
                     self.status_property_name(),
                     self.done_value(),
                 ),
+                assignee: None,
             });
         }
         Ok(items)
@@ -431,16 +423,9 @@ impl PmProvider for NotionClient {
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        if update.is_noop() {
-            return Ok(());
-        }
-
         let mut properties = Map::new();
         if let Some(name) = &update.name {
             properties.extend(value_object(self.page_title_property(name)));
-        }
-        if let Some(priority) = update.priority {
-            properties.extend(value_object(self.page_priority_property(priority)));
         }
 
         if !properties.is_empty() {
@@ -495,6 +480,10 @@ impl PmProvider for NotionClient {
                 }))
             })
             .await?;
+        Ok(())
+    }
+
+    async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
         Ok(())
     }
 }
@@ -587,16 +576,6 @@ fn page_item_name(page: &Value, title_property: &str) -> PmResult<String> {
         )));
     }
     Ok(title)
-}
-
-fn page_item_priority(page: &Value, priority_property: &str) -> PriorityBucket {
-    let Some(property) = item_property(page, priority_property) else {
-        return PriorityBucket::Low;
-    };
-    property_select_name(property)
-        .as_deref()
-        .and_then(PriorityBucket::from_semantic_label)
-        .unwrap_or(PriorityBucket::Low)
 }
 
 fn page_item_completed(page: &Value, status_property: &str, done_value: &str) -> bool {
@@ -851,7 +830,6 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "page-1");
         assert_eq!(items[0].name, "Build it");
-        assert_eq!(items[0].priority, PriorityBucket::High);
         assert!(items[0].completed);
         assert_eq!(items[0].description, "First paragraph");
 
@@ -879,7 +857,7 @@ mod tests {
                 &PmItemCreate {
                     name: "Build it".to_string(),
                     description: "# Heading\n\nBody".to_string(),
-                    priority: PriorityBucket::Urgent,
+                    rank: 0,
                 },
             )
             .await
@@ -889,7 +867,6 @@ mod tests {
         let requests = requests.lock().await.clone();
         assert_eq!(requests[0].path, "/pages");
         assert!(requests[0].body.contains("\"database_id\":\"db-1\""));
-        assert!(requests[0].body.contains("\"Urgent\""));
         assert_eq!(requests[1].path, "/blocks/page-1/children");
         assert!(requests[1].body.contains("heading_1"));
         assert!(requests[1].body.contains("paragraph"));
@@ -922,7 +899,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("New title".to_string()),
                     description: Some("Updated body".to_string()),
-                    priority: Some(PriorityBucket::Medium),
+                    rank: None,
                 },
             )
             .await
@@ -931,7 +908,6 @@ mod tests {
         let requests = requests.lock().await.clone();
         assert_eq!(requests[0].path, "/pages/page-1");
         assert!(requests[0].body.contains("New title"));
-        assert!(requests[0].body.contains("Medium"));
         assert_eq!(requests[1].path, "/blocks/page-1/children");
         assert_eq!(requests[2].method, "DELETE");
         assert_eq!(requests[2].path, "/blocks/block-1");

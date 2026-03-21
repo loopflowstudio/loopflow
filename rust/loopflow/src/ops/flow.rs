@@ -14,6 +14,25 @@ use crate::ops::{
     RebaseOptions,
 };
 
+/// Resolve which PM-enabled waves to operate on within a flow context.
+/// If no wave is specified and no --all flag, auto-detect from the repo.
+fn resolve_pm_waves_for_flow(
+    repo: &Path,
+    wave: &Option<String>,
+    wave_flag: &Option<String>,
+    all: bool,
+) -> OpsResult<Vec<String>> {
+    if all {
+        return crate::ops::pm::list_pm_waves(repo);
+    }
+    let name = wave
+        .clone()
+        .or_else(|| wave_flag.clone())
+        .or_else(|| crate::ops::util::resolve_wave_name(repo, None))
+        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    Ok(vec![name])
+}
+
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
     let mut argv = vec!["lf".to_string(), "op".to_string(), item.command.clone()];
     argv.extend(item.args.iter().cloned());
@@ -183,13 +202,50 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             Ok(())
         }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
+        OpsCommand::Pm { cmd } => {
+            use crate::lf::PmCommand;
+            match cmd {
+                PmCommand::Pull {
+                    wave,
+                    wave_flag,
+                    all,
+                } => {
+                    let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
+                    for w in waves {
+                        crate::ops::pm::pm_pull(
+                            repo,
+                            &crate::ops::pm::PmPullOptions { wave: w },
+                            progress,
+                        )?;
+                    }
+                    Ok(())
+                }
+                PmCommand::PushDiff {
+                    wave,
+                    wave_flag,
+                    all,
+                } => {
+                    let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
+                    for w in waves {
+                        crate::ops::pm::pm_push_diff(
+                            repo,
+                            &crate::ops::pm::PmPushDiffOptions { wave: w },
+                            progress,
+                        )?;
+                    }
+                    Ok(())
+                }
+                _ => Err(OpsError::Message(
+                    "only pm pull and pm push-diff are supported as flow ops".to_string(),
+                )),
+            }
+        }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
-        | OpsCommand::Pm { .. }
         | OpsCommand::Auth { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/wt/shell/pm/auth commands".to_string(),
+            "ops item does not support cp/doctor/wt/shell/auth commands".to_string(),
         )),
     }
 }

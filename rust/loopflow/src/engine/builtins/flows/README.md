@@ -10,8 +10,8 @@ Inner loops — composable building blocks that don't land.
 |------|-------|----------|
 | `code` | implement → compress → lint → gate | Headless build cycle |
 | `pair` | design → code | Interactive design then build |
-| `deploy` | gate → op: land → op: pm sync | Gate, land PR, sync PM |
-| `sync` | rebase → integrate-upstream → op: pm sync | Rebase and sync upstream |
+| `deploy` | gate → op: land → op: pm push-diff | Gate, land PR, push PM changes |
+| `sync` | rebase → integrate-upstream → op: pm pull | Rebase and pull fresh PM state |
 | `qa-deploy` | qa → triage → xor(code, deploy) | QA gate with fix-or-ship branch |
 | `reorg` | update-wave | Wave coherence pass |
 
@@ -22,7 +22,7 @@ Full cycles that end with deploy.
 | Flow | Steps | Use case |
 |------|-------|----------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy | Full iterative build cycle |
-| `build-or-silent` | ingest → xor(build, silence) | Pick item or stay quiet |
+| `build-or-silent` | op: pm pull → ingest → xor(build, silence) | Pull PM, pick item or stay quiet |
 | `design-and-ship` | design → implement → reduce → polish → deploy | Design through to ship |
 | `queue` | gate → update-wave → deploy | Gate, reconcile wave, then ship |
 
@@ -32,8 +32,8 @@ Chord-level scanning, assessment, and mutation of member waves.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `garden` | wave/mutate → wave/review | Apply and review wave mutations |
-| `garden-or-silent` | garden/scan → garden/assess → xor(garden, silence) | Scan, assess, mutate if needed |
+| `garden` | wave/mutate → wave/review → deploy | Apply, review, and ship wave mutations |
+| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) | Pull PM, scan, assess, mutate if needed |
 
 ## Algedonic flows (`algedonic/`)
 
@@ -60,9 +60,9 @@ Multi-perspective analysis via `and` branches.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `wave-reduce` | and(reduce×3) → update-wave | Find simplification opportunities |
-| `wave-polish` | and(polish×3) → update-wave | Find polish priorities |
-| `wave-expand` | and(expand×3) → update-wave | Find expansion opportunities |
+| `wave-reduce` | and(reduce×3) → update-wave → deploy | Find simplification opportunities |
+| `wave-polish` | and(polish×3) → update-wave → deploy | Find polish priorities |
+| `wave-expand` | and(expand×3) → update-wave → deploy | Find expansion opportunities |
 
 ## Scan flows (`scan/`)
 

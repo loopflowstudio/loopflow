@@ -18,10 +18,13 @@ pub struct IngestResult {
     pub dest: PathBuf,
 }
 
-/// Fast-path ingest: pick the highest-priority roadmap item and move it to scratch/.
+/// Pick the highest-priority roadmap item and move it to scratch/.
 ///
-/// Priority files (`1-*` through `4-*`) take precedence over legacy numbered files.
-/// Within the same bucket or stage, the fast path uses filename order.
+/// When PM is enabled for the wave, claims the item in the PM provider first
+/// (assigns to self + sets branch). This acts as a distributed lock — two agents
+/// racing ingest will claim different items.
+///
+/// Without PM, falls back to local file ordering.
 pub fn ingest(
     repo: &Path,
     options: &IngestOptions,
@@ -48,7 +51,19 @@ pub fn ingest(
         )));
     }
 
-    let item = items.first().expect("items is non-empty");
+    // If PM is enabled, try to claim an unassigned item from the provider.
+    // The claimed filename takes priority over local ordering.
+    let claimed_filename = crate::ops::pm::pm_try_claim(&main_repo, &wave, progress);
+
+    let item = if let Some(ref claimed) = claimed_filename {
+        items
+            .iter()
+            .find(|i| i.filename == *claimed)
+            .unwrap_or_else(|| items.first().expect("items is non-empty"))
+    } else {
+        items.first().expect("items is non-empty")
+    };
+
     let scratch_dir = repo.join("scratch");
     std::fs::create_dir_all(&scratch_dir)?;
 
@@ -87,10 +102,10 @@ pub(crate) struct WaveItem {
 }
 
 impl WaveItem {
-    pub fn priority_bucket(&self) -> Option<PriorityBucket> {
+    pub(crate) fn rank(&self) -> u32 {
         match self.order {
-            WaveItemOrder::Bucket(bucket) => Some(bucket),
-            WaveItemOrder::LegacyStage(_) => None,
+            WaveItemOrder::Bucket(bucket) => bucket.rank(),
+            WaveItemOrder::LegacyStage(stage) => stage.saturating_sub(1),
         }
     }
 }
@@ -163,7 +178,7 @@ mod tests {
     #[test]
     fn parse_wave_item_filename_parses_bucketed_files() {
         let item = parse_wave_item_filename("2-setup.md").expect("bucketed item");
-        assert_eq!(item.priority_bucket(), Some(PriorityBucket::High));
+        assert_eq!(item.order, WaveItemOrder::Bucket(PriorityBucket::High));
         assert_eq!(item.slug, "setup");
     }
 

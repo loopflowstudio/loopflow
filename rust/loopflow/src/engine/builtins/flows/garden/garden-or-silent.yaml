@@ -1,3 +1,4 @@
+- op: pm pull
 - garden/scan
 - garden/assess
 - xor:

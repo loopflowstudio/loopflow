@@ -5,7 +5,7 @@ notion_id: 32af8f99-3d81-817f-96ff-d7e5bca1c64d
 ---
 # 02: Portfolio View
 
-**Finish line:** Multi-repo, multi-wave status at a glance. Wave health, PR state, and active attention items per wave. The 10-second assessment: “where do things stand?”
+**Finish line:** Multi-repo, multi-wave status at a glance. Wave health, PR state, and active attention items per wave. The 10-second assessment: "where do things stand?"
 
 ## Context
 
@@ -21,22 +21,20 @@ Absorbs and replaces the existing scale/05 (cross-repo UI) concept with the cond
 
 ## What to build
 
-1. **Wave cards.** Each wave as a card showing: name, health indicator (healthy/stalled/blocked/shallow), last activity, current work item, open attention count, queue pressure, and whether an interactive terminal session is active. Color-coded status — scannable.
-
+1. **Wave cards.** Each wave as a card showing: name, health indicator (healthy/stalled/blocked/shallow), last activity, current work item, open attention count, and queue pressure. Color-coded status — scannable.
 2. **Chord grouping.** Waves grouped by chord membership. The redesign chord's four waves together. Ungrouped waves separate. Visual hierarchy matches the coordination structure.
-
 3. **Cross-wave indicators.** File overlap, trigger relationships, active conflicts. Visible without drilling in — lines or badges between related wave cards.
 
 4. **Repo scope.** Toggle between single-repo and multi-repo view. Single repo shows all waves for this repo. Multi-repo shows the portfolio across related repos (parent/child). Promote repo/chord attention filtering and terminal-session summaries into store queries instead of repo-by-repo HTTP cards before this view goes broad.
 
-5. **Trend lines.** Per wave: velocity (PRs/week), attention frequency, time-to-resolve, and recent terminal-session success/failure trend. Derive the terminal metrics from persisted `terminal_sessions` rows so the same data can back both reviewer measurement and in-product trend lines. Not detailed charts — sparklines or directional indicators. “This wave is accelerating” vs “this wave is slowing down.”
+5. **Trend lines.** Per wave: velocity (PRs/week), attention frequency, time-to-resolve, and recent terminal-session success/failure trend. Derive the terminal metrics from persisted `terminal_sessions` rows so the same data can back both reviewer measurement and in-product trend lines. Not detailed charts — sparklines or directional indicators. "This wave is accelerating" vs "this wave is slowing down."
 
 6. **Shared data model, not a dashboard fork.** Build the view from the same wave/run/attention/terminal-session stores already used by the queue and terminal sidebar. If the portfolio needs a new summary query, add it at the store/service layer rather than introducing a portfolio-only cache or extending `PortfolioRepoState` into a second source of truth. Treat wave-level cards as summaries over potentially many runs: foreground run, running-run count, waiting-run count, and active terminal presence should all be derivations from run/session state rather than assumptions that a wave only has one execution.
 
 ## Done when
 
-- Portfolio view shows all waves with health status
-- Chord grouping is visible
-- Status is assessable in <10 seconds
-- Cross-wave relationships are visible
-- Works for both single-repo and multi-repo
+* Portfolio view shows all waves with health status
+* Chord grouping is visible
+* Status is assessable in <10 seconds
+* Cross-wave relationships are visible
+* Works for both single-repo and multi-repo

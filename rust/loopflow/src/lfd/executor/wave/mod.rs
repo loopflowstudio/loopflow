@@ -372,6 +372,7 @@ impl WaveExecutor {
             wave.name().clone(),
             run.worktree.clone(),
         );
+        let run_is_pr_oriented = run.target_branch == "main" || run.target_branch.is_empty();
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
@@ -760,9 +761,7 @@ impl WaveExecutor {
                     // Activations targeting "main" produce new branches and PRs.
                     // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
                     // push directly to that branch — no new PR needed.
-                    let should_manage_pr =
-                        run.target_branch == "main" || run.target_branch.is_empty();
-                    if should_manage_pr {
+                    if run_is_pr_oriented {
                         let worktree = run.worktree.clone();
                         let wave_name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -810,7 +809,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if should_manage_pr && run.pr.is_some() && is_recurring {
+                    if run_is_pr_oriented && run.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -846,7 +845,7 @@ impl WaveExecutor {
                     self.output.close_writer(&run.id.to_string());
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
-                    if should_manage_pr && run.pr.is_some() {
+                    if run_is_pr_oriented && run.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue_with_events(
                             &self.store,
                             &self.github_config,

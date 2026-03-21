@@ -1,4 +1,3 @@
 pm:
-  linear_project: b5547541-b564-489a-8151-baa9db4ccfd8
-  provider: notion
-  notion_project: 32af8f99-3d81-81fe-aee7-e31b2ee53fc0
+  provider: linear
+  linear_project: 9dcc6771-8ad1-483a-816f-d4ffba692f89

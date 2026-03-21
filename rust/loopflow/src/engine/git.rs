@@ -633,6 +633,39 @@ pub fn diff_names(repo: &Path, old: &str, new: &str) -> Result<Vec<PathBuf>, Git
         .collect())
 }
 
+/// Like `diff_names` but scoped to paths under `prefix`.
+pub fn diff_names_under(
+    repo: &Path,
+    old: &str,
+    new: &str,
+    prefix: &str,
+) -> Result<Vec<PathBuf>, GitError> {
+    let output = git_stdout(repo, &["diff", "--name-only", old, new, "--", prefix])?;
+    Ok(output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(PathBuf::from)
+        .collect())
+}
+
+/// Find the most recent commit on the current branch whose message contains `pattern`.
+/// Returns the commit SHA, or `None` if no match.
+pub fn log_grep(repo: &Path, pattern: &str) -> Result<Option<String>, GitError> {
+    let output = run_git(
+        repo,
+        &["log", "--grep", pattern, "--format=%H", "-1", "HEAD"],
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(sha))
+    }
+}
+
 /// Hash the contents of areas in a repo using git ls-tree.
 ///
 /// Returns a hex-encoded SHA-256 digest of the `git ls-tree` output for the

@@ -168,8 +168,8 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land → op: pm sync |
-| `sync` | rebase → integrate-upstream → op: pm sync |
+| `deploy` | gate → op: land → op: pm push-diff |
+| `sync` | rebase → integrate-upstream → op: pm pull |
 | `qa-deploy` | qa → triage → xor(code, deploy) |
 | `reorg` | update-wave (coherence pass) |
 
@@ -186,8 +186,8 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `garden` | wave/mutate → wave/review |
-| `garden-or-silent` | garden/scan → garden/assess → xor(garden, silence) |
+| `garden` | wave/mutate → wave/review → deploy |
+| `garden-or-silent` | op: pm pull → garden/scan → garden/assess → xor(garden, silence) |
 
 ### Algedonic flows (`algedonic/`)
 
@@ -208,9 +208,9 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | and(reduce×3) → update-wave |
-| `wave-polish` | and(polish×3) → update-wave |
-| `wave-expand` | and(expand×3) → update-wave |
+| `wave-reduce` | and(reduce×3) → update-wave → deploy |
+| `wave-polish` | and(polish×3) → update-wave → deploy |
+| `wave-expand` | and(expand×3) → update-wave → deploy |
 
 ### Scan flows (`scan/`)
 
@@ -339,10 +339,15 @@ notion:
 ```
 
 ```bash
-lf op pm init             # create fresh PM projects for all waves
-lf op pm pull pm          # rewrite one wave from PM; remote changes win
-lf op pm pull --all       # rewrite every wave from PM; remote changes win
-lf op pm status           # show linked waves and local/remote counts
+lf op pm init pm           # connect/create one wave project, link items, write IDs
+lf op pm init --all        # bootstrap every wave/ project on the shared PM team
+lf op pm pull pm           # rewrite one wave from PM; remote changes win
+lf op pm pull --all        # rewrite every wave from PM; remote changes win
+lf op pm export pm         # push one wave to PM; local changes win
+lf op pm export --all      # push every PM-enabled wave
+lf op pm push-diff pm      # push only branch-changed items to PM
+lf op pm push-diff --all   # push-diff every PM-enabled wave
+lf op pm status            # show linked waves and local/remote counts
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

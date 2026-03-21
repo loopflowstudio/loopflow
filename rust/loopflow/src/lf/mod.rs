@@ -243,7 +243,7 @@ pub enum OpsCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// PM tool integration (import, sync)
+    /// PM tool integration (bootstrap, pull, export, sync)
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -257,8 +257,17 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Bootstrap all waves with fresh PM projects
-    Init {},
+    /// Bootstrap PM provider roles for a wave
+    Init {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Initialize all waves under wave/
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+    },
     /// Import projects from PM tool as waves
     Import {
         /// Team ID in the PM provider
@@ -278,6 +287,29 @@ pub enum PmCommand {
         #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
         wave_flag: Option<String>,
         /// Pull every wave under wave/
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+    },
+    /// Push local wave files into PM; local changes win
+    Export {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Export every wave under wave/
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+    },
+    /// Push only branch-changed wave items to PM
+    #[command(name = "push-diff")]
+    PushDiff {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Push-diff every PM-enabled wave
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
@@ -435,16 +467,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pm_init_parses() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "init"]).expect("parse");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Op {
-                op: OpsCommand::Pm {
-                    cmd: PmCommand::Init {},
+    fn pm_init_accepts_positional_wave() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "pm"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Init {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
                 },
-            })
-        ));
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("pm"));
+        assert_eq!(wave_flag, None);
+        assert!(!all);
+    }
+
+    #[test]
+    fn pm_init_accepts_all_flag() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "--all"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Init {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave, None);
+        assert_eq!(wave_flag, None);
+        assert!(all);
     }
 
     #[test]
@@ -486,6 +551,52 @@ mod tests {
         }) = cli.command
         else {
             panic!("expected pm pull command");
+        };
+
+        assert_eq!(wave, None);
+        assert_eq!(wave_flag, None);
+        assert!(all);
+    }
+
+    #[test]
+    fn pm_export_accepts_positional_wave() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "export", "pm"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Export {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm export command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("pm"));
+        assert_eq!(wave_flag, None);
+        assert!(!all);
+    }
+
+    #[test]
+    fn pm_export_accepts_all_flag() {
+        let cli = Cli::try_parse_from(["lf", "op", "pm", "export", "--all"]).expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Export {
+                            wave,
+                            wave_flag,
+                            all,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm export command");
         };
 
         assert_eq!(wave, None);

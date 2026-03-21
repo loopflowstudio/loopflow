@@ -592,7 +592,7 @@ notion:
   done_value: "Shipped"
   priority_property: "Severity"
 pm:
-  provider: notion
+  provider: linear
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
@@ -622,7 +622,7 @@ pm:
         assert_eq!(
             config.pm,
             Some(PmRolesConfig {
-                provider: crate::lfd::pm::PmProviderKind::Notion,
+                provider: crate::lfd::pm::PmProviderKind::Linear,
             })
         );
     }

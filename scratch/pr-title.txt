@@ -1,1 +1,0 @@
-pm/notion: add Notion OAuth and PM sync support

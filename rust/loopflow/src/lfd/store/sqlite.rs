@@ -1374,63 +1374,6 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
-    pub fn find_attention_item_for_run(
-        &self,
-        run_id: &LfdId,
-        kind: AttentionKind,
-    ) -> StoreResult<Option<AttentionItem>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
-             FROM attention_items
-             WHERE run_id = ?1 AND kind = ?2 AND status != ?3
-             ORDER BY surfaced_at DESC
-             LIMIT 1",
-        )?;
-        stmt.query_row(
-            rusqlite::params![run_id, kind.as_str(), AttentionStatus::Resolved.as_str()],
-            |row| {
-                let kind_raw: String = row.get(3)?;
-                let status_raw: String = row.get(4)?;
-                let context_raw: String = row.get(7)?;
-                let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        3,
-                        rusqlite::types::Type::Text,
-                        Box::new(StoreError::InvalidData(err)),
-                    )
-                })?;
-                let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        4,
-                        rusqlite::types::Type::Text,
-                        Box::new(StoreError::InvalidData(err)),
-                    )
-                })?;
-                Ok(AttentionItem {
-                    id: LfdId::from_raw(row.get::<_, String>(0)?),
-                    wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
-                    run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
-                    kind,
-                    status,
-                    title: row.get(5)?,
-                    summary: row.get(6)?,
-                    context: serde_json::from_str(&context_raw)
-                        .unwrap_or(serde_json::Value::Object(Default::default())),
-                    surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.get(8)?),
-                    viewed_at: row
-                        .get::<_, Option<i64>>(9)?
-                        .map(crate::lfd::store::rows::unix_to_datetime),
-                    resolved_at: row
-                        .get::<_, Option<i64>>(10)?
-                        .map(crate::lfd::store::rows::unix_to_datetime),
-                })
-            },
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
     pub fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

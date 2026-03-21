@@ -1034,6 +1034,7 @@ fn create_interactive_attention_item(
     step: &ConcreteStep,
     terminal_session: &TerminalSession,
 ) -> AttentionItem {
+    let details = interactive_attention_details(step, run);
     AttentionItem {
         id: LfdId::new(),
         wave_id: wave.id().clone(),
@@ -1041,40 +1042,65 @@ fn create_interactive_attention_item(
         kind: AttentionKind::Interactive,
         status: AttentionStatus::Surfaced,
         title: interactive_title(step, wave),
-        summary: interactive_summary(step, run),
-        context: build_interactive_context(step, terminal_session, run),
+        summary: interactive_summary(&details),
+        context: build_interactive_context(step, terminal_session, &details),
         surfaced_at: OffsetDateTime::now_utc(),
         viewed_at: None,
         resolved_at: None,
     }
 }
 
+#[derive(Debug, Default)]
+struct InteractiveAttentionDetails {
+    design_path: Option<String>,
+    mutation_summary: Option<String>,
+    summary_source: Option<String>,
+}
+
+fn interactive_attention_details(
+    step: &ConcreteStep,
+    run: &WaveRun,
+) -> InteractiveAttentionDetails {
+    let worktree = Path::new(&run.worktree);
+    match step.step.name.as_str() {
+        "review-design" => {
+            let design_path = find_review_design_path(worktree, &run.branch);
+            let summary_source = design_path
+                .as_ref()
+                .and_then(|path| read_context_file(worktree, path));
+            InteractiveAttentionDetails {
+                design_path,
+                mutation_summary: None,
+                summary_source,
+            }
+        }
+        "wave/review" => {
+            let mutation_summary = read_context_file(worktree, "scratch/wave-mutate.md");
+            InteractiveAttentionDetails {
+                design_path: None,
+                summary_source: mutation_summary.clone(),
+                mutation_summary,
+            }
+        }
+        _ => InteractiveAttentionDetails::default(),
+    }
+}
+
 fn build_interactive_context(
     step: &ConcreteStep,
     terminal_session: &TerminalSession,
-    run: &WaveRun,
+    details: &InteractiveAttentionDetails,
 ) -> Value {
     let mut context = json!({
         "step": step.step.name.clone(),
         "terminal_session_id": terminal_session.id.clone(),
     });
 
-    match step.step.name.as_str() {
-        "review-design" => {
-            if let Some(design_path) =
-                find_review_design_path(Path::new(&run.worktree), &run.branch)
-            {
-                context["design_path"] = Value::String(design_path);
-            }
-        }
-        "wave/review" => {
-            if let Some(summary) =
-                read_context_file(Path::new(&run.worktree), "scratch/wave-mutate.md")
-            {
-                context["mutation_summary"] = Value::String(summary);
-            }
-        }
-        _ => {}
+    if let Some(design_path) = &details.design_path {
+        context["design_path"] = Value::String(design_path.clone());
+    }
+    if let Some(summary) = &details.mutation_summary {
+        context["mutation_summary"] = Value::String(summary.clone());
     }
 
     context
@@ -1088,16 +1114,9 @@ fn interactive_title(step: &ConcreteStep, wave: &Wave) -> String {
     }
 }
 
-fn interactive_summary(step: &ConcreteStep, run: &WaveRun) -> String {
-    let worktree = Path::new(&run.worktree);
-    let source = match step.step.name.as_str() {
-        "review-design" => find_review_design_path(worktree, &run.branch)
-            .and_then(|path| std::fs::read_to_string(worktree.join(path)).ok()),
-        "wave/review" => read_context_file(worktree, "scratch/wave-mutate.md"),
-        _ => None,
-    };
-
-    source
+fn interactive_summary(details: &InteractiveAttentionDetails) -> String {
+    details
+        .summary_source
         .as_deref()
         .and_then(first_meaningful_line)
         .unwrap_or_default()

@@ -1,4 +1,2 @@
-# Open questions
-
-- The branch already contains a partial implementation of item 01 centered on runtime journal emission/observation, but the larger shared `FlowEngine` / `lfd` real-CLI executor refactor from `scratch/lfd-real-cli-executor.md` is not yet present. I treated `LF_RUN_ID` journal correlation as the highest-leverage missing piece in the current implementation rather than attempting the full daemon executor rewrite in one pass.
-- Local macOS UI validation still fails in `xcodebuild test` with `ConcertoUITests-Runner` crashing before the test runner bootstraps. Swift package tests pass, so this currently looks isolated to the UI-test harness rather than the journal changes in this branch.
+- Assumption: daemon-managed interactive waiting only applies to top-level dispatched steps. Interactive steps reached inside nested xor/loop execution still run headless today because `WaveRun.step_index` only persists top-level position.
+- Assumption: `LFD_SESSION_ID` is only injected for terminal-backed interactive sessions. Headless per-step `lf` child processes receive `LFD_WAVE_ID`, `LFD_RUN_ID`, and `LF_RUN_ID`.

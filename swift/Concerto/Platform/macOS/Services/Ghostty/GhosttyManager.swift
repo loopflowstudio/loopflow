@@ -41,34 +41,34 @@ final class GhosttyManager: ObservableObject {
 
     static let shared = GhosttyManager()
 
-    // Loopflow color scheme
+    // Loopflow color scheme — slate grey, adapts to system appearance
     private static let loopflowConfig = """
-    # Loopflow Terminal Theme - Cream on Burgundy
-    background = #4A1A2C
-    foreground = #F5E6D3
-    cursor-color = #F5E6D3
-    selection-background = #6B2D42
-    selection-foreground = #F5E6D3
+    # Loopflow Terminal Theme - Slate
+    background = #2B3036
+    foreground = #F5F1EA
+    cursor-color = #F5F1EA
+    selection-background = #46505B
+    selection-foreground = #F5F1EA
 
-    # Palette - muted tones complementing burgundy
-    palette = 0=#2A0F18
-    palette = 1=#C75B75
+    # Palette - muted tones on slate
+    palette = 0=#1E2228
+    palette = 1=#D4756A
     palette = 2=#8B9A6B
     palette = 3=#D4A574
     palette = 4=#7B8FA8
     palette = 5=#A67B93
     palette = 6=#7FAFAF
-    palette = 7=#E8D4C4
+    palette = 7=#C8C1B8
 
     # Bright variants
-    palette = 8=#4A2A38
-    palette = 9=#E87B95
+    palette = 8=#3C4550
+    palette = 9=#E89888
     palette = 10=#ABB97B
     palette = 11=#E8C594
     palette = 12=#9BAFC8
     palette = 13=#C69BB3
     palette = 14=#9FCFCF
-    palette = 15=#F5E6D3
+    palette = 15=#F5F1EA
 
     font-size = 13
     """

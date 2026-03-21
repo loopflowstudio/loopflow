@@ -26,7 +26,7 @@ struct MultiplexerView: View {
             worktreePath: currentWave.worktreePath ?? currentWave.api.localWorktree,
             focusedPaneId: focusedPaneId
         )
-        .background(Color.black)
+        .background(LoopflowPalette.dark.background)
     }
 }
 
@@ -116,8 +116,8 @@ private struct PaneContainerView: View {
         }
         .background(backgroundColor)
         .overlay {
-            RoundedRectangle(cornerRadius: 0)
-                .stroke(isFocused ? Color.loopflowBurgundy.opacity(0.7) : palette.border, lineWidth: isFocused ? 2 : 1)
+            Rectangle()
+                .stroke(isFocused ? Color.loopflowBurgundy.opacity(0.7) : palette.border.opacity(0.5), lineWidth: isFocused ? 2 : 0.5)
                 .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
@@ -149,7 +149,7 @@ private struct PaneContainerView: View {
     }
 
     private var backgroundColor: Color {
-        pane.type == .terminal ? .black : palette.surface
+        pane.type == .terminal ? LoopflowPalette.dark.background : palette.surface
     }
 }
 
@@ -204,7 +204,7 @@ private struct TerminalPaneView: View {
                 } else {
                     ProgressView("Starting tmux…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
+                        .background(LoopflowPalette.dark.background)
                 }
             } else {
                 paneUnavailable(
@@ -342,7 +342,6 @@ private struct RoadmapPaneView: View {
     @State private var actionErrors: [String: String] = [:]
     @State private var ingestingItemIds: Set<String> = []
     @State private var reprioritizingItemIds: Set<String> = []
-    private let terminalLauncher = TerminalLauncher()
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
@@ -398,6 +397,7 @@ private struct RoadmapPaneView: View {
                     Text(item.title)
                         .font(Typography.body())
                         .fontWeight(.medium)
+                        .foregroundStyle(Color.loopflowBurgundy)
                     HStack(spacing: Spacing.sm) {
                         Text(item.isShipped ? "Shipped" : "Planned")
                             .font(Typography.caption(10))
@@ -454,16 +454,6 @@ private struct RoadmapPaneView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let filePath = item.filePath {
-                Button {
-                    openInIDE(path: filePath)
-                } label: {
-                    Label("Open in Cursor", systemImage: "curlybraces")
-                        .font(Typography.caption())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(palette.textSecondary)
-            }
         }
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
@@ -536,10 +526,6 @@ private struct RoadmapPaneView: View {
         }
     }
 
-    private func openInIDE(path: String) {
-        let remoteHost = repoState.repoTarget?.remoteHost
-        try? terminalLauncher.openInIDE(.cursor, at: URL(fileURLWithPath: path), remoteHost: remoteHost)
-    }
 }
 
 private struct ReadmePaneView: View {

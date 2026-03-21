@@ -30,28 +30,38 @@ struct CommandPalette: View {
     @FocusState private var isSearchFocused: Bool
 
     private var filteredActions: [PaletteAction] {
-        if query.isEmpty {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty {
             return actions
         }
-        let q = query.lowercased()
         return actions
             .compactMap { action -> (PaletteAction, Int)? in
-                let score = fuzzyScore(query: q, target: action.title.lowercased())
-                return score > 0 ? (action, score) : nil
+                let titleScore = fuzzyScore(query: q, target: action.title.lowercased())
+                let idScore = fuzzyScore(query: q, target: action.id.lowercased())
+                let best = max(titleScore, idScore)
+                return best > 0 ? (action, best) : nil
             }
             .sorted { $0.1 > $1.1 }
             .map(\.0)
     }
 
     /// Score a fuzzy match. Returns 0 for no match.
-    /// Higher = better: prefix > word-start > scattered subsequence.
+    /// Higher = better: exact contains > prefix > word-start > scattered subsequence.
     private func fuzzyScore(query: String, target: String) -> Int {
         guard !query.isEmpty else { return 1 }
 
+        // Exact substring match gets highest score
+        if target.contains(query) {
+            if target == query { return 100 }
+            if target.hasPrefix(query) { return 50 }
+            return 20
+        }
+
+        // Fuzzy subsequence match
         var queryIndex = query.startIndex
         var targetIndex = target.startIndex
         var score = 0
-        var prevWasBoundary = true // start of string counts as boundary
+        var prevWasBoundary = true
 
         while queryIndex < query.endIndex && targetIndex < target.endIndex {
             let qChar = query[queryIndex]
@@ -59,11 +69,11 @@ struct CommandPalette: View {
 
             if qChar == tChar {
                 if queryIndex == query.startIndex && targetIndex == target.startIndex {
-                    score += 3 // prefix match
+                    score += 3
                 } else if prevWasBoundary {
-                    score += 2 // word-start match
+                    score += 2
                 } else {
-                    score += 1 // scattered match
+                    score += 1
                 }
                 queryIndex = query.index(after: queryIndex)
             }

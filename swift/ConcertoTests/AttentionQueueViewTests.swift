@@ -41,7 +41,7 @@ struct AttentionQueueViewTests {
             return
         }
 
-        let preview = attentionDesignPreviewText(context: context, repoRoot: repoRoot)
+        let preview = attentionDesignPreviewText(item: item, context: context, repoRoot: repoRoot)
         #expect(preview != nil)
         #expect(preview?.contains("Surface every interactive step in the attention queue.") == true)
     }

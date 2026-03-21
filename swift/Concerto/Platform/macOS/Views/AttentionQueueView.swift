@@ -265,10 +265,7 @@ struct AttentionDetailView: View {
                 if let designPath = context.designPath {
                     detailLine("Design", designPath)
                 }
-                if let preview = attentionDesignPreviewText(
-                    context: context,
-                    repoRoot: repoRoot(for: item)
-                ) {
+                if let preview = designPreview(for: item, context: context) {
                     attentionSection("Design preview", accessibilityIdentifier: "attention-design-preview") {
                         Text(renderAttentionMarkdown(preview))
                             .font(Typography.caption())
@@ -277,7 +274,7 @@ struct AttentionDetailView: View {
                             .textSelection(.enabled)
                     }
                 }
-                if let mutationSummary = attentionMutationSummary(context) {
+                if let mutationSummary = mutationSummary(for: context) {
                     attentionSection("Proposed mutations", accessibilityIdentifier: "attention-mutation-summary") {
                         Text(renderAttentionMarkdown(mutationSummary))
                             .font(Typography.caption())
@@ -354,9 +351,22 @@ struct AttentionDetailView: View {
         }
     }
 
+    private func designPreview(
+        for item: AttentionItem,
+        context: InteractiveAttentionContext
+    ) -> String? {
+        attentionDesignPreviewText(item: item, context: context, repoRoot: repoRoot(for: item))
+    }
+
+    private func mutationSummary(for context: InteractiveAttentionContext) -> String? {
+        attentionMutationSummary(context)
+    }
+
     private func repoRoot(for item: AttentionItem) -> URL? {
-        repoState.waveStore.wave(for: item.waveId)
-            .map { URL(fileURLWithPath: $0.repo) } ?? repoState.currentRepo
+        if let wave = repoState.waveStore.wave(for: item.waveId) {
+            return URL(fileURLWithPath: wave.repo)
+        }
+        return repoState.currentRepo
     }
 }
 
@@ -368,6 +378,7 @@ private func renderAttentionMarkdown(_ text: String) -> AttributedString {
 }
 
 func attentionDesignPreviewText(
+    item: AttentionItem,
     context: InteractiveAttentionContext,
     repoRoot: URL?
 ) -> String? {

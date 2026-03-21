@@ -1,1 +1,1 @@
-lfd: correlate CLI journals with daemon run ids
+lfd: finish the real CLI executor refactor

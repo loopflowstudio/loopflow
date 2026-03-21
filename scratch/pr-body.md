@@ -7,22 +7,31 @@ cargo test -p loopflow
 ```
 
 What you should see:
-- The daemon and CLI both drive flow execution through the shared `FlowEngine`.
+- CLI flows and daemon-supervised wave runs both execute through the shared `FlowEngine`.
 - Daemon-launched `lf` children inherit `LFD_WAVE_ID`, `LFD_RUN_ID`, and `LF_RUN_ID`; interactive sessions also get `LFD_SESSION_ID`.
-- Interactive wave steps launch into daemon-hosted tmux sessions when tmux is available, and waiting runs resume from nested xor/loop positions instead of restarting the top-level item.
+- Nested interactive xor/loop waits resume from the stored execution cursor instead of restarting the top-level item.
+- Stopping a waiting wave cancels its active terminal session instead of leaving orphaned interactive state behind.
 
 ## Intent
 
-Finish the real CLI executor refactor. The daemon now stops reimplementing flow semantics itself and instead supervises per-step `lf` processes while the shared `FlowEngine` handles sequencing, xor routing, loops, and fork/and.
+Finish the real CLI executor refactor so `lfd` stops reimplementing flow semantics itself. The daemon now supervises per-step `lf` processes and interactive terminal sessions while the shared execution engine owns sequencing, xor routing, loop traversal, and fork/and behavior for both CLI and daemon entrypoints.
+
+## Assumptions
+
+- `tmux` is available for the preferred daemon-hosted interactive-step path; when it is not, the older wrapped terminal-session path remains the fallback.
+- Journal polling once per second is still acceptable for progress visibility.
+- `or` flow items remain intentionally unsupported and should still surface a not-implemented error.
 
 ## Key decisions
 
-- Persist a serialized execution cursor on `WaveRun` so nested waits resume exactly where they paused.
-- Resolve interactive attach requests from the current execution cursor instead of top-level `step_index` alone.
-- Prefer daemon-hosted tmux sessions for interactive steps, with the old wrapped command path kept only as a fallback when tmux is unavailable.
-- Update `flow_parents` from the exact step/op/fork being executed so nested resumes stay accurate.
+- Persist a serialized nested execution cursor on `WaveRun` so waits inside xor/loop structures resume exactly where they paused.
+- Resolve the current interactive step from that cursor instead of top-level `step_index` alone.
+- Keep journal events as observability, not control flow: the daemon advances from the shared engine cursor and only uses journal replay for client-visible progress.
+- Cancel active terminal sessions when a waiting wave is stopped so cancellation semantics match headless step cancellation.
+- Retry branch renames after worktree moves when git's branch metadata briefly lags, which removes a flaky wave-worktree edge case from the validation path.
 
 ## Not included
 
-- `or` (multi-select) flow execution; the shared engine still returns a deliberate not-implemented error there.
+- `or` (multi-select) flow execution.
+- Push-based journal ingestion.
 - A fix for the local Concerto UI-test bootstrap crash.

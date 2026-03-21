@@ -201,6 +201,33 @@ pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), 
             return Ok(());
         }
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if stderr.contains(&format!("no branch named '{old_name}'")) {
+            if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
+                let fallback_command =
+                    format!("git -C {} branch -m {}", worktree.display(), new_name);
+                let fallback = run_git(&worktree, &["branch", "-m", new_name])?;
+                if fallback.status.success() {
+                    return Ok(());
+                }
+
+                let fallback_stderr = String::from_utf8_lossy(&fallback.stderr).to_string();
+                if attempt < 2 && fallback_stderr.contains(&format!("no branch named '{old_name}'"))
+                {
+                    thread::sleep(Duration::from_millis(25));
+                    continue;
+                }
+
+                return Err(GitError::CommandFailed {
+                    command: fallback_command,
+                    stderr: fallback_stderr,
+                });
+            }
+
+            if attempt < 2 {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
+        }
         let lock_failed = stderr.contains("could not lock config file");
         if lock_failed && attempt < 2 {
             thread::sleep(Duration::from_millis(25));

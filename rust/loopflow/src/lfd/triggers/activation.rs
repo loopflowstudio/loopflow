@@ -301,7 +301,7 @@ pub async fn spawn_immediate_activation(
     } else {
         Some(envelope.target_branch.as_str())
     };
-    let create_run = if wave.serialized {
+    let create_run = if wave.workers() == 1 {
         create_wave_run_with_id(store, wave, &run_id, target).await
     } else {
         create_parallel_wave_run(store, wave, &run_id, target).await
@@ -374,48 +374,6 @@ pub async fn spawn_immediate_activation(
         slot_guard,
     );
     Ok(Some(run))
-}
-
-pub async fn dispatch_or_enqueue_activation(
-    store: &SharedStore,
-    executor: &WaveExecutor,
-    scheduler: &Arc<Scheduler>,
-    event_hub: &EventHub,
-    wave: &Wave,
-    flow_override: Option<String>,
-    envelope: ActivationEnvelope,
-) -> bool {
-    let active_runs = match store.count_active_wave_runs(wave.id()).await {
-        Ok(count) => count,
-        Err(err) => {
-            tracing::error!(
-                wave_id = %wave.id(),
-                error = %err,
-                "failed to count active wave runs"
-            );
-            return false;
-        }
-    };
-
-    if active_runs >= wave.workers() {
-        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
-        return matches!(
-            outcome,
-            Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-        );
-    }
-
-    let result = spawn_immediate_activation(
-        store,
-        executor,
-        scheduler,
-        event_hub,
-        wave,
-        flow_override,
-        envelope,
-    )
-    .await;
-    result.is_some()
 }
 
 pub async fn dispatch_pending_activations(

@@ -102,7 +102,7 @@ async fn handle_ci_failure_event(
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("wave {} not found", activation.wave_id))?;
 
-    if wave.serialized {
+    if wave.workers() == 1 {
         let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
         if outcome.is_none() {
             return Err(format!(

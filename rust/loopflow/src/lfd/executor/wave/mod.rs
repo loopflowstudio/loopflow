@@ -532,7 +532,7 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
-            let activated = if listener_wave.serialized {
+            let activated = if listener_wave.workers() == 1 {
                 let enqueued = matches!(
                     enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
                     Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)

@@ -92,7 +92,7 @@ async fn check_repo_triggers(
                     &result.current_sha,
                     "main",
                 );
-                if wave.serialized {
+                if wave.workers() == 1 {
                     let _ = enqueue_pending_activation(store, event_hub, envelope).await;
                 } else if let Err(err) = spawn_immediate_activation(
                     store,

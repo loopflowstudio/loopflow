@@ -11,13 +11,9 @@ Wave-level PM import/export now happens automatically at PR-oriented run start/e
 
 **Open design question:** Push scope — should lifecycle comments push the whole item state or just the event payload (PR URL, error message)? Event-only is simpler and avoids accidentally overwriting human edits in the PM tool.
 
-<<<<<<< HEAD:wave/pm/4-item-lifecycle-comments-and-completion.md
 `AsanaClient`, `LinearClient`, and `NotionClient` all implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
 
 Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload (not a paragraph block wrapper). The `NotionClient::comment` implementation already handles this correctly. Notion comments are plaintext-only — rich-text formatting in comments is not supported by the current implementation and was explicitly deferred when shipping the Notion client.
-=======
-Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
->>>>>>> e633e00d4 (wave: delete shipped PM items, renumber, and update accuracy):wave/pm/06-run-lifecycle-sync.md
 
 **Context from export design:** `pm_export` is intentionally additive-only — it creates and updates remote items but never deletes or completes them. Destructive remote operations (marking items done, archiving) belong here in the lifecycle path, triggered by actual events (merge/land), not by routine export sync.
 
@@ -56,11 +52,7 @@ Best-effort: if a PM API call fails, log a warning and continue. Never block wav
 - PM sync failures must not affect wave execution.
 - Stable item identity must survive `ingest` moving files into `scratch/`.
 - No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter (`id_for(provider)` on `RoadmapItemDocument`) / run metadata.
-<<<<<<< HEAD:wave/pm/4-item-lifecycle-comments-and-completion.md
 - Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`/`NotionClient`); do not create a second PM transport path for lifecycle events.
-=======
-- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`); do not create a second PM transport path for lifecycle events.
->>>>>>> e633e00d4 (wave: delete shipped PM items, renumber, and update accuracy):wave/pm/06-run-lifecycle-sync.md
 
 ## Done when
 

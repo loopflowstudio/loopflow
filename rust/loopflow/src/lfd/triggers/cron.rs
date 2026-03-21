@@ -69,7 +69,7 @@ async fn check_cron_waves(
         if should_activate_cron(&cron_expr, last_triggered) {
             let reason = format!("cron schedule {cron_expr} due");
             let envelope = ActivationEnvelope::new(wave.id(), None, reason, "", "", "main");
-            if wave.serialized {
+            if wave.workers() == 1 {
                 let _ = enqueue_pending_activation(store, event_hub, envelope).await;
             } else if let Err(err) = spawn_immediate_activation(
                 store,

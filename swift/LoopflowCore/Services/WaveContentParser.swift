@@ -123,31 +123,33 @@ public enum WaveContentParser {
             return []
         }
 
-        let roadmapFiles = files.filter { file in
-            let name = file.lastPathComponent
-            return name.range(of: "^[0-9]{2}-.+\\.md$", options: .regularExpression) != nil
-        }
+        let roadmapFiles = files.filter { parseRoadmapMetadata(for: $0) != nil }
 
         return roadmapFiles.compactMap(parseRoadmapItem).sorted { lhs, rhs in
-            if lhs.number != rhs.number {
-                return lhs.number < rhs.number
+            if lhs.priority != rhs.priority {
+                return lhs.priority.rawValue < rhs.priority.rawValue
             }
-            return lhs.id < rhs.id
+            return lhs.fileName < rhs.fileName
         }
     }
 
     private static func parseRoadmapItem(_ fileURL: URL) -> RoadmapItem? {
-        let stem = fileURL.deletingPathExtension().lastPathComponent
-        guard let number = Int(stem.prefix(2)) else {
-            return nil
-        }
+        guard let metadata = parseRoadmapMetadata(for: fileURL) else { return nil }
 
         guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            return RoadmapItem(id: stem, number: number, title: stem, isShipped: false)
+            return RoadmapItem(
+                id: metadata.stem,
+                number: metadata.number,
+                title: metadata.stem,
+                slug: metadata.slug,
+                fileName: metadata.fileName,
+                priority: metadata.priority,
+                isShipped: false
+            )
         }
 
         let lines = text.components(separatedBy: .newlines)
-        let title = firstHeading(in: lines) ?? stem
+        let title = firstHeading(in: lines) ?? metadata.stem
         let isShipped = lines.contains {
             $0.trimmingCharacters(in: .whitespaces) == "## Shipped"
         }
@@ -155,12 +157,47 @@ public enum WaveContentParser {
         let content: String? = isShipped ? nil : extractContent(from: lines)
 
         return RoadmapItem(
-            id: stem,
-            number: number,
+            id: metadata.stem,
+            number: metadata.number,
             title: title,
+            slug: metadata.slug,
+            fileName: metadata.fileName,
+            priority: metadata.priority,
             isShipped: isShipped,
             content: content,
             filePath: fileURL.path
+        )
+    }
+
+    private struct RoadmapMetadata {
+        let stem: String
+        let fileName: String
+        let slug: String
+        let number: Int
+        let priority: RoadmapPriority
+    }
+
+    private static func parseRoadmapMetadata(for fileURL: URL) -> RoadmapMetadata? {
+        guard fileURL.pathExtension.lowercased() == "md" else { return nil }
+        let fileName = fileURL.lastPathComponent
+        let stem = fileURL.deletingPathExtension().lastPathComponent
+        let parts = stem.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+
+        let prefix = String(parts[0])
+        let slug = String(parts[1])
+        guard !slug.isEmpty,
+              let priority = RoadmapPriority.from(prefix: prefix),
+              let number = Int(prefix.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+
+        return RoadmapMetadata(
+            stem: stem,
+            fileName: fileName,
+            slug: slug,
+            number: number,
+            priority: priority
         )
     }
 

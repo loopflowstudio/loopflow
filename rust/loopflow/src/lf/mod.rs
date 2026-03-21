@@ -242,6 +242,9 @@ pub enum OpsCommand {
         /// Wave name (auto-detected from worktree or branch if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Roadmap item filename or slug
+        #[arg(short = 'i', long = "item")]
+        item: Option<String>,
     },
     /// PM tool integration (bootstrap, pull, export, sync)
     Pm {

@@ -127,6 +127,7 @@ pub struct RunWaveRequest {
     area: Option<Vec<String>>,
     direction: Option<Vec<String>>,
     flow: Option<String>,
+    roadmap_item: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -722,8 +723,10 @@ async fn start_wave_run(
     }
 
     let mut flow_override = None;
+    let mut roadmap_item = None;
     if let Some(overrides) = overrides {
         flow_override = overrides.flow;
+        roadmap_item = overrides.roadmap_item;
         if let Some(direction) = overrides.direction {
             wave.direction = direction;
         }
@@ -754,16 +757,29 @@ async fn start_wave_run(
         "main",
     );
 
-    Ok(spawn_immediate_activation(
+    spawn_immediate_activation(
         &state.store,
         &state.executor,
         &state.scheduler,
         &state.event_hub,
         wave,
         flow_override,
+        roadmap_item,
         envelope,
     )
-    .await)
+    .await
+    .map_err(|err| {
+        let message = err.to_string();
+        let status = if message.contains("roadmap item not found")
+            || message.contains("wave directory not found")
+            || message.contains("no roadmap items")
+        {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        api_error(status, ApiMessage::Untrusted(message))
+    })
 }
 
 pub async fn check_wave_ci_handler(
@@ -1755,6 +1771,7 @@ mod tests {
                 area: None,
                 direction: None,
                 flow: Some("design".to_string()),
+                roadmap_item: None,
             }),
         )
         .await

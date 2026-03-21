@@ -7,7 +7,7 @@ use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{dispatch_or_enqueue_activation, ActivationEnvelope};
+use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
@@ -67,16 +67,24 @@ async fn check_cron_waves(
         if should_activate_cron(&cron_expr, last_triggered) {
             let reason = format!("cron schedule {cron_expr} due");
             let envelope = ActivationEnvelope::new(wave.id(), None, reason, "", "", "main");
-            let _ = dispatch_or_enqueue_activation(
-                store,
-                executor,
-                scheduler,
-                event_hub,
-                &wave,
-                Some(wave.primary_flow().to_string()),
-                envelope,
-            )
-            .await;
+            if wave.serialized {
+                let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            } else {
+                if let Err(err) = spawn_immediate_activation(
+                    store,
+                    executor,
+                    scheduler,
+                    event_hub,
+                    &wave,
+                    Some(wave.primary_flow().to_string()),
+                    None,
+                    envelope,
+                )
+                .await
+                {
+                    tracing::warn!(wave_id = %wave.id(), error = %err, "cron activation failed");
+                }
+            }
         }
     }
 }

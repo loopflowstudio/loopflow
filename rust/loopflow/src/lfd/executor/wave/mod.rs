@@ -19,8 +19,11 @@ use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
-use crate::lfd::triggers::{dispatch_or_enqueue_activation, ActivationEnvelope};
+use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
+use crate::lfd::triggers::{
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
+    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
+};
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Signal, TerminalSession,
     TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
@@ -529,16 +532,48 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
-            let activated = dispatch_or_enqueue_activation(
-                &self.store,
-                self,
-                &self.scheduler,
-                &self.event_hub,
-                &listener_wave,
-                trigger.flow.clone(),
-                envelope,
-            )
-            .await;
+            let activated = if listener_wave.serialized {
+                let enqueued = matches!(
+                    enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
+                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+                );
+                if enqueued {
+                    let _ = dispatch_wave_if_ready(
+                        &self.store,
+                        self,
+                        &self.scheduler,
+                        &self.event_hub,
+                        &listener_wave,
+                    )
+                    .await;
+                }
+                enqueued
+            } else {
+                match spawn_immediate_activation(
+                    &self.store,
+                    self,
+                    &self.scheduler,
+                    &self.event_hub,
+                    &listener_wave,
+                    trigger.flow.clone(),
+                    None,
+                    envelope,
+                )
+                .await
+                {
+                    Ok(Some(_)) => true,
+                    Ok(None) => false,
+                    Err(err) => {
+                        warn!(
+                            wave_id = %listener_wave.id(),
+                            trigger_id = %trigger.id,
+                            error = %err,
+                            "failed to activate listener wave immediately"
+                        );
+                        false
+                    }
+                }
+            };
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {

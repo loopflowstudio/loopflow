@@ -987,6 +987,43 @@ public final class RepoState {
         }
     }
 
+    public func ingestAndBuild(wave: WaveViewModel, item: RoadmapItem) async throws {
+        try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
+            let flow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
+            let overrides = RunOverrides(flow: flow, roadmapItem: item.fileName)
+            try await self.waveService.run(wave.id, overrides: overrides)
+        }
+        loadWaveContent(for: wave.id)
+    }
+
+    public func updateRoadmapPriority(
+        wave: WaveViewModel,
+        item: RoadmapItem,
+        priority: RoadmapPriority
+    ) throws {
+        guard repoTarget?.isRemote != true else {
+            throw WaveServiceError.commandFailed("Roadmap priority is only editable for local repositories.")
+        }
+        guard let filePath = item.filePath else {
+            throw WaveServiceError.commandFailed("Roadmap item is missing its file path.")
+        }
+
+        let sourceURL = URL(fileURLWithPath: filePath)
+        let destinationURL = sourceURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(priority.filenamePrefix)-\(item.slug).md", isDirectory: false)
+
+        if sourceURL.lastPathComponent == destinationURL.lastPathComponent {
+            return
+        }
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            throw WaveServiceError.commandFailed("A roadmap item named \(destinationURL.lastPathComponent) already exists.")
+        }
+
+        try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+        loadWaveContent(for: wave.id)
+    }
+
     public func addTrigger(wave: WaveViewModel, signal: Trigger.Signal, flow: String? = nil) async throws {
         let trigger = try await waveService.addTrigger(wave.id, signal: signal, flow: flow)
         _ = waveStore.applyOptimistic(wave.id) { $0.triggers.append(trigger) }

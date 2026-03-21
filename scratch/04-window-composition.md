@@ -1,124 +1,77 @@
-# 04: Window Composition — Polish
+# 04: Actionable Roadmap
 
 ## Problem
 
-The multiplexer shipped with the right structure (binary split tree, per-wave persistence, 8 pane types, tmux-backed terminals) but the interaction layer is still primitive. Splitting auto-cycles through pane types instead of letting you choose. The markdown pane reads one file with no way to browse or watch for changes. The diff pane shows `--stat` output when you need unified hunks. Focus cycles sequentially instead of moving spatially. There are no layout presets for common workflows.
+The roadmap pane shows items but you can't do anything with them. Priority isn't editable, content is collapsed so you can't tell what things are, and there's no way to launch work on an item. You look at the roadmap, then leave Concerto to actually start working.
 
-These gaps mean the workspace isn't sticky — you split, get the wrong pane, close it, split again. You open diff, see stat output, switch to a terminal and run `git diff` manually. The workspace should be the thing you stay in, not the thing you work around.
-
-This advances wave goals:
-- **"Percentage of coding sessions inside Concerto vs external terminal (>70%)"** — a useful diff viewer and markdown browser eliminate two common reasons to leave
-- **"Clicks from 'I see a problem' to 'I'm acting on it' (<=2)"** — directional focus and layout presets reduce navigation friction
-- **"Every human checkpoint surfaces as an AttentionItem"** — richer pane content means checkpoints have better context when you're already looking at the right files
+The workspace should be the place where you see what's next, reprioritize, and kick off a run — all without leaving.
 
 ## Approach
 
-Five coordinated changes that transform the multiplexer from "you can split" to "you can compose a workspace."
+Three changes to the roadmap pane, plus one new operation in Rust.
 
-### 1. Pane type picker (replace auto-cycling)
+### 1. Targeted ingest (`lf ops ingest --item <filename>`)
 
-When a split shortcut fires (`Ctrl+Shift+5` or `Ctrl+Shift+'`), show a small floating menu anchored at the focused pane instead of auto-picking via `splitPaneType(for:)`.
+Current `lf ops ingest` auto-picks the highest-priority item. The play button needs to ingest a *specific* item.
 
-**Menu items:** Terminal (disabled if one exists in the layout), Markdown, Diff, Launchpad, Roadmap, Runs, Launcher. Each with SF Symbol icon. Default selection: terminal if none exists, otherwise markdown.
+**Rust change:** Add `item: Option<String>` to `IngestOptions`. When set, copy that file (by filename, e.g. `03-calibration-view.md`) instead of auto-picking. Validation: file must exist in the wave directory and parse as a valid wave item. The rest of the ingest path (copy to `scratch/<wave>-<slug>.md`, delete original) stays the same.
 
-**Interaction:** Menu appears on split shortcut → user clicks type or presses number key (1-7) → split happens with chosen type. Escape cancels. The menu is a SwiftUI `popover` modifier on `PaneContainerView`, triggered by state in `MultiplexerView`.
+**CLI surface:** `lf ops ingest --item 03-calibration-view.md` (or `--item calibration-view` matching by slug).
 
-**Implementation:** Add `@State var showPaneTypePicker: String?` (pane ID) and `@State var pendingSplitAxis: SplitAxis?` to `MultiplexerView`. `ContentView.handleMultiplexerSplit` sets these instead of calling `splitPane` directly. `PaneContainerView` shows the popover when its pane ID matches. On selection, `MultiplexerStore.splitPane` fires with the chosen type.
+**lfd API:** The existing run-wave endpoint already accepts a flow parameter. Concerto calls targeted ingest as a pre-step, then runs the build flow. Alternatively, a new `ingest` endpoint that takes wave ID + item filename, returns the scratch path.
 
-### 2. Markdown file picker and file watching
+### 2. Play button on roadmap cards
 
-Replace the static `MarkdownPaneView` with one that browses and watches files.
+Each non-shipped roadmap card gets a play button. Tap it to:
 
-**Top bar:** Horizontal strip showing the current file path as a clickable dropdown. Dropdown lists all `.md` files found in `scratch/`, `wave/<wave-id>/`, and the repo root (non-recursive). Files grouped by directory, sorted alphabetically within groups. Current file highlighted.
+1. Call `lf ops ingest --item <filename>` (through lfd)
+2. Run the build flow for the wave
 
-**File enumeration:** `FileManager.default.contentsOfDirectory` with `.md` filter. Called on appear and when the watcher fires.
+The button is disabled when the wave is already running. Shows a spinner during ingest. If ingest fails (item gone, wave dir missing), show the error inline on the card.
 
-**File watching:** `DispatchSource.makeFileSystemObjectSource` watching the parent directories (`scratch/`, `wave/<wave-id>/`). On event, re-enumerate files and re-read current file content. The source is owned by the view's lifecycle (`task` cancellation tears it down).
+**Implementation:** Add `ingestAndBuild(item:)` to `RoadmapPaneView`. This calls a new method on `RepoState` (or `LocalWaveService`) that chains ingest + run. The roadmap card's play button calls this.
 
-**Config integration:** Selected file stored in `pane.config.filePath`. Changing files calls `MultiplexerStore.updatePaneConfig` so the choice persists across app restarts.
+### 3. Priority picker
 
-### 3. Unified diff viewer
+Each card shows a priority picker — segmented control or dropdown with Urgent / High / Medium / Low. Current priority derived from filename prefix (`1-` through `4-`).
 
-Replace `--stat` with a file list + unified diff display. Reuse `DiffLinesView` for rendering.
+Changing priority renames the file on disk:
+- `03-calibration-view.md` → `2-calibration-view.md` (High → uses bucket prefix, not legacy `0N-`)
+- Uses `FileManager.moveItem` in the wave directory
 
-**Layout:** Horizontal split — file list sidebar (200pt, resizable) on the left, unified diff content on the right.
+After rename, re-parse wave content to refresh the list. Items reorder by new priority.
 
-**File list:** Run `git diff --name-only main...HEAD` (or `main...<branch>`). Display as a flat list with file icons and change indicators (+/-/~). Click to select. First file auto-selected on load.
+**Edge case:** Two items could collide if they have the same slug in different buckets. Unlikely (slugs are unique per wave), but validate before rename.
 
-**Diff content:** Run `git diff --no-color main...HEAD -- <selected-file>`. Parse into `DiffLine` array using existing `DiffLinesView` parser. Render with existing syntax coloring (green additions, red deletions, gray context). For hunks > 500 lines, show first 100 lines + "Show N more lines" button that expands in-place.
+### 4. Inline summary
 
-**Refresh:** Re-run on `scenePhase` becoming `.active` (covers window focus), or on manual pull-to-refresh / Cmd+R shortcut. Show a subtle "Refreshing..." indicator during async load.
+Show the first 2-3 lines of item content by default, without requiring expand. The `WaveContentParser.extractContent` already grabs up to 20 lines — just display the first few unconditionally.
 
-**Stat summary:** Show the `--stat` summary line at the bottom of the file list (e.g., "12 files changed, 450 insertions(+), 120 deletions(-)").
-
-### 4. Directional focus
-
-Replace sequential next/previous with spatial `Cmd+Arrow` navigation.
-
-**New shortcut actions:** `focusLeft`, `focusRight`, `focusUp`, `focusDown` mapped to `Cmd+←/→/↑/↓`.
-
-**Tree walk algorithm:** Given a focused pane and a direction, walk the binary tree to find the spatially adjacent pane:
-- `focusLeft` from pane P: find the nearest ancestor split with `.horizontal` axis where P is in the `second` subtree. The target is the rightmost leaf of `first`.
-- `focusRight`: opposite — find horizontal split where P is in `first`, target is leftmost leaf of `second`.
-- `focusUp`/`focusDown`: same logic with `.vertical` axis.
-- If no adjacent pane exists in the given direction, wrap to the opposite edge (same behavior as current next/previous cycling).
-
-Add `func adjacentPane(from paneId: String, direction: Direction) -> PaneState?` to `LayoutNode`. This is a pure tree traversal with no layout geometry needed — the binary tree encodes spatial relationships directly.
-
-**Terminal routing:** When the focused pane is a terminal, directional focus routes to `tmux select-pane -L/-R/-U/-D` via `TmuxSession`. If tmux reports there's no pane in that direction (exit code 1), fall through to the outer multiplexer's directional focus. This lets you navigate within tmux splits first, then escape to outer panes.
-
-**Backward compatibility:** Keep `focusNextPane` (Cmd+Option+Right) and `focusPreviousPane` (Cmd+Option+Left) as sequential alternatives.
-
-### 5. Named layout presets
-
-Three preset layouts applied via Cmd+Shift+1/2/3.
-
-| Preset | Name | Layout |
-|--------|------|--------|
-| Cmd+Shift+1 | Build | terminal (right, 0.58) + markdown (left) |
-| Cmd+Shift+2 | Review | terminal (right, 0.58) + diff (left) |
-| Cmd+Shift+3 | Full | terminal only |
-
-**Implementation:** Add `LayoutPreset` enum to `MultiplexerLayout.swift` with a `func layout(for wave: WaveViewModel) -> LayoutNode` method that generates the tree. Add `applyPresetBuild`, `applyPresetReview`, `applyPresetFull` to `ShortcutAction`. In `MultiplexerStore`, `applyPreset` kills tmux sessions for removed terminal panes, creates sessions for new ones, and persists the result.
-
-**Preservation:** Applying a preset replaces the current layout entirely. The previous layout is not saved — presets are starting points you customize with splits, not states you toggle between.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Type picker as command palette filter | Reuses Cmd+K infrastructure | Too heavyweight for a 7-item choice. A popover is faster and more discoverable at the split point. |
-| Markdown pane with full tree sidebar | Rich file navigation | Eats horizontal space in a pane that's already width-constrained. A top-bar dropdown is compact and sufficient for the typical 5-15 markdown files. |
-| Diff via libgit2 / swift-git bindings | Structured diff data, no shell calls | Adds a native dependency for something `git diff` already does well. Shell calls are fine for a refresh-on-focus viewer. |
-| Directional focus via geometry (hit testing) | Works with arbitrary layouts | Overkill — the binary tree already encodes spatial adjacency perfectly. Geometry-based navigation would only matter with drag-to-rearrange, which isn't in scope. |
-| Layout presets stored per wave alongside split tree | Restorable named states | Complexity without clear value. Presets are fast starting points. If you want to preserve a custom layout, it already persists automatically via `MultiplexerStore`. |
-| Resize + zoom (item 5 from wave spec) | More complete window management | Significant interaction design for a feature that's less urgent than the core five. Resize requires drag handles, zoom requires toggle state. Defer to a follow-up. |
+- First 3 lines of content shown in secondary text below the title
+- "Show more" expands to the full 20-line preview (same as current expand behavior)
+- Shipped items still show no content (already the case)
 
 ## Key decisions
 
-**Popover, not command palette.** The pane picker appears at the split point as a small popover, not as a command palette filter. Seven items don't need search. Spatial proximity (the popover is where the split will happen) makes the choice feel direct.
+**Targeted ingest via Rust, not Swift file copy.** Keeps ingest logic in one place. The slug derivation, scratch path conventions, and file deletion all stay in `ops/ingest.rs`. Concerto calls through lfd rather than reimplementing.
 
-**Top-bar dropdown, not sidebar tree.** The markdown file browser is a horizontal strip with a dropdown, not a persistent sidebar. The typical wave has 5-15 markdown files. A sidebar would consume 150-200px permanently for a list you glance at once then ignore.
+**Priority as rename, not metadata.** The filename prefix *is* the priority. No new metadata format, no sidecar files. Git sees a rename, which is fine — wave items are meant to be reshuffled.
 
-**Shell `git diff`, not libgit2.** The diff viewer runs `git diff` as a subprocess. It's refresh-on-focus (not live-streaming), so subprocess overhead is irrelevant. This avoids a native dependency and works identically to what the user sees in their terminal.
+**Bucket prefixes for priority changes.** When you change priority, the new filename uses bucket-style prefix (`1-`, `2-`, `3-`, `4-`), not legacy two-digit prefix (`01-`, `02-`). This matches the direction of the codebase.
 
-**Tree walk for directional focus, not geometry.** The binary split tree already encodes "left of" and "above" relationships. Walking the tree is O(depth) and always correct. Hit-testing against rendered geometry would require layout measurement and break in edge cases.
-
-**Three presets, hardcoded.** Build, Review, Full. Not configurable (yet). These cover the three most common workflows. If a fourth becomes obviously needed, add it then.
-
-**Defer resize, zoom, drag-to-resize, cross-pane interaction, IME validation.** Items 5, 7, 9 from the wave spec are real but secondary. Landing the core five in one coherent PR is better than spreading thin across nine features.
+**Deferred: multiplexer interaction improvements.** Pane type picker, markdown file browser, unified diff viewer, directional focus, and layout presets are real improvements but they're about workspace interaction, not workspace content. They move to a follow-up.
 
 ## Scope
 
-- **In scope:** Pane type picker, markdown file picker + watching, unified diff viewer, directional focus, three named layout presets, tests for layout tree traversal and preset generation
-- **Out of scope:** Resize/zoom (item 5), drag-to-resize split boundaries (item 7), cross-pane interaction (item 7), layout persistence versioning (item 8 — already low-risk with Codable), IME validation (item 9 — manual testing, not code), snap hotkeys beyond the three presets (item 6 partial)
+- **In scope:** Targeted ingest (`--item` flag), play button on roadmap cards, priority picker, inline summary, tests for targeted ingest
+- **Out of scope:** Pane type picker, markdown browser, diff viewer, directional focus, layout presets (follow-up), drag-to-reorder (four discrete levels don't need drag)
 
 ## Done when
 
-- Split shortcut shows a pane type popover; choosing a type creates the split
-- Markdown pane has a top-bar file dropdown and re-reads on external file changes
-- Diff pane shows file list + unified hunks with syntax coloring; hunks > 500 lines are truncated
-- `Cmd+←/→/↑/↓` moves focus directionally across outer panes; terminal focus falls through to tmux
-- `Cmd+Shift+1/2/3` applies Build/Review/Full layout presets
-- `swift test --package-path swift` passes with new tests for directional traversal and preset layouts
+- `lf ops ingest --item <filename>` copies a specific item to scratch/
+- Roadmap card play button ingests and launches the build flow
+- Priority picker renames files and reorders the list
+- First 2-3 lines of content visible without expanding
+- `cargo test -p loopflow` passes with targeted ingest tests
+- `swift test --package-path swift` passes
 - `xcodebuild test` passes for Concerto UI

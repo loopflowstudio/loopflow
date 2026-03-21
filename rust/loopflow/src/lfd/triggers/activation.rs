@@ -1,11 +1,14 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{create_parallel_wave_run, create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::cleanup_workspace_worktree;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
@@ -13,6 +16,7 @@ use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, Event, PendingActivation, Wave, WaveRun, WaveStatus,
 };
+use crate::ops::{ingest, IngestOptions, NullProgress};
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 
@@ -244,13 +248,14 @@ pub async fn spawn_immediate_activation(
     event_hub: &EventHub,
     wave: &Wave,
     flow_override: Option<String>,
+    roadmap_item: Option<String>,
     envelope: ActivationEnvelope,
-) -> Option<WaveRun> {
+) -> anyhow::Result<Option<WaveRun>> {
     if wave.status() == WaveStatus::Paused {
-        return None;
+        return Ok(None);
     }
     if scheduler.has_active_session(wave.id().as_str()) {
-        return None;
+        return Ok(None);
     }
 
     let run_id = LfdId::new();
@@ -258,8 +263,8 @@ pub async fn spawn_immediate_activation(
         Ok(guard) => guard,
         Err(_reason) => {
             // Fall back to queue when scheduler is full.
-            enqueue_pending_activation(store, event_hub, envelope).await;
-            return None;
+            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            return Ok(None);
         }
     };
 
@@ -276,7 +281,7 @@ pub async fn spawn_immediate_activation(
             error = %err,
             "failed to write immediate activation dispatch log"
         );
-        return None;
+        return Err(anyhow!("failed to write activation log: {err}"));
     }
 
     let target = if envelope.target_branch.is_empty() || envelope.target_branch == "main" {
@@ -284,7 +289,13 @@ pub async fn spawn_immediate_activation(
     } else {
         Some(envelope.target_branch.as_str())
     };
-    let mut run = match create_wave_run(store, wave, &run_id, target).await {
+    let create_run = if wave.serialized {
+        create_wave_run_with_id(store, wave, &run_id, target).await
+    } else {
+        create_parallel_wave_run(store, wave, &run_id, target).await
+    };
+
+    let mut run = match create_run {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -295,11 +306,42 @@ pub async fn spawn_immediate_activation(
             if activation_requires_manual_resolution(&err) {
                 pause_wave_after_activation_conflict(store, event_hub, wave, &err).await;
             }
-            return None;
+            return Err(err);
         }
     };
     if let Some(flow_override) = flow_override {
         run.snapshot.flow = flow_override;
+    }
+    if let Some(item) = roadmap_item {
+        if let Err(err) = ingest(
+            Path::new(&run.worktree),
+            &IngestOptions {
+                wave: Some(wave.name().clone()),
+                item: Some(item.clone()),
+            },
+            &NullProgress,
+        ) {
+            tracing::error!(
+                wave_id = %wave.id(),
+                run_id = %run.id,
+                item = %item,
+                error = %err,
+                "failed targeted ingest before immediate activation"
+            );
+            run.status = crate::lfd::types::WaveRunStatus::Failed;
+            run.ended_at = Some(time::OffsetDateTime::now_utc());
+            run.error = Some(format!("ingest failed: {err}"));
+            let _ = store.update_wave_run(&run).await;
+
+            if let Ok(Some(mut stored_wave)) = store.get_wave(wave.id()).await {
+                stored_wave.status = WaveStatus::Idle;
+                let _ = store.update_wave(&stored_wave).await;
+            }
+
+            let _ = cleanup_workspace_worktree(Path::new(&run.worktree));
+            event_hub.send(Event::wave_updated(wave.id().clone()));
+            return Err(anyhow!("ingest failed: {err}"));
+        }
     }
     run.target_branch = envelope.target_branch.clone();
     run.activation_log_id = Some(dispatch_log.id.clone());
@@ -319,7 +361,7 @@ pub async fn spawn_immediate_activation(
         run.clone(),
         slot_guard,
     );
-    Some(run)
+    Ok(Some(run))
 }
 
 pub async fn dispatch_or_enqueue_activation(

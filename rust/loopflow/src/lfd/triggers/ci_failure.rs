@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::activation::{dispatch_or_enqueue_activation, ActivationEnvelope};
+use super::activation::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -99,21 +99,36 @@ async fn handle_ci_failure_event(
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("wave {} not found", activation.wave_id))?;
 
-    if !dispatch_or_enqueue_activation(
-        store,
-        executor,
-        scheduler,
-        event_hub,
-        &wave,
-        trigger.flow.clone(),
-        envelope,
-    )
-    .await
-    {
-        return Err(format!(
-            "failed to dispatch CI failure activation for wave {}",
-            activation.wave_id
-        ));
+    if wave.serialized {
+        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
+        if outcome.is_none() {
+            return Err(format!(
+                "failed to enqueue CI failure activation for wave {}",
+                activation.wave_id
+            ));
+        }
+        if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
+            tracing::warn!(
+                wave_id = %activation.wave_id,
+                trigger_id = %trigger.id,
+                "dropped CI failure activation because queue is full"
+            );
+        }
+    } else {
+        if let Err(err) = spawn_immediate_activation(
+            store,
+            executor,
+            scheduler,
+            event_hub,
+            &wave,
+            trigger.flow.clone(),
+            None,
+            envelope,
+        )
+        .await
+        {
+            tracing::warn!(wave_id = %wave.id(), trigger_id = %trigger.id, error = %err, "ci failure activation failed");
+        }
     }
     Ok(())
 }

@@ -191,6 +191,7 @@ struct LocalWaveServiceAuthTests {
             #expect(json["flow"] as? String == "design")
             #expect(json["area"] == nil)
             #expect(json["direction"] == nil)
+            #expect(json["roadmap_item"] == nil)
 
             return StubResponse(
                 statusCode: 200,
@@ -201,6 +202,31 @@ struct LocalWaveServiceAuthTests {
         try await service.run(
             "wave-1",
             overrides: RunOverrides(flow: "design")
+        )
+    }
+
+    @Test("run sends targeted roadmap item override")
+    func runSendsRoadmapItemOverride() async throws {
+        let service = makeService { request in
+            #expect(request.httpMethod == "POST")
+            #expect(request.url?.path == "/v0/waves/wave-1/run")
+
+            let body = try #require(httpBodyData(for: request))
+            let json = try #require(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            #expect(json["flow"] as? String == "build")
+            #expect(json["roadmap_item"] as? String == "03-calibration-view.md")
+
+            return StubResponse(
+                statusCode: 200,
+                body: Data("{\"ok\":true}".utf8)
+            )
+        }
+
+        try await service.run(
+            "wave-1",
+            overrides: RunOverrides(flow: "build", roadmapItem: "03-calibration-view.md")
         )
     }
 }

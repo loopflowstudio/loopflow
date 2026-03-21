@@ -9,6 +9,7 @@ use crate::ops::util::resolve_wave_name;
 #[derive(Debug, Clone, Default)]
 pub struct IngestOptions {
     pub wave: Option<String>,
+    pub item: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,19 +52,7 @@ pub fn ingest(
         )));
     }
 
-    // If PM is enabled, try to claim an unassigned item from the provider.
-    // The claimed filename takes priority over local ordering.
-    let claimed_filename = crate::ops::pm::pm_try_claim(&main_repo, &wave, progress);
-
-    let item = if let Some(ref claimed) = claimed_filename {
-        items
-            .iter()
-            .find(|i| i.filename == *claimed)
-            .unwrap_or_else(|| items.first().expect("items is non-empty"))
-    } else {
-        items.first().expect("items is non-empty")
-    };
-
+    let item = select_wave_item(&items, options.item.as_deref())?;
     let scratch_dir = repo.join("scratch");
     std::fs::create_dir_all(&scratch_dir)?;
 
@@ -88,6 +77,22 @@ pub fn ingest(
     })
 }
 
+fn select_wave_item<'a>(items: &'a [WaveItem], requested: Option<&str>) -> OpsResult<&'a WaveItem> {
+    let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(items.first().expect("items is non-empty"));
+    };
+
+    let requested_stem = requested.strip_suffix(".md").unwrap_or(requested);
+    items
+        .iter()
+        .find(|item| {
+            item.filename == requested
+                || item.slug == requested
+                || item.filename_stem() == requested_stem
+        })
+        .ok_or_else(|| OpsError::Message(format!("roadmap item not found: {requested}")))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WaveItemOrder {
     Bucket(PriorityBucket),
@@ -107,6 +112,10 @@ impl WaveItem {
             WaveItemOrder::Bucket(bucket) => bucket.rank(),
             WaveItemOrder::LegacyStage(stage) => stage.saturating_sub(1),
         }
+    }
+
+    fn filename_stem(&self) -> &str {
+        self.filename.strip_suffix(".md").unwrap_or(&self.filename)
     }
 }
 
@@ -245,6 +254,7 @@ mod tests {
             repo,
             &IngestOptions {
                 wave: Some("test-wave".to_string()),
+                item: None,
             },
             &NullProgress,
         )
@@ -279,6 +289,7 @@ mod tests {
             repo,
             &IngestOptions {
                 wave: Some("test-wave".to_string()),
+                item: None,
             },
             &NullProgress,
         )
@@ -307,6 +318,7 @@ mod tests {
             repo,
             &IngestOptions {
                 wave: Some("test-wave".to_string()),
+                item: None,
             },
             &NullProgress,
         );
@@ -315,6 +327,100 @@ mod tests {
         assert_eq!(
             result.expect_err("empty wave should error").to_string(),
             "no roadmap items in wave/test-wave/"
+        );
+    }
+
+    #[test]
+    fn ingest_accepts_targeted_filename() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo)
+            .output()
+            .expect("git init");
+
+        let wave_dir = repo.join("wave").join("test-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
+        std::fs::write(wave_dir.join("4-beta.md"), "# Beta").expect("write beta");
+
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: Some("4-beta.md".to_string()),
+            },
+            &NullProgress,
+        )
+        .expect("targeted ingest succeeds");
+
+        assert_eq!(result.slug, "beta");
+        assert!(!wave_dir.join("4-beta.md").exists());
+        assert!(wave_dir.join("1-alpha.md").exists());
+    }
+
+    #[test]
+    fn ingest_accepts_targeted_slug() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo)
+            .output()
+            .expect("git init");
+
+        let wave_dir = repo.join("wave").join("test-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
+        std::fs::write(wave_dir.join("4-beta.md"), "# Beta").expect("write beta");
+
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: Some("beta".to_string()),
+            },
+            &NullProgress,
+        )
+        .expect("targeted ingest succeeds");
+
+        assert_eq!(result.slug, "beta");
+        assert!(!wave_dir.join("4-beta.md").exists());
+        assert!(wave_dir.join("1-alpha.md").exists());
+    }
+
+    #[test]
+    fn ingest_errors_when_targeted_item_is_missing() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo)
+            .output()
+            .expect("git init");
+
+        let wave_dir = repo.join("wave").join("test-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("1-alpha.md"), "# Alpha").expect("write alpha");
+
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: Some("beta".to_string()),
+            },
+            &NullProgress,
+        );
+
+        assert_eq!(
+            result
+                .expect_err("missing roadmap item should error")
+                .to_string(),
+            "roadmap item not found: beta"
         );
     }
 }

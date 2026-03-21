@@ -11,14 +11,16 @@ notion_id: 32af8f99-3d81-81c8-a089-d47185436add
 
 The multiplexer core shipped: recursive binary split tree, per-wave layout persistence (`MultiplexerStore`), tmux session management (`TmuxSession`), Ghostty terminal embedding, and first-party workspace panes for roadmap, README, runs, launcher, markdown, diff, terminal, and launchpad. Focus-aware keyboard routing dispatches splits and closes to SwiftUI or tmux based on whether a `GhosttyMetalView` is the first responder. All of this is in `MultiplexerView`, `MultiplexerLayout`, `MultiplexerStore`, `TmuxSession`, `KeyboardRouter`, `ShortcutAction`, and `ContentView`.
 
+Current pane types (8): terminal, roadmap, readme, runs, launcher, markdown, diff, launchpad. Default workspace opens as roadmap + runs (vertical split) on the left, terminal on the right. The command palette (`Cmd+K`) focuses existing panes before creating duplicates and supports wave switching.
+
 Current pane state:
-- **Terminal:** Fully functional — Ghostty embedding, tmux-backed splits, session lifecycle
+- **Terminal:** Fully functional — Ghostty embedding, tmux-backed sessions (`lf-{waveId}-{paneId}`), session lifecycle
 - **Roadmap / README / Runs / Launcher:** Shipped and useful, but still simple projections over existing stores rather than deeply interactive tools
 - **Markdown:** Shows file contents with fallback search (`scratch/`, `wave/`, `README.md`). Plain `Typography.code()` rendering, no file picker, no file watching
 - **Diff:** Shows `git diff --stat main...HEAD`. No per-file unified diff, no file list sidebar
 - **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
-Current shortcuts: `Ctrl+Shift+5` split vertical, `Ctrl+Shift+'` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Return` new shell, `Cmd+Option+←/→` focus next/previous pane.
+Current shortcuts: split vertical/horizontal, close pane, new shell, focus next/previous pane. Smart pane rotation on split: terminal → launchpad → roadmap → runs → readme → launcher → diff → launchpad.
 
 This work should deepen the per-wave workspace that already shipped. Do not treat it as a back door to a second dashboard architecture; always-on wave terminals across the portfolio stay downstream of daemon-owned tmux sessions in `wave/lfd/`.
 

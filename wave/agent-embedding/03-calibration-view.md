@@ -16,7 +16,9 @@ Three kinds of human intervention, each with different UX needs:
 
 Design and code review have existing UX patterns (PR review, design doc review). Calibration is new — there's no established pattern for "review the trajectory of a coordinated system of agents."
 
-The shipped interactive-checkpoint work keeps the queue contract coarse: calibration should ride the same `interactive` path as other human checkpoints, keyed by `context.step`. This item starts from that routing. Its job is the dedicated all-waves review surface, not a new top-level attention kind.
+The interactive-checkpoint routing is now shipped end to end. Every `WaitInteractive` step produces an `interactive` attention item with typed context: `InteractiveAttentionContext` carries `step`, `terminalSessionId`, `designPath` (for `review-design`), and `mutationSummary` (for `wave/review`). The executor owns creation and resolution. `AttentionQueueView` shows these items with step-specific detail — design preview for design reviews, mutation summary inline for wave reviews — and an "Open Session" button when a terminal session is attached.
+
+Calibration should ride the same `interactive` path, keyed by `context.step == "wave/review"`. Its job is the dedicated all-waves review surface — not a new top-level attention kind, but a richer view when the queue item happens to be a garden calibration checkpoint.
 
 ## What to build
 

@@ -3,7 +3,7 @@ asana_id: '1213718081065257'
 linear_id: 2c9c7c0b-7b1e-4855-bbc8-18592d1c8f49
 notion_id: 32af8f99-3d81-818c-af27-c6add76d0279
 ---
-# 01: Wave Lifecycle UI — Remaining
+# Wave Lifecycle UI — Remaining
 
 **Finish line:** Worktree management and step-level run history are first-class in Concerto. The last lifecycle gaps that still require dropping to the terminal.
 

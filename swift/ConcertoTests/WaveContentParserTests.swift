@@ -307,6 +307,46 @@ struct WaveContentParserTests {
         #expect(items.map(\.priority) == [.high, .high])
     }
 
+    @Test("strips number prefixes from titles since priority is shown visually")
+    func stripsNumberPrefixFromTitles() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("prefix-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        try "# Minimal".write(
+            to: waveDir.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try "# 01: CLI Contract".write(
+            to: waveDir.appendingPathComponent("1-cli-contract.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# 02b: Wave Modes".write(
+            to: waveDir.appendingPathComponent("2-wave-modes.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# No Prefix Here".write(
+            to: waveDir.appendingPathComponent("3-no-prefix.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "prefix-wave")
+        let items = try #require(content?.roadmapItems)
+
+        #expect(items[0].title == "CLI Contract")
+        #expect(items[1].title == "Wave Modes")
+        #expect(items[2].title == "No Prefix Here")
+    }
+
     private func makeTempRepo() throws -> URL {
         let repoRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("loopflow-wave-content-tests-\(UUID().uuidString)", isDirectory: true)

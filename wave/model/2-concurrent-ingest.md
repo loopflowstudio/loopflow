@@ -1,4 +1,4 @@
-# 02d: Concurrent Ingest
+# Concurrent Ingest
 
 **Finish line:** Multiple workers in a pool call `ingest` and the PM provider (Linear/Asana) arbitrates who gets which item. No double-picks.
 

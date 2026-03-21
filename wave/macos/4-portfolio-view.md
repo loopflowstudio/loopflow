@@ -3,7 +3,7 @@ asana_id: '1213718096105435'
 linear_id: f055918b-3e00-4f1f-ad40-9aa25b72f1a1
 notion_id: 32af8f99-3d81-817f-96ff-d7e5bca1c64d
 ---
-# 02: Portfolio View
+# Portfolio View
 
 **Finish line:** Multi-repo, multi-wave status at a glance. Wave health, PR state, and active attention items per wave. The 10-second assessment: "where do things stand?"
 

@@ -278,10 +278,20 @@ public enum WaveContentParser {
             if trimmed.hasPrefix("# ") {
                 let title = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
                 if !title.isEmpty {
-                    return title
+                    return stripNumberPrefix(title)
                 }
             }
         }
         return nil
+    }
+
+    /// Strip leading `NN:` or `NNx:` prefixes (e.g. "01: Foo" → "Foo", "02b: Bar" → "Bar").
+    /// Priority is already shown visually — no need to repeat it in the title.
+    private static func stripNumberPrefix(_ title: String) -> String {
+        guard let range = title.range(of: #"^\d+[a-z]?:\s*"#, options: .regularExpression) else {
+            return title
+        }
+        let stripped = String(title[range.upperBound...])
+        return stripped.isEmpty ? title : stripped
     }
 }

@@ -1,4 +1,4 @@
-# 02e: Wave Crons — Multiple Scheduled Flows per Wave
+# Wave Crons — Multiple Scheduled Flows per Wave
 
 **Finish line:** A wave can have a list of cron'd flows alongside its primary flow. Workers run the primary flow. Crons fire supplementary flows on schedule. Root waves default to `workers: 0` with governance crons.
 

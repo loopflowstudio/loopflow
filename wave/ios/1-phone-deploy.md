@@ -2,7 +2,7 @@
 linear_id: 9b4c4ee7-9f6a-4302-bcd5-fc7b4dbbc45c
 notion_id: 32af8f99-3d81-8147-a46c-fcde08064714
 ---
-# 02: Phone Deploy
+# Phone Deploy
 
 **Finish line:** Concerto iOS connects to a remote lfd instance and provides useful wave monitoring and intervention on the go.
 

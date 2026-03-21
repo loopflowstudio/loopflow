@@ -1,4 +1,4 @@
-# 02c: Planning Flow and Chord Governance
+# Planning Flow and Chord Governance
 
 **Finish line:** A chord-wave runs a single planning flow that traverses its member tree — scanning up (leaves → root), governing down (root → leaves) — producing one reviewable PR per planning cycle. The s-levels (s5–s2) are steps within the flow, not separate waves.
 

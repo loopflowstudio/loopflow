@@ -136,6 +136,7 @@ fn land_preserves_main_on_failure() {
     repo.create_file("conflict.txt", "main");
     repo.stage_all();
     repo.commit("main work");
+    repo.push();
     let main_head = repo.head_sha();
 
     repo.checkout("feature");

@@ -19,6 +19,8 @@ Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload 
 Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
 >>>>>>> e633e00d4 (wave: delete shipped PM items, renumber, and update accuracy):wave/pm/06-run-lifecycle-sync.md
 
+**Context from export design:** `pm_export` is intentionally additive-only — it creates and updates remote items but never deletes or completes them. Destructive remote operations (marking items done, archiving) belong here in the lifecycle path, triggered by actual events (merge/land), not by routine export sync.
+
 ## What to build
 
 ### Persist the ingested item link

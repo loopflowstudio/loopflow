@@ -12,8 +12,10 @@ linear_id: 53651936-b71f-45fa-a28c-c21c942bca78
 
 1. Resolve the wave name and PM config as `ingest` already does for the filesystem lookup (`ops/ingest.rs::ingest`).
 2. If a read/write PM provider is configured in the wave's `pm` block, call `pm_pull` to refresh local items from remote priority order.
-3. After the refresh, run the existing `list_numbered_items` / move-to-`scratch/` logic against the updated wave directory.
+3. After the refresh, run the existing `list_wave_items` / move-to-`scratch/` logic against the updated wave directory.
 4. Warn and continue on PM pull failure — the local roadmap is still better than blocking work.
+
+Ingest is already priority-aware: `1-*` through `4-*` files take precedence over legacy numbered files, and the highest-priority non-empty level is picked first (filename order within a level). The PM pull must write priority-prefixed filenames so that post-refresh ingest picks the right item.
 
 This keeps PM planning authoritative without inventing a second sync path. Reprioritize items, update descriptions, add new items, delete stale ones — `ingest` should pick up the latest state before it decides what to move into `scratch/`.
 

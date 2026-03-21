@@ -31,11 +31,19 @@ Asana and Linear cover project-management-native tools. Notion covers teams that
 5. Route `ops/pm.rs` through the existing provider-role orchestration so Notion can act as the read/write provider or as an export-only mirror. (The legacy `ops/export.rs` was removed — all sync flows through `ops/pm.rs` now.)
 6. Use the shared test server (`pm::test_server`) and retry logic (`RATE_LIMIT_RETRIES`, `retry_after_delay`) from `pm::mod.rs`.
 
+## Prerequisites
+
+- Item 08: OAuth-only PM auth — Notion should arrive on a clean auth surface, not mixed API-key/OAuth.
+- Item 09: Notion README sync — prove the doc-native advantage before adding task parity.
+- Item 10: Notion supporting docs — round out the doc surface before task sync.
+
 ## Constraints
 
 - Notion's block model is richer than markdown. For the first pass, store descriptions as a single paragraph block — don't attempt full markdown → Notion block conversion.
 - Database property schema (status column name, etc.) should be configurable in `NotionConfig` rather than hardcoded.
 - Same test pattern as Asana/Linear: axum test server with request capture.
+- Notion task sync should speak the shared priority-bucket model but preserve doc-native workflow where possible.
+- Keep the adapter thin; docs import and task sync may share a client, but they are different surfaces.
 
 ## Done when
 
@@ -43,3 +51,4 @@ Asana and Linear cover project-management-native tools. Notion covers teams that
 - `lf ops auth configure notion` stores and retrieves the token
 - `lf ops pm init|pull|status` work for a wave configured with Notion as the read/write or export provider
 - Existing Asana and Linear exports are unaffected
+- Notion README/docs sync (items 09–10) remains first-class rather than an afterthought

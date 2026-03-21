@@ -18,15 +18,15 @@ Current pane state:
 - **Diff:** Shows `git diff --stat main...HEAD`. No per-file unified diff, no file list sidebar
 - **Launchpad:** Cursor, Finder, PR buttons. Missing Codex and OpenCode
 
-Current shortcuts: `Cmd+D` split vertical, `Cmd+Shift+D` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Enter` new shell, `Cmd+←/→` focus next/previous pane.
+Current shortcuts: `Ctrl+Shift+5` split vertical, `Ctrl+Shift+'` split horizontal, `Cmd+W` close pane, `Cmd+Shift+Return` new shell, `Cmd+Option+←/→` focus next/previous pane.
 
 ## What to build
 
 ### 1. Pane type picker
 
-When splitting, a popover lets you choose the new pane type. Currently splits always create a terminal pane.
+When splitting, a popover lets you choose the new pane type. Currently splits auto-cycle through pane types (terminal splits default to launchpad; non-terminal splits cycle through roadmap → runs → readme → launcher → diff → launchpad).
 
-- Small popover at the split point
+- Small popover at the split point instead of auto-cycling
 - Options: Terminal (grayed if one exists), Markdown, Diff, Launchpad
 - Default: terminal if none exists, otherwise markdown
 

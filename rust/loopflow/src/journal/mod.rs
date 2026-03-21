@@ -296,17 +296,25 @@ mod tests {
 
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = env_lock().lock().expect("env lock");
+        super::clear_context();
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
         match value {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
         }
         let result = run();
+        super::clear_context();
         match previous {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
         }
         result
+    }
+
+    fn journal_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = env_lock().lock().expect("env lock");
+        super::clear_context();
+        guard
     }
 
     fn started_fields(
@@ -333,6 +341,7 @@ mod tests {
 
     #[test]
     fn journal_is_disabled_in_main_repo() {
+        let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let command = vec!["lf".to_string(), "implement".to_string()];
 
@@ -354,6 +363,7 @@ mod tests {
 
     #[test]
     fn journal_writes_run_flow_and_step_events_in_wave_worktree() {
+        let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_wave_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
@@ -425,6 +435,7 @@ mod tests {
 
     #[test]
     fn journal_keeps_worktree_clean() {
+        let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_wave_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
@@ -441,6 +452,7 @@ mod tests {
 
     #[test]
     fn terminal_run_events_clear_context_for_the_next_run() {
+        let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_wave_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];

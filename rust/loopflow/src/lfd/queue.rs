@@ -751,6 +751,7 @@ mod tests {
             ended_at: Some(OffsetDateTime::now_utc()),
             error: None,
             flow_parents: Vec::new(),
+            execution_cursor: None,
             activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,

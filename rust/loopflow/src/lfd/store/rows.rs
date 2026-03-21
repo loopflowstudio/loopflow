@@ -156,7 +156,7 @@ pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
-///        activation_log_id, parent_run_id, parent_pr_number,
+///        execution_cursor, activation_log_id, parent_run_id, parent_pr_number,
 ///        stack_position, stack_group_id, stack_status,
 ///        lineage_inferred, target_branch, repair_of
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
@@ -166,15 +166,16 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let snapshot_area = parse_json_vec(&row.text(13)?)?;
     let snapshot_pr = parse_pr(row.opt_text(14)?)?;
     let flow_parents = parse_json_vec(&row.text(15)?)?;
-    let activation_log_id = row.opt_text(16)?.map(LfdId::from_raw);
-    let parent_run_id = row.opt_text(17)?.map(LfdId::from_raw);
-    let parent_pr_number = row.opt_bigint(18)?.map(|value| value as u32);
-    let stack_position = row.int(19)? as u32;
-    let stack_group_id = row.text(20)?;
-    let stack_status = WaveRunStackStatus::from_i32(row.int(21)?);
-    let lineage_inferred = row.int(22)? != 0;
-    let target_branch = row.text(23)?;
-    let repair_of = row.opt_text(24)?.map(LfdId::from_raw);
+    let execution_cursor = row.opt_text(16)?;
+    let activation_log_id = row.opt_text(17)?.map(LfdId::from_raw);
+    let parent_run_id = row.opt_text(18)?.map(LfdId::from_raw);
+    let parent_pr_number = row.opt_bigint(19)?.map(|value| value as u32);
+    let stack_position = row.int(20)? as u32;
+    let stack_group_id = row.text(21)?;
+    let stack_status = WaveRunStackStatus::from_i32(row.int(22)?);
+    let lineage_inferred = row.int(23)? != 0;
+    let target_branch = row.text(24)?;
+    let repair_of = row.opt_text(25)?.map(LfdId::from_raw);
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -196,6 +197,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         ended_at: ended_at.map(unix_to_datetime),
         error: row.opt_text(9)?,
         flow_parents,
+        execution_cursor,
         activation_log_id,
         parent_run_id,
         parent_pr_number,

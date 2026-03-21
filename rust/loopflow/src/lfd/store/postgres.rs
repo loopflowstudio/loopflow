@@ -1208,6 +1208,7 @@ impl PostgresStore {
                 .unwrap_or_else(now_unix);
             let ended_at = run.ended_at.map(|dt| dt.unix_timestamp());
             let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+            let execution_cursor = run.execution_cursor.clone();
             client
                 .execute(
                     Self::sql(Query::InsertWaveRun),
@@ -1228,6 +1229,7 @@ impl PostgresStore {
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
+                        &execution_cursor,
                         &run.activation_log_id,
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),
@@ -1248,6 +1250,7 @@ impl PostgresStore {
     pub async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
         self.with_client(|client| async move {
             let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+            let execution_cursor = run.execution_cursor.clone();
             let updated = client
                 .execute(
                     Self::sql(Query::UpdateWaveRun),
@@ -1266,6 +1269,7 @@ impl PostgresStore {
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
+                        &execution_cursor,
                         &run.activation_log_id,
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),

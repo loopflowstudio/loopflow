@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
+use serde::{Deserialize, Serialize};
 
 use crate::engine::flow::{
     build_xor_routing_suffix, load_step, load_xor_path_items, ConcreteAnd, ConcreteItem,
@@ -41,6 +42,38 @@ impl ExecutionStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub progress: Option<FlowProgress>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ExecutionCursor {
+    pub index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child: Option<Box<NestedCursor>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NestedCursor {
+    Xor {
+        selected: String,
+        cursor: ExecutionCursor,
+    },
+    Loop {
+        phase: LoopCursorPhase,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum LoopCursorPhase {
+    Body {
+        cursor: ExecutionCursor,
+    },
+    ExitRouter,
+    ExitPath {
+        selected: String,
+        cursor: ExecutionCursor,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,44 +136,58 @@ impl<E> FlowEngine<E> {
 
 impl<E: StepExecutor> FlowEngine<E> {
     pub async fn run(&self, items: &[ConcreteItem], start_index: usize) -> Result<FlowOutcome> {
-        let total = items.len();
-        for index in start_index..total {
-            let item = items
-                .get(index)
-                .expect("top-level flow item index should stay within bounds");
-            self.executor
-                .before_top_level_item(index, total, item)
-                .await?;
-            let outcome = self
-                .run_item(
-                    item,
-                    ExecutionContext {
-                        progress: Some(FlowProgress { index, total }),
-                    },
-                )
-                .await?;
-            if outcome == FlowOutcome::Waiting {
-                return Ok(FlowOutcome::Waiting);
-            }
-            self.executor
-                .after_top_level_item(index, total, item)
-                .await?;
-        }
-        Ok(FlowOutcome::Completed)
+        let mut cursor = ExecutionCursor {
+            index: start_index,
+            child: None,
+        };
+        self.run_with_cursor(items, &mut cursor).await
     }
 
-    fn run_items_inline<'a>(
+    pub async fn run_with_cursor(
+        &self,
+        items: &[ConcreteItem],
+        cursor: &mut ExecutionCursor,
+    ) -> Result<FlowOutcome> {
+        self.run_items(items, cursor, true).await
+    }
+
+    fn run_items<'a>(
         &'a self,
         items: &'a [ConcreteItem],
+        cursor: &'a mut ExecutionCursor,
+        top_level: bool,
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
-            for item in items {
+            let total = items.len();
+            while cursor.index < total {
+                let index = cursor.index;
+                let item = items
+                    .get(index)
+                    .expect("execution cursor index should stay within bounds");
+                if top_level {
+                    self.executor
+                        .before_top_level_item(index, total, item)
+                        .await?;
+                }
                 let outcome = self
-                    .run_item(item, ExecutionContext { progress: None })
+                    .run_item(
+                        item,
+                        cursor,
+                        ExecutionContext {
+                            progress: top_level.then_some(FlowProgress { index, total }),
+                        },
+                    )
                     .await?;
                 if outcome == FlowOutcome::Waiting {
                     return Ok(FlowOutcome::Waiting);
                 }
+                cursor.child = None;
+                if top_level {
+                    self.executor
+                        .after_top_level_item(index, total, item)
+                        .await?;
+                }
+                cursor.index += 1;
             }
             Ok(FlowOutcome::Completed)
         }
@@ -150,6 +197,7 @@ impl<E: StepExecutor> FlowEngine<E> {
     fn run_item<'a>(
         &'a self,
         item: &'a ConcreteItem,
+        cursor: &'a mut ExecutionCursor,
         ctx: ExecutionContext,
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
@@ -163,13 +211,11 @@ impl<E: StepExecutor> FlowEngine<E> {
                     self.executor.run_and(fork, ctx).await?;
                     Ok(FlowOutcome::Completed)
                 }
-                ConcreteItem::Xor(branch) => {
-                    self.run_xor(branch, ctx).await.map(|(outcome, _)| outcome)
-                }
+                ConcreteItem::Xor(branch) => self.run_xor(branch, cursor, ctx).await,
                 ConcreteItem::Or(_) => Err(anyhow!(
                     "or (multi-select) execution is not yet implemented"
                 )),
-                ConcreteItem::Loop(body) => self.run_loop(body).await,
+                ConcreteItem::Loop(body) => self.run_loop(body, cursor).await,
             }
         }
         .boxed()
@@ -193,43 +239,111 @@ impl<E: StepExecutor> FlowEngine<E> {
     fn run_xor<'a>(
         &'a self,
         branch: &'a ConcreteXor,
+        cursor: &'a mut ExecutionCursor,
         ctx: ExecutionContext,
-    ) -> BoxFuture<'a, Result<(FlowOutcome, String)>> {
+    ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
-            let router_step = self.build_router_step(branch)?;
-            let outcome = self.executor.run_step(&router_step, ctx).await?;
-            if outcome == StepOutcome::Waiting {
-                return Ok((FlowOutcome::Waiting, String::new()));
+            if cursor.child.is_none() {
+                let router_step = self.build_router_step(branch)?;
+                let outcome = self.executor.run_step(&router_step, ctx).await?;
+                if outcome == StepOutcome::Waiting {
+                    return Ok(FlowOutcome::Waiting);
+                }
+
+                let selected = self.executor.read_xor_verdict(branch).await?;
+                cursor.child = Some(Box::new(NestedCursor::Xor {
+                    selected,
+                    cursor: ExecutionCursor::default(),
+                }));
             }
 
-            let selected = self.executor.read_xor_verdict(branch).await?;
+            let Some(NestedCursor::Xor {
+                selected,
+                cursor: path_cursor,
+            }) = cursor.child.as_deref_mut()
+            else {
+                return Err(anyhow!("xor cursor lost selected path state"));
+            };
             let xor_path = branch
                 .paths
-                .get(&selected)
+                .get(selected)
                 .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
             let sub_items = load_xor_path_items(xor_path, self.executor.repo_root())?;
-            Ok((self.run_items_inline(&sub_items).await?, selected))
+            let outcome = self.run_items(&sub_items, path_cursor, false).await?;
+            if outcome == FlowOutcome::Waiting {
+                return Ok(FlowOutcome::Waiting);
+            }
+            cursor.child = None;
+            Ok(FlowOutcome::Completed)
         }
         .boxed()
     }
 
-    fn run_loop<'a>(&'a self, body: &'a ConcreteLoop) -> BoxFuture<'a, Result<FlowOutcome>> {
+    fn run_loop<'a>(
+        &'a self,
+        body: &'a ConcreteLoop,
+        cursor: &'a mut ExecutionCursor,
+    ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
             loop {
-                let outcome = self.run_items_inline(&body.steps).await?;
-                if outcome == FlowOutcome::Waiting {
-                    return Ok(FlowOutcome::Waiting);
+                if cursor.child.is_none() {
+                    cursor.child = Some(Box::new(NestedCursor::Loop {
+                        phase: LoopCursorPhase::Body {
+                            cursor: ExecutionCursor::default(),
+                        },
+                    }));
                 }
 
-                let (outcome, selected) = self
-                    .run_xor(&body.exit, ExecutionContext { progress: None })
-                    .await?;
-                if outcome == FlowOutcome::Waiting {
-                    return Ok(FlowOutcome::Waiting);
-                }
+                let Some(NestedCursor::Loop { phase }) = cursor.child.as_deref_mut() else {
+                    return Err(anyhow!("loop cursor lost phase state"));
+                };
 
-                if selected == "done" {
-                    return Ok(FlowOutcome::Completed);
+                match phase {
+                    LoopCursorPhase::Body {
+                        cursor: body_cursor,
+                    } => {
+                        let outcome = self.run_items(&body.steps, body_cursor, false).await?;
+                        if outcome == FlowOutcome::Waiting {
+                            return Ok(FlowOutcome::Waiting);
+                        }
+                        *phase = LoopCursorPhase::ExitRouter;
+                    }
+                    LoopCursorPhase::ExitRouter => {
+                        let router_step = self.build_router_step(&body.exit)?;
+                        let outcome = self
+                            .executor
+                            .run_step(&router_step, ExecutionContext { progress: None })
+                            .await?;
+                        if outcome == StepOutcome::Waiting {
+                            return Ok(FlowOutcome::Waiting);
+                        }
+
+                        let selected = self.executor.read_xor_verdict(&body.exit).await?;
+                        *phase = LoopCursorPhase::ExitPath {
+                            selected,
+                            cursor: ExecutionCursor::default(),
+                        };
+                    }
+                    LoopCursorPhase::ExitPath {
+                        selected,
+                        cursor: path_cursor,
+                    } => {
+                        let xor_path =
+                            body.exit.paths.get(selected).ok_or_else(|| {
+                                anyhow!("selected xor path '{selected}' not found")
+                            })?;
+                        let sub_items = load_xor_path_items(xor_path, self.executor.repo_root())?;
+                        let outcome = self.run_items(&sub_items, path_cursor, false).await?;
+                        if outcome == FlowOutcome::Waiting {
+                            return Ok(FlowOutcome::Waiting);
+                        }
+
+                        let selected = selected.clone();
+                        cursor.child = None;
+                        if selected == "done" {
+                            return Ok(FlowOutcome::Completed);
+                        }
+                    }
                 }
             }
         }
@@ -275,6 +389,165 @@ impl<E: StepExecutor> FlowEngine<E> {
 
 pub fn xor_verdict_path(repo_root: &Path) -> PathBuf {
     repo_root.join("scratch/route-xor.md")
+}
+
+pub fn current_step(
+    items: &[ConcreteItem],
+    cursor: &ExecutionCursor,
+    repo_root: &Path,
+) -> Result<Option<ConcreteStep>> {
+    let Some(item) = items.get(cursor.index) else {
+        return Ok(None);
+    };
+
+    match item {
+        ConcreteItem::Step(step) => Ok(Some(step.clone())),
+        ConcreteItem::Xor(branch) => {
+            let Some(NestedCursor::Xor {
+                selected,
+                cursor: path_cursor,
+            }) = cursor.child.as_deref()
+            else {
+                return Ok(None);
+            };
+            let xor_path = branch
+                .paths
+                .get(selected)
+                .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
+            let sub_items = load_xor_path_items(xor_path, repo_root)?;
+            current_step(&sub_items, path_cursor, repo_root)
+        }
+        ConcreteItem::Loop(loop_body) => match cursor.child.as_deref() {
+            Some(NestedCursor::Loop {
+                phase:
+                    LoopCursorPhase::Body {
+                        cursor: body_cursor,
+                    },
+            }) => current_step(&loop_body.steps, body_cursor, repo_root),
+            Some(NestedCursor::Loop {
+                phase:
+                    LoopCursorPhase::ExitPath {
+                        selected,
+                        cursor: path_cursor,
+                    },
+            }) => {
+                let xor_path = loop_body
+                    .exit
+                    .paths
+                    .get(selected)
+                    .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
+                let sub_items = load_xor_path_items(xor_path, repo_root)?;
+                current_step(&sub_items, path_cursor, repo_root)
+            }
+            _ => Ok(None),
+        },
+        ConcreteItem::Op(_) | ConcreteItem::And(_) | ConcreteItem::Or(_) => Ok(None),
+    }
+}
+
+pub fn current_flow_parents(
+    items: &[ConcreteItem],
+    cursor: &ExecutionCursor,
+    repo_root: &Path,
+) -> Result<Vec<String>> {
+    if let Some(step) = current_step(items, cursor, repo_root)? {
+        return Ok(step.flow_parents);
+    }
+
+    Ok(match items.get(cursor.index) {
+        Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
+        Some(ConcreteItem::Op(ops)) => ops.flow_parents.clone(),
+        Some(ConcreteItem::And(and)) => and.flow_parents.clone(),
+        Some(ConcreteItem::Xor(branch)) => branch.flow_parents.clone(),
+        Some(ConcreteItem::Or(branch)) => branch.flow_parents.clone(),
+        Some(ConcreteItem::Loop(loop_body)) => loop_body.flow_parents.clone(),
+        None => Vec::new(),
+    })
+}
+
+pub fn advance_cursor_after_wait(
+    items: &[ConcreteItem],
+    cursor: &mut ExecutionCursor,
+    repo_root: &Path,
+) -> Result<()> {
+    let Some(item) = items.get(cursor.index) else {
+        return Ok(());
+    };
+
+    match item {
+        ConcreteItem::Step(_) | ConcreteItem::Op(_) | ConcreteItem::And(_) => {
+            cursor.child = None;
+            cursor.index += 1;
+            Ok(())
+        }
+        ConcreteItem::Xor(branch) => {
+            let Some(NestedCursor::Xor {
+                selected,
+                cursor: path_cursor,
+            }) = cursor.child.as_deref_mut()
+            else {
+                return Err(anyhow!(
+                    "cannot advance xor cursor before a path has been selected"
+                ));
+            };
+            let xor_path = branch
+                .paths
+                .get(selected)
+                .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
+            let sub_items = load_xor_path_items(xor_path, repo_root)?;
+            advance_cursor_after_wait(&sub_items, path_cursor, repo_root)?;
+            if path_cursor.index >= sub_items.len() {
+                cursor.child = None;
+                cursor.index += 1;
+            }
+            Ok(())
+        }
+        ConcreteItem::Loop(loop_body) => {
+            let Some(NestedCursor::Loop { phase }) = cursor.child.as_deref_mut() else {
+                return Err(anyhow!(
+                    "cannot advance loop cursor before entering the loop body"
+                ));
+            };
+
+            match phase {
+                LoopCursorPhase::Body {
+                    cursor: body_cursor,
+                } => {
+                    advance_cursor_after_wait(&loop_body.steps, body_cursor, repo_root)?;
+                    if body_cursor.index >= loop_body.steps.len() {
+                        *phase = LoopCursorPhase::ExitRouter;
+                    }
+                    Ok(())
+                }
+                LoopCursorPhase::ExitPath {
+                    selected,
+                    cursor: path_cursor,
+                } => {
+                    let xor_path = loop_body
+                        .exit
+                        .paths
+                        .get(selected)
+                        .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
+                    let sub_items = load_xor_path_items(xor_path, repo_root)?;
+                    advance_cursor_after_wait(&sub_items, path_cursor, repo_root)?;
+                    if path_cursor.index >= sub_items.len() {
+                        let selected = selected.clone();
+                        cursor.child = None;
+                        if selected == "done" {
+                            cursor.index += 1;
+                        }
+                    }
+                    Ok(())
+                }
+                LoopCursorPhase::ExitRouter => Err(anyhow!(
+                    "cannot advance loop exit router cursor before a path has been selected"
+                )),
+            }
+        }
+        ConcreteItem::Or(_) => Err(anyhow!(
+            "or (multi-select) execution is not yet implemented"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -475,6 +748,60 @@ mod tests {
         let outcome = engine.run(&items, 0).await.expect("engine run");
         assert_eq!(outcome, FlowOutcome::Waiting);
         assert_eq!(executor.calls(), vec!["design".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn engine_resumes_nested_xor_after_waiting_step() {
+        let repo = tempdir().expect("tempdir");
+        std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
+        std::fs::write(
+            repo.path().join(".lf/flows/branch.yaml"),
+            "- design\n- implement\n",
+        )
+        .expect("write flow");
+
+        let items = vec![ConcreteItem::Xor(ConcreteXor {
+            router: None,
+            paths: HashMap::from([(
+                "ship".to_string(),
+                XorPath {
+                    flow: Some("branch".to_string()),
+                    step: None,
+                    steps: Vec::new(),
+                    description: "ship it".to_string(),
+                    direction: Vec::new(),
+                },
+            )]),
+            flow_parents: vec!["test".to_string()],
+        })];
+
+        let mut cursor = ExecutionCursor::default();
+        let executor = RecordingExecutor::new(repo.path().to_path_buf())
+            .with_verdicts(&["ship"])
+            .with_wait("design");
+        let outcome = FlowEngine::new(executor.clone())
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .expect("engine run");
+        assert_eq!(outcome, FlowOutcome::Waiting);
+        assert_eq!(
+            executor.calls(),
+            vec!["xor-route".to_string(), "design".to_string()]
+        );
+
+        advance_cursor_after_wait(&items, &mut cursor, repo.path()).expect("advance cursor");
+        let resumed = current_step(&items, &cursor, repo.path())
+            .expect("current step")
+            .expect("step should remain");
+        assert_eq!(resumed.step.name, "implement");
+
+        let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["ship"]);
+        let outcome = FlowEngine::new(executor.clone())
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .expect("resume engine");
+        assert_eq!(outcome, FlowOutcome::Completed);
+        assert_eq!(executor.calls(), vec!["implement".to_string()]);
     }
 
     #[tokio::test]

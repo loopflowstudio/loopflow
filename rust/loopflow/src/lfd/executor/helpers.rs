@@ -23,6 +23,7 @@ use crate::engine::prompt::Surface;
 use crate::engine::worktrees::{
     branch_exists, create_with_schema_synced, worktree_path as wave_worktree_path,
 };
+use crate::engine::{current_step, ExecutionCursor};
 
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::structured_reply::ClientContext;
@@ -82,6 +83,7 @@ pub async fn create_parallel_wave_run(
         ended_at: None,
         error: None,
         flow_parents: Vec::new(),
+        execution_cursor: None,
         activation_log_id: None,
         parent_run_id,
         parent_pr_number,
@@ -167,6 +169,7 @@ pub async fn create_wave_run_with_id(
         ended_at: None,
         error: None,
         flow_parents: Vec::new(),
+        execution_cursor: None,
         activation_log_id: None,
         parent_run_id,
         parent_pr_number,
@@ -325,16 +328,29 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
 }
 
 pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> String {
-    let repo = Path::new(&run.snapshot.repo);
+    let repo = Path::new(&run.worktree);
+    let cursor = run
+        .execution_cursor
+        .as_deref()
+        .filter(|raw| !raw.trim().is_empty())
+        .and_then(|raw| serde_json::from_str::<ExecutionCursor>(raw).ok())
+        .unwrap_or(ExecutionCursor {
+            index: step_index as usize,
+            child: None,
+        });
     let name = load_flow(&run.snapshot.flow, repo)
         .ok()
         .and_then(|flow| expand_flow(&flow, repo).ok())
-        .and_then(|plan| match next_action(&plan, step_index as usize) {
-            FlowAction::WaitInteractive { step } => Some(step.step.name),
-            FlowAction::RunStep { step } => Some(step.step.name),
-            FlowAction::RunOps { ops } => Some(format!("op {}", ops.item.command)),
-            FlowAction::Loop { .. } => Some("loop".to_string()),
-            _ => None,
+        .and_then(|plan| {
+            current_step(&plan, &cursor, repo)
+                .ok()
+                .flatten()
+                .map(|step| step.step.name)
+                .or_else(|| match next_action(&plan, step_index as usize) {
+                    FlowAction::RunOps { ops } => Some(format!("op {}", ops.item.command)),
+                    FlowAction::Loop { .. } => Some("loop".to_string()),
+                    _ => None,
+                })
         });
     name.unwrap_or_else(|| format!("step-{step_index}"))
 }

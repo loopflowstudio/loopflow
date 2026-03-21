@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
@@ -16,12 +17,11 @@ use tracing::{debug, error, info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
-use crate::engine::flow::{
-    expand_flow, load_flow, next_action, read_xor_verdict, ConcreteItem, ConcreteStep, FlowAction,
-};
+use crate::engine::flow::{expand_flow, load_flow, read_xor_verdict, ConcreteItem, ConcreteStep};
 use crate::engine::worktree::remove_worktree;
 use crate::engine::{
-    ConcreteAnd, ConcreteOp, ConcreteXor, ExecutionContext, ExecutionStep, FlowEngine, FlowOutcome,
+    advance_cursor_after_wait, current_flow_parents, current_step, ConcreteAnd, ConcreteOp,
+    ConcreteXor, ExecutionContext, ExecutionCursor, ExecutionStep, FlowEngine, FlowOutcome,
     StepExecutor, StepOutcome,
 };
 use crate::lfd::attention::resolve_attention_item;
@@ -36,9 +36,9 @@ use crate::lfd::triggers::{
     dispatch_or_enqueue_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, Event, LivePrState, LivePullRequestState,
-    Signal, TerminalSession, TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot,
-    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
+    tmux_session_name, AttentionItem, AttentionKind, AttentionStatus, Event, LivePrState,
+    LivePullRequestState, Signal, TerminalSession, TerminalSessionStatus, Wave, WaveMode, WaveRun,
+    WaveRunSnapshot, WaveRunStatus, WaveStatus, CI_FIX_FLOW, TMUX_TERMINAL_SOURCE,
 };
 
 use super::docker::DockerExecutor;
@@ -115,6 +115,52 @@ async fn execute_step_process(
     Ok(StepOutcome::Completed)
 }
 
+fn load_execution_cursor(run: &WaveRun) -> Result<ExecutionCursor> {
+    match run.execution_cursor.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => serde_json::from_str(raw)
+            .map_err(|err| anyhow!("invalid execution cursor for run {}: {err}", run.id)),
+        _ => Ok(ExecutionCursor {
+            index: run.step_index as usize,
+            child: None,
+        }),
+    }
+}
+
+fn store_execution_cursor(run: &mut WaveRun, cursor: &ExecutionCursor) -> Result<()> {
+    if cursor.child.is_none() {
+        run.step_index = cursor.index as u32;
+    }
+    run.execution_cursor = if cursor.child.is_none() && cursor.index == run.step_index as usize {
+        None
+    } else {
+        Some(
+            serde_json::to_string(cursor)
+                .map_err(|err| anyhow!("failed serializing execution cursor: {err}"))?,
+        )
+    };
+    Ok(())
+}
+
+fn shell_escape(value: &str) -> String {
+    let escaped = value.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
+    cwd.join(".lf/tmp/terminal-sessions")
+        .join(format!("{session_id}.exit"))
+}
+
+fn tmux_available() -> bool {
+    if std::env::var_os("LFD_DISABLE_TMUX").is_some() {
+        return false;
+    }
+    std::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
 #[derive(Clone)]
 struct DaemonFlowExecutor<'a> {
     owner: &'a WaveExecutor,
@@ -128,21 +174,6 @@ struct DaemonFlowExecutor<'a> {
 impl StepExecutor for DaemonFlowExecutor<'_> {
     fn repo_root(&self) -> &Path {
         &self.repo_root
-    }
-
-    async fn before_top_level_item(
-        &self,
-        _index: usize,
-        _total: usize,
-        _item: &ConcreteItem,
-    ) -> Result<()> {
-        let mut run = self.run.lock().await;
-        let current_flow_parents = flow_parents_for_index(self.plan, run.step_index);
-        if run.flow_parents != current_flow_parents {
-            run.flow_parents = current_flow_parents;
-            self.owner.store.update_wave_run(&run).await?;
-        }
-        Ok(())
     }
 
     async fn after_top_level_item(
@@ -159,6 +190,10 @@ impl StepExecutor for DaemonFlowExecutor<'_> {
 
     async fn run_step(&self, step: &ExecutionStep, ctx: ExecutionContext) -> Result<StepOutcome> {
         let mut run = self.run.lock().await;
+        if run.flow_parents != step.step.flow_parents {
+            run.flow_parents = step.step.flow_parents.clone();
+            self.owner.store.update_wave_run(&run).await?;
+        }
 
         if let Err(err) = pre_step_sync(
             Path::new(&run.snapshot.repo),
@@ -168,7 +203,7 @@ impl StepExecutor for DaemonFlowExecutor<'_> {
             warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
         }
 
-        if ctx.progress.is_some() && step.step.step.interactive.unwrap_or(false) {
+        if step.step.step.interactive.unwrap_or(false) {
             let terminal_session = self
                 .owner
                 .create_terminal_session(self.wave, &run, &step.step)
@@ -233,6 +268,10 @@ impl StepExecutor for DaemonFlowExecutor<'_> {
 
     async fn run_op(&self, ops: &ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
         let mut run = self.run.lock().await;
+        if run.flow_parents != ops.flow_parents {
+            run.flow_parents = ops.flow_parents.clone();
+            self.owner.store.update_wave_run(&run).await?;
+        }
 
         if let Err(err) = pre_step_sync(
             Path::new(&run.snapshot.repo),
@@ -276,6 +315,10 @@ impl StepExecutor for DaemonFlowExecutor<'_> {
 
     async fn run_and(&self, fork: &ConcreteAnd, _ctx: ExecutionContext) -> Result<()> {
         let mut run = self.run.lock().await;
+        if run.flow_parents != fork.flow_parents {
+            run.flow_parents = fork.flow_parents.clone();
+            self.owner.store.update_wave_run(&run).await?;
+        }
 
         if let Err(err) = pre_step_sync(
             Path::new(&run.snapshot.repo),
@@ -609,6 +652,10 @@ impl WaveExecutor {
         let plan = expand_flow(&flow, Path::new(&run.worktree))?;
         debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
         let shared_run = Arc::new(Mutex::new(run));
+        let mut cursor = {
+            let run = shared_run.lock().await;
+            load_execution_cursor(&run)?
+        };
         let executor = DaemonFlowExecutor {
             owner: self,
             wave: &wave,
@@ -618,12 +665,16 @@ impl WaveExecutor {
         };
 
         let outcome = FlowEngine::new(executor)
-            .run(&plan, shared_run.lock().await.step_index as usize)
+            .run_with_cursor(&plan, &mut cursor)
             .await;
 
         let mut run = shared_run.lock().await.clone();
+        store_execution_cursor(&mut run, &cursor)?;
         match outcome {
-            Ok(FlowOutcome::Waiting) => Ok(()),
+            Ok(FlowOutcome::Waiting) => {
+                self.store.update_wave_run(&run).await?;
+                Ok(())
+            }
             Ok(FlowOutcome::Completed) => self.finish_completed_run(&wave, &mut run).await,
             Err(err) => {
                 if run.status == WaveRunStatus::Failed {
@@ -866,6 +917,7 @@ impl WaveExecutor {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            execution_cursor: None,
             activation_log_id: None,
             parent_run_id: failed_run.parent_run_id.clone(),
             parent_pr_number: failed_run.parent_pr_number,
@@ -932,13 +984,13 @@ impl WaveExecutor {
             return Ok(session);
         }
 
-        let repo = Path::new(&run.snapshot.repo);
-        let flow = load_flow(&run.snapshot.flow, repo).map_err(|err| err.to_string())?;
-        let plan = expand_flow(&flow, repo).map_err(|err| err.to_string())?;
-        let FlowAction::WaitInteractive { step } = next_action(&plan, run.step_index as usize)
-        else {
-            return Err("current wave step is not interactive".to_string());
-        };
+        let worktree = Path::new(&run.worktree);
+        let flow = load_flow(&run.snapshot.flow, worktree).map_err(|err| err.to_string())?;
+        let plan = expand_flow(&flow, worktree).map_err(|err| err.to_string())?;
+        let cursor = load_execution_cursor(&run).map_err(|err| err.to_string())?;
+        let step = current_step(&plan, &cursor, worktree)
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| "current wave step is not interactive".to_string())?;
         self.create_terminal_session(&wave, &run, &step)
             .await
             .map_err(|err| err.to_string())
@@ -952,6 +1004,7 @@ impl WaveExecutor {
     ) -> Result<TerminalSession> {
         let session_id = LfdId::new();
         let env = flow_step_env(wave.id(), &run.id, Some(&session_id));
+        let tmux_managed = tmux_available();
         let terminal_session = TerminalSession {
             id: session_id.clone(),
             wave_id: wave.id().clone(),
@@ -967,20 +1020,135 @@ impl WaveExecutor {
                 wave.name(),
             ),
             env: env.into_iter().collect::<BTreeMap<_, _>>(),
-            source: "wave_step".to_string(),
+            source: if tmux_managed {
+                TMUX_TERMINAL_SOURCE.to_string()
+            } else {
+                "wave_step".to_string()
+            },
             status: TerminalSessionStatus::Pending,
             attached_at: None,
             started_at: None,
             completed_at: None,
             created_at: OffsetDateTime::now_utc(),
-            completion_token: Some(session_id.to_string()),
+            completion_token: (!tmux_managed).then(|| session_id.to_string()),
         };
         self.store
             .create_terminal_session(&terminal_session)
             .await?;
         self.event_hub
             .send(Event::terminal_session_created(terminal_session.clone()));
-        Ok(terminal_session)
+        if tmux_managed {
+            self.launch_tmux_terminal_session(terminal_session).await
+        } else {
+            Ok(terminal_session)
+        }
+    }
+
+    async fn launch_tmux_terminal_session(
+        &self,
+        session: TerminalSession,
+    ) -> Result<TerminalSession> {
+        let session_name = tmux_session_name(&session.id);
+        let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
+        let exit_dir = exit_file
+            .parent()
+            .expect("tmux exit file should always have a parent");
+        let env_prefix = session
+            .env
+            .iter()
+            .map(|(key, value)| format!("{key}={} ", shell_escape(value)))
+            .collect::<String>();
+        let command = session
+            .argv
+            .iter()
+            .map(|arg| shell_escape(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let shell_command = format!(
+            "mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; exit \"$EXIT_CODE\"",
+            exit_dir = shell_escape(&exit_dir.display().to_string()),
+            exit_file = shell_escape(&exit_file.display().to_string()),
+        );
+
+        let status = Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &session_name,
+                "-c",
+                &session.cwd,
+                "/bin/zsh",
+                "-lc",
+                &shell_command,
+            ])
+            .status()
+            .await?;
+        if !status.success() {
+            return Err(anyhow!("tmux failed to launch terminal session"));
+        }
+
+        let mut running = session.clone();
+        let _ = running.start();
+        self.store.update_terminal_session(&running).await?;
+        self.event_hub
+            .send(Event::terminal_session_updated(running.clone()));
+        self.spawn_tmux_terminal_session_monitor(running.clone());
+        Ok(running)
+    }
+
+    fn spawn_tmux_terminal_session_monitor(&self, session: TerminalSession) {
+        let executor = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = executor
+                .monitor_tmux_terminal_session(session.clone())
+                .await
+            {
+                warn!(
+                    session_id = %session.id,
+                    error = %err,
+                    "tmux terminal session monitor failed"
+                );
+            }
+        });
+    }
+
+    async fn monitor_tmux_terminal_session(&self, session: TerminalSession) -> Result<()> {
+        let session_name = tmux_session_name(&session.id);
+        let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
+        loop {
+            let status = Command::new("tmux")
+                .args(["has-session", "-t", &session_name])
+                .status()
+                .await;
+            match status {
+                Ok(status) if status.success() => {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                Ok(_) => break,
+                Err(err) => return Err(anyhow!("tmux session probe failed: {err}")),
+            }
+        }
+
+        let exit_code = tokio::task::spawn_blocking({
+            let exit_file = exit_file.clone();
+            move || std::fs::read_to_string(&exit_file).ok()
+        })
+        .await
+        .map_err(|err| anyhow!("terminal exit file task failed: {err}"))?
+        .and_then(|text| text.trim().parse::<i32>().ok())
+        .unwrap_or(1);
+
+        if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
+            if stored.complete(exit_code) {
+                self.store.update_terminal_session(&stored).await?;
+                self.event_hub
+                    .send(Event::terminal_session_updated(stored.clone()));
+            }
+        }
+
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
+        Ok(())
     }
 
     fn spawn_terminal_session_watcher(&self, wave_id: LfdId, run_id: LfdId, session_id: LfdId) {
@@ -1046,16 +1214,16 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        let repo = Path::new(&run.snapshot.repo);
-        let flow = load_flow(&run.snapshot.flow, repo)?;
-        let plan = expand_flow(&flow, repo)?;
+        let worktree_path = PathBuf::from(&run.worktree);
+        let worktree = worktree_path.as_path();
+        let flow = load_flow(&run.snapshot.flow, worktree)?;
+        let plan = expand_flow(&flow, worktree)?;
+        let mut cursor = load_execution_cursor(&run)?;
 
         // Auto-commit any changes left by the interactive step.
-        let step_name = match next_action(&plan, run.step_index as usize) {
-            FlowAction::WaitInteractive { step } | FlowAction::RunStep { step } => step.step.name,
-            FlowAction::RunOps { ops } => ops.item.to_string(),
-            _ => format!("step-{}", run.step_index),
-        };
+        let step_name = current_step(&plan, &cursor, worktree)?
+            .map(|step| step.step.name)
+            .unwrap_or_else(|| format!("step-{}", run.step_index));
         let worktree = run.worktree.clone();
         if let Err(err) = tokio::task::spawn_blocking(move || {
             auto_commit_if_dirty(Path::new(&worktree), &step_name)
@@ -1068,7 +1236,12 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        self.advance_run_step(&mut run, &plan, wave.id()).await?;
+        advance_cursor_after_wait(&plan, &mut cursor, worktree_path.as_path())?;
+        store_execution_cursor(&mut run, &cursor)?;
+        run.status = WaveRunStatus::Running;
+        run.flow_parents = current_flow_parents(&plan, &cursor, worktree_path.as_path())?;
+        self.store.update_wave_run(&run).await?;
+        self.event_hub.send(Event::wave_updated(wave.id().clone()));
         self.set_wave_status(wave.id(), WaveStatus::Running).await;
         self.resume_run_execution(run).await?;
         Ok(())
@@ -1568,6 +1741,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: vec![],
+            execution_cursor: None,
             activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
@@ -1623,6 +1797,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            execution_cursor: None,
             activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
@@ -2400,6 +2575,79 @@ mod tests {
         );
         assert!(session.argv.iter().any(|arg| arg == "-w"));
         assert!(session.env.contains_key("LFD_SESSION_ID"));
+        if session.source == TMUX_TERMINAL_SOURCE {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+                .status();
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_waits_on_nested_interactive_step_inside_xor_path() {
+        let repo = TestRepo::new();
+        repo.create_file(
+            ".lf/flows/nested-xor.yaml",
+            r#"
+- xor:
+    paths:
+      ship:
+        flow: chosen
+        description: Ship it
+"#,
+        );
+        repo.create_file(".lf/flows/chosen.yaml", "- design\n- implement\n");
+        repo.create_file("scratch/route-xor.md", "path: ship\n");
+        repo.stage_all();
+        repo.commit("add nested xor fixtures");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "nested-xor").await;
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should reach waiting step");
+
+        let run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(run.status, WaveRunStatus::Waiting);
+        assert_eq!(run.step_index, 0, "nested wait should keep top-level index");
+        assert!(
+            run.execution_cursor.is_some(),
+            "nested wait should persist execution cursor"
+        );
+
+        let session = executor
+            .create_terminal_session_for_waiting_wave(&wave_id, Some(&run_id))
+            .await
+            .expect("terminal session should resolve");
+        assert_eq!(session.step, "design");
+        assert_eq!(session.cwd, repo.path().to_string_lossy());
+        if session.source == TMUX_TERMINAL_SOURCE {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-session", "-t", &tmux_session_name(&session.id)])
+                .status();
+        }
     }
 
     #[tokio::test]

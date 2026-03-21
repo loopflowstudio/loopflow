@@ -860,6 +860,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            execution_cursor: None,
             activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,

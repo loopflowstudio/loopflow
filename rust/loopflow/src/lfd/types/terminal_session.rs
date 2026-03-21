@@ -5,6 +5,12 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
+pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
+
+pub fn tmux_session_name(session_id: &LfdId) -> String {
+    format!("lfd-{session_id}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -93,12 +99,19 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn attach(&mut self) -> bool {
-        if self.status != TerminalSessionStatus::Pending {
+        if self.status.is_terminal() {
             return false;
         }
-        self.status = TerminalSessionStatus::Attached;
-        self.attached_at = Some(OffsetDateTime::now_utc());
-        true
+        let mut changed = false;
+        if self.status == TerminalSessionStatus::Pending {
+            self.status = TerminalSessionStatus::Attached;
+            changed = true;
+        }
+        if self.attached_at.is_none() {
+            self.attached_at = Some(OffsetDateTime::now_utc());
+            changed = true;
+        }
+        changed
     }
 
     pub fn start(&mut self) -> bool {

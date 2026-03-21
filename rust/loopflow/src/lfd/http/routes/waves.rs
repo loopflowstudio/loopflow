@@ -13,6 +13,9 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::engine::{
+    advance_cursor_after_wait, current_flow_parents, expand_flow, load_flow, ExecutionCursor,
+};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
@@ -1123,9 +1126,61 @@ pub async fn continue_wave_handler(
     )
     .await?;
 
-    // Advance to the next step.
-    run.step_index += 1;
+    let worktree_path = FsPath::new(&run.worktree);
+    let flow = load_flow(&run.snapshot.flow, worktree_path).map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(format!("failed to load flow: {err}")),
+        )
+    })?;
+    let plan = expand_flow(&flow, worktree_path).map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(format!("failed to expand flow: {err}")),
+        )
+    })?;
+    let mut cursor = run
+        .execution_cursor
+        .as_deref()
+        .filter(|raw| !raw.trim().is_empty())
+        .map(|raw| {
+            serde_json::from_str::<ExecutionCursor>(raw).map_err(|err| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiMessage::Untrusted(format!("invalid execution cursor: {err}")),
+                )
+            })
+        })
+        .transpose()?
+        .unwrap_or(ExecutionCursor {
+            index: run.step_index as usize,
+            child: None,
+        });
+    advance_cursor_after_wait(&plan, &mut cursor, worktree_path).map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(format!("failed to advance execution cursor: {err}")),
+        )
+    })?;
+
     run.status = WaveRunStatus::Running;
+    run.step_index = cursor.index as u32;
+    run.execution_cursor = if cursor.child.is_none() {
+        None
+    } else {
+        Some(serde_json::to_string(&cursor).map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(format!("failed to serialize execution cursor: {err}")),
+            )
+        })?)
+    };
+    run.flow_parents = current_flow_parents(&plan, &cursor, worktree_path).map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(format!("failed to resolve current flow parents: {err}")),
+        )
+    })?;
     state
         .store
         .update_wave_run(&run)

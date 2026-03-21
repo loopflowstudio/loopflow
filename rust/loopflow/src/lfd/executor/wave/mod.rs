@@ -93,6 +93,7 @@ pub struct WaveExecutor {
     event_hub: EventHub,
     executor_type: ExecutorType,
     github_config: GitHubConfig,
+    disable_tmux: bool,
 }
 
 impl std::fmt::Debug for WaveExecutor {
@@ -128,6 +129,7 @@ impl WaveExecutor {
             event_hub,
             executor_type,
             github_config,
+            disable_tmux: false,
         })
     }
 
@@ -147,6 +149,7 @@ impl WaveExecutor {
             event_hub,
             executor_type: ExecutorType::Local,
             github_config: GitHubConfig::default(),
+            disable_tmux: true,
         }
     }
 
@@ -302,7 +305,7 @@ impl WaveExecutor {
             &run.snapshot.area,
             wave.name(),
         );
-        let tmux_managed = tmux_available();
+        let tmux_managed = !self.disable_tmux && tmux_available();
         let terminal_session = TerminalSession {
             id: session_id.clone(),
             wave_id: wave.id().clone(),
@@ -355,11 +358,6 @@ impl WaveExecutor {
             outcome.exit_code
         };
 
-        eprintln!(
-            "[DIAG] execute: exit_code={exit_code} run={} wave={}",
-            run.id,
-            wave.id()
-        );
         if exit_code == 0 {
             self.finish_completed_run(&wave, &mut run).await
         } else {
@@ -500,47 +498,23 @@ impl WaveExecutor {
             }
         };
 
-        eprintln!(
-            "[DIAG] trigger_listeners_on_completion: source={source_wave_id} triggers={}",
-            triggers.len()
-        );
-
         for mut trigger in triggers {
             if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
-                eprintln!("[DIAG] trigger_listeners_on_completion: skipping trigger {} (enabled={}, source_match={})",
-                    trigger.id, trigger.enabled, trigger.source_wave_id.as_ref() == Some(source_wave_id));
                 continue;
             }
 
             let listener_wave = match self.store.get_wave(&trigger.wave_id).await {
                 Ok(Some(wave)) => wave,
-                Ok(None) => {
-                    eprintln!(
-                        "[DIAG] trigger_listeners_on_completion: listener wave {} not found",
-                        trigger.wave_id
-                    );
-                    continue;
-                }
+                Ok(None) => continue,
                 Err(err) => {
-                    eprintln!(
-                        "[DIAG] trigger_listeners_on_completion: error loading wave {}: {err}",
-                        trigger.wave_id
-                    );
                     warn!(trigger_id = %trigger.id, error = %err, "failed to load listening wave");
                     continue;
                 }
             };
 
             if listener_wave.status() == WaveStatus::Paused {
-                eprintln!(
-                    "[DIAG] trigger_listeners_on_completion: listener {} is paused",
-                    listener_wave.id()
-                );
                 continue;
             }
-
-            eprintln!("[DIAG] trigger_listeners_on_completion: dispatching for listener {} workers={} status={:?}",
-                listener_wave.id(), listener_wave.workers(), listener_wave.status());
 
             let reason = format!(
                 "wave trigger {} triggered by source wave {}",
@@ -564,7 +538,6 @@ impl WaveExecutor {
                 envelope,
             )
             .await;
-            eprintln!("[DIAG] trigger_listeners_on_completion: activated={activated}");
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {
@@ -974,7 +947,6 @@ mod tests {
 
     #[tokio::test]
     async fn execute_starts_listen_wave_on_completion() {
-        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step a");
@@ -1063,7 +1035,6 @@ mod tests {
 
     #[tokio::test]
     async fn listen_trigger_queues_when_listener_running() {
-        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step");
@@ -1138,7 +1109,6 @@ mod tests {
 
     #[tokio::test]
     async fn listen_trigger_queues_when_scheduler_full() {
-        let _ = tracing_subscriber::fmt::try_init();
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
         repo.create_file(".lf/steps/step-a.md", "do step");

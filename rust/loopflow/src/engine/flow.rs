@@ -575,7 +575,7 @@ fn parse_flow_mapping_with_options(
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, op, ops, flow, and, xor, or, or loop".to_string(),
+        "flow item mapping must include step, op, flow, and, xor, or, or loop".to_string(),
     ))
 }
 
@@ -1743,7 +1743,7 @@ Be careful.
     #[test]
     fn parse_ops_mapping_accepts_command_and_args() {
         let yaml = r#"
-- ops: land --create-pr
+- op: land --create-pr
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();

@@ -5,7 +5,7 @@ linear_id: af05f722-57f8-46a9-b64c-ceef04394f20
 
 **Finish line:** PM providers use browser-based OAuth through the shared auth surface, and PM commands no longer rely on API-key/PAT setup paths.
 
-Notion should not arrive on top of a mixed auth story. Before adding another provider, clean up the existing PM auth surface so Asana, Linear, and future Notion all connect the same way.
+Notion shipped OAuth-only (no `api_key_env_name`, Basic-auth token exchange on port 19223). But Asana still has `ASANA_ACCESS_TOKEN` and Linear still has `LINEAR_API_KEY` as API-key fallback paths. The auth story is now inconsistent across providers — Notion is clean, Asana/Linear are not.
 
 ## What to build
 
@@ -25,4 +25,4 @@ Notion should not arrive on top of a mixed auth story. Before adding another pro
 - Asana and Linear PM flows connect via OAuth
 - PM commands read stored OAuth credentials
 - PM API-key setup flows are gone
-- The path for adding Notion auth is obvious and consistent
+- All three PM providers (Asana, Linear, Notion) use the same browser-connect auth pattern

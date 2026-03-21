@@ -10,7 +10,7 @@ README sync proves the core shape. The next step is bringing in the nearby suppo
 ## What to build
 
 1. Decide how a wave points at the supporting pages to import: explicit links, child pages, or a small rooted subtree.
-2. Pull those pages into durable local docs next to the wave.
+2. Pull those pages into durable local docs next to the wave using `NotionClient` and `blocks_to_markdown` from `pm/notion_blocks.rs`.
 3. Keep overwrite behavior explicit so imported docs do not surprise users.
 4. Stay narrow: import the pages that matter to the wave, not a whole workspace crawler.
 
@@ -19,6 +19,7 @@ README sync proves the core shape. The next step is bringing in the nearby suppo
 - Build on top of the canonical README page link from item 09.
 - Keep naming and overwrite rules obvious.
 - Do not turn this into arbitrary workspace sync.
+- The block-replacement write pattern means push-back of supporting docs has the same concurrent-edit conflict risk as item bodies.
 
 ## Done when
 

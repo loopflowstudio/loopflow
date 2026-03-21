@@ -1,2 +1,0 @@
-- Notion comment creation uses the `/comments` rich_text payload shape instead of a paragraph block wrapper. The design doc described it as a paragraph block, but the API model is comment-specific, so the implementation follows that request shape.
-- Notion OAuth uses the localhost redirect flow on port 19223. The implementation omits PKCE because Notion's token exchange is Basic-auth based and the design doc did not require a verifier in the token request.

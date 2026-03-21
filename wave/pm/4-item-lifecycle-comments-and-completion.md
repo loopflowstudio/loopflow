@@ -10,7 +10,9 @@ Wave-level PM import/export now happens automatically at PR-oriented run start/e
 
 **Open design question:** Push scope — should lifecycle comments push the whole item state or just the event payload (PR URL, error message)? Event-only is simpler and avoids accidentally overwriting human edits in the PM tool.
 
-Both `AsanaClient` and `LinearClient` already implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
+`AsanaClient`, `LinearClient`, and `NotionClient` all implement the required `comment` and `complete_item` methods. This item wires those calls into the lifecycle path that actually knows which roadmap item the run is working on.
+
+Note: Notion's comment API uses a `/comments` endpoint with `rich_text` payload (not a paragraph block wrapper). The `NotionClient::comment` implementation already handles this correctly.
 
 ## What to build
 
@@ -47,7 +49,7 @@ Best-effort: if a PM API call fails, log a warning and continue. Never block wav
 - PM sync failures must not affect wave execution.
 - Stable item identity must survive `ingest` moving files into `scratch/`.
 - No fuzzy title matching at lifecycle time — use the item IDs already carried by roadmap frontmatter (`id_for(provider)` on `RoadmapItemDocument`) / run metadata.
-- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`); do not create a second PM transport path for lifecycle events.
+- Reuse the existing provider client methods (`comment`, `complete_item` on `AsanaClient`/`LinearClient`/`NotionClient`); do not create a second PM transport path for lifecycle events.
 
 ## Done when
 

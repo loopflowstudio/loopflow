@@ -15,7 +15,7 @@ Asana supports a subset of HTML in the `html_notes` field alongside the plaintex
 
 - Asana's HTML subset is limited. Unsupported tags should degrade gracefully (strip to plain text).
 - Don't break existing items that only have `notes` content.
-- The converter should be its own module (`pm/asana_html.rs`) with round-trip tests, same pattern as `pm/notion_blocks.rs`.
+- The converter should be its own module (`pm/asana_html.rs`) with round-trip tests, same pattern as `pm/notion_blocks.rs`. The Notion converter's inline formatting span model (`parse_inline` / `rich_text_to_markdown`) is a validated reference for the rich-text parsing approach.
 
 ## Done when
 

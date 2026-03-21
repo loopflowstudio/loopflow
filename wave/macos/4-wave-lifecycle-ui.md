@@ -9,7 +9,7 @@ notion_id: 32af8f99-3d81-818c-af27-c6add76d0279
 
 ## Context
 
-The core lifecycle surface shipped. Concerto can create, configure (flow/area/direction/agent/triggers), start/stop, delete/rename, land/next, and view PRs. The workspace now has a launcher pane plus a runs pane, so branch, PR, and recent run state are visible without leaving the app. `WaveSidebar` supports creation, rename, and deletion via context menu.
+The core lifecycle surface shipped. Concerto can create, configure (flow/area/direction/agent/triggers), start/stop, delete/rename, land/next, and view PRs. The workspace multiplexer provides launcher, runs, roadmap, terminal, and other panes in a persistent binary split tree per wave. Roadmap cards are now actionable (inline content preview, priority editing via file rename, play button for targeted ingest + flow run). `WaveSidebar` supports creation, rename, and deletion via context menu.
 
 Two gaps remain before the "full lifecycle without touching the terminal" finish line is crossed:
 

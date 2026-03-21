@@ -243,7 +243,7 @@ pub enum OpsCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// PM tool integration (import, sync)
+    /// PM tool integration (bootstrap, pull, export, sync)
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,

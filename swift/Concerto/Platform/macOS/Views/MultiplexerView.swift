@@ -26,7 +26,7 @@ struct MultiplexerView: View {
             worktreePath: currentWave.worktreePath ?? currentWave.api.localWorktree,
             focusedPaneId: focusedPaneId
         )
-        .background(Color.black)
+        .background(LoopflowPalette.dark.background)
     }
 }
 
@@ -116,8 +116,8 @@ private struct PaneContainerView: View {
         }
         .background(backgroundColor)
         .overlay {
-            RoundedRectangle(cornerRadius: 0)
-                .stroke(isFocused ? Color.loopflowBurgundy.opacity(0.7) : palette.border, lineWidth: isFocused ? 2 : 1)
+            Rectangle()
+                .stroke(isFocused ? Color.loopflowBurgundy.opacity(0.7) : palette.border.opacity(0.5), lineWidth: isFocused ? 2 : 0.5)
                 .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
@@ -149,7 +149,7 @@ private struct PaneContainerView: View {
     }
 
     private var backgroundColor: Color {
-        pane.type == .terminal ? .black : palette.surface
+        pane.type == .terminal ? LoopflowPalette.dark.background : palette.surface
     }
 }
 
@@ -204,7 +204,7 @@ private struct TerminalPaneView: View {
                 } else {
                     ProgressView("Starting tmux…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
+                        .background(LoopflowPalette.dark.background)
                 }
             } else {
                 paneUnavailable(
@@ -339,7 +339,9 @@ private struct RoadmapPaneView: View {
     @Environment(\.palette) private var palette
 
     @State private var expandedItemIds: Set<String> = []
-    private let terminalLauncher = TerminalLauncher()
+    @State private var actionErrors: [String: String] = [:]
+    @State private var ingestingItemIds: Set<String> = []
+    @State private var reprioritizingItemIds: Set<String> = []
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
@@ -347,6 +349,11 @@ private struct RoadmapPaneView: View {
 
     private var roadmapItems: [RoadmapItem] {
         wave?.content?.roadmapItems ?? []
+    }
+
+    private var waveIsRunning: Bool {
+        guard let wave else { return false }
+        return wave.status == .running || wave.status == .waiting
     }
 
     var body: some View {
@@ -377,21 +384,50 @@ private struct RoadmapPaneView: View {
 
     private func roadmapCard(_ item: RoadmapItem) -> some View {
         let isExpanded = expandedItemIds.contains(item.id)
-        let preview = previewText(item.content)
+        let preview = previewText(item.content, maxLines: 3)
+        let isIngesting = ingestingItemIds.contains(item.id)
+        let isReprioritizing = reprioritizingItemIds.contains(item.id)
+        let errorMessage = actionErrors[item.id]
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("\(String(format: "%02d", item.number)) · \(item.title)")
+                    Text(item.title)
                         .font(Typography.body())
                         .fontWeight(.medium)
-                    Text(item.isShipped ? "Shipped" : "Planned")
-                        .font(Typography.caption(10))
-                        .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
+                        .foregroundStyle(Color.loopflowBurgundy)
+                    HStack(spacing: Spacing.sm) {
+                        Text(item.isShipped ? "Shipped" : "Planned")
+                            .font(Typography.caption(10))
+                            .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
+                        Text("·")
+                            .font(Typography.caption(10))
+                            .foregroundStyle(palette.textSecondary)
+                        priorityMenu(for: item, isLoading: isReprioritizing)
+                    }
                 }
                 Spacer()
+                if !item.isShipped {
+                    Button {
+                        ingestAndBuild(item)
+                    } label: {
+                        Group {
+                            if isIngesting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "play.fill")
+                            }
+                        }
+                        .frame(width: HitTarget.minimum, height: HitTarget.minimum)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(waveIsRunning ? palette.textSecondary : Color.statusSuccess)
+                    .disabled(waveIsRunning || isIngesting)
+                    .accessibilityLabel("Ingest \(item.title) and run the wave")
+                }
             }
 
             if let text = item.content, !text.isEmpty {
@@ -411,20 +447,47 @@ private struct RoadmapPaneView: View {
                 }
             }
 
-            if let filePath = item.filePath {
-                Button {
-                    openInIDE(path: filePath)
-                } label: {
-                    Label("Open in Cursor", systemImage: "curlybraces")
-                        .font(Typography.caption())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(palette.textSecondary)
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
         }
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
+    private func priorityMenu(for item: RoadmapItem, isLoading: Bool) -> some View {
+        Menu {
+            ForEach(RoadmapPriority.allCases, id: \.self) { priority in
+                Button {
+                    updatePriority(priority, for: item)
+                } label: {
+                    if item.priority == priority {
+                        Label(priority.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(priority.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(item.priority.displayName)
+                    .font(Typography.caption(10))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(palette.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(isLoading)
     }
 
     private func toggleExpansion(for itemId: String) {
@@ -435,10 +498,34 @@ private struct RoadmapPaneView: View {
         }
     }
 
-    private func openInIDE(path: String) {
-        let remoteHost = repoState.repoTarget?.remoteHost
-        try? terminalLauncher.openInIDE(.cursor, at: URL(fileURLWithPath: path), remoteHost: remoteHost)
+    private func ingestAndBuild(_ item: RoadmapItem) {
+        guard let wave else { return }
+        actionErrors[item.id] = nil
+        ingestingItemIds.insert(item.id)
+        Task { @MainActor in
+            defer { ingestingItemIds.remove(item.id) }
+            do {
+                try await repoState.ingestAndBuild(wave: wave, item: item)
+            } catch {
+                actionErrors[item.id] = error.localizedDescription
+            }
+        }
     }
+
+    private func updatePriority(_ priority: RoadmapPriority, for item: RoadmapItem) {
+        guard let wave else { return }
+        actionErrors[item.id] = nil
+        reprioritizingItemIds.insert(item.id)
+        Task { @MainActor in
+            defer { reprioritizingItemIds.remove(item.id) }
+            do {
+                try repoState.updateRoadmapPriority(wave: wave, item: item, priority: priority)
+            } catch {
+                actionErrors[item.id] = error.localizedDescription
+            }
+        }
+    }
+
 }
 
 private struct ReadmePaneView: View {

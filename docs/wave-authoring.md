@@ -91,7 +91,8 @@ Priority meanings:
 - **`3-*`** — Medium: a big idea that is "when, not if"
 - **`4-*`** — Low: speculative work
 
-`ingest` picks from the highest-priority non-empty level first. Within a level, exact ordering is intentionally loose.
+`ingest` picks from the highest-priority non-empty level first. Within a level, the default fast path uses filename order.
+Use `lf ops ingest --item <filename-or-slug>` when you want to target a specific item instead of auto-picking.
 
 Each item needs:
 

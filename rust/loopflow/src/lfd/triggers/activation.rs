@@ -1,11 +1,14 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{create_parallel_wave_run, create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::cleanup_workspace_worktree;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
@@ -13,6 +16,7 @@ use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, Event, PendingActivation, Wave, WaveRun, WaveStatus,
 };
+use crate::ops::{ingest, IngestOptions, NullProgress};
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 
@@ -65,6 +69,48 @@ async fn create_wave_run(
     }
 }
 
+fn target_branch_ref(target_branch: &str) -> Option<&str> {
+    match target_branch {
+        "" | "main" => None,
+        branch => Some(branch),
+    }
+}
+
+fn ingest_roadmap_item_for_run(wave: &Wave, run: &WaveRun, item: &str) -> anyhow::Result<()> {
+    ingest(
+        Path::new(&run.worktree),
+        &IngestOptions {
+            wave: Some(wave.name().clone()),
+            item: Some(item.to_string()),
+        },
+        &NullProgress,
+    )
+    .map_err(|err| anyhow!("ingest failed: {err}"))?;
+
+    Ok(())
+}
+
+async fn fail_immediate_activation(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    wave: &Wave,
+    run: &mut WaveRun,
+    error: &anyhow::Error,
+) {
+    run.status = crate::lfd::types::WaveRunStatus::Failed;
+    run.ended_at = Some(time::OffsetDateTime::now_utc());
+    run.error = Some(error.to_string());
+    let _ = store.update_wave_run(run).await;
+
+    if let Ok(Some(mut stored_wave)) = store.get_wave(wave.id()).await {
+        stored_wave.status = WaveStatus::Idle;
+        let _ = store.update_wave(&stored_wave).await;
+    }
+
+    let _ = cleanup_workspace_worktree(Path::new(&run.worktree));
+    event_hub.send(Event::wave_updated(wave.id().clone()));
+}
+
 #[derive(Debug, Clone)]
 pub struct ActivationEnvelope {
     pub wave_id: LfdId,
@@ -93,6 +139,14 @@ impl ActivationEnvelope {
             target_branch: target_branch.into(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImmediateActivation<'a> {
+    pub wave: &'a Wave,
+    pub flow_override: Option<String>,
+    pub roadmap_item: Option<String>,
+    pub envelope: ActivationEnvelope,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,15 +296,20 @@ pub async fn spawn_immediate_activation(
     executor: &WaveExecutor,
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
-    wave: &Wave,
-    flow_override: Option<String>,
-    envelope: ActivationEnvelope,
-) -> Option<WaveRun> {
+    activation: ImmediateActivation<'_>,
+) -> anyhow::Result<Option<WaveRun>> {
+    let ImmediateActivation {
+        wave,
+        flow_override,
+        roadmap_item,
+        envelope,
+    } = activation;
+
     if wave.status() == WaveStatus::Paused {
-        return None;
+        return Ok(None);
     }
     if scheduler.has_active_session(wave.id().as_str()) {
-        return None;
+        return Ok(None);
     }
 
     let run_id = LfdId::new();
@@ -258,8 +317,8 @@ pub async fn spawn_immediate_activation(
         Ok(guard) => guard,
         Err(_reason) => {
             // Fall back to queue when scheduler is full.
-            enqueue_pending_activation(store, event_hub, envelope).await;
-            return None;
+            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            return Ok(None);
         }
     };
 
@@ -276,30 +335,39 @@ pub async fn spawn_immediate_activation(
             error = %err,
             "failed to write immediate activation dispatch log"
         );
-        return None;
+        return Err(anyhow!("failed to write activation log: {err}"));
     }
 
-    let target = if envelope.target_branch.is_empty() || envelope.target_branch == "main" {
-        None
-    } else {
-        Some(envelope.target_branch.as_str())
-    };
+    let target = target_branch_ref(&envelope.target_branch);
     let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
                 wave_id = %wave.id(),
                 error = %err,
-                "failed to create parallel wave run for immediate activation"
+                "failed to create wave run for immediate activation"
             );
             if activation_requires_manual_resolution(&err) {
                 pause_wave_after_activation_conflict(store, event_hub, wave, &err).await;
             }
-            return None;
+            return Err(err);
         }
     };
     if let Some(flow_override) = flow_override {
         run.snapshot.flow = flow_override;
+    }
+    if let Some(item) = roadmap_item {
+        if let Err(err) = ingest_roadmap_item_for_run(wave, &run, &item) {
+            tracing::error!(
+                wave_id = %wave.id(),
+                run_id = %run.id,
+                item = %item,
+                error = %err,
+                "failed targeted ingest before immediate activation"
+            );
+            fail_immediate_activation(store, event_hub, wave, &mut run, &err).await;
+            return Err(err);
+        }
     }
     run.target_branch = envelope.target_branch.clone();
     run.activation_log_id = Some(dispatch_log.id.clone());
@@ -319,49 +387,7 @@ pub async fn spawn_immediate_activation(
         run.clone(),
         slot_guard,
     );
-    Some(run)
-}
-
-pub async fn dispatch_or_enqueue_activation(
-    store: &SharedStore,
-    executor: &WaveExecutor,
-    scheduler: &Arc<Scheduler>,
-    event_hub: &EventHub,
-    wave: &Wave,
-    flow_override: Option<String>,
-    envelope: ActivationEnvelope,
-) -> bool {
-    let active_runs = match store.count_active_wave_runs(wave.id()).await {
-        Ok(count) => count,
-        Err(err) => {
-            tracing::error!(
-                wave_id = %wave.id(),
-                error = %err,
-                "failed to count active wave runs"
-            );
-            return false;
-        }
-    };
-
-    if active_runs >= wave.workers() {
-        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
-        return matches!(
-            outcome,
-            Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-        );
-    }
-
-    let result = spawn_immediate_activation(
-        store,
-        executor,
-        scheduler,
-        event_hub,
-        wave,
-        flow_override,
-        envelope,
-    )
-    .await;
-    result.is_some()
+    Ok(Some(run))
 }
 
 pub async fn dispatch_pending_activations(
@@ -454,11 +480,7 @@ pub async fn dispatch_wave_if_ready(
         None => None,
     };
 
-    let target = if activation.target_branch.is_empty() || activation.target_branch == "main" {
-        None
-    } else {
-        Some(activation.target_branch.as_str())
-    };
+    let target = target_branch_ref(&activation.target_branch);
     let mut run = match create_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {

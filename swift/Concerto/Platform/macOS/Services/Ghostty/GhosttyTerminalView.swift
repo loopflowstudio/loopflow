@@ -104,7 +104,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor.loopflowDarkBackground.cgColor
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
     }
@@ -660,7 +660,7 @@ struct GhosttyTerminalView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.9))
+        .background(LoopflowPalette.dark.background.opacity(0.9))
     }
 }
 

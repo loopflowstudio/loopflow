@@ -157,6 +157,7 @@ Repo windows now open into a queue view when no wave is selected:
 Selected waves now open into a multiplexer workspace:
 
 - Default panes show **Roadmap**, **Runs**, and a Ghostty-backed **Terminal**
+- Roadmap cards show inline summaries, let you change priority, and can ingest + run a specific item from the play button
 - Cmd+K switches waves and opens or focuses panes like **README** and **Launcher**
 - Waves without worktrees still keep roadmap/readme/runs panes available; only terminal-style panes show a worktree placeholder
 - Interactive sessions still take over the workspace when a flow needs input

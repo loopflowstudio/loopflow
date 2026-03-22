@@ -2,7 +2,7 @@
 asana_id: '1213718347030073'
 linear_id: 75eee601-381e-47be-be6a-7386fd2fefca
 ---
-# 06: iOS TestFlight Distribution
+# iOS TestFlight Distribution
 
 **Finish line:** Concerto's iOS target builds in CI, uploads to TestFlight, and the installed app can sign in, discover `lfd`, and connect on a real device.
 

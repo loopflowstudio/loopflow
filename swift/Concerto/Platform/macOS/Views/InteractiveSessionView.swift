@@ -129,7 +129,7 @@ struct InteractiveSessionView: View {
             sessionId: session.id,
             manager: ghosttyManager
         )
-        .background(Color.black)
+        .background(LoopflowPalette.dark.background)
     }
 
     // MARK: - Actions

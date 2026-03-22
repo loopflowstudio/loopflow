@@ -1,4 +1,4 @@
-# 02b: Wave Modes — `flow` Replacing `manual`
+# Wave Modes — `flow` Replacing `manual`
 
 **Finish line:** Wave mode `manual` is replaced by `flow`. `flow` means "parented by some loop, cron, or human initiation — not the root." `manual` is deprecated but treated as alias during transition.
 

@@ -6,12 +6,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+#[cfg(test)]
+use serde_json::{json, Value};
 use tokio::process::Command;
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
+#[cfg(test)]
+use crate::engine::flow::ConcreteStep;
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
@@ -20,12 +24,19 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::triggers::{dispatch_or_enqueue_activation, ActivationEnvelope};
+#[cfg(test)]
+use crate::lfd::triggers::spawn_run_task_with_slot;
+use crate::lfd::triggers::{
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
+    ActivationEnvelope, EnqueueOutcome, ImmediateActivation,
+};
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Signal, TerminalSession,
     TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     CI_FIX_FLOW, TMUX_TERMINAL_SOURCE,
 };
+#[cfg(test)]
+use crate::lfd::types::{AttentionKind, AttentionStatus};
 
 use super::docker::DockerExecutor;
 use super::helpers::{
@@ -529,16 +540,50 @@ impl WaveExecutor {
                 "",
                 source_branch,
             );
-            let activated = dispatch_or_enqueue_activation(
-                &self.store,
-                self,
-                &self.scheduler,
-                &self.event_hub,
-                &listener_wave,
-                trigger.flow.clone(),
-                envelope,
-            )
-            .await;
+            let activated = if listener_wave.workers() == 1 {
+                let enqueued = matches!(
+                    enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
+                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+                );
+                if enqueued {
+                    let _ = dispatch_wave_if_ready(
+                        &self.store,
+                        self,
+                        &self.scheduler,
+                        &self.event_hub,
+                        &listener_wave,
+                    )
+                    .await;
+                }
+                enqueued
+            } else {
+                match spawn_immediate_activation(
+                    &self.store,
+                    self,
+                    &self.scheduler,
+                    &self.event_hub,
+                    ImmediateActivation {
+                        wave: &listener_wave,
+                        flow_override: trigger.flow.clone(),
+                        roadmap_item: None,
+                        envelope,
+                    },
+                )
+                .await
+                {
+                    Ok(Some(_)) => true,
+                    Ok(None) => false,
+                    Err(err) => {
+                        warn!(
+                            wave_id = %listener_wave.id(),
+                            trigger_id = %trigger.id,
+                            error = %err,
+                            "failed to activate listener wave immediately"
+                        );
+                        false
+                    }
+                }
+            };
             if activated {
                 trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_trigger(&trigger).await {
@@ -716,7 +761,242 @@ impl WaveExecutor {
         let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         Ok(exit_code)
     }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_terminal_session_and_resume(
+        &self,
+        wave_id: LfdId,
+        run_id: LfdId,
+        session_id: LfdId,
+    ) -> Result<()> {
+        let status = self.wait_for_terminal_session_status(&session_id).await?;
+        let mut run = self
+            .store
+            .get_wave_run(&run_id)
+            .await?
+            .ok_or_else(|| anyhow!("wave run {run_id} not found"))?;
+        let wave = self
+            .store
+            .get_wave(&wave_id)
+            .await?
+            .ok_or_else(|| anyhow!("wave {wave_id} not found"))?;
+
+        // Resolve the attention item for this session.
+        if let Ok(items) = self
+            .store
+            .list_attention_items(None, Some(AttentionKind::Interactive))
+            .await
+        {
+            for item in items {
+                if item
+                    .context
+                    .get("terminal_session_id")
+                    .and_then(|v| v.as_str())
+                    == Some(session_id.as_str())
+                {
+                    let mut resolved = item.clone();
+                    resolved.status = AttentionStatus::Resolved;
+                    resolved.resolved_at = Some(OffsetDateTime::now_utc());
+                    let _ = self.store.upsert_attention_item(&resolved).await;
+                }
+            }
+        }
+
+        if status != TerminalSessionStatus::Succeeded {
+            let error_msg = format!("terminal session {session_id} failed");
+            self.fail_run(&mut run, &wave, error_msg).await?;
+            return Ok(());
+        }
+
+        self.set_wave_status(wave.id(), WaveStatus::Running).await;
+        self.resume_run_execution(run).await?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn wait_for_terminal_session_status(
+        &self,
+        session_id: &LfdId,
+    ) -> Result<TerminalSessionStatus> {
+        loop {
+            let session = self
+                .store
+                .get_terminal_session(session_id)
+                .await
+                .map_err(|err| anyhow!("failed to load terminal session {session_id}: {err}"))?
+                .ok_or_else(|| anyhow!("terminal session {session_id} not found"))?;
+            if session.status.is_terminal() {
+                return Ok(session.status);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    #[cfg(test)]
+    async fn resume_run_execution(&self, run: WaveRun) -> Result<()> {
+        // Retry for up to 60s (120 × 500ms) waiting for a scheduler slot.
+        for _ in 0..120 {
+            if let Some(current) = self.store.get_wave_run(&run.id).await? {
+                if current.status != WaveRunStatus::Running {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+
+            if let Ok(slot_guard) = self.scheduler.acquire_guard(run.id.as_str()).await {
+                spawn_run_task_with_slot(
+                    self.store.clone(),
+                    self.clone(),
+                    self.event_hub.clone(),
+                    run,
+                    slot_guard,
+                );
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        Err(anyhow!(
+            "unable to resume run {}: no scheduler slots available",
+            run.id
+        ))
+    }
 }
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct InteractiveAttentionDetails {
+    design_path: Option<String>,
+    mutation_summary: Option<String>,
+    summary_source: Option<String>,
+}
+
+#[cfg(test)]
+fn interactive_attention_details(
+    step: &ConcreteStep,
+    run: &WaveRun,
+) -> InteractiveAttentionDetails {
+    let worktree = Path::new(&run.worktree);
+    match step.step.name.as_str() {
+        "review-design" => {
+            let design_path = find_review_design_path(worktree, &run.branch);
+            let summary_source = design_path
+                .as_ref()
+                .and_then(|path| read_context_file(worktree, path));
+            InteractiveAttentionDetails {
+                design_path,
+                mutation_summary: None,
+                summary_source,
+            }
+        }
+        "wave/review" => {
+            let mutation_summary = read_context_file(worktree, "scratch/wave-mutate.md");
+            InteractiveAttentionDetails {
+                design_path: None,
+                summary_source: mutation_summary.clone(),
+                mutation_summary,
+            }
+        }
+        _ => InteractiveAttentionDetails::default(),
+    }
+}
+
+#[cfg(test)]
+fn build_interactive_context(
+    step: &ConcreteStep,
+    terminal_session: &TerminalSession,
+    details: &InteractiveAttentionDetails,
+) -> Value {
+    let mut context = json!({
+        "step": step.step.name.clone(),
+        "terminal_session_id": terminal_session.id.clone(),
+    });
+
+    if let Some(design_path) = &details.design_path {
+        context["design_path"] = Value::String(design_path.clone());
+    }
+    if let Some(summary) = &details.mutation_summary {
+        context["mutation_summary"] = Value::String(summary.clone());
+    }
+
+    context
+}
+
+#[cfg(test)]
+fn interactive_summary(details: &InteractiveAttentionDetails) -> String {
+    details
+        .summary_source
+        .as_deref()
+        .and_then(first_meaningful_line)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+fn find_review_design_path(worktree: &Path, branch: &str) -> Option<String> {
+    let branch_candidate = format!("scratch/{branch}.md");
+    if worktree.join(&branch_candidate).is_file() {
+        return Some(branch_candidate);
+    }
+
+    let scratch_dir = worktree.join("scratch");
+    let mut candidates = std::fs::read_dir(scratch_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "md")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        !name.starts_with('.')
+                            && name != "questions.md"
+                            && name != "wave-mutate.md"
+                            && name != "wave-review.md"
+                            && !name.ends_with("-review.md")
+                    })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    });
+    candidates.reverse();
+
+    candidates.into_iter().next().and_then(|path| {
+        path.strip_prefix(worktree)
+            .ok()
+            .map(|relative| relative.to_string_lossy().to_string())
+    })
+}
+
+#[cfg(test)]
+fn read_context_file(worktree: &Path, relative_path: &str) -> Option<String> {
+    let text = std::fs::read_to_string(worktree.join(relative_path)).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+fn first_meaningful_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty() && *line != "---" && !line.starts_with('#') && !line.starts_with("```")
+        })
+        .map(ToString::to_string)
+}
+
+// -----------------------------------------------------------------------------
+// Or-routing helpers
+// -----------------------------------------------------------------------------
 
 fn flow_step_env(
     wave_id: &LfdId,
@@ -752,6 +1032,7 @@ pub(crate) fn classify_repair_flow(failed_run: &WaveRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::flow::Step;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
@@ -1181,6 +1462,193 @@ mod tests {
             "listener should not start immediately when scheduler is full"
         );
     }
+
+    #[tokio::test]
+    async fn failed_terminal_session_marks_run_failed() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (wave_id, run_id) = create_wave_and_run(&store, repo, "missing-flow").await;
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Waiting;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run update should succeed");
+
+        let session_id = LfdId::new();
+        let session = TerminalSession {
+            id: session_id.clone(),
+            wave_id: wave_id.clone(),
+            wave_run_id: Some(run_id.clone()),
+            step: "design".to_string(),
+            agent: "claude".to_string(),
+            cwd: repo.to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Failed,
+            attached_at: None,
+            started_at: None,
+            completed_at: Some(OffsetDateTime::now_utc()),
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+            tmux_name: "lf-test".to_string(),
+        };
+        store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .wait_for_terminal_session_and_resume(
+                wave_id.clone(),
+                run_id.clone(),
+                session_id.clone(),
+            )
+            .await
+            .expect("resume should succeed");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert!(updated_run
+            .error
+            .expect("failed run should include an error")
+            .contains(&session_id.to_string()));
+
+        let updated_wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        assert_eq!(updated_wave.status, WaveStatus::Failed);
+    }
+
+    #[test]
+    fn build_interactive_context_uses_design_and_mutation_artifacts() {
+        let tmp = tempdir().expect("tempdir");
+        let worktree = tmp.path();
+        std::fs::create_dir_all(worktree.join("scratch")).expect("scratch dir");
+        std::fs::write(
+            worktree.join("scratch/feature-branch.md"),
+            "# Design\n\nUse attention items for interactive steps.\n",
+        )
+        .expect("write design doc");
+        std::fs::write(
+            worktree.join("scratch/wave-mutate.md"),
+            "# Mutation summary\n\n- Rebalance the PM wave.\n",
+        )
+        .expect("write mutate summary");
+
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            snapshot: WaveRunSnapshot {
+                repo: worktree.to_string_lossy().to_string(),
+                flow: "build".to_string(),
+                direction: vec![],
+                area: vec![],
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Waiting,
+            worktree: worktree.to_string_lossy().to_string(),
+            branch: "feature-branch".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+            execution_cursor: None,
+            activation_log_id: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: "stack".to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
+            target_branch: "main".to_string(),
+            repair_of: None,
+            pr: None,
+        };
+        let session = TerminalSession {
+            id: LfdId::new(),
+            wave_id: run.wave_id.clone(),
+            wave_run_id: Some(run.id.clone()),
+            step: "review-design".to_string(),
+            agent: "claude".to_string(),
+            cwd: worktree.to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+            tmux_name: "lf-test-review".to_string(),
+        };
+
+        let review_step = ConcreteStep {
+            step: Step::named("review-design"),
+            flow_parents: vec![],
+        };
+        let review_details = interactive_attention_details(&review_step, &run);
+        let review_context = build_interactive_context(&review_step, &session, &review_details);
+        assert_eq!(review_context["step"], "review-design");
+        assert_eq!(review_context["design_path"], "scratch/feature-branch.md");
+        assert_eq!(
+            interactive_summary(&review_details),
+            "Use attention items for interactive steps."
+        );
+
+        let wave_review_step = ConcreteStep {
+            step: Step::named("wave/review"),
+            flow_parents: vec![],
+        };
+        let wave_review_details = interactive_attention_details(&wave_review_step, &run);
+        let wave_review_context =
+            build_interactive_context(&wave_review_step, &session, &wave_review_details);
+        assert_eq!(wave_review_context["step"], "wave/review");
+        assert!(wave_review_context["mutation_summary"]
+            .as_str()
+            .expect("mutation summary")
+            .contains("Rebalance the PM wave."));
+        assert_eq!(
+            interactive_summary(&wave_review_details),
+            "- Rebalance the PM wave."
+        );
+    }
+
+    // Interactive checkpoint tests removed during rebase — per-step execution
+    // was replaced with flow-level tmux sessions on main. Re-add when
+    // interactive checkpoints are re-integrated.
 
     #[test]
     fn classify_repair_flow_returns_debug_for_ci_fix() {

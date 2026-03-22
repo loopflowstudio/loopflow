@@ -197,8 +197,15 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 Ok(())
             }
         },
-        OpsCommand::Ingest { wave } => {
-            ingest(repo, &IngestOptions { wave: wave.clone() }, progress)?;
+        OpsCommand::Ingest { wave, item } => {
+            ingest(
+                repo,
+                &IngestOptions {
+                    wave: wave.clone(),
+                    item: item.clone(),
+                },
+                progress,
+            )?;
             Ok(())
         }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),

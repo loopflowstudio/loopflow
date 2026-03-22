@@ -19,7 +19,9 @@ struct WaveModelTests {
         status: WaveStatus = .idle,
         iteration: Int = 0,
         recentSteps: [StepRun] = [],
-        waitingReason: WaitingReason? = nil
+        waitingReason: WaitingReason? = nil,
+        diffStat: String? = nil,
+        hasDiff: Bool = false
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -31,8 +33,10 @@ struct WaveModelTests {
                 area: area,
                 triggers: triggers,
                 status: status,
-                iteration: iteration
+                iteration: iteration,
+                diffStat: diffStat
             ),
+            hasDiff: hasDiff,
             recentSteps: recentSteps,
             waitingReason: waitingReason
         )
@@ -120,6 +124,17 @@ struct WaveModelTests {
         let wave = makeWave(id: "test", repo: "/tmp", area: ["."])
 
         #expect(wave.areaDisplay == ".")
+    }
+
+    @Test("diff helpers share parsed stat counts")
+    func diffHelpersUseSharedCounts() {
+        let wave = makeWave(
+            diffStat: "3 files changed, 12 insertions(+), 4 deletions(-)",
+            hasDiff: true
+        )
+
+        #expect(wave.diffIndicator == "+12 −4")
+        #expect(wave.diffIsPositive == true)
     }
 
     @Test("areaDisplay returns empty for nil area")

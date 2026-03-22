@@ -68,8 +68,10 @@ struct WaveContentParserTests {
         #expect(content?.roadmapItems.count == 2)
         #expect(content?.roadmapItems[0].id == "01-design-entry")
         #expect(content?.roadmapItems[0].title == "Design-first entry")
+        #expect(content?.roadmapItems[0].priority == .urgent)
         #expect(content?.roadmapItems[0].isShipped == true)
         #expect(content?.roadmapItems[1].id == "02-detail-panel")
+        #expect(content?.roadmapItems[1].priority == .high)
         #expect(content?.roadmapItems[1].isShipped == false)
     }
 
@@ -145,6 +147,8 @@ struct WaveContentParserTests {
 
         let first = content?.roadmapItems[0]
         #expect(first?.title == "Feature Alpha")
+        #expect(first?.slug == "feature-alpha")
+        #expect(first?.fileName == "01-feature-alpha.md")
         #expect(first?.content?.contains("first paragraph") == true)
         #expect(first?.filePath != nil)
 
@@ -226,6 +230,121 @@ struct WaveContentParserTests {
         let with = WaveContentParser.parse(repoRoot: repoRoot, waveName: "doc-only", branch: "my-branch")
         #expect(with != nil)
         #expect(with?.scratchDoc == "Design content")
+    }
+
+    @Test("parses bucketed roadmap filenames and sorts by priority")
+    func parsesBucketedRoadmapItems() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("bucket-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        try "# Minimal".write(
+            to: waveDir.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try "# Medium".write(
+            to: waveDir.appendingPathComponent("3-medium.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# Urgent".write(
+            to: waveDir.appendingPathComponent("1-urgent.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# Legacy".write(
+            to: waveDir.appendingPathComponent("02-legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "bucket-wave")
+        let items = try #require(content?.roadmapItems)
+
+        #expect(items.map(\.fileName) == ["1-urgent.md", "3-medium.md", "02-legacy.md"])
+        #expect(items[0].priority == .urgent)
+        #expect(items[1].priority == .medium)
+        #expect(items[2].priority == .high)
+    }
+
+    @Test("sorts canonical priority buckets ahead of legacy numbers in the same rank")
+    func sortsBucketedItemsAheadOfLegacyNumbers() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("mixed-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        try "# Minimal".write(
+            to: waveDir.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try "# Canonical".write(
+            to: waveDir.appendingPathComponent("2-canonical.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# Legacy".write(
+            to: waveDir.appendingPathComponent("02-legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "mixed-wave")
+        let items = try #require(content?.roadmapItems)
+
+        #expect(items.map(\.fileName) == ["2-canonical.md", "02-legacy.md"])
+        #expect(items.map(\.priority) == [.high, .high])
+    }
+
+    @Test("strips number prefixes from titles since priority is shown visually")
+    func stripsNumberPrefixFromTitles() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("prefix-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        try "# Minimal".write(
+            to: waveDir.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try "# 01: CLI Contract".write(
+            to: waveDir.appendingPathComponent("1-cli-contract.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# 02b: Wave Modes".write(
+            to: waveDir.appendingPathComponent("2-wave-modes.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# No Prefix Here".write(
+            to: waveDir.appendingPathComponent("3-no-prefix.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "prefix-wave")
+        let items = try #require(content?.roadmapItems)
+
+        #expect(items[0].title == "CLI Contract")
+        #expect(items[1].title == "Wave Modes")
+        #expect(items[2].title == "No Prefix Here")
     }
 
     private func makeTempRepo() throws -> URL {

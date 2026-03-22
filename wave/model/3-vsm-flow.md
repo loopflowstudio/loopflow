@@ -2,7 +2,7 @@
 linear_id: 852b8034-d57d-4210-9c1e-0be33e5a8cfc
 notion_id: 32af8f99-3d81-81c7-8810-c1ce50f7962d
 ---
-# 02: VSM Flow
+# VSM Flow
 
 **Finish line:** `lf vsm` runs a single-pass viable system audit — s5 through s2 — against a chord-wave's members. Each step is a builtin. The flow produces code changes and ships in one PR.
 

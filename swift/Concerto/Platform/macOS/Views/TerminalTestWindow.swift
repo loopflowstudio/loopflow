@@ -81,7 +81,7 @@ struct TerminalTestWindow: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.9))
+        .background(LoopflowPalette.dark.background.opacity(0.9))
     }
 
     @ViewBuilder
@@ -92,7 +92,7 @@ struct TerminalTestWindow: View {
             workingDirectory: homeDir,
             manager: ghosttyManager
         )
-        .background(Color.black)
+        .background(LoopflowPalette.dark.background)
     }
 }
 

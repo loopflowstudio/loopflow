@@ -195,6 +195,18 @@ jobs:
           while True:
               remaining = deadline - time.monotonic()
               if remaining <= 0:
+                  # Kill xcodebuild first so it releases the result bundle lock,
+                  # then check xcresulttool for the authoritative verdict.
+                  subprocess.run(
+                      ["/bin/ps", "-axo", "pid,ppid,etime,stat,command"],
+                      check=False,
+                  )
+                  process.terminate()
+                  try:
+                      process.wait(timeout=15)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
                   success, reason = xcresult_indicates_success(result_bundle_path)
                   if success:
                       print(
@@ -212,16 +224,6 @@ jobs:
                           f"::error::xcodebuild exceeded {timeout_seconds}s ({reason})",
                           flush=True,
                       )
-                  subprocess.run(
-                      ["/bin/ps", "-axo", "pid,ppid,etime,stat,command"],
-                      check=False,
-                  )
-                  process.terminate()
-                  try:
-                      process.wait(timeout=15)
-                  except subprocess.TimeoutExpired:
-                      process.kill()
-                      process.wait()
                   if success or saw_success_summary:
                       print(
                           "Timed out after tests completed; accepting successful test output.",

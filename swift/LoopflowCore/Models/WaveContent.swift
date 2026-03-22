@@ -1,5 +1,37 @@
 import Foundation
 
+public enum RoadmapPriority: Int, Sendable, CaseIterable, Equatable, Hashable {
+    case urgent = 1
+    case high = 2
+    case medium = 3
+    case low = 4
+
+    public var displayName: String {
+        switch self {
+        case .urgent: return "Urgent"
+        case .high: return "High"
+        case .medium: return "Medium"
+        case .low: return "Low"
+        }
+    }
+
+    public var filenamePrefix: String {
+        String(rawValue)
+    }
+
+    public static func from(prefix: String) -> RoadmapPriority? {
+        parseFilenamePrefix(prefix)?.priority
+    }
+
+    static func parseFilenamePrefix(_ prefix: String) -> (priority: Self, isCanonical: Bool)? {
+        let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(normalized), let priority = Self(rawValue: value) else {
+            return nil
+        }
+        return (priority, normalized == priority.filenamePrefix)
+    }
+}
+
 public struct WaveContent: Sendable, Equatable, Hashable {
     public var vision: String?
     public var strategy: String?
@@ -35,6 +67,9 @@ public struct RoadmapItem: Sendable, Identifiable, Equatable, Hashable {
     public var id: String
     public var number: Int
     public var title: String
+    public var slug: String
+    public var fileName: String
+    public var priority: RoadmapPriority
     public var isShipped: Bool
     public var content: String?
     public var filePath: String?
@@ -43,6 +78,9 @@ public struct RoadmapItem: Sendable, Identifiable, Equatable, Hashable {
         id: String,
         number: Int,
         title: String,
+        slug: String,
+        fileName: String,
+        priority: RoadmapPriority,
         isShipped: Bool,
         content: String? = nil,
         filePath: String? = nil
@@ -50,6 +88,9 @@ public struct RoadmapItem: Sendable, Identifiable, Equatable, Hashable {
         self.id = id
         self.number = number
         self.title = title
+        self.slug = slug
+        self.fileName = fileName
+        self.priority = priority
         self.isShipped = isShipped
         self.content = content
         self.filePath = filePath

@@ -86,7 +86,9 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
             ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
         },
-        OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
+        OpsCommand::Ingest { wave, item } => {
+            ingest_cmd(wave.as_deref(), item.as_deref(), &progress)
+        }
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
     }
@@ -261,12 +263,13 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
+fn ingest_cmd(wave: Option<&str>, item: Option<&str>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = ingest(
         &repo_root,
         &IngestOptions {
             wave: wave.map(str::to_string),
+            item: item.map(str::to_string),
         },
         progress,
     )?;

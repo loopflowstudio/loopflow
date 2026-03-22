@@ -34,15 +34,18 @@ public struct RunOverrides: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
+    public var roadmapItem: String?
 
     public init(
         area: [String]? = nil,
         direction: [String]? = nil,
-        flow: String? = nil
+        flow: String? = nil,
+        roadmapItem: String? = nil
     ) {
         self.area = area
         self.direction = direction
         self.flow = flow
+        self.roadmapItem = roadmapItem
     }
 }
 
@@ -1048,6 +1051,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             if let area = overrides.area { body["area"] = area }
             if let direction = overrides.direction { body["direction"] = direction }
             if let flow = overrides.flow { body["flow"] = flow }
+            if let roadmapItem = overrides.roadmapItem { body["roadmap_item"] = roadmapItem }
         }
 
         let request = try makeRequest(

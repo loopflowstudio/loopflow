@@ -1503,6 +1503,7 @@ mod tests {
             completed_at: Some(OffsetDateTime::now_utc()),
             created_at: OffsetDateTime::now_utc(),
             completion_token: None,
+            tmux_name: "lf-test".to_string(),
         };
         store
             .create_terminal_session(&session)
@@ -1611,6 +1612,7 @@ mod tests {
             completed_at: None,
             created_at: OffsetDateTime::now_utc(),
             completion_token: None,
+            tmux_name: "lf-test-review".to_string(),
         };
 
         let review_step = ConcreteStep {

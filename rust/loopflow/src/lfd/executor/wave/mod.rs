@@ -36,7 +36,7 @@ use crate::lfd::types::{
     CI_FIX_FLOW, TMUX_TERMINAL_SOURCE,
 };
 #[cfg(test)]
-use crate::lfd::types::{AttentionKind, AttentionStatus};
+use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 
 use super::docker::DockerExecutor;
 use super::helpers::{
@@ -1646,9 +1646,123 @@ mod tests {
         );
     }
 
-    // Interactive checkpoint tests removed during rebase — per-step execution
-    // was replaced with flow-level tmux sessions on main. Re-add when
-    // interactive checkpoints are re-integrated.
+    #[tokio::test]
+    async fn completed_terminal_session_resolves_interactive_attention() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- review-design\n");
+        repo.create_file(
+            "scratch/main.md",
+            "# Design review\n\nSurface interactive checkpoints in the queue.\n",
+        );
+        repo.stage_all();
+        repo.commit("add interactive flow");
+
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "test-flow").await;
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Waiting;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run update should succeed");
+
+        let mut wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        wave.status = WaveStatus::Waiting;
+        store
+            .update_wave(&wave)
+            .await
+            .expect("wave update should succeed");
+
+        let session_id = LfdId::new();
+        let session = TerminalSession {
+            id: session_id.clone(),
+            wave_id: wave_id.clone(),
+            wave_run_id: Some(run_id.clone()),
+            step: "review-design".to_string(),
+            agent: "claude".to_string(),
+            cwd: repo.path().to_string_lossy().to_string(),
+            argv: vec!["claude".to_string()],
+            env: Default::default(),
+            source: "wave_step".to_string(),
+            status: TerminalSessionStatus::Succeeded,
+            attached_at: None,
+            started_at: None,
+            completed_at: Some(OffsetDateTime::now_utc()),
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+            tmux_name: "lf-test-resolve".to_string(),
+        };
+        store
+            .create_terminal_session(&session)
+            .await
+            .expect("terminal session should be created");
+
+        let attention_item = AttentionItem {
+            id: LfdId::new(),
+            wave_id: wave_id.clone(),
+            run_id: Some(run_id.clone()),
+            kind: AttentionKind::Interactive,
+            status: AttentionStatus::Surfaced,
+            title: "Design review: fork-wave".to_string(),
+            summary: "Surface interactive checkpoints in the queue.".to_string(),
+            context: json!({
+                "step": "review-design",
+                "terminal_session_id": session_id,
+                "design_path": "scratch/main.md",
+            }),
+            surfaced_at: OffsetDateTime::now_utc(),
+            viewed_at: None,
+            resolved_at: None,
+        };
+        store
+            .upsert_attention_item(&attention_item)
+            .await
+            .expect("attention item should be created");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .wait_for_terminal_session_and_resume(
+                wave_id.clone(),
+                run_id.clone(),
+                session_id.clone(),
+            )
+            .await
+            .expect("resume should succeed");
+
+        let resolved = store
+            .get_attention_item(&attention_item.id)
+            .await
+            .expect("attention lookup should succeed")
+            .expect("attention item should exist");
+        assert_eq!(resolved.status, AttentionStatus::Resolved);
+        assert!(resolved.resolved_at.is_some());
+    }
 
     #[test]
     fn classify_repair_flow_returns_debug_for_ci_fix() {

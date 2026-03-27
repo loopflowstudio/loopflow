@@ -352,6 +352,8 @@ lf op pm push-diff --all   # push-diff every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
 ```
 
+Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
+
 PM-backed `lf ops ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

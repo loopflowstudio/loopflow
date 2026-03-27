@@ -1,4 +1,0 @@
-# Open questions
-
-- `jack-heart.lfnext.20260327_1357` has no implementation diff from current upstream `origin/main` (`c358e9cf44add6e1d530a2fb216d4231e1bb49bc`), while the local `main` ref is stale at `9da445a5bccb809da40188454df5524f43d4bf9b`; there is no matching design doc at `scratch/jack-heart.lfnext.20260327_1357.md`. I assumed this gate pass should validate the no-op state, record that there is no product diff to review, and prepare no-op PR copy rather than inventing changes.
-- During validation, `tests/e2e/test_smoke.sh` preserved this worktree as `/Users/jack/src/loopflow.lfnext.20260327_1357`. That left `.venv/bin/pytest` with a stale shebang to `/Users/jack/src/loopflow.lfnext/.venv/bin/python`, so `uv run pytest ...` failed with `bad interpreter` while `uv run python -m pytest ...` passed. I treated that as an environment artifact and did not broaden this no-op branch into a tooling fix.

@@ -60,7 +60,7 @@ struct TerminalWorkspaceView: View {
                         .accessibilityHidden(session.id != selectedSession.id)
                 }
             }
-            .background(Color.black)
+            .background(LoopflowPalette.dark.background)
         }
     }
 }

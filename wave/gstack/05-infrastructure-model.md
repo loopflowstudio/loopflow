@@ -126,7 +126,7 @@ providers:
   pm: notion
 ```
 
-When the system needs to deploy, it checks the active workstyle's `providers.deployment`. When it needs to store a secret, it checks `providers.secrets`. The workstyle is opinionated about which providers to use — you're adopting someone's actual stack.
+`lf workstyle apply gstack` writes these provider defaults into your config. `lf workstyle apply lfjack` resets them. You can reapply any workstyle at any time — it's a config reset, not a runtime dispatch layer. Override individual providers after applying if you want gstack's flow but Railway instead of Vercel.
 
 ## Done when
 

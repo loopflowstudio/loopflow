@@ -83,7 +83,10 @@ Utility skills (careful, freeze, guard, unfreeze, browse, setup-*) become hooks 
 
 ### `lf ops workstyle sync`
 
-Pulls SKILL.md files from a git repo, strips gstack-specific preamble (telemetry, update checks, onboarding), converts to loopflow step format, and writes to a local cache.
+**Sync is a normalizer.** People publish in whatever form — SKILL.md, program.md, raw markdown, yaml. The sync tool converts whatever it finds into loopflow's standard workstyle structure. Missing pieces get lfjack defaults. A workstyle = what they provide + loopflow defaults for everything else.
+
+For gstack: pulls SKILL.md files, strips preamble, keeps voice and methodology, fills in loopflow defaults for config and directions.
+For autoresearch: pulls program.md, decomposes into steps + flow, fills in defaults for everything else.
 
 ```
 garrytan/gstack repo

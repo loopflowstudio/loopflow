@@ -1,6 +1,11 @@
 pub trait Progress {
     fn status(&self, msg: &str);
     fn error(&self, msg: &str);
+
+    fn warning(&self, msg: &str) {
+        self.error(msg);
+    }
+
     fn confirm(&self, msg: &str) -> bool;
 }
 

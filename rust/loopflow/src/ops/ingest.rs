@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::engine::worktrees::main_repo_root;
 use crate::lfd::pm::PriorityBucket;
 use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::pm::{pm_pull, wave_pm_is_enabled, PmPullOptions};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
 
@@ -21,11 +22,9 @@ pub struct IngestResult {
 
 /// Pick the highest-priority roadmap item and move it to scratch/.
 ///
-/// When PM is enabled for the wave, claims the item in the PM provider first
-/// (assigns to self + sets branch). This acts as a distributed lock — two agents
-/// racing ingest will claim different items.
-///
-/// Without PM, falls back to local file ordering.
+/// When PM is enabled for the wave, refresh the local wave mirror from the
+/// provider before selecting an item. Without PM, falls back to local file
+/// ordering.
 pub fn ingest(
     repo: &Path,
     options: &IngestOptions,
@@ -35,6 +34,15 @@ pub fn ingest(
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
 
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+
+    if wave_pm_is_enabled(&main_repo, &wave) {
+        if let Err(err) = refresh_wave_from_pm(&main_repo, &wave, progress) {
+            progress.warning(&format!(
+                "warning: failed to pull PM items for wave/{wave}: {err}"
+            ));
+        }
+    }
+
     let wave_dir = main_repo.join("wave").join(&wave);
 
     if !wave_dir.is_dir() {
@@ -75,6 +83,32 @@ pub fn ingest(
         slug: item.slug.clone(),
         dest,
     })
+}
+
+fn refresh_wave_from_pm(repo: &Path, wave: &str, progress: &impl Progress) -> OpsResult<()> {
+    #[cfg(test)]
+    if let Some(hook) = *test_pm_pull_hook().lock().expect("pm pull hook lock") {
+        return hook(repo, wave, progress);
+    }
+
+    pm_pull(
+        repo,
+        &PmPullOptions {
+            wave: wave.to_string(),
+        },
+        progress,
+    )
+    .map(|_| ())
+}
+
+#[cfg(test)]
+type TestPmPullHook = fn(&Path, &str, &dyn Progress) -> OpsResult<()>;
+
+#[cfg(test)]
+fn test_pm_pull_hook() -> &'static std::sync::Mutex<Option<TestPmPullHook>> {
+    static TEST_PM_PULL_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<TestPmPullHook>>> =
+        std::sync::OnceLock::new();
+    TEST_PM_PULL_HOOK.get_or_init(|| std::sync::Mutex::new(None))
 }
 
 fn select_wave_item<'a>(items: &'a [WaveItem], requested: Option<&str>) -> OpsResult<&'a WaveItem> {
@@ -184,7 +218,94 @@ fn order_rank(order: WaveItemOrder) -> (u8, u32) {
 mod tests {
     use super::*;
     use crate::ops::NullProgress;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn set_test_pm_pull_hook(hook: Option<TestPmPullHook>) {
+        *test_pm_pull_hook().lock().expect("pm pull hook lock") = hook;
+    }
+
+    fn pm_test_lock() -> &'static Mutex<()> {
+        static PM_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        PM_TEST_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct TestPmPullGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TestPmPullGuard {
+        fn install(hook: TestPmPullHook) -> Self {
+            let guard = pm_test_lock().lock().expect("pm test lock");
+            set_test_pm_pull_hook(Some(hook));
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for TestPmPullGuard {
+        fn drop(&mut self) {
+            set_test_pm_pull_hook(None);
+        }
+    }
+
+    fn write_pm_config(repo: &Path) {
+        std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
+        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: linear\n")
+            .expect("write repo pm config");
+
+        let wave_dir = repo.join("wave").join("test-wave");
+        std::fs::write(
+            wave_dir.join("test-wave.yaml"),
+            "flow: build\npm:\n  linear_project: \"lin-1\"\n",
+        )
+        .expect("write wave pm config");
+    }
+
+    fn refresh_from_pm_fixture(repo: &Path, wave: &str, _progress: &dyn Progress) -> OpsResult<()> {
+        PM_PULL_CALLS.fetch_add(1, Ordering::SeqCst);
+        let wave_dir = repo.join("wave").join(wave);
+        for entry in std::fs::read_dir(&wave_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md")
+                && path.file_name().and_then(|name| name.to_str()) != Some("README.md")
+            {
+                std::fs::remove_file(path)?;
+            }
+        }
+        write_wave_file(&wave_dir, "1-fresh.md", "# Fresh from PM");
+        write_wave_file(&wave_dir, "2-later.md", "# Later");
+        Ok(())
+    }
+
+    fn fail_pm_pull(_repo: &Path, _wave: &str, _progress: &dyn Progress) -> OpsResult<()> {
+        Err(OpsError::Message("pm unavailable".to_string()))
+    }
+
+    static PM_PULL_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Debug, Default)]
+    struct RecordingProgress {
+        warnings: Mutex<Vec<String>>,
+    }
+
+    impl Progress for RecordingProgress {
+        fn status(&self, _msg: &str) {}
+
+        fn error(&self, _msg: &str) {}
+
+        fn warning(&self, msg: &str) {
+            self.warnings
+                .lock()
+                .expect("warnings lock")
+                .push(msg.to_string());
+        }
+
+        fn confirm(&self, _msg: &str) -> bool {
+            true
+        }
+    }
 
     fn init_test_wave() -> (TempDir, PathBuf) {
         let dir = TempDir::new().expect("temp dir");
@@ -391,6 +512,60 @@ mod tests {
                 .expect_err("missing roadmap item should error")
                 .to_string(),
             "roadmap item not found: beta"
+        );
+    }
+
+    #[test]
+    fn ingest_refreshes_pm_backed_waves_before_picking_an_item() {
+        let _guard = TestPmPullGuard::install(refresh_from_pm_fixture);
+        let (dir, wave_dir) = init_test_wave();
+        let repo = dir.path();
+        write_pm_config(repo);
+        write_wave_file(&wave_dir, "2-stale.md", "# Stale local item");
+
+        PM_PULL_CALLS.store(0, Ordering::SeqCst);
+
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: None,
+            },
+            &NullProgress,
+        )
+        .expect("ingest succeeds");
+
+        assert_eq!(PM_PULL_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(result.slug, "fresh");
+        assert!(result.dest.ends_with("scratch/test-wave-fresh.md"));
+        assert!(!wave_dir.join("1-fresh.md").exists());
+        assert!(wave_dir.join("2-later.md").exists());
+        assert!(!wave_dir.join("2-stale.md").exists());
+    }
+
+    #[test]
+    fn ingest_warns_when_pm_pull_fails_and_continues_with_local_items() {
+        let _guard = TestPmPullGuard::install(fail_pm_pull);
+        let (dir, wave_dir) = init_test_wave();
+        let repo = dir.path();
+        write_pm_config(repo);
+        write_wave_file(&wave_dir, "2-stale.md", "# Stale local item");
+        let progress = RecordingProgress::default();
+
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: None,
+            },
+            &progress,
+        )
+        .expect("ingest succeeds");
+
+        assert_eq!(result.slug, "stale");
+        assert_eq!(
+            progress.warnings.lock().expect("warnings lock").as_slice(),
+            ["warning: failed to pull PM items for wave/test-wave: pm unavailable"]
         );
     }
 }

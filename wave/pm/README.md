@@ -20,7 +20,7 @@ The PM architecture now centers on provider roles, a shared seam, and a single s
 - `rust/loopflow/src/ops/pm.rs` remains the orchestration layer for `pm_init`, `pm_pull`, `pm_status`, `pm_import`, and `pm_sync`
 - `WaveExecutor::execute()` already imports from the read/write provider at PR-oriented run start and exports back to configured providers at the end; future work should keep using that lifecycle instead of inventing a second sync path
 
-Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. Notion item descriptions sync as real pages with full markdown↔blocks conversion (`pm/notion_blocks.rs`), not flattened text. The next steps are wiring ingest to auto-refresh from PM before picking, cleaning up auth to OAuth-only, and extending Notion into doc-native README and supporting-doc sync.
+Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. Notion item descriptions sync as real pages with full markdown↔blocks conversion (`pm/notion_blocks.rs`), not flattened text. Ingest now auto-refreshes from PM before picking (`ingest` calls `pm_pull` when a wave has a `pm` block, warns and falls back to local files on failure). The next steps are cleaning up auth to OAuth-only, adding item lifecycle comments, and extending Notion into doc-native README and supporting-doc sync.
 
 ### Invariants
 
@@ -37,7 +37,6 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 
 ## Goals
 
-- Wire ingest auto-refresh from PM so `lf ingest` sees the latest remote state before picking
 - Complete item lifecycle comments (PR open, run failure, merge → comment/complete on PM item)
 - Move PM auth toward OAuth-only browser-connect flows
 - Add Notion README sync and supporting-doc import now that the Notion client is proven

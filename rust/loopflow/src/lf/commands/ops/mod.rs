@@ -105,6 +105,10 @@ impl Progress for CliProgress {
         eprintln!("{}", msg);
     }
 
+    fn warning(&self, msg: &str) {
+        eprintln!("{}", msg);
+    }
+
     fn confirm(&self, msg: &str) -> bool {
         print!("{} [y/N]: ", msg);
         let _ = io::stdout().flush();

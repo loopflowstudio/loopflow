@@ -7,10 +7,13 @@ Clone garrytan/gstack, write a converter that transforms SKILL.md files into loo
 **Python converter** (`python/loopflow/workstyle/convert.py`):
 - Parse gstack SKILL.md format (YAML frontmatter + preamble bash block + voice + instructions)
 - Strip preamble bash blocks (telemetry, update checks, session tracking, onboarding)
+- Strip setup sections (env verification, data download, onboarding flows) — loopflow owns setup
 - Keep voice section — extract it once into `voice.md` for the workstyle
 - Keep skill-specific instructions as step content
 - Map gstack frontmatter (`name`, `version`, `benefits-from`, `allowed-tools`) to loopflow step frontmatter
 - Write converted steps to `.lf/workstyles/gstack/steps/<name>.md`
+
+**General policy: strip setup from imported workstyles.** Branch creation, environment checks, tool verification, data preparation — these are loopflow's responsibility, standardized across all workstyles. Workstyles bring methodology, not scaffolding.
 
 **Workstyle directory structure**:
 ```

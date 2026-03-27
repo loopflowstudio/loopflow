@@ -10,11 +10,14 @@ Concerto is the session manager. It launches agents into tmux sessions, opens Gh
 
 The embedded terminal uses libghostty — fully interactive, same rendering engine. But the full Ghostty app will always have an edge: tabs, splits, its own config system, GPU optimizations, faster updates. For a long interactive session, the real Ghostty window is the better experience. The embedded view is great for quick checks, short interactions, and keeping an eye on things without leaving Concerto. Make it easy to pop out to a real Ghostty window when you want to settle in.
 
+Workspace shell access is shipped — "Open Terminal" and "Open Internally" buttons create or attach tmux sessions in external/embedded Ghostty. The next step is making this the default path for step/flow launch, not just manual shell access.
+
 ### Not here
 
 - Replacing external terminals — Ghostty windows are the primary interaction surface
 - Building a terminal emulator — Ghostty embedding is for convenience, not competition
 - Deep integration with agent internals — we launch commands and track sessions, we don't parse agent output
+- Remote terminal workflows — workspace terminal actions are local-only (Ghostty + tmux assumes local install)
 
 ## Goals
 
@@ -25,9 +28,9 @@ The embedded terminal uses libghostty — fully interactive, same rendering engi
 
 ## Risks
 
-- Terminal detection and launching is fragile across macOS versions. The existing `TerminalLauncher` uses AppleScript for some terminals — this breaks silently.
 - tmux version differences. Session naming, attach semantics, and environment passing vary.
-- User's preferred terminal might not support the attach workflow cleanly (Terminal.app is limited).
+- User's preferred terminal might not support the attach workflow cleanly (Terminal.app is limited). Ghostty is the blessed path.
+- `ConcertoUITests-Runner` bootstrap crash in local environment is unrelated to this wave but blocks full UI test coverage.
 
 ## Metrics
 

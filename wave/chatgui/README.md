@@ -4,7 +4,7 @@ Native SwiftUI chat UI in Concerto — a first-class conversation experience for
 
 ## Vision
 
-Some users want a chat interface, full stop. The terminal-first approach serves power users well, but a native chat UI widens the audience and gives Concerto a surface it fully controls. The infrastructure exists — streaming, transcript, tool cards, voice input, quote-reply — but the experience feels rough. Performance issues mask what's already a capable prototype.
+Some users want a chat interface, full stop. The terminal-first approach serves power users well, but a native chat UI widens the audience and gives Concerto a surface it fully controls. The infrastructure exists — streaming, transcript, tool cards, voice input, quote-reply — and the streaming hot path is now incremental (SessionState owns derived transcript state, MessageRow caches segment parsing). The foundation is solid; the next layer is visual polish and rich content.
 
 The path isn't "build a chat UI" — it's "make the existing chat UI feel like a product."
 
@@ -23,9 +23,9 @@ The path isn't "build a chat UI" — it's "make the existing chat UI feel like a
 
 ## Risks
 
-- SwiftUI's observation model makes per-token performance hard to get right. The current architecture couples transcript mutation to full view re-evaluation. Fixing this may require restructuring SessionState.
 - Markdown/syntax highlighting libraries for SwiftUI are immature. May need to build or heavily customize.
 - Scope creep — "polish" is unbounded. Each stage needs a clear "done when."
+- The segment cache invalidates by content length (append-only assumption). If we add message editing, the cache key needs strengthening.
 
 ## Metrics
 

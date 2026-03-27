@@ -9,7 +9,7 @@ notion_id: 32af8f99-3d81-8121-b592-d35ee90a848d
 
 `lf ingest` was written before PM integration existed. It still thinks locally: read `wave/<name>/`, pick a file, move it into `scratch/`. That made sense when the filesystem was the source of truth. It is the wrong mental model once a wave has a PM provider.
 
-For PM-backed waves, the authoritative queue now lives in Asana/Linear/Notion. `lf ingest` should not behave like a local-file picker that sometimes gets prefreshed by a flow. It should behave like a PM-native pickup step whose local files are the materialized view of the tracker.
+For PM-backed waves, the authoritative queue now lives in Asana/Linear/Notion. `lf ingest` should not behave like a local-file picker that sometimes gets pre-refreshed by a flow. It should behave like a PM-native pickup step whose local files are the materialized view of the tracker.
 
 The stale-data bug is one symptom of that mismatch. The deeper issue is that ingest still belongs to the pre-PM world.
 

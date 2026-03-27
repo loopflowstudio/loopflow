@@ -246,11 +246,7 @@ fn run_target(
                     message: Some(format!("lf commit: {name}")),
                     ..loopflow::ops::CommitOptions::for_task(name)
                 };
-                loopflow::ops::commit_workflow(
-                    &repo_root,
-                    &options,
-                    &loopflow::ops::NullProgress,
-                )?;
+                loopflow::ops::commit_workflow(&repo_root, &options, &loopflow::ops::NullProgress)?;
                 Ok(())
             })
         }),

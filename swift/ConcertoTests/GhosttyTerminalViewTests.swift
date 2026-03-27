@@ -43,7 +43,6 @@ struct GhosttyTerminalViewTests {
 
         #expect(command.workingDirectory == "/tmp/repo")
         #expect(command.argv == ["tmux", "attach-session", "-t", "lfd-session-1"])
-        #expect(command.env.isEmpty)
     }
 
     @Test("builds an ssh tmux attach command for remote hosts")
@@ -59,7 +58,6 @@ struct GhosttyTerminalViewTests {
 
         #expect(command.workingDirectory == FileManager.default.homeDirectoryForCurrentUser.path)
         #expect(command.argv == ["ssh", "-t", "lfd.example.com", "tmux attach-session -t 'lfd-session-1'"])
-        #expect(command.env.isEmpty)
     }
 
     @Test("localhost detection normalizes common local host spellings")

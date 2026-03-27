@@ -8,7 +8,7 @@ use crate::lfd::types::{
     ActivationLog, AgentRun, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock,
     ChatMessage, LivePrState, LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent,
     Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus, Trigger, Wave,
-    WaveRun, WaveRunStackStatus,
+    WaveCron, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -149,8 +149,36 @@ impl Store {
         WaveStateStore::list_loopable_waves(self).await
     }
 
-    pub async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
-        WaveStateStore::list_cron_waves(self).await
+    pub async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
+        WaveStateStore::list_wave_crons(self, wave_id).await
+    }
+
+    pub async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
+        WaveStateStore::list_all_active_crons(self).await
+    }
+
+    pub async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
+        WaveStateStore::create_wave_cron(self, cron).await
+    }
+
+    pub async fn replace_wave_crons(&self, wave_id: &LfdId, crons: &[WaveCron]) -> StoreResult<()> {
+        self.delete_wave_crons(wave_id).await?;
+        for cron in crons {
+            self.create_wave_cron(cron).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_wave_cron_last_triggered(
+        &self,
+        cron_id: &LfdId,
+        last_triggered_at: Option<i64>,
+    ) -> StoreResult<()> {
+        WaveStateStore::update_wave_cron_last_triggered(self, cron_id, last_triggered_at).await
+    }
+
+    pub async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
+        WaveStateStore::delete_wave_crons(self, wave_id).await
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
@@ -651,12 +679,20 @@ impl Store {
 pub trait WaveStateStore: Send + Sync {
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
     async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>>;
-    async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>>;
+    async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>>;
+    async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>>;
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
+    async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()>;
+    async fn update_wave_cron_last_triggered(
+        &self,
+        cron_id: &LfdId,
+        last_triggered_at: Option<i64>,
+    ) -> StoreResult<()>;
+    async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()>;
 
     async fn list_wave_runs(
         &self,
@@ -948,12 +984,22 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+    async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_cron_waves()).await
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_wave_crons(&wave_id)).await
             }
-            StoreBackend::Postgres(store) => store.list_cron_waves().await,
+            StoreBackend::Postgres(store) => store.list_wave_crons(wave_id).await,
+        }
+    }
+
+    async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.list_all_active_crons()).await
+            }
+            StoreBackend::Postgres(store) => store.list_all_active_crons().await,
         }
     }
 
@@ -1004,6 +1050,47 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.delete_wave(&wave_id)).await
             }
             StoreBackend::Postgres(store) => store.delete_wave(wave_id).await,
+        }
+    }
+
+    async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let cron = cron.clone();
+                run_sqlite(store, move |store| store.create_wave_cron(&cron)).await
+            }
+            StoreBackend::Postgres(store) => store.create_wave_cron(cron).await,
+        }
+    }
+
+    async fn update_wave_cron_last_triggered(
+        &self,
+        cron_id: &LfdId,
+        last_triggered_at: Option<i64>,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let cron_id = cron_id.clone();
+                run_sqlite(store, move |store| {
+                    store.update_wave_cron_last_triggered(&cron_id, last_triggered_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_wave_cron_last_triggered(cron_id, last_triggered_at)
+                    .await
+            }
+        }
+    }
+
+    async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.delete_wave_crons(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_wave_crons(wave_id).await,
         }
     }
 
@@ -2221,8 +2308,8 @@ mod tests {
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Summary,
-        Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-        WaveStatus,
+        Trigger, Wave, WaveCron, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus,
+        WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -2235,7 +2322,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
             status: WaveStatus::Idle,
@@ -2297,6 +2384,34 @@ mod tests {
             .await
             .expect("list loopable waves");
         assert!(loopable.iter().all(|candidate| candidate.id() != wave.id()));
+
+        let cron = WaveCron {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            flow: "wave-polish".to_string(),
+            schedule: "0 0 * * 1".to_string(),
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store
+            .create_wave_cron(&cron)
+            .await
+            .expect("create wave cron");
+        let listed_crons = store
+            .list_wave_crons(wave.id())
+            .await
+            .expect("list wave crons");
+        assert_eq!(listed_crons.len(), 1);
+        assert_eq!(listed_crons[0].flow, "wave-polish");
+        store
+            .update_wave_cron_last_triggered(&cron.id, Some(1234))
+            .await
+            .expect("update cron last_triggered_at");
+        let updated_crons = store
+            .list_wave_crons(wave.id())
+            .await
+            .expect("list updated wave crons");
+        assert_eq!(updated_crons[0].last_triggered_at, Some(1234));
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),

@@ -3,8 +3,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage,
     LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo, RepoEdge, RepoId,
-    Signal, Summary, Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus,
-    WaveRunStatus, WaveStatus,
+    Signal, Summary, Trigger, Wave, WaveCron, WaveMode, WaveRun, WaveRunSnapshot,
+    WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -99,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, repo, direction, area, paused, status, iteration,
-///        cycle_start_iteration, created_at, workers, mode, primary_flow, cron
+///        cycle_start_iteration, created_at, workers, mode, primary_flow
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(3)?)?;
     let area = parse_json_vec(&row.text(4)?)?;
@@ -108,11 +108,10 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let iteration = row.int(7)? as u32;
     let cycle_start_iteration = row.int(8)? as u32;
     let created_at = unix_to_datetime(row.bigint(9)?);
-    let workers = (row.int(10)? as u32).max(1);
+    let workers = row.int(10)? as u32;
     let mode_str = row.text(11)?;
     let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
     let primary_flow = row.text(12)?;
-    let cron = row.opt_text(13)?;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;
@@ -124,7 +123,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         repo: row.text(2)?,
         mode,
         primary_flow,
-        cron,
+        crons: Vec::new(),
         direction,
         area,
         status,
@@ -132,6 +131,18 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         cycle_start_iteration,
         created_at: Some(created_at),
         workers,
+    })
+}
+
+/// SELECT id, wave_id, flow, schedule, last_triggered_at, created_at
+pub fn map_wave_cron_row(row: &impl StoreRow) -> StoreResult<WaveCron> {
+    Ok(WaveCron {
+        id: LfdId::from_raw(row.text(0)?),
+        wave_id: LfdId::from_raw(row.text(1)?),
+        flow: row.text(2)?,
+        schedule: row.text(3)?,
+        last_triggered_at: row.opt_bigint(4)?,
+        created_at: row.opt_bigint(5)?.map(unix_to_datetime),
     })
 }
 

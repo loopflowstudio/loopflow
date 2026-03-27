@@ -388,7 +388,7 @@ impl WaveExecutor {
         run.status = WaveRunStatus::Completed;
         run.ended_at = Some(OffsetDateTime::now_utc());
 
-        let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
+        let is_recurring = matches!(wave.mode(), WaveMode::Loop);
         let should_manage_pr = run.target_branch == "main" || run.target_branch.is_empty();
         if should_manage_pr {
             let worktree = run.worktree.clone();
@@ -566,6 +566,7 @@ impl WaveExecutor {
                         wave: &listener_wave,
                         flow_override: trigger.flow.clone(),
                         roadmap_item: None,
+                        force_parallel: false,
                         envelope,
                     },
                 )
@@ -1071,7 +1072,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: vec![],
             area: vec![],
             status: WaveStatus::Running,
@@ -1129,7 +1130,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: vec![],
             area: vec![],
             status,
@@ -1255,7 +1256,7 @@ mod tests {
             repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

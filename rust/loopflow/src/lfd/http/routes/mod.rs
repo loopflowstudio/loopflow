@@ -21,7 +21,8 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, trigger_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+    format_datetime, trigger_dto, wave_cron_dto, wave_run_dto, CommitEntryDto, ErrorResponse,
+    WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -107,6 +108,8 @@ pub async fn build_wave_dto(
         .await
         .unwrap_or_default();
     let triggers = triggers_list.into_iter().map(trigger_dto).collect();
+    let crons_list = store.list_wave_crons(wave.id()).await.unwrap_or_default();
+    let crons = crons_list.into_iter().map(wave_cron_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
     let active_run = if include_active_run {
@@ -136,7 +139,6 @@ pub async fn build_wave_dto(
         repo: wave.repo().clone(),
         mode: wave.mode().as_str().to_string(),
         primary_flow: wave.primary_flow().to_string(),
-        cron: wave.cron.clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
@@ -154,6 +156,7 @@ pub async fn build_wave_dto(
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         workers: wave.workers(),
         triggers,
+        crons,
         active_run,
     })
 }
@@ -470,7 +473,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

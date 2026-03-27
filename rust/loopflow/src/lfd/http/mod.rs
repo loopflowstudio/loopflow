@@ -161,6 +161,10 @@ pub fn router(state: HttpState) -> Router {
             get(waves::list_triggers_handler),
         )
         .route(
+            "/waves/{wave_id}/crons",
+            get(waves::list_wave_crons_handler),
+        )
+        .route(
             "/waves/{wave_id}/activations",
             get(waves::list_activations_handler),
         )

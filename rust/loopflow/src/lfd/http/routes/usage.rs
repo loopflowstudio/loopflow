@@ -739,7 +739,7 @@ mod tests {
             repo: tmp.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

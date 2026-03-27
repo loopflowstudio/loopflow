@@ -171,6 +171,28 @@ public struct CommitEntry: Sendable, Hashable, Identifiable {
     }
 }
 
+public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
+    public let id: String
+    public var flow: String
+    public var schedule: String
+    public var lastTriggeredAt: Date?
+    public var createdAt: Date?
+
+    public init(
+        id: String = UUID().uuidString,
+        flow: String,
+        schedule: String,
+        lastTriggeredAt: Date? = nil,
+        createdAt: Date? = nil
+    ) {
+        self.id = id
+        self.flow = flow
+        self.schedule = schedule
+        self.lastTriggeredAt = lastTriggeredAt
+        self.createdAt = createdAt
+    }
+}
+
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
@@ -181,6 +203,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var agent: String?
     public var stepAgents: [String: String]?
     public var triggers: [Trigger]
+    public var crons: [WaveCron]
     public var status: WaveStatus
     public var iteration: Int
     public var localWorktree: String?
@@ -202,6 +225,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         agent: String? = nil,
         stepAgents: [String: String]? = nil,
         triggers: [Trigger] = [],
+        crons: [WaveCron] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
         localWorktree: String? = nil,
@@ -222,6 +246,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.agent = agent
         self.stepAgents = stepAgents
         self.triggers = triggers
+        self.crons = crons
         self.status = status
         self.iteration = iteration
         self.localWorktree = localWorktree

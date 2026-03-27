@@ -14,6 +14,14 @@ class Trigger(BaseModel):
     max_iterations: Optional[int] = None
 
 
+class WaveCron(BaseModel):
+    id: Optional[str] = None
+    flow: str
+    schedule: str
+    last_triggered_at: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+
 class PullRequest(BaseModel):
     url: str
     number: Optional[int] = None
@@ -73,11 +81,11 @@ class Wave(BaseModel):
     repo: str
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
-    cron: Optional[str] = None
     workers: int = 1
     direction: list[str]
     area: list[str]
     triggers: list[Trigger] = Field(default_factory=list)
+    crons: list[WaveCron] = Field(default_factory=list)
     status: str
     iteration: int
     local_worktree: Optional[str] = None

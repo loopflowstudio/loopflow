@@ -10,7 +10,7 @@ use crate::lfd::sessions::usage::{
 };
 use crate::lfd::types::{
     ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState,
-    TerminalSession, Trigger, WaveRun, WaveRunStatus,
+    TerminalSession, Trigger, WaveCron, WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -90,8 +90,6 @@ pub struct WaveDto {
     pub repo: String,
     pub mode: String,
     pub primary_flow: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cron: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +112,7 @@ pub struct WaveDto {
     pub has_stale_pr_state: bool,
     pub workers: u32,
     pub triggers: Vec<TriggerDto>,
+    pub crons: Vec<WaveCronDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -191,6 +190,16 @@ pub struct TriggerDto {
     pub source_wave_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_main_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_triggered_at: Option<i64>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaveCronDto {
+    pub id: String,
+    pub flow: String,
+    pub schedule: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered_at: Option<i64>,
     pub created_at: Option<String>,
@@ -503,6 +512,16 @@ pub fn trigger_dto(t: Trigger) -> TriggerDto {
     }
 }
 
+pub fn wave_cron_dto(cron: WaveCron) -> WaveCronDto {
+    WaveCronDto {
+        id: cron.id.to_string(),
+        flow: cron.flow,
+        schedule: cron.schedule,
+        last_triggered_at: cron.last_triggered_at,
+        created_at: format_datetime(cron.created_at),
+    }
+}
+
 pub fn activation_log_dto(log: ActivationLog) -> ActivationLogDto {
     ActivationLogDto {
         id: log.id.to_string(),
@@ -604,6 +623,8 @@ mod contract_tests {
         assert_eq!(wave.triggers[0].signal, "repo");
         assert_eq!(wave.triggers[0].flow.as_deref(), Some("integrate"));
         assert_eq!(wave.triggers[1].signal, "ci_failure");
+        assert_eq!(wave.crons.len(), 1);
+        assert_eq!(wave.crons[0].flow, "wave-polish");
 
         assert_eq!(wave.commits.len(), 1);
         assert_eq!(wave.commits[0].sha, "abc1234");

@@ -298,6 +298,39 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
+    def test_create_wave_includes_crons_when_provided(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=WAVE_MINIMAL)
+
+        client = _mock_client(handler)
+        client.create_wave(
+            "reduce",
+            "/tmp/repo",
+            flow="reduce",
+            crons=[{"flow": "wave-polish", "schedule": "0 0 * * 1"}],
+        )
+        assert received["crons"] == [{"flow": "wave-polish", "schedule": "0 0 * * 1"}]
+        client.close()
+
+    def test_update_wave_includes_crons_when_provided(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=WAVE_MINIMAL)
+
+        client = _mock_client(handler)
+        client.update_wave(
+            "reduce",
+            flow="reduce",
+            crons=[{"flow": "wave-reduce", "schedule": "0 0 1 * *"}],
+        )
+        assert received["crons"] == [{"flow": "wave-reduce", "schedule": "0 0 1 * *"}]
+        client.close()
+
     def test_add_trigger_with_wave_source_sends_correct_body(self):
         received = {}
 

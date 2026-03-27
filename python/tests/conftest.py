@@ -17,6 +17,15 @@ WAVE_MINIMAL = {
 WAVE_FULL = {
     **WAVE_MINIMAL,
     "triggers": [{"id": "trig-1", "signal": "repo"}],
+    "crons": [
+        {
+            "id": "cron-1",
+            "flow": "wave-polish",
+            "schedule": "0 0 * * 1",
+            "last_triggered_at": 1_770_000_000,
+            "created_at": "2026-02-08T01:56:54Z",
+        }
+    ],
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
     "commits": [

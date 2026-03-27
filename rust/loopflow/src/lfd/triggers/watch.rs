@@ -103,6 +103,7 @@ async fn check_repo_triggers(
                         wave: &wave,
                         flow_override: trigger.flow.clone(),
                         roadmap_item: None,
+                        force_parallel: false,
                         envelope,
                     },
                 )

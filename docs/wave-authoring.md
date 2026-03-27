@@ -126,7 +126,11 @@ Optional. Mirrors the wave's fields in lfd:
 ```yaml
 # wave/infra/infra.yaml
 flow: ship-wave
+workers: 2
 mode: loop
+crons:
+  - flow: wave-polish
+    schedule: "0 0 * * 1"
 area:
   - rust/loopflow/src/lfd/
   - rust/loopflow/src/lfd/store/
@@ -142,7 +146,9 @@ triggers:
 | Field | What it does |
 |-------|-------------|
 | `flow` | Which flow to run (`build`, `ship-wave`, `grind`, etc.) |
-| `mode` | Execution pattern: `manual`, `loop`, or `cron` |
+| `workers` | Parallelism for the primary flow. `0` means "don't auto-dispatch the primary flow" |
+| `mode` | Primary execution pattern: `manual` or `loop` |
+| `crons` | Scheduled supplementary flows. Each entry has a `flow` and cron `schedule` |
 | `area` | Paths in scope for this wave |
 | `direction` | Quality lenses applied to every step |
 | `triggers` | Signal + flow pairs (repo, wave, ci_failure). Defaults don't need declaring |
@@ -219,15 +225,35 @@ loopflow.run_wave("mywave")
 loopflow.waves()             # list all waves
 ```
 
-### Modes and Triggers
+### Modes, Crons, and Triggers
 
-Mode controls execution pattern. Triggers fire flows in response to signals.
+Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to signals.
 
 | Mode | Behavior |
 |------|----------|
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped or backlog empty |
-| **cron** | On schedule (`0 9 * * *`) |
+
+```yaml
+# wave/mywave/mywave.yaml
+flow: build
+workers: 2
+mode: loop
+crons:
+  - flow: wave-polish
+    schedule: "0 0 * * 1"
+```
+
+`workers: 0` is valid for waves that only run scheduled flows:
+
+```yaml
+flow: garden
+workers: 0
+mode: manual
+crons:
+  - flow: govern-coordination
+    schedule: "0 0 * * *"
+```
 
 | Signal | What changed | Default flow |
 |--------|--------------|--------------|
@@ -238,8 +264,14 @@ Mode controls execution pattern. Triggers fire flows in response to signals.
 ```python
 import loopflow.api as loopflow
 
-# Set mode at creation
-loopflow.create_wave("mywave", repo=".", flow="build", mode="loop", area=["src/"])
+# Create the wave, then manage primary flow, crons, and scope
+loopflow.create_wave("mywave", repo=".", flow="build", area=["src/"])
+loopflow.update_wave(
+    "mywave",
+    flow="build",
+    crons=[{"flow": "wave-polish", "schedule": "0 0 * * 1"}],
+    area=["src/"],
+)
 
 # Add a trigger — react to another wave
 loopflow.add_trigger("mywave", signal="wave", source_wave_id="infra")

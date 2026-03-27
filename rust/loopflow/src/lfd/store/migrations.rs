@@ -162,6 +162,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "035_terminal_session_tmux_name",
         sql: include_str!("migrations/035_terminal_session_tmux_name.sql"),
     },
+    Migration {
+        version: "036_wave_crons",
+        sql: include_str!("migrations/036_wave_crons.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

@@ -16,12 +16,12 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::http::dto::{
-    activation_log_dto, trigger_dto, ActivationLogDto, CombineResponse, CombineResponseResult,
-    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
-    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    activation_log_dto, trigger_dto, wave_cron_dto, ActivationLogDto, CombineResponse,
+    CombineResponseResult, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
+    NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveCronDto, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{
-    read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig,
+    read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig, WaveCronDef,
 };
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -31,7 +31,8 @@ use crate::lfd::triggers::{
     spawn_immediate_activation, spawn_run_task_with_slot, ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
-    AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
+    AgentStatus, Event, Signal, Trigger, Wave, WaveCron, WaveMode, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +100,7 @@ pub struct CreateWaveRequest {
     repo: String,
     name: Option<String>,
     flow: Option<String>,
+    crons: Option<Vec<WaveCronDef>>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     workers: Option<u32>,
@@ -113,6 +115,7 @@ pub struct CreateWaveRequest {
 pub struct UpdateWaveRequest {
     name: Option<String>,
     flow: Option<String>,
+    crons: Option<Vec<WaveCronDef>>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     workers: Option<u32>,
@@ -190,6 +193,7 @@ pub async fn create_wave_handler(
         repo,
         name: requested_name,
         flow,
+        crons: requested_crons,
         direction,
         area,
         workers: requested_workers,
@@ -233,8 +237,11 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.primary_flow.clone()))
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
-    let cron_field = wave_config.as_ref().and_then(|c| c.cron.clone());
     let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
+    let cron_defs = requested_crons
+        .or_else(|| wave_config.as_ref().and_then(|c| c.crons.clone()))
+        .unwrap_or_default();
+    let crons = build_wave_crons(&id, &cron_defs)?;
 
     let mut wave = Wave {
         id: id.clone(),
@@ -242,7 +249,7 @@ pub async fn create_wave_handler(
         repo,
         mode,
         primary_flow,
-        cron: cron_field,
+        crons: Vec::new(),
         direction,
         area,
         status: WaveStatus::Idle,
@@ -260,6 +267,12 @@ pub async fn create_wave_handler(
         .create_wave(&wave)
         .await
         .map_err(map_store_error)?;
+
+    if let Err(err) = state.store.replace_wave_crons(wave.id(), &crons).await {
+        let wave_id = wave.id().clone();
+        let _ = state.store.delete_wave(&wave_id).await;
+        return Err(map_store_error(err));
+    }
 
     if let Err(err) = ensure_wave_workspace(&state, &wave).await {
         let wave_id = wave.id().clone();
@@ -411,6 +424,32 @@ fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn required_trimmed(
+    value: &str,
+    message: &'static str,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    trimmed_non_empty(Some(value)).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, message))
+}
+
+fn build_wave_crons(
+    wave_id: &LfdId,
+    cron_defs: &[WaveCronDef],
+) -> Result<Vec<WaveCron>, (StatusCode, Json<ErrorResponse>)> {
+    cron_defs
+        .iter()
+        .map(|cron| {
+            Ok(WaveCron {
+                id: LfdId::new(),
+                wave_id: wave_id.clone(),
+                flow: required_trimmed(&cron.flow, "wave cron flow is required")?,
+                schedule: required_trimmed(&cron.schedule, "wave cron schedule is required")?,
+                last_triggered_at: None,
+                created_at: Some(OffsetDateTime::now_utc()),
+            })
+        })
+        .collect()
+}
+
 fn create_wave_workers(
     requested_workers: Option<u32>,
     serialized: bool,
@@ -421,7 +460,6 @@ fn create_wave_workers(
         .or_else(|| serialized.then_some(1))
         .or_else(|| wave_config.and_then(|config| config.serialized).map(|_| 1))
         .unwrap_or(1)
-        .max(1)
 }
 
 fn update_wave_workers(
@@ -430,7 +468,6 @@ fn update_wave_workers(
     serialized: Option<bool>,
 ) -> u32 {
     requested_workers
-        .map(|workers| workers.max(1))
         .or_else(|| serialized.map(|_| 1))
         .unwrap_or(current_workers)
 }
@@ -614,6 +651,15 @@ pub async fn update_wave_handler(
         .await
         .map_err(map_store_error)?;
 
+    if let Some(cron_defs) = payload.crons {
+        let crons = build_wave_crons(wave.id(), &cron_defs)?;
+        state
+            .store
+            .replace_wave_crons(wave.id(), &crons)
+            .await
+            .map_err(map_store_error)?;
+    }
+
     state.event_hub.send(Event::wave_updated(wave.id().clone()));
 
     let view = build_wave_dto(&state.store, &state.github, wave, false)
@@ -715,7 +761,7 @@ async fn start_wave_run(
         .count_active_wave_runs(wave.id())
         .await
         .map_err(map_store_error)?;
-    if active_runs >= wave.workers() {
+    if wave.workers() > 0 && active_runs >= wave.workers() {
         return Err(api_error(
             StatusCode::PRECONDITION_FAILED,
             "wave already at worker capacity",
@@ -766,6 +812,7 @@ async fn start_wave_run(
             wave,
             flow_override,
             roadmap_item,
+            force_parallel: false,
             envelope,
         },
     )
@@ -921,6 +968,20 @@ pub async fn list_triggers_handler(
     let dtos: Vec<_> = triggers.into_iter().map(trigger_dto).collect();
 
     Ok(Json(serde_json::json!({ "data": dtos })))
+}
+
+pub async fn list_wave_crons_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<ListResponse<WaveCronDto>> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let crons = state
+        .store
+        .list_wave_crons(&wave_id)
+        .await
+        .map_err(map_store_error)?;
+    let data = crons.into_iter().map(wave_cron_dto).collect();
+    Ok(Json(ListResponse::new(data, false)))
 }
 
 pub async fn list_activations_handler(
@@ -1509,7 +1570,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -1601,6 +1662,32 @@ mod tests {
         assert_eq!(parsed.signal, Signal::Wave);
         assert_eq!(parsed.source.as_deref(), Some("infra"));
         assert_eq!(parsed.source_repo.as_deref(), Some("/tmp/source"));
+    }
+
+    #[test]
+    fn create_wave_workers_allows_zero() {
+        assert_eq!(create_wave_workers(Some(0), false, None), 0);
+    }
+
+    #[test]
+    fn build_wave_crons_requires_flow_and_schedule() {
+        let wave_id = LfdId::new();
+        assert!(build_wave_crons(
+            &wave_id,
+            &[WaveCronDef {
+                flow: "".to_string(),
+                schedule: "0 0 * * *".to_string(),
+            }]
+        )
+        .is_err());
+        assert!(build_wave_crons(
+            &wave_id,
+            &[WaveCronDef {
+                flow: "wave-polish".to_string(),
+                schedule: "".to_string(),
+            }]
+        )
+        .is_err());
     }
 
     #[tokio::test]
@@ -1708,6 +1795,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("build".to_string()),
+                crons: None,
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["src/".to_string()]),
                 workers: None,
@@ -1748,6 +1836,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,
@@ -1805,6 +1894,7 @@ mod tests {
                 repo,
                 name: Some("designer".to_string()),
                 flow: None,
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,
@@ -1835,6 +1925,7 @@ mod tests {
                 repo,
                 name: Some("designer".to_string()),
                 flow: None,
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,
@@ -1847,6 +1938,49 @@ mod tests {
         .expect("create wave");
 
         assert_eq!(created.status, "paused");
+    }
+
+    #[tokio::test]
+    async fn create_wave_reads_crons_from_config() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+        let wave_dir = repo_tmp.path().join("wave").join("designer");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(
+            wave_dir.join("designer.yaml"),
+            "flow: build\nworkers: 0\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n  - flow: wave-reduce\n    schedule: '0 0 1 * *'\n",
+        )
+        .expect("write wave config");
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("designer".to_string()),
+                flow: None,
+                crons: None,
+                direction: None,
+                area: None,
+                workers: None,
+                status: None,
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        assert_eq!(created.workers, 0);
+        assert_eq!(created.crons.len(), 2);
+        assert_eq!(created.crons[0].flow, "wave-polish");
+        assert_eq!(created.crons[1].schedule, "0 0 1 * *");
+
+        let Json(listed) = list_wave_crons_handler(State(state), Path(created.id.clone()))
+            .await
+            .expect("list crons");
+        assert_eq!(listed.data.len(), 2);
     }
 
     #[tokio::test]
@@ -1948,6 +2082,7 @@ mod tests {
                 repo: repo_a.clone(),
                 name: Some("wave-a".to_string()),
                 flow: None,
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,
@@ -1964,6 +2099,7 @@ mod tests {
                 repo: repo_b.clone(),
                 name: Some("wave-b".to_string()),
                 flow: None,
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,
@@ -2006,6 +2142,7 @@ mod tests {
                 repo,
                 name: Some("before".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                crons: None,
                 direction: Some(vec!["infra".to_string()]),
                 area: Some(vec!["src/".to_string()]),
                 workers: None,
@@ -2062,6 +2199,7 @@ mod tests {
                 repo,
                 name: Some("delete-me".to_string()),
                 flow: None,
+                crons: None,
                 direction: None,
                 area: None,
                 workers: None,

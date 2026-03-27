@@ -5,7 +5,7 @@ title: Waves
 
 # Waves
 
-A wave is **area × direction × flow**. Mode controls how it executes. Triggers fire flows in response to signals.
+A wave is **area × direction × flow**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to signals.
 
 ```bash
 python - <<'PY'
@@ -16,59 +16,55 @@ loopflow.run_wave("shipper")
 PY
 ```
 
-This runs the `build` flow on `src/api/` with the `clarity` direction—continuously, creating PRs until you stop it.
+This creates a wave with the `build` flow on `src/api/` and the `clarity` direction.
 
 Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
 ## Modes
 
-The wave's `mode` controls its execution pattern. Set it at creation or update it later.
+The wave's `mode` controls its primary execution pattern.
 
 | Mode | Behavior |
 |------|----------|
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped |
-| **cron** | On schedule |
 
 ### Manual
 
-Single execution. Run a flow once then stop.
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("runner", repo=".", flow="build", mode="manual", area=["swift/"])
-loopflow.run_wave("runner")
-PY
-```
+Single execution. Run a flow once, then stop.
 
 ### Loop
 
-Continuous work. Each iteration picks a task, runs the flow, creates a PR.
+Continuous work. Each iteration picks a task, runs the flow, creates a PR. When the PR limit is reached, the loop pauses until PRs are merged.
 
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
+## Crons
 
-loopflow.create_wave("looper", repo=".", flow="build", mode="loop", area=["src/"])
-loopflow.run_wave("looper")
-PY
+Crons schedule supplementary flows on a wave. They do not replace the wave's primary flow, and they do not consume the wave's `workers` budget.
+
+```yaml
+# wave/shipper/shipper.yaml
+flow: build
+workers: 2
+mode: loop
+crons:
+  - flow: wave-polish
+    schedule: "0 0 * * 1"
+  - flow: wave-reduce
+    schedule: "0 0 1 * *"
 ```
 
-When the PR limit is reached, the loop pauses until PRs are merged.
+Use `workers: 0` for waves that only run from cron schedules:
 
-### Cron
-
-Run on schedule. 24-hour grace period for laptops.
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("cronner", repo=".", flow="build", mode="cron", cron="0 9 * * *", area=["."])
-loopflow.run_wave("cronner")
-PY
+```yaml
+# wave/governance/governance.yaml
+flow: garden
+workers: 0
+mode: manual
+crons:
+  - flow: govern-identity
+    schedule: "0 0 * * 0"
+  - flow: govern-coordination
+    schedule: "0 0 * * *"
 ```
 
 ## Triggers
@@ -127,7 +123,7 @@ Triggers are a list. Multiple triggers of the same signal are fine — watch dif
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("swift-falcon", repo=".", flow="build", mode="loop", area=["src/"])
+loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
 loopflow.add_trigger("swift-falcon", signal="wave", source_wave_id="infra")
 loopflow.run_wave("swift-falcon")
 PY

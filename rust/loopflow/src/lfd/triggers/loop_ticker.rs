@@ -130,6 +130,7 @@ async fn tick_loop_waves(
                 wave: &wave,
                 flow_override: Some(wave.primary_flow().to_string()),
                 roadmap_item: None,
+                force_parallel: false,
                 envelope,
             },
         )
@@ -171,7 +172,7 @@ mod tests {
             repo: "/tmp/repo".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

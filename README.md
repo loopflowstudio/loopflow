@@ -4,7 +4,7 @@ Loopflow helps you maintain flow and craft using coding agents (Claude Code, Cod
 
 Loopflow helps you create and run **Waves**. Waves are chains of coding agents working together in pre-defined ways.  
 
-Waves are first built manually through more interactive exploration. Eventually waves become autonomous through looping, scheduling, and watching for changes.
+Waves are first built manually through more interactive exploration. Eventually waves become autonomous through looping, scheduled cron runs, and watching for changes.
 
 ## Waves
 
@@ -38,7 +38,32 @@ The wave's `mode` controls its execution pattern.
 |------|----------|---------|
 | **manual** | Single run | Ship one feature, run one audit |
 | **loop** | Continuous until stopped | Work through a backlog, grind PRs |
-| **cron** | On a schedule | Daily QA pass, weekly dependency scan |
+
+### Crons
+
+Crons schedule supplementary flows on a wave without changing its primary mode. They run independently of the worker pool, and `workers: 0` is valid for cron-driven waves.
+
+```yaml
+# member wave — workers handle the primary flow, crons sweep maintenance
+flow: build
+workers: 2
+mode: loop
+crons:
+  - flow: wave-polish
+    schedule: "0 0 * * 1"
+  - flow: wave-reduce
+    schedule: "0 0 1 * *"
+
+# root wave — no workers, all work comes from crons
+flow: garden
+workers: 0
+mode: manual
+crons:
+  - flow: govern-identity
+    schedule: "0 0 * * 0"
+  - flow: govern-coordination
+    schedule: "0 0 * * *"
+```
 
 ### Triggers
 

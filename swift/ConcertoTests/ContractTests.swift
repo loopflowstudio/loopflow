@@ -42,6 +42,10 @@ struct ContractTests {
         #expect(wave.triggers[0].signal == .repo)
         #expect(wave.triggers[0].flow == "integrate")
         #expect(wave.triggers[1].signal == .ciFailure)
+        #expect(wave.crons.count == 1)
+        #expect(wave.crons[0].flow == "wave-polish")
+        #expect(wave.crons[0].schedule == "0 0 * * 1")
+        #expect(wave.crons[0].lastTriggeredAt != nil)
     }
 
     @Test("trigger.json decodes signal and optional fields")

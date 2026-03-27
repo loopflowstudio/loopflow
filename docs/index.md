@@ -88,10 +88,11 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Flow** | Chains steps together | `.lf/flows/*.yaml` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
-| **Mode** | Execution pattern: manual, loop, cron | wave config |
+| **Mode** | Primary execution pattern: manual or loop | wave config |
+| **Cron** | Scheduled supplementary flow | wave config |
 | **Trigger** | Signal + flow: repo, wave, ci_failure | wave config |
 
-A wave is **area × direction × flow**. Mode controls how it executes. Triggers fire flows in response to external signals.
+A wave is **area × direction × flow**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
 
 Area is the path you pass—not a file. It scopes what the wave sees and changes.
 
@@ -99,7 +100,15 @@ Area is the path you pass—not a file. It scopes what the wave sees and changes
 |------|------|
 | **manual** | Single run |
 | **loop** | Continuously until stopped |
-| **cron** | On schedule |
+
+```yaml
+flow: build
+workers: 2
+mode: loop
+crons:
+  - flow: wave-polish
+    schedule: "0 0 * * 1"
+```
 
 | Signal | What changed | Default flow |
 |--------|--------------|--------------|

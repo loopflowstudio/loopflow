@@ -14,7 +14,7 @@ The builtin steps (`vsm/s5-scan`, `vsm/s5-assess`, ..., `vsm/s2-scan`, `vsm/s2-a
 
 Depends on:
 - ~~02a (worker pools)~~ — shipped
-- 02b (wave modes — planning flow needs `mode: cron`)
+- ~~02b (wave modes — planning flow needs `mode: cron`)~~ — cron mode removed; planning uses `crons:` entries on the chord-wave instead
 
 ## The planning flow model
 

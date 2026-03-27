@@ -13,6 +13,12 @@ pub(crate) struct TriggerDef {
     pub source_repo: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct WaveCronDef {
+    pub flow: String,
+    pub schedule: String,
+}
+
 /// Per-provider project IDs stored in wave config.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub(crate) struct WavePmConfig {
@@ -42,7 +48,7 @@ pub(crate) struct WaveConfig {
     pub flow: Option<String>,
     pub mode: Option<String>,
     pub primary_flow: Option<String>,
-    pub cron: Option<String>,
+    pub crons: Option<Vec<WaveCronDef>>,
     pub workers: Option<u32>,
     pub serialized: Option<bool>,
     pub area: Option<Vec<String>>,
@@ -200,6 +206,24 @@ mod tests {
         assert_eq!(trigger.signal, "wave");
         assert_eq!(trigger.source.as_deref(), Some("infra"));
         assert_eq!(trigger.source_repo.as_deref(), Some("/tmp/source"));
+    }
+
+    #[test]
+    fn read_wave_config_parses_crons() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("scan.yaml"),
+            "flow: build\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n  - flow: wave-reduce\n    schedule: '0 0 1 * *'\n",
+        )
+        .expect("write");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        let crons = config.crons.expect("cron config should exist");
+        assert_eq!(crons.len(), 2);
+        assert_eq!(crons[0].flow, "wave-polish");
+        assert_eq!(crons[1].schedule, "0 0 1 * *");
     }
 
     #[test]

@@ -231,7 +231,7 @@ Report findings before proceeding to Step 0.
 
 ### Landscape Check
 
-Read ETHOS.md for the Search Before Building framework (the preamble's Search Before Building section has the path). Before challenging scope, understand the landscape. WebSearch for:
+Read ETHOS.md for the Search Before Building framework. Before challenging scope, understand the landscape. WebSearch for:
 - "[product category] landscape {current year}"
 - "[key feature] alternatives"
 - "why [incumbent/conventional approach] [succeeds/fails]"
@@ -243,7 +243,7 @@ Run the three-layer synthesis:
 - **[Layer 2]** What are the search results saying?
 - **[Layer 3]** First-principles reasoning — where might the conventional wisdom be wrong?
 
-Feed into the Premise Challenge (0A) and Dream State Mapping (0C). If you find a eureka moment, surface it during the Expansion opt-in ceremony as a differentiation opportunity. Log it (see preamble).
+Feed into the Premise Challenge (0A) and Dream State Mapping (0C). If you find a eureka moment, surface it during the Expansion opt-in ceremony as a differentiation opportunity.
 
 ## Step 0: Nuclear Scope Challenge + Mode Selection
 
@@ -423,12 +423,6 @@ After the loop completes (PASS, max iterations, or convergence guard):
 2. If issues remain after max iterations or convergence, add a "## Reviewer Concerns"
    section to the document listing each unresolved issue. Downstream skills will see this.
 
-3. Append metrics:
-```bash
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"plan-ceo-review","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","iterations":ITERATIONS,"issues_found":FOUND,"issues_fixed":FIXED,"remaining":REMAINING,"quality_score":SCORE}' >> ~/.gstack/analytics/spec-review.jsonl 2>/dev/null || true
-```
-Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review.
 
 ### 0E. Temporal Interrogation (EXPANSION, SELECTIVE EXPANSION, and HOLD modes)
 Think ahead to implementation: What decisions will need to be made during implementation that should be resolved NOW in the plan?
@@ -942,31 +936,6 @@ setopt +o nomatch 2>/dev/null || true  # zsh compat
 eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
 rm -f ~/.gstack/projects/$SLUG/*-$BRANCH-ceo-handoff-*.md 2>/dev/null || true
 ```
-
-## Review Log
-
-After producing the Completion Summary above, persist the review result.
-
-**PLAN MODE EXCEPTION — ALWAYS RUN:** This command writes review metadata to
-`~/.gstack/` (user config directory, not project files). The skill preamble
-already writes to `~/.gstack/sessions/` and `~/.gstack/analytics/` — this is
-the same pattern. The review dashboard depends on this data. Skipping this
-command breaks the review readiness dashboard in /ship.
-
-```bash
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-ceo-review","timestamp":"TIMESTAMP","status":"STATUS","unresolved":N,"critical_gaps":N,"mode":"MODE","scope_proposed":N,"scope_accepted":N,"scope_deferred":N,"commit":"COMMIT"}'
-```
-
-Before running this command, substitute the placeholder values from the Completion Summary you just produced:
-- **TIMESTAMP**: current ISO 8601 datetime (e.g., 2026-03-16T14:30:00)
-- **STATUS**: "clean" if 0 unresolved decisions AND 0 critical gaps; otherwise "issues_open"
-- **unresolved**: number from "Unresolved decisions" in the summary
-- **critical_gaps**: number from "Failure modes: ___ CRITICAL GAPS" in the summary
-- **MODE**: the mode the user selected (SCOPE_EXPANSION / SELECTIVE_EXPANSION / HOLD_SCOPE / SCOPE_REDUCTION)
-- **scope_proposed**: number from "Scope proposals: ___ proposed" in the summary (0 for HOLD/REDUCTION)
-- **scope_accepted**: number from "Scope proposals: ___ accepted" in the summary (0 for HOLD/REDUCTION)
-- **scope_deferred**: number of items deferred to TODOS.md from scope decisions (0 for HOLD/REDUCTION)
-- **COMMIT**: output of `git rev-parse --short HEAD`
 
 ## Review Readiness Dashboard
 

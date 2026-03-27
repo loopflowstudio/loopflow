@@ -299,7 +299,7 @@ If no matches found, proceed silently.
 
 ## Phase 2.75: Landscape Awareness
 
-Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments). The preamble's Search Before Building section has the ETHOS.md path.
+Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments).
 
 After understanding the problem through questioning, search for what the world thinks. This is NOT competitive research (that's /design-consultation's job). This is understanding conventional wisdom so you can evaluate where it's wrong.
 
@@ -326,7 +326,7 @@ Read the top 2-3 results. Run the three-layer synthesis:
 - **[Layer 2]** What are the search results and current discourse saying?
 - **[Layer 3]** Given what WE learned in Phase 2A/2B — is there a reason the conventional approach is wrong?
 
-**Eureka check:** If Layer 3 reasoning reveals a genuine insight, name it: "EUREKA: Everyone does X because they assume [assumption]. But [evidence from our conversation] suggests that's wrong here. This means [implication]." Log the eureka moment (see preamble).
+**Eureka check:** If Layer 3 reasoning reveals a genuine insight, name it: "EUREKA: Everyone does X because they assume [assumption]. But [evidence from our conversation] suggests that's wrong here. This means [implication]."
 
 If no eureka moment exists, say: "The conventional wisdom seems sound here. Let's build on it." Proceed to Phase 3.
 
@@ -794,12 +794,6 @@ After the loop completes (PASS, max iterations, or convergence guard):
 2. If issues remain after max iterations or convergence, add a "## Reviewer Concerns"
    section to the document listing each unresolved issue. Downstream skills will see this.
 
-3. Append metrics:
-```bash
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"office-hours","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","iterations":ITERATIONS,"issues_found":FOUND,"issues_fixed":FIXED,"remaining":REMAINING,"quality_score":SCORE}' >> ~/.gstack/analytics/spec-review.jsonl 2>/dev/null || true
-```
-Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review.
 
 ---
 

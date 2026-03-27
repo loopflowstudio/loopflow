@@ -610,45 +610,6 @@ AskUserQuestion options:
 
 ---
 
-## Completion: Write Review Logs
-
-On approval, write 3 separate review log entries so /ship's dashboard recognizes them.
-Replace TIMESTAMP, STATUS, and N with actual values from each review phase.
-STATUS is "clean" if no unresolved issues, "issues_open" otherwise.
-
-```bash
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-ceo-review","timestamp":"'"$TIMESTAMP"'","status":"STATUS","unresolved":N,"critical_gaps":N,"mode":"SELECTIVE_EXPANSION","via":"autoplan","commit":"'"$COMMIT"'"}'
-
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-eng-review","timestamp":"'"$TIMESTAMP"'","status":"STATUS","unresolved":N,"critical_gaps":N,"issues_found":N,"mode":"FULL_REVIEW","via":"autoplan","commit":"'"$COMMIT"'"}'
-```
-
-If Phase 2 ran (UI scope):
-```bash
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-design-review","timestamp":"'"$TIMESTAMP"'","status":"STATUS","unresolved":N,"via":"autoplan","commit":"'"$COMMIT"'"}'
-```
-
-Dual voice logs (one per phase that ran):
-```bash
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"autoplan-voices","timestamp":"'"$TIMESTAMP"'","status":"STATUS","source":"SOURCE","phase":"ceo","via":"autoplan","consensus_confirmed":N,"consensus_disagree":N,"commit":"'"$COMMIT"'"}'
-
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"autoplan-voices","timestamp":"'"$TIMESTAMP"'","status":"STATUS","source":"SOURCE","phase":"eng","via":"autoplan","consensus_confirmed":N,"consensus_disagree":N,"commit":"'"$COMMIT"'"}'
-```
-
-If Phase 2 ran (UI scope), also log:
-```bash
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"autoplan-voices","timestamp":"'"$TIMESTAMP"'","status":"STATUS","source":"SOURCE","phase":"design","via":"autoplan","consensus_confirmed":N,"consensus_disagree":N,"commit":"'"$COMMIT"'"}'
-```
-
-SOURCE = "codex+subagent", "codex-only", "subagent-only", or "unavailable".
-Replace N values with actual consensus counts from the tables.
-
-Suggest next step: `/ship` when ready to create the PR.
-
----
-
 ## Important Rules
 
 - **Never abort.** The user chose /autoplan. Respect that choice. Surface all taste decisions, never redirect to interactive review.

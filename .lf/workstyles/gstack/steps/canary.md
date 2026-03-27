@@ -189,14 +189,6 @@ VERDICT: [DEPLOY IS HEALTHY / DEPLOY HAS ISSUES — details above]
 
 Save report to `.gstack/canary-reports/{date}-canary.md` and `.gstack/canary-reports/{date}-canary.json`.
 
-Log the result for the review dashboard:
-
-```bash
-eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
-mkdir -p ~/.gstack/projects/$SLUG
-```
-
-Write a JSONL entry: `{"skill":"canary","timestamp":"<ISO>","status":"<HEALTHY/DEGRADED/BROKEN>","url":"<url>","duration_min":<N>,"alerts":<N>}`
 
 ### Phase 7: Baseline Update
 

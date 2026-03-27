@@ -127,7 +127,7 @@ private struct SessionTerminalSurface: View {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
-                    env: [:],
+                    env: command.env,
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
@@ -164,6 +164,7 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
+    let env: [String: String] = [:]
 
     init(_ connection: TerminalConnectionInfo) {
         if connection.usesLocalTmux {

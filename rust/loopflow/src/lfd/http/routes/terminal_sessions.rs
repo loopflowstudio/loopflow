@@ -280,10 +280,8 @@ mod tests {
     }
 
     fn make_terminal_session(wave_id: LfdId, source: &str) -> TerminalSession {
-        let id = LfdId::new();
-        let tmux_name = tmux_session_name("test-branch");
         TerminalSession {
-            id,
+            id: LfdId::new(),
             wave_id,
             wave_run_id: None,
             step: "design".to_string(),
@@ -292,7 +290,11 @@ mod tests {
             argv: vec!["lf".to_string(), "design".to_string()],
             env: Default::default(),
             source: source.to_string(),
-            tmux_name,
+            tmux_name: if source == TMUX_TERMINAL_SOURCE {
+                tmux_session_name("test-branch")
+            } else {
+                String::new()
+            },
             status: TerminalSessionStatus::Pending,
             attached_at: None,
             started_at: None,

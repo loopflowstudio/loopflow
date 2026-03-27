@@ -1,4 +1,4 @@
-# 04: Conversation History
+# 03: Conversation History
 
 Browse past sessions, resume where you left off.
 

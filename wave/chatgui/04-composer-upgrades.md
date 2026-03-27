@@ -1,4 +1,4 @@
-# 05: Composer Upgrades
+# 04: Composer Upgrades
 
 File drop, image paste, slash commands, context awareness.
 

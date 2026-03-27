@@ -4,7 +4,7 @@ Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomou
 
 ## What to build
 
-**A synced flow, not a workstyle.** Autoresearch is a loop pattern any workstyle can use: edit a file, run a measurement, keep or discard based on a single metric. The source is Karpathy's `program.md` — synced from `github:karpathy/autoresearch`, decomposed into loopflow steps by the converter. Same sync tooling as gstack, different output shape.
+**A synced flow, not a workstyle.** Syncing autoresearch produces steps and a flow YAML — no workstyle is created. The sync tool doesn't decide what the thing is. It converts whatever it finds and writes the pieces. A workstyle only exists when someone publishes the full bundle and names it one (like gstack). Karpathy published a loop and some prompts — that's a flow.
 
 **Four steps, not one.** Karpathy has it as a monolithic `program.md`, but it's doing four distinct things. Decomposing makes each step composable — swap evaluate for a benchmark, a test suite, a bundle size check. The loop pattern stays the same.
 
@@ -57,18 +57,18 @@ What the converter extracts into steps:
 - **evaluate** — how to run the measurement and extract the metric
 - **decide** — the keep/discard logic (compare to best, commit or reset)
 
+The sync tool writes directly to loopflow's native locations:
+
 ```
-.lf/synced/autoresearch/
-  source.yaml             # metadata: repo, ref, last sync
-  steps/
-    experiment.md
-    evaluate.md
-    decide.md
-  flows/
-    autoresearch.yaml
+.lf/steps/autoresearch/
+  experiment.md
+  evaluate.md
+  decide.md
+.lf/flows/
+  autoresearch.yaml
 ```
 
-This generalizes the sync tool. It syncs a workstyle or any partial of one — steps, flows, voice, directions, config, or any combination. gstack is a full workstyle. Autoresearch is steps + a flow. Someone else might publish just a direction or a single step.
+No workstyle directory, no wrapper. Just steps and a flow.
 
 ### What makes this general
 

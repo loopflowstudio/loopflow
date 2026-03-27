@@ -8,7 +8,7 @@ Loopflow becomes a platform for workstyles — shareable bundles of prompts, flo
 
 Three launch workstyles: **lfjack** (loopflow native), **vsm** (governance), **gstack** (sprint factory). Eventually: **loopflowhub** — an open-source registry where anyone publishes their workstyle.
 
-**Sync as normalizer.** People publish in whatever form they want — SKILL.md files, a single program.md, raw markdown, yaml configs. The sync tool converts whatever it finds into loopflow's standard workstyle structure. Missing pieces get lfjack defaults. A "workstyle" is just the union of whatever someone provides and loopflow's defaults filling the gaps.
+**Sync as normalizer.** People publish in whatever form they want — SKILL.md files, a single program.md, raw markdown, yaml configs. The sync engine reads any input format and writes directly to loopflow's native formats: `.md` steps, `.yaml` flows, `voice.md`, `config.yaml`. No intermediate representation — it writes to the places loopflow already looks. Missing pieces get lfjack defaults.
 
 ### Not here
 

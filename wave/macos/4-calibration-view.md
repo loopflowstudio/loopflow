@@ -5,6 +5,8 @@ notion_id: 32af8f99-3d81-81f8-87ac-decf31e198c2
 ---
 # Calibration View
 
+**Needs:** model/3-wave-modes, model/4-letta-integration
+
 **Finish line:** The garden flow's human checkpoint has a dedicated UX. Not a notification, not a PR review — a trajectory review across all waves. The highest-leverage human moment in the system.
 
 ## Context

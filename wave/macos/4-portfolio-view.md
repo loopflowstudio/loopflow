@@ -5,6 +5,8 @@ notion_id: 32af8f99-3d81-817f-96ff-d7e5bca1c64d
 ---
 # Portfolio View
 
+**Needs:** model/3-wave-modes
+
 **Finish line:** Multi-repo, multi-wave status at a glance. Wave health, PR state, and active attention items per wave. The 10-second assessment: "where do things stand?"
 
 ## Context

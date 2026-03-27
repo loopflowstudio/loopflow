@@ -16,8 +16,8 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_summary_row, map_trigger_row, map_wave_row, map_wave_run_row, now_unix,
-    serialize_pr,
+    map_repo_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
+    map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
@@ -25,7 +25,7 @@ use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
     ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
     QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus,
-    Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    Trigger, Wave, WaveCron, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -216,10 +216,9 @@ impl SqliteStore {
                 wave.iteration() as i64,
                 wave.cycle_start_iteration() as i64,
                 created_at,
-                wave.workers() as i64,
+                wave.workers as i64,
                 wave.mode().as_str(),
                 wave.primary_flow(),
-                wave.cron.as_deref(),
             ],
         )?;
         Ok(())
@@ -1013,15 +1012,26 @@ impl SqliteStore {
         Ok(waves)
     }
 
-    pub fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+    pub fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListCronWaves))?;
-        let rows = stmt.query_map([], |row| Ok(map_wave_row(row)))?;
-        let mut waves = Vec::new();
-        for wave in rows {
-            waves.push(wave??);
+        let mut stmt = conn.prepare(Self::sql(Query::ListWaveCrons))?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_wave_cron_row(row)))?;
+        let mut crons = Vec::new();
+        for cron in rows {
+            crons.push(cron??);
         }
-        Ok(waves)
+        Ok(crons)
+    }
+
+    pub fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListAllActiveCrons))?;
+        let rows = stmt.query_map([], |row| Ok(map_wave_cron_row(row)))?;
+        let mut crons = Vec::new();
+        for cron in rows {
+            crons.push(cron??);
+        }
+        Ok(crons)
     }
 
     pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
@@ -1057,6 +1067,43 @@ impl SqliteStore {
             params![wave_id],
         )?;
         conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;
+        Ok(())
+    }
+
+    pub fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::InsertWaveCron),
+            params![
+                cron.id.as_str(),
+                cron.wave_id.as_str(),
+                cron.flow,
+                cron.schedule,
+                cron.last_triggered_at,
+                cron.created_at
+                    .map(|value| value.unix_timestamp())
+                    .unwrap_or_else(now_unix),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_wave_cron_last_triggered(
+        &self,
+        cron_id: &LfdId,
+        last_triggered_at: Option<i64>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::UpdateWaveCronLastTriggered),
+            params![last_triggered_at, cron_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(Self::sql(Query::DeleteWaveCronsByWave), params![wave_id])?;
         Ok(())
     }
 

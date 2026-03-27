@@ -182,6 +182,7 @@ class Client:
         name: str,
         repo: str,
         flow: Optional[str] = None,
+        crons: Optional[list[dict[str, str]]] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
@@ -189,7 +190,13 @@ class Client:
         body = {
             "repo": repo,
             "name": name,
-            **_compact_dict(flow=flow, direction=direction, area=area, status=status),
+            **_compact_dict(
+                flow=flow,
+                crons=crons,
+                direction=direction,
+                area=area,
+                status=status,
+            ),
         }
         payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)
@@ -198,11 +205,18 @@ class Client:
         self,
         name_or_id: str,
         flow: Optional[str] = None,
+        crons: Optional[list[dict[str, str]]] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
     ) -> Wave:
-        body = _compact_dict(flow=flow, direction=direction, area=area, status=status)
+        body = _compact_dict(
+            flow=flow,
+            crons=crons,
+            direction=direction,
+            area=area,
+            status=status,
+        )
         payload = self._request_json("PATCH", f"/v0/waves/{name_or_id}", json=body)
         return Wave.model_validate(payload)
 

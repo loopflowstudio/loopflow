@@ -951,6 +951,24 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             triggers = []
         }
 
+        let crons: [WaveCron]
+        if let cronArr = json["crons"] as? [[String: Any]] {
+            crons = cronArr.compactMap { dict in
+                guard let id = dict["id"] as? String,
+                      let flow = dict["flow"] as? String,
+                      let schedule = dict["schedule"] as? String else { return nil }
+                return WaveCron(
+                    id: id,
+                    flow: flow,
+                    schedule: schedule,
+                    lastTriggeredAt: normalizeUnixDate(dict["last_triggered_at"]),
+                    createdAt: parseDate(dict["created_at"])
+                )
+            }
+        } else {
+            crons = []
+        }
+
         let createdAt: Date?
         if let dateStr = json["created_at"] as? String {
             createdAt = dateFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr)
@@ -996,6 +1014,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             agent: json["agent"] as? String,
             stepAgents: stepAgents,
             triggers: triggers,
+            crons: crons,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
             localWorktree: json["local_worktree"] as? String,
@@ -1912,6 +1931,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let intValue = value as? Int { return intValue }
         if let doubleValue = value as? Double { return Int(doubleValue) }
         return nil
+    }
+
+    private static func normalizeUnixDate(_ value: Any?) -> Date? {
+        guard let seconds = normalizeOptionalInt(value) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(seconds))
     }
 
     private static func normalizeOptionalUInt64(_ value: Any?) -> UInt64? {

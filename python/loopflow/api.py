@@ -21,6 +21,7 @@ from .models import (
     UsageSummary,
     UsageSummaryGroup,
     Wave,
+    WaveCron,
     WaveRun,
 )
 
@@ -110,6 +111,7 @@ def create_wave(
     name: str,
     repo: str,
     flow: Optional[str] = None,
+    crons: Optional[list[dict[str, str]]] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     status: Optional[str] = None,
@@ -118,6 +120,7 @@ def create_wave(
         name,
         repo,
         flow=flow,
+        crons=crons,
         direction=direction,
         area=area,
         status=status,
@@ -127,6 +130,7 @@ def create_wave(
 def update_wave(
     name_or_id: str,
     flow: Optional[str] = None,
+    crons: Optional[list[dict[str, str]]] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     status: Optional[str] = None,
@@ -134,6 +138,7 @@ def update_wave(
     return _client().update_wave(
         name_or_id,
         flow=flow,
+        crons=crons,
         direction=direction,
         area=area,
         status=status,
@@ -292,6 +297,7 @@ __all__ = [
     "UsageSummary",
     "UsageSummaryGroup",
     "Wave",
+    "WaveCron",
     "WaveRun",
     "health",
     "status",

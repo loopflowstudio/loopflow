@@ -154,7 +154,6 @@ impl LivePrState {
 pub enum WaveMode {
     #[default]
     Loop,
-    Cron,
     Manual,
 }
 
@@ -162,7 +161,6 @@ impl WaveMode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Loop => "loop",
-            Self::Cron => "cron",
             Self::Manual => "manual",
         }
     }
@@ -174,11 +172,21 @@ impl std::str::FromStr for WaveMode {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "loop" => Ok(Self::Loop),
-            "cron" => Ok(Self::Cron),
             "manual" => Ok(Self::Manual),
             _ => Err(format!("unknown wave mode: {value}")),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaveCron {
+    pub id: LfdId,
+    pub wave_id: LfdId,
+    pub flow: String,
+    pub schedule: String,
+    pub last_triggered_at: Option<i64>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub created_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,7 +233,8 @@ pub struct Wave {
     pub repo: String,
     pub mode: WaveMode,
     pub primary_flow: String,
-    pub cron: Option<String>,
+    #[serde(default)]
+    pub crons: Vec<WaveCron>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub status: WaveStatus,
@@ -250,7 +259,7 @@ impl Wave {
             repo,
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -306,7 +315,7 @@ impl Wave {
     }
 
     pub fn workers(&self) -> u32 {
-        self.workers.max(1)
+        self.workers
     }
 }
 

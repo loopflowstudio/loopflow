@@ -10,6 +10,8 @@ The wave *is* the scope. Crons are maintenance rhythms layered on top. A member 
 
 Wave config gains `crons`: a list of flow + schedule pairs. Cron runs are independent of the worker pool — they don't count against `workers` capacity, get their own ephemeral worktrees, and fire regardless of whether workers are busy.
 
+`mode: cron` is removed. All scheduled work uses `crons`. What was `mode: cron` becomes `workers: 0` + a cron entry.
+
 ```yaml
 # member wave — workers grind build, crons sweep maintenance
 flow: build
@@ -21,10 +23,10 @@ crons:
   - flow: wave-reduce
     schedule: "0 0 1 * *"      # monthly 1st
 
-# root wave — no workers, governance on crons
+# root wave — no workers, all work on crons
 flow: garden
 workers: 0
-mode: loop
+mode: manual
 crons:
   - flow: govern-identity
     schedule: "0 0 * * 0"
@@ -35,7 +37,8 @@ crons:
 ```
 
 `flow` + `workers` + `mode` = the primary work. What the wave *does*.
-`crons` = supplementary flows that fire on schedule. Each runs once when triggered, not in the worker pool.
+`crons` = flows that fire on schedule. Each runs once when triggered, not in the worker pool.
+`mode` is now `loop | manual` only — `cron` is gone.
 
 ### Database
 
@@ -115,21 +118,43 @@ During `create_wave_handler`, cron defs are converted to `WaveCron` rows in the 
 
 ### Workers: 0
 
-Allow `workers: 0` for waves that are purely cron-driven. Change `create_wave_workers` to allow 0 when the wave has crons or `mode: cron`. A wave with `workers: 0` and no crons is valid (paused/manual) but the primary flow never auto-dispatches.
+Allow `workers: 0` for waves that are purely cron-driven. Remove the `.max(1)` enforcement in `create_wave_workers` and `wave.workers()`. A wave with `workers: 0` and no crons is valid (paused/manual) but the primary flow never auto-dispatches.
 
 ### Dispatch
 
-The cron poller (`spawn_cron_poller`) gains a second check alongside the existing `mode: cron` path:
+The cron poller (`spawn_cron_poller`) replaces the existing `mode: cron` path entirely:
 
-1. **Existing path** (unchanged): Query `mode = 'cron'` waves, check `wave.cron` against activation_log, fire `primary_flow`. This preserves backwards compatibility.
-
-2. **New path**: Query all `wave_crons` entries (joined with wave status to skip paused waves). For each entry, call `should_activate_cron(entry.schedule, entry.last_triggered_at)`. On fire:
+1. Query all `wave_crons` entries joined with waves (skip paused waves).
+2. For each entry, call `should_activate_cron(entry.schedule, entry.last_triggered_at)`.
+3. On fire:
    - Create a `WaveRun` with `flow = entry.flow`, inheriting the wave's area and direction
    - Use `spawn_immediate_activation` (parallel path) — always gets its own ephemeral worktree
    - Update `entry.last_triggered_at` in the store
    - Log to `activation_log` with reason `"cron [{flow}] schedule {schedule} due"`
 
+The old `list_cron_waves` / `wave.cron` path is removed. `should_activate_cron` stays — it now reads `last_triggered_at` from the cron entry instead of from `activation_log`.
+
 Cron runs bypass per-wave `workers` capacity but still acquire a global `Scheduler` semaphore slot. If the global ceiling is hit, the cron activation queues normally.
+
+### Migration
+
+Migration converts existing `mode: cron` waves:
+
+```sql
+-- For each wave where mode = 'cron' and cron IS NOT NULL:
+-- 1. Insert a wave_crons row with flow = primary_flow, schedule = cron
+-- 2. Set mode = 'manual', workers = 0
+-- 3. The cron column is dropped from waves
+INSERT INTO wave_crons (id, wave_id, flow, schedule, created_at)
+SELECT lfd_id(), id, primary_flow, cron, strftime('%s', 'now')
+FROM waves WHERE mode = 'cron' AND cron IS NOT NULL;
+
+UPDATE waves SET mode = 'manual', workers = 0 WHERE mode = 'cron';
+
+-- Then drop the cron column (via table rebuild in SQLite)
+```
+
+`WaveMode` loses the `Cron` variant. `Wave.cron` field is removed. `WaveConfig.cron` is removed. `list_cron_waves` store method is removed.
 
 ### Store queries
 
@@ -178,7 +203,7 @@ Human-readable schedule descriptions (croner or manual mapping for common patter
 | Separate waves per flow | Each gets its own backlog and identity | Fragments scope — area/direction/README duplicated, harder to reason about "what does this wave do" |
 | JSON column on waves table | Simpler schema, no joins | Crons need mutable per-entry state (last_triggered_at); JSON update is awkward and loses query indexing |
 | Extend existing triggers table | Reuse existing signal/trigger machinery | Triggers respond to events (repo change, CI failure); crons are time-based. Different dispatch semantics. Overloading `signal` with a cron type conflates two concepts |
-| Normalize `mode: cron` into `crons` | Single mechanism | Migration complexity, changes semantics of existing waves. Not worth it — the two paths are small and orthogonal |
+| Keep `mode: cron` alongside `crons` | Backwards compat, no migration | Two mechanisms for the same thing. Config footgun. Extra code path in the poller for no benefit |
 
 ## Key decisions
 
@@ -188,14 +213,14 @@ Human-readable schedule descriptions (croner or manual mapping for common patter
 
 **Per-entry last-triggered, not per-wave.** The current cron poller approximates last-triggered from activation_log (most recent entry for the wave). With multiple crons per wave, this collapses independent schedules. A weekly polish and daily governance would share one timestamp. Per-entry tracking is the only correct approach.
 
-**Keep `mode: cron` as-is.** The existing `mode: cron` + `cron: "expr"` path works. Normalizing it into `crons` would require a migration and change semantics for all existing cron waves. The two paths coexist cleanly — `mode: cron` fires the primary flow, `crons` fires supplementary flows.
+**`mode: cron` is gone.** One mechanism for scheduled work: `crons`. Existing `mode: cron` waves are migrated to `workers: 0` + a cron entry. `WaveMode` becomes `Loop | Manual`.
 
-**`workers: 0` is valid.** Root waves that are purely cron-driven shouldn't need a dummy worker. Remove the minimum-1 enforcement when the wave has crons or `mode: cron`.
+**`workers: 0` is valid.** Root waves that are purely cron-driven shouldn't need a dummy worker. Remove the `.max(1)` enforcement entirely.
 
 ## Scope
 
-- **In scope:** `wave_crons` table + migration, `WaveCron` type in Rust/Python/Swift, config parsing, cron poller extension, `workers: 0` support, HTTP API, store queries, activation logging
-- **Out of scope:** Concerto UI for cron management (read-only display only), cron expression validation beyond what the `cron` crate provides, retry/repair logic for failed cron runs (use existing repair mechanism), replacing `mode: cron` with `crons`
+- **In scope:** `wave_crons` table + migration, `WaveCron` type in Rust/Python/Swift, config parsing, cron poller rewrite (single path), `workers: 0` support, remove `mode: cron` + `wave.cron`, HTTP API, store queries, activation logging
+- **Out of scope:** Concerto UI for cron management (read-only display only), cron expression validation beyond what the `cron` crate provides, retry/repair logic for failed cron runs (use existing repair mechanism)
 
 ## Done when
 

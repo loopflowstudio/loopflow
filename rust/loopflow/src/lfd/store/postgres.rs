@@ -17,8 +17,8 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_summary_row, map_trigger_row, map_wave_row, map_wave_run_row, now_unix,
-    serialize_pr,
+    map_repo_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
+    map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
@@ -26,7 +26,7 @@ use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
     ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
     QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus,
-    Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    Trigger, Wave, WaveCron, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -225,10 +225,9 @@ impl PostgresStore {
             };
             let created_at = wave.created_at().map(|dt| dt.unix_timestamp()).unwrap_or(0);
 
-            let workers = wave.workers() as i32;
+            let workers = wave.workers as i32;
             let mode = wave.mode().as_str();
             let primary_flow = wave.primary_flow();
-            let cron = wave.cron.as_deref();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -246,7 +245,6 @@ impl PostgresStore {
                         &workers,
                         &mode,
                         &primary_flow.as_str(),
-                        &cron,
                     ],
                 )
                 .await?;
@@ -1068,10 +1066,22 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+    pub async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
         self.with_client(|client| async move {
-            let rows = client.query(Self::sql(Query::ListCronWaves), &[]).await?;
-            rows.iter().map(map_wave_row).collect()
+            let rows = client
+                .query(Self::sql(Query::ListWaveCrons), &[&wave_id])
+                .await?;
+            rows.iter().map(map_wave_cron_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::ListAllActiveCrons), &[])
+                .await?;
+            rows.iter().map(map_wave_cron_row).collect()
         })
         .await
     }
@@ -1116,6 +1126,60 @@ impl PostgresStore {
                 .await?;
             client
                 .execute(Self::sql(Query::DeleteWaveById), &[&wave_id])
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let created_at = cron
+                .created_at
+                .map(|value| value.unix_timestamp())
+                .unwrap_or_else(now_unix);
+            client
+                .execute(
+                    Self::sql(Query::InsertWaveCron),
+                    &[
+                        &cron.id.as_str(),
+                        &cron.wave_id.as_str(),
+                        &cron.flow,
+                        &cron.schedule,
+                        &cron.last_triggered_at,
+                        &created_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn update_wave_cron_last_triggered(
+        &self,
+        cron_id: &LfdId,
+        last_triggered_at: Option<i64>,
+    ) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::UpdateWaveCronLastTriggered),
+                    &[&last_triggered_at, &cron_id.as_str()],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::DeleteWaveCronsByWave),
+                    &[&wave_id.as_str()],
+                )
                 .await?;
             Ok(())
         })

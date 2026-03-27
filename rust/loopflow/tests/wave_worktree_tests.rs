@@ -31,7 +31,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         repo: repo.to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
-        cron: None,
+        crons: Vec::new(),
         direction: vec![],
         area: vec![],
         status: WaveStatus::Idle,

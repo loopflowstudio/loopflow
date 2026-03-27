@@ -60,12 +60,13 @@ async fn create_wave_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
+    force_parallel: bool,
     target_branch: Option<&str>,
 ) -> anyhow::Result<WaveRun> {
-    if wave.workers() == 1 {
-        create_wave_run_with_id(store, wave, run_id, target_branch).await
-    } else {
+    if force_parallel || wave.workers() != 1 {
         create_parallel_wave_run(store, wave, run_id, target_branch).await
+    } else {
+        create_wave_run_with_id(store, wave, run_id, target_branch).await
     }
 }
 
@@ -146,6 +147,7 @@ pub struct ImmediateActivation<'a> {
     pub wave: &'a Wave,
     pub flow_override: Option<String>,
     pub roadmap_item: Option<String>,
+    pub force_parallel: bool,
     pub envelope: ActivationEnvelope,
 }
 
@@ -302,6 +304,7 @@ pub async fn spawn_immediate_activation(
         wave,
         flow_override,
         roadmap_item,
+        force_parallel,
         envelope,
     } = activation;
 
@@ -339,7 +342,7 @@ pub async fn spawn_immediate_activation(
     }
 
     let target = target_branch_ref(&envelope.target_branch);
-    let mut run = match create_wave_run(store, wave, &run_id, target).await {
+    let mut run = match create_wave_run(store, wave, &run_id, force_parallel, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -481,7 +484,7 @@ pub async fn dispatch_wave_if_ready(
     };
 
     let target = target_branch_ref(&activation.target_branch);
-    let mut run = match create_wave_run(store, wave, &run_id, target).await {
+    let mut run = match create_wave_run(store, wave, &run_id, false, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");
@@ -596,7 +599,7 @@ mod tests {
             repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            cron: None,
+            crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

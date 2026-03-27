@@ -161,7 +161,7 @@ struct ContentView: View {
         if let wave = repoState.selectedWave,
            let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
-            let terminal = TerminalApp.warp
+            let terminal = TerminalApp.ghostty
             let ide = IDEApp.cursor
             let remoteHost = repoState.repoTarget?.remoteHost
 

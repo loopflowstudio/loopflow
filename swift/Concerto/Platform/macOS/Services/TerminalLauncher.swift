@@ -33,6 +33,8 @@ struct TerminalLauncher {
 
     func launchTerminal(_ terminal: TerminalApp, at path: URL, command: String? = nil) throws {
         switch terminal {
+        case .ghostty:
+            try launchGhostty(at: path, command: command)
         case .warp:
             try launchWarp(at: path, command: command)
         case .iterm:
@@ -71,6 +73,8 @@ struct TerminalLauncher {
     private func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
         let command = sshCommand(host: host, path: path)
         switch terminal {
+        case .ghostty:
+            try launchGhostty(at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
         case .warp, .iterm, .terminal:
             // Use AppleScript-based terminals with the ssh command
             try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
@@ -105,6 +109,23 @@ struct TerminalLauncher {
     }
 
     // MARK: - Terminal Launchers
+
+    private func launchGhostty(at path: URL, command: String?) throws {
+        let executableURL = URL(fileURLWithPath: "/Applications/Ghostty.app/Contents/MacOS/ghostty")
+        guard FileManager.default.fileExists(atPath: executableURL.path) else {
+            throw LaunchError.launchFailed("Ghostty not found at /Applications/Ghostty.app")
+        }
+
+        var arguments = ["--working-directory=\(path.path())"]
+        if let command, !command.isEmpty {
+            arguments.append("--command=\(command)")
+        }
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        try process.run()
+    }
 
     private func launchWarp(at path: URL, command: String?) throws {
         // Warp requires UI scripting via Accessibility - check permission first
@@ -397,4 +418,3 @@ struct TerminalLauncher {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
-

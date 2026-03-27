@@ -278,6 +278,57 @@ struct SessionStateTests {
     }
 
     @MainActor
+    @Test("derived transcript state groups tool runs and tracks the latest assistant")
+    func derivedTranscriptStateTracksHotPathState() async {
+        let service = MockSessionService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemStarted(
+                        turnId: "turn_1",
+                        item: .command(CommandItem(id: "cmd_1", command: ["git", "status"], status: .inProgress))
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .itemStarted(
+                        turnId: "turn_1",
+                        item: .tool(ToolItem(id: "tool_1", name: "Read", status: .inProgress))
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 3, event: .textDelta(turnId: "turn_1", content: "done"))),
+                    .success(AgentSessionEventEnvelope(seq: 4, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+
+        let state = SessionState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("derived-hot-path")
+        )
+
+        await state.send("check")
+        await waitUntil { state.turnState == .completed }
+
+        #expect(state.groupedTranscript.count >= 3)
+
+        if let toolRun = state.groupedTranscript.first(where: {
+            if case .toolRun = $0 {
+                return true
+            }
+            return false
+        }),
+           case .toolRun(let items) = toolRun {
+            #expect(items.map(\.itemId) == ["cmd_1", "tool_1"])
+        } else {
+            Issue.record("Expected tool entries to group into one run")
+        }
+
+        let assistantMessages = messages(in: state, role: .assistant)
+        #expect(assistantMessages.count == 1)
+        #expect(state.latestAssistantMessageId == assistantMessages[0].id)
+        #expect(state.timestampLabels == messageTimestampLabels(for: state.transcript))
+    }
+
+    @MainActor
     @Test("item completion without start still creates one row")
     func completionWithoutStartCreatesRow() async {
         let service = MockSessionService(

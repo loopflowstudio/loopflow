@@ -34,6 +34,7 @@ struct AppIconProvider {
 
 enum AppIdentifier {
     case cursor
+    case ghostty
     case warp
     case vscode
     case iterm
@@ -52,6 +53,7 @@ enum AppIdentifier {
 
     init(terminal: TerminalApp) {
         switch terminal {
+        case .ghostty: self = .ghostty
         case .warp: self = .warp
         case .iterm: self = .iterm
         case .terminal: self = .terminal
@@ -62,6 +64,7 @@ enum AppIdentifier {
     var bundleIdentifier: String? {
         switch self {
         case .cursor: return "com.todesktop.230313mzl4w4u92"
+        case .ghostty: return nil
         case .warp: return "dev.warp.Warp-Stable"
         case .vscode: return "com.microsoft.VSCode"
         case .iterm: return "com.googlecode.iterm2"
@@ -75,6 +78,7 @@ enum AppIdentifier {
     var appName: String {
         switch self {
         case .cursor: return "Cursor"
+        case .ghostty: return "Ghostty"
         case .warp: return "Warp"
         case .vscode: return "Visual Studio Code"
         case .iterm: return "iTerm"
@@ -88,9 +92,8 @@ enum AppIdentifier {
     var fallbackSystemImage: String {
         switch self {
         case .cursor, .vscode, .zed: return "cursorarrow.rays"
-        case .warp, .iterm, .terminal, .kitty: return "terminal"
+        case .ghostty, .warp, .iterm, .terminal, .kitty: return "terminal"
         case .github: return "arrow.up.right.square"
         }
     }
 }
-

@@ -1,6 +1,23 @@
-#if os(macOS)
 import SwiftUI
 import LoopflowCore
+
+private final class MessageSegmentCache {
+    private var cachedContentLength = -1
+    private var cachedSegments: [MessageSegment] = []
+
+    func segments(for content: String) -> [MessageSegment] {
+        let contentLength = content.count
+        guard contentLength != cachedContentLength else {
+            return cachedSegments
+        }
+
+        cachedContentLength = contentLength
+        cachedSegments = parseMessageSegments(content)
+        return cachedSegments
+    }
+}
+
+#if os(macOS)
 
 struct MessageRow: View {
     @Environment(\.palette) private var palette
@@ -12,6 +29,7 @@ struct MessageRow: View {
     @State private var selectedQuote: String?
     @State private var replyDraft = ""
     @State private var selectionResetToken = 0
+    @State private var segmentCache = MessageSegmentCache()
 
     var body: some View {
         if message.role == .system {
@@ -47,7 +65,7 @@ struct MessageRow: View {
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant {
-            let segments = parseMessageSegments(message.content)
+            let segments = segmentCache.segments(for: message.content)
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     switch segment {
@@ -68,6 +86,7 @@ struct MessageRow: View {
 
                 if showStreamingCursor {
                     StreamingCursorView()
+                        .id("streaming-cursor-\(message.id)")
                 }
             }
             .popover(
@@ -143,8 +162,6 @@ struct MessageRow: View {
 }
 
 #else
-import SwiftUI
-import LoopflowCore
 
 struct MessageRow: View {
     @Environment(\.palette) private var palette
@@ -156,6 +173,7 @@ struct MessageRow: View {
 
     @State private var composerQuote: String?
     @State private var replyDraft = ""
+    @State private var segmentCache = MessageSegmentCache()
 
     var body: some View {
         if message.role == .system {
@@ -191,7 +209,7 @@ struct MessageRow: View {
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant {
-            let segments = parseMessageSegments(message.content)
+            let segments = segmentCache.segments(for: message.content)
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     switch segment {
@@ -206,6 +224,7 @@ struct MessageRow: View {
 
                 if showStreamingCursor {
                     StreamingCursorView()
+                        .id("streaming-cursor-\(message.id)")
                 }
             }
             .modifier(ReplyComposerPresentation(

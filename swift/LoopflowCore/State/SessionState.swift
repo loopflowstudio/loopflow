@@ -89,6 +89,20 @@ public enum TranscriptEntry: Identifiable, Equatable {
     }
 }
 
+public enum TranscriptGroup: Identifiable, Equatable {
+    case single(TranscriptEntry)
+    case toolRun([TranscriptItem])
+
+    public var id: UUID {
+        switch self {
+        case .single(let entry):
+            return entry.id
+        case .toolRun(let items):
+            return items[0].id
+        }
+    }
+}
+
 public protocol SessionService: Sendable {
     func createSession(
         harness: String,
@@ -125,7 +139,10 @@ public enum StreamPhase {
 public final class SessionState {
     public let waveId: String
 
-    public var transcript: [TranscriptEntry] = []
+    public private(set) var transcript: [TranscriptEntry] = []
+    public private(set) var groupedTranscript: [TranscriptGroup] = []
+    public private(set) var latestAssistantMessageId: UUID?
+    public private(set) var timestampLabels: [UUID: String] = [:]
     public var turnState: TurnState = .idle
     public var streamPhase: StreamPhase = .idle
     public var awaitingSessionJoin: Bool = false
@@ -149,6 +166,7 @@ public final class SessionState {
     private var itemEntryIdByItemId: [String: UUID] = [:]
     private var assistantEntryIdByTurnId: [String: UUID] = [:]
     private var messageEntryIdByItemId: [String: UUID] = [:]
+    private var transcriptIndexById: [UUID: Int] = [:]
 
     private var streamTask: Task<Void, Never>?
     private var streamGeneration = 0
@@ -460,7 +478,7 @@ public final class SessionState {
     }
 
     private func resetForReplay() {
-        transcript.removeAll()
+        setTranscript([])
         turnState = .idle
         resetSessionCaches()
     }
@@ -472,12 +490,13 @@ public final class SessionState {
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
         messageEntryIdByItemId.removeAll()
+        transcriptIndexById.removeAll()
         clearSuggestedActions()
         contextSnapshot = nil
     }
 
     private func appendMessage(role: MessageRole, content: String) {
-        transcript.append(.message(SessionMessage(role: role, content: content)))
+        appendTranscriptEntry(.message(SessionMessage(role: role, content: content)))
     }
 
     private func upsertMessageBubble(item: SessionItem, isCompletion: Bool) -> Bool {
@@ -489,26 +508,29 @@ public final class SessionState {
 
         if let itemId = normalizedItemId(message.id) {
             if let entryId = messageEntryIdByItemId[itemId],
-               let index = transcript.firstIndex(where: { $0.id == entryId }),
+               let index = transcriptIndexById[entryId],
                case .message(let existing) = transcript[index] {
-                let updated = SessionMessage(
-                    id: existing.id,
-                    role: role,
-                    content: text,
-                    timestamp: existing.timestamp
-                )
-                transcript[index] = .message(updated)
+                updateTranscriptEntry(id: entryId) { _ in
+                    .message(
+                        SessionMessage(
+                            id: existing.id,
+                            role: role,
+                            content: text,
+                            timestamp: existing.timestamp
+                        )
+                    )
+                }
                 return true
             }
 
             let messageEntry = SessionMessage(role: role, content: text)
-            transcript.append(.message(messageEntry))
+            appendTranscriptEntry(.message(messageEntry))
             messageEntryIdByItemId[itemId] = messageEntry.id
             return true
         }
 
         guard isCompletion else { return true }
-        transcript.append(.message(SessionMessage(role: role, content: text)))
+        appendTranscriptEntry(.message(SessionMessage(role: role, content: text)))
         return true
     }
 
@@ -603,21 +625,24 @@ public final class SessionState {
 
     private func appendAssistantDelta(turnId: String, delta: String) {
         if let entryId = assistantEntryIdByTurnId[turnId],
-           let index = transcript.firstIndex(where: { $0.id == entryId }),
+           let index = transcriptIndexById[entryId],
            case .message(let message) = transcript[index],
            message.role == .assistant {
-            let updated = SessionMessage(
-                id: message.id,
-                role: .assistant,
-                content: message.content + delta,
-                timestamp: message.timestamp
-            )
-            transcript[index] = .message(updated)
+            updateTranscriptEntry(id: entryId) { _ in
+                .message(
+                    SessionMessage(
+                        id: message.id,
+                        role: .assistant,
+                        content: message.content + delta,
+                        timestamp: message.timestamp
+                    )
+                )
+            }
             return
         }
 
         let message = SessionMessage(role: .assistant, content: delta)
-        transcript.append(.message(message))
+        appendTranscriptEntry(.message(message))
         assistantEntryIdByTurnId[turnId] = message.id
     }
 
@@ -653,7 +678,7 @@ public final class SessionState {
                 card: projectCard(from: boundedItem)
             )
             itemEntryIdByItemId[itemId] = entry.id
-            transcript.append(.item(entry))
+            appendTranscriptEntry(.item(entry))
             return
         }
 
@@ -670,19 +695,22 @@ public final class SessionState {
 
     private func updateTranscriptItem(itemId: String, turnId: String, item: SessionItem) {
         guard let entryId = itemEntryIdByItemId[itemId],
-              let index = transcript.firstIndex(where: { $0.id == entryId }),
+              let index = transcriptIndexById[entryId],
               case .item(let existing) = transcript[index] else {
             return
         }
 
-        let updated = TranscriptItem(
-            id: existing.id,
-            turnId: turnId,
-            itemId: itemId,
-            card: projectCard(from: item),
-            timestamp: existing.timestamp
-        )
-        transcript[index] = .item(updated)
+        updateTranscriptEntry(id: entryId) { _ in
+            .item(
+                TranscriptItem(
+                    id: existing.id,
+                    turnId: turnId,
+                    itemId: itemId,
+                    card: projectCard(from: item),
+                    timestamp: existing.timestamp
+                )
+            )
+        }
     }
 
     private func apply(delta: ItemDelta, to item: SessionItem) -> SessionItem {
@@ -874,5 +902,267 @@ public final class SessionState {
         }
 
         return id
+    }
+
+    private func setTranscript(_ entries: [TranscriptEntry]) {
+        transcript = entries
+        rebuildTranscriptIndex()
+        rebuildDerivedTranscriptState()
+    }
+
+    private func appendTranscriptEntry(_ entry: TranscriptEntry) {
+        transcript.append(entry)
+        transcriptIndexById[entry.id] = transcript.count - 1
+        appendDerivedTranscriptState(entry)
+    }
+
+    private func updateTranscriptEntry(id: UUID, transform: (TranscriptEntry) -> TranscriptEntry) {
+        guard let index = transcriptIndexById[id] else { return }
+        let previous = transcript[index]
+        let updated = transform(previous)
+        transcript[index] = updated
+
+        if updated.id != id {
+            transcriptIndexById.removeValue(forKey: id)
+            transcriptIndexById[updated.id] = index
+        }
+
+        updateDerivedTranscriptState(previous: previous, updated: updated, at: index)
+    }
+
+    private func rebuildTranscriptIndex() {
+        transcriptIndexById = Dictionary(uniqueKeysWithValues: transcript.enumerated().map { ($0.element.id, $0.offset) })
+    }
+
+    private func rebuildDerivedTranscriptState() {
+        groupedTranscript = buildTranscriptGroups(from: transcript)
+        latestAssistantMessageId = transcript.reversed().compactMap { entry -> UUID? in
+            guard case .message(let message) = entry,
+                  message.role == .assistant else {
+                return nil
+            }
+            return message.id
+        }.first
+        timestampLabels = messageTimestampLabels(for: transcript)
+    }
+
+    private func appendDerivedTranscriptState(_ entry: TranscriptEntry) {
+        if case .message(let message) = entry,
+           message.role == .assistant {
+            latestAssistantMessageId = message.id
+        }
+
+        updateTimestampLabelsAfterAppend(entry)
+
+        switch entry {
+        case .item(let item) where item.card.type.isToolLike:
+            appendToolLikeGroup(item)
+        default:
+            groupedTranscript.append(.single(entry))
+        }
+    }
+
+    private func appendToolLikeGroup(_ item: TranscriptItem) {
+        guard let lastGroup = groupedTranscript.last else {
+            groupedTranscript.append(.single(.item(item)))
+            return
+        }
+
+        switch lastGroup {
+        case .toolRun(let items):
+            groupedTranscript[groupedTranscript.count - 1] = .toolRun(items + [item])
+        case .single(.item(let existing)) where existing.card.type.isToolLike:
+            groupedTranscript[groupedTranscript.count - 1] = .toolRun([existing, item])
+        default:
+            groupedTranscript.append(.single(.item(item)))
+        }
+    }
+
+    private func updateTimestampLabelsAfterAppend(_ entry: TranscriptEntry) {
+        guard case .message(let message) = entry,
+              message.role != .system else {
+            return
+        }
+
+        let previousMessage = transcript.dropLast().reversed().compactMap { entry -> SessionMessage? in
+            guard case .message(let message) = entry,
+                  message.role != .system else {
+                return nil
+            }
+            return message
+        }.first
+
+        if let previousMessage {
+            if message.role == .user {
+                timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
+            } else if let label = timestampLabel(
+                forGapSincePreviousMessage: message.timestamp.timeIntervalSince(previousMessage.timestamp),
+                timestamp: message.timestamp
+            ) {
+                timestampLabels[message.id] = label
+            }
+            return
+        }
+
+        timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
+    }
+
+    private func updateDerivedTranscriptState(previous: TranscriptEntry, updated: TranscriptEntry, at index: Int) {
+        if shouldRebuildDerivedTranscriptState(previous: previous, updated: updated) {
+            rebuildDerivedTranscriptState()
+            return
+        }
+
+        if case .message(let message) = updated,
+           message.role == .assistant {
+            latestAssistantMessageId = message.id
+        } else if latestAssistantMessageId == previous.id {
+            latestAssistantMessageId = transcript.reversed().compactMap { entry -> UUID? in
+                guard case .message(let message) = entry,
+                      message.role == .assistant else {
+                    return nil
+                }
+                return message.id
+            }.first
+        }
+
+        guard let groupIndex = groupedTranscript.lastIndex(where: { groupContainsEntry($0, id: previous.id) }) else {
+            rebuildDerivedTranscriptState()
+            return
+        }
+
+        switch groupedTranscript[groupIndex] {
+        case .single:
+            groupedTranscript[groupIndex] = .single(updated)
+        case .toolRun(let items):
+            guard case .item(let updatedItem) = updated,
+                  let itemIndex = items.firstIndex(where: { $0.id == previous.id }) else {
+                rebuildDerivedTranscriptState()
+                return
+            }
+
+            var nextItems = items
+            nextItems[itemIndex] = updatedItem
+            groupedTranscript[groupIndex] = .toolRun(nextItems)
+        }
+
+        if index == transcript.count - 1,
+           case .message(let message) = updated,
+           message.role != .system {
+            if timestampLabels[message.id] == nil,
+               transcript.dropLast().contains(where: { entry in
+                   guard case .message(let previousMessage) = entry else { return false }
+                   return previousMessage.role != .system
+               }) == false {
+                timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
+            }
+        }
+    }
+
+    private func shouldRebuildDerivedTranscriptState(previous: TranscriptEntry, updated: TranscriptEntry) -> Bool {
+        switch (previous, updated) {
+        case (.message(let previousMessage), .message(let updatedMessage)):
+            return previousMessage.role != updatedMessage.role || previousMessage.timestamp != updatedMessage.timestamp
+        case (.item(let previousItem), .item(let updatedItem)):
+            return previousItem.card.type.isToolLike != updatedItem.card.type.isToolLike
+        default:
+            return true
+        }
+    }
+
+    private func groupContainsEntry(_ group: TranscriptGroup, id: UUID) -> Bool {
+        switch group {
+        case .single(let entry):
+            return entry.id == id
+        case .toolRun(let items):
+            return items.contains(where: { $0.id == id })
+        }
+    }
+}
+
+public func buildTranscriptGroups(from transcript: [TranscriptEntry]) -> [TranscriptGroup] {
+    var groups: [TranscriptGroup] = []
+    var currentRun: [TranscriptItem] = []
+
+    func flushRun() {
+        guard !currentRun.isEmpty else { return }
+        if currentRun.count == 1 {
+            groups.append(.single(.item(currentRun[0])))
+        } else {
+            groups.append(.toolRun(currentRun))
+        }
+        currentRun.removeAll(keepingCapacity: true)
+    }
+
+    for entry in transcript {
+        switch entry {
+        case .item(let item) where item.card.type.isToolLike:
+            currentRun.append(item)
+        default:
+            flushRun()
+            groups.append(.single(entry))
+        }
+    }
+
+    flushRun()
+    return groups
+}
+
+public func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
+    var labels: [UUID: String] = [:]
+    var previousTimestamp: Date?
+
+    for entry in transcript {
+        guard case .message(let message) = entry,
+              message.role != .system else {
+            continue
+        }
+
+        let timestamp = message.timestamp
+
+        guard let previous = previousTimestamp else {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+            previousTimestamp = timestamp
+            continue
+        }
+
+        if message.role == .user {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+        } else if let label = timestampLabel(
+            forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
+            timestamp: timestamp
+        ) {
+            labels[message.id] = label
+        }
+
+        previousTimestamp = timestamp
+    }
+
+    return labels
+}
+
+public func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
+    if gap <= 60 {
+        return nil
+    }
+    if gap > 3600 {
+        return formatMessageTimestamp(timestamp)
+    }
+    let minutes = max(1, Int(gap / 60))
+    return "\(minutes)m ago"
+}
+
+public func formatMessageTimestamp(_ timestamp: Date) -> String {
+    timestamp.formatted(date: .omitted, time: .shortened)
+}
+
+extension SessionItemType {
+    var isToolLike: Bool {
+        switch self {
+        case .command, .tool, .file:
+            return true
+        case .message, .thought, .unknown:
+            return false
+        }
     }
 }

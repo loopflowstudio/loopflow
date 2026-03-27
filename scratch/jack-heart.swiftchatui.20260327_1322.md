@@ -18,9 +18,61 @@ Both block the chatgui and chattui waves from delivering on their core promises:
 
 Move all derived transcript state out of the view's computed properties and into SessionState, where it's updated incrementally on mutation rather than recomputed on render. This is the bold choice — the design doc suggests caching in `@State` with `onChange`, but that's a bandaid. The mutation site knows exactly what changed; the view doesn't.
 
+#### Step 0: Verify @Observable array diffing behavior
+
+Before building the incremental state machine, prove the core assumption: that SwiftUI's `@Observable` tracking + `ForEach` over an `Equatable` array actually skips re-rendering unchanged rows on in-place mutation.
+
+Build a minimal test harness:
+
+1. An `@Observable` class with a `var items: [Item]` where `Item` is `Identifiable + Equatable`
+2. A `ForEach` over `items`, where each row logs when its `body` runs (via `Self._printChanges()` or a render counter)
+3. A button that mutates only the last element in-place (simulating a streaming delta)
+4. A button that appends a new element
+
+Run it and observe:
+- **In-place mutation of last element:** Does only the last row's body re-evaluate? Or do all rows re-render?
+- **Append:** Does only the new row render, or does the full list rebuild?
+- **Does `Equatable` conformance matter?** Try with and without — does SwiftUI use it to skip equal rows?
+
+If SwiftUI re-renders all rows regardless, the incremental update in SessionState still helps (no O(n) computed properties), but we'd also need `EquatableView` wrappers on `MessageRow` / `ToolRunView` to get the row-level skip. Better to know upfront than discover in Instruments after the fact.
+
+This harness can live in a throwaway SwiftUI preview or a scratch Xcode project — it doesn't need to be committed.
+
 #### What changes in SessionState
 
-SessionState gets three new published properties alongside `transcript`:
+##### Funnel all transcript mutations through methods
+
+`transcript` is currently mutated directly at ~8 call sites (lines 480, 500, 505, 511, 615, 620, 656, 685). Rather than adding `updateDerivedState(change:)` calls at each site, make `transcript` private and expose three mutation methods:
+
+```swift
+private var transcript: [TranscriptEntry] = []
+
+func appendTranscriptEntry(_ entry: TranscriptEntry) {
+    transcript.append(entry)
+    transcriptIndexById[entry.id] = transcript.count - 1
+    updateDerivedState(.append(entry))
+}
+
+func updateTranscriptEntry(id: UUID, transform: (TranscriptEntry) -> TranscriptEntry) {
+    guard let index = transcriptIndexById[id] else { return }
+    transcript[index] = transform(transcript[index])
+    updateDerivedState(.inPlaceUpdate(index))
+}
+
+func setTranscript(_ entries: [TranscriptEntry]) {
+    transcript = entries
+    rebuildTranscriptIndex()
+    updateDerivedState(.fullRecompute)
+}
+```
+
+Every mutation goes through one of these three methods. The derived state update is guaranteed — no call site can forget it. The reverse index (`transcriptIndexById`) is maintained in the same place.
+
+This changes SessionState's internal API but doesn't change its public surface for views — views already read transcript, they don't mutate it. The refactor is contained within SessionState.
+
+##### New derived state
+
+SessionState gets three new properties alongside `transcript`:
 
 ```swift
 // SessionState.swift — new derived state
@@ -29,7 +81,7 @@ private(set) var latestAssistantMessageId: UUID? = nil
 private(set) var timestampLabels: [UUID: String] = [:]
 ```
 
-Every transcript mutation (`append`, `transcript[index] = ...`) calls a single `updateDerivedState(change:)` method that does targeted updates:
+`updateDerivedState` does targeted updates based on the change type:
 
 - **On append:** Extend the last group or add a new one. Update `latestAssistantMessageId` only if the appended entry is an assistant message. Recompute timestamp labels only for the new entry (check gap against previous).
 - **On in-place update (streaming delta):** No group structure changes. No timestamp changes. Only `latestAssistantMessageId` might need updating (and usually doesn't — same message, same id). This is the hot path and it does O(1) work.
@@ -228,6 +280,20 @@ Button {
 3. **No new UI for terminal preference.** The existing command palette and sidebar buttons use `TerminalApp` which is already surfaced in preferences. Adding `.ghostty` to the enum is sufficient.
 
 ---
+
+## Implementation order
+
+Four chunks. Part 2 and Part 1a are independent — run as parallel subagents.
+
+| Chunk | What | Files | Depends on |
+|-------|------|-------|------------|
+| **Part 2** | Ghostty launcher + workspace buttons | AppPreferences.swift, TerminalLauncher.swift, TerminalWorkspaceView.swift | — |
+| **Part 1a** | Mutation funneling + reverse index | SessionState.swift | — |
+| **Step 0** | @Observable array diffing harness | throwaway preview | Part 1a (needs the new types) |
+| **Part 1b** | Derived state in SessionState, TranscriptGroup moved + Equatable, view reads state | SessionState.swift, WaveSessionView.swift | Part 1a, Step 0 results |
+| **Part 1c** | parseMessageSegments memo, scroll animation, cursor identity | MessageRow.swift, WaveSessionView.swift | Part 1b |
+
+Part 2 and Part 1a touch zero overlapping files — safe to parallelize. Part 1b depends on both 1a (mutation methods exist) and Step 0 (know whether we need EquatableView wrappers). Part 1c is view-level cleanup that layers on top.
 
 ## Scope
 

@@ -4,7 +4,7 @@ Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomou
 
 ## What to build
 
-**A builtin flow, not a workstyle.** Autoresearch is a loop pattern any workstyle can use: edit a file, run a measurement, keep or discard based on a single metric. The steps are written directly as loopflow builtins (like `implement` or `gate`) — no external sync, no workstyle wrapper. Inspired by Karpathy's autoresearch repo but maintained as native loopflow prompts.
+**A synced flow, not a workstyle.** Autoresearch is a loop pattern any workstyle can use: edit a file, run a measurement, keep or discard based on a single metric. The source is Karpathy's `program.md` — synced from `github:karpathy/autoresearch`, decomposed into loopflow steps by the converter. Same sync tooling as gstack, different output shape.
 
 **Four steps, not one.** Karpathy has it as a monolithic `program.md`, but it's doing four distinct things. Decomposing makes each step composable — swap evaluate for a benchmark, a test suite, a bundle size check. The loop pattern stays the same.
 
@@ -42,15 +42,33 @@ The user provides:
 
 ### Writing the steps
 
-These are builtin loopflow steps, not imports. We write them directly in `rust/loopflow/src/engine/builtins/steps/research/`. Key elements from Karpathy's design to carry forward:
-- The autonomous spirit ("NEVER STOP") — lives in the flow's loop construct
-- The metric definition — parameterizable per wave config
-- The git keep/discard pattern — lives in `decide` step
-- The fixed time budget per experiment — lives in `evaluate` step
-- The results.tsv logging format — lives in `decide` step
-- The single-file constraint — lives in wave `area` config
+Synced from `karpathy/autoresearch`, converted by the same tooling as gstack. The converter reads one `program.md` and decomposes it into three steps + a flow YAML. Setup/infrastructure portions are stripped — loopflow already provides those:
 
-No sync needed. These are our prompts, inspired by the pattern.
+| Karpathy's program.md | Already in loopflow |
+|---|---|
+| "NEVER STOP", "don't ask the human" | Headless surface mode |
+| Branch creation, run tagging | `lf ops` / wave config |
+| Results logging | scratch/ or wave state |
+| "Only edit train.py" | Wave `area` config |
+| Fixed time budget | Step/wave config |
+
+What the converter extracts into steps:
+- **experiment** — how to form a hypothesis from prior results, what kind of edits to try
+- **evaluate** — how to run the measurement and extract the metric
+- **decide** — the keep/discard logic (compare to best, commit or reset)
+
+```
+.lf/synced/autoresearch/
+  source.yaml             # metadata: repo, ref, last sync
+  steps/
+    experiment.md
+    evaluate.md
+    decide.md
+  flows/
+    autoresearch.yaml
+```
+
+This generalizes the sync tool. It syncs a workstyle or any partial of one — steps, flows, voice, directions, config, or any combination. gstack is a full workstyle. Autoresearch is steps + a flow. Someone else might publish just a direction or a single step.
 
 ### What makes this general
 

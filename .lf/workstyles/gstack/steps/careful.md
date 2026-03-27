@@ -16,7 +16,7 @@ tools:
 - Read
 version: 0.1.0
 ---
-# /careful — Destructive Command Guardrails
+# gstack:careful — Destructive Command Guardrails
 
 Safety mode is now **active**. Every bash command will be checked for destructive
 patterns before running. If a destructive command is detected, you'll be warned

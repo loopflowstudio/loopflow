@@ -19,7 +19,7 @@ version: 0.1.0
 requires:
 - browser
 ---
-# /connect-chrome — Launch Real Chrome with Side Panel
+# gstack:connect-chrome — Launch Real Chrome with Side Panel
 
 Connect Claude to a visible Chrome window with the gstack extension auto-loaded.
 You see every click, every navigation, every action in real time.
@@ -203,7 +203,7 @@ Tell the user:
 > You're all set! Here's what you can do with the connected Chrome:
 >
 > **Watch Claude work in real time:**
-> - Run any gstack skill (`/qa`, `/design-review`, `/benchmark`) and watch
+> - Run any gstack skill (`gstack:qa`, `gstack:design-audit`, `gstack:benchmark`) and watch
 >   every action happen in the visible Chrome window + Side Panel feed
 > - No cookie import needed — the Playwright browser shares its own session
 >
@@ -218,10 +218,10 @@ Tell the user:
 > - `$B disconnect` — close headed Chrome and return to headless mode
 >
 > **What skills look like in headed mode:**
-> - `/qa` runs its full test suite in the visible browser — you see every page
+> - `gstack:qa` runs its full test suite in the visible browser — you see every page
 >   load, every click, every assertion
-> - `/design-review` takes screenshots in the real browser — same pixels you see
-> - `/benchmark` measures performance in the headed browser
+> - `gstack:design-audit` takes screenshots in the real browser — same pixels you see
+> - `gstack:benchmark` measures performance in the headed browser
 
 Then proceed with whatever the user asked to do. If they didn't specify a task,
 ask what they'd like to test or browse.

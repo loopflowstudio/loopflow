@@ -21,7 +21,7 @@ preamble_tier: 4
 ---
 # Ship: Fully Automated Ship Workflow
 
-You are running the `/ship` workflow. This is a **non-interactive, fully automated** workflow. Do NOT ask for confirmation at any step. The user said `/ship` which means DO IT. Run straight through and output the PR URL at the end.
+You are running the `gstack:ship` workflow. This is a **non-interactive, fully automated** workflow. Do NOT ask for confirmation at any step. The user said `gstack:ship` which means DO IT. Run straight through and output the PR URL at the end.
 
 **Only stop for:**
 - On the base branch (abort)
@@ -66,9 +66,9 @@ After completing the review, read the review log and config to display the dashb
 ~/.claude/skills/gstack/bin/gstack-review-read
 ```
 
-Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both /plan-ceo-review and /plan-eng-review.
+Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both gstack:ceo-review and gstack:eng-review.
 
-**Source attribution:** If the most recent entry for a skill has a \`"via"\` field, append it to the status label in parentheses. Examples: `plan-eng-review` with `via:"autoplan"` shows as "CLEAR (PLAN via /autoplan)". `review` with `via:"ship"` shows as "CLEAR (DIFF via /ship)". Entries without a `via` field show as "CLEAR (PLAN)" or "CLEAR (DIFF)" as before.
+**Source attribution:** If the most recent entry for a skill has a \`"via"\` field, append it to the status label in parentheses. Examples: `plan-eng-review` with `via:"autoplan"` shows as "CLEAR (PLAN via gstack:autoplan)". `review` with `via:"ship"` shows as "CLEAR (DIFF via gstack:ship)". Entries without a `via` field show as "CLEAR (PLAN)" or "CLEAR (DIFF)" as before.
 
 Note: `autoplan-voices` and `design-outside-voices` entries are audit-trail-only (forensic data for cross-model consensus analysis). They do not appear in the dashboard and are not checked by any consumer.
 
@@ -95,7 +95,7 @@ Display:
 - **CEO Review (optional):** Use your judgment. Recommend it for big product/business changes, new user-facing features, or scope decisions. Skip for bug fixes, refactors, infra, and cleanup.
 - **Design Review (optional):** Use your judgment. Recommend it for UI/UX changes. Skip for backend-only, infra, or prompt-only changes.
 - **Adversarial Review (automatic):** Auto-scales by diff size. Small diffs (<50 lines) skip adversarial. Medium diffs (50–199) get cross-model adversarial. Large diffs (200+) get all 4 passes: Claude structured, Codex structured, Claude adversarial subagent, Codex adversarial. No configuration needed.
-- **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in /plan-ceo-review and /plan-eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
+- **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in gstack:ceo-review and gstack:eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
 
 **Verdict logic:**
 - **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\`)
@@ -113,11 +113,11 @@ If the Eng Review is NOT "CLEAR":
 
 Print: "No prior eng review found — ship will run its own pre-landing review in Step 3.5."
 
-Check diff size: `git diff <base>...HEAD --stat | tail -1`. If the diff is >200 lines, add: "Note: This is a large diff. Consider running `/plan-eng-review` or `/autoplan` for architecture-level review before shipping."
+Check diff size: `git diff <base>...HEAD --stat | tail -1`. If the diff is >200 lines, add: "Note: This is a large diff. Consider running `gstack:eng-review` or `gstack:autoplan` for architecture-level review before shipping."
 
 If CEO Review is missing, mention as informational ("CEO Review not run — recommended for product changes") but do NOT block.
 
-For Design Review: run `source <(~/.claude/skills/gstack/bin/gstack-diff-scope <base> 2>/dev/null)`. If `SCOPE_FRONTEND=true` and no design review (plan-design-review or design-review-lite) exists in the dashboard, mention: "Design Review not run — this PR changes frontend code. The lite design check will run automatically in Step 3.5, but consider running /design-review for a full visual audit post-implementation." Still never block.
+For Design Review: run `source <(~/.claude/skills/gstack/bin/gstack-diff-scope <base> 2>/dev/null)`. If `SCOPE_FRONTEND=true` and no design review (plan-design-review or design-review-lite) exists in the dashboard, mention: "Design Review not run — this PR changes frontend code. The lite design check will run automatically in Step 3.5, but consider running gstack:design-audit for a full visual audit post-implementation." Still never block.
 
 Continue to Step 1.5 — do NOT block or ask. Ship runs its own review in Step 3.5.
 
@@ -403,7 +403,7 @@ Use AskUserQuestion:
 ### Step T4: Execute the chosen action
 
 **If "Investigate and fix now":**
-- Switch to /investigate mindset: root cause first, then minimal fix.
+- Switch to gstack:investigate mindset: root cause first, then minimal fix.
 - Fix the pre-existing failure.
 - Commit the fix separately from the branch's changes: `git commit -m "fix: pre-existing test failure in <test-file>"`
 - Continue with the workflow.
@@ -428,14 +428,14 @@ Use AskUserQuestion:
     ```bash
     gh issue create \
       --title "Pre-existing test failure: <test-name>" \
-      --body "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack /ship on <date>" \
+      --body "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack gstack:ship on <date>" \
       --assignee "<github-username>"
     ```
   - **If GitLab:**
     ```bash
     glab issue create \
       -t "Pre-existing test failure: <test-name>" \
-      -d "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack /ship on <date>" \
+      -d "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack gstack:ship on <date>" \
       -a "<gitlab-username>"
     ```
 - If neither CLI is available or `--assignee`/`-a` fails (user not in org, etc.), create the issue without assignee and note who should look at it in the body.
@@ -489,7 +489,7 @@ Map runner → test file: `post_generation_eval_runner.rb` → `post_generation_
 
 **3. Run affected suites at `EVAL_JUDGE_TIER=full`:**
 
-`/ship` is a pre-merge gate, so always use full tier (Sonnet structural + Opus persona judges).
+`gstack:ship` is a pre-merge gate, so always use full tier (Sonnet structural + Opus persona judges).
 
 ```bash
 EVAL_JUDGE_TIER=full EVAL_VERBOSE=1 bin/test-lane --eval test/evals/<suite>_eval_test.rb 2>&1 | tee /tmp/ship_evals.txt
@@ -504,12 +504,12 @@ If multiple suites need to run, run them sequentially (each needs a test lane). 
 
 **5. Save eval output** — include eval results and cost dashboard in the PR body (Step 8).
 
-**Tier reference (for context — /ship always uses `full`):**
+**Tier reference (for context — gstack:ship always uses `full`):**
 | Tier | When | Speed (cached) | Cost |
 |------|------|----------------|------|
 | `fast` (Haiku) | Dev iteration, smoke tests | ~5s (14x faster) | ~$0.07/run |
 | `standard` (Sonnet) | Default dev, `bin/test-lane --eval` | ~17s (4x faster) | ~$0.37/run |
-| `full` (Opus persona) | **`/ship` and pre-merge** | ~72s (baseline) | ~$1.27/run |
+| `full` (Opus persona) | **`gstack:ship` and pre-merge** | ~72s (baseline) | ~$1.27/run |
 
 ---
 
@@ -744,7 +744,7 @@ Using the coverage percentage from the diagram in substep 4 (the `COVERAGE: X/Y 
 
 ### Test Plan Artifact
 
-After producing the coverage diagram, write a test plan artifact so `/qa` and `/qa-only` can consume it:
+After producing the coverage diagram, write a test plan artifact so `gstack:qa` and `gstack:qa-only` can consume it:
 
 ```bash
 eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
@@ -756,7 +756,7 @@ Write to `~/.gstack/projects/{slug}/{user}-{branch}-ship-test-plan-{datetime}.md
 
 ```markdown
 # Test Plan
-Generated by /ship on {date}
+Generated by gstack:ship on {date}
 Branch: {branch}
 Repo: {owner/repo}
 
@@ -895,7 +895,7 @@ After producing the completion checklist:
 
 ## Step 3.47: Plan Verification
 
-Automatically verify the plan's testing/verification steps using the `/qa-only` skill.
+Automatically verify the plan's testing/verification steps using the `gstack:qa-only` skill.
 
 ### 1. Check for verification section
 
@@ -915,23 +915,23 @@ curl -s -o /dev/null -w '%{http_code}' http://localhost:5173 2>/dev/null || \
 curl -s -o /dev/null -w '%{http_code}' http://localhost:4000 2>/dev/null || echo "NO_SERVER"
 ```
 
-**If NO_SERVER:** Skip with "No dev server detected — skipping plan verification. Run /qa separately after deploying."
+**If NO_SERVER:** Skip with "No dev server detected — skipping plan verification. Run gstack:qa separately after deploying."
 
-### 3. Invoke /qa-only inline
+### 3. Invoke gstack:qa-only inline
 
-Read the `/qa-only` skill from disk:
+Read the `gstack:qa-only` skill from disk:
 
 ```bash
 cat ${CLAUDE_SKILL_DIR}/../qa-only/SKILL.md
 ```
 
-**If unreadable:** Skip with "Could not load /qa-only — skipping plan verification."
+**If unreadable:** Skip with "Could not load gstack:qa-only — skipping plan verification."
 
-Follow the /qa-only workflow with these modifications:
-- **Skip the preamble** (already handled by /ship)
+Follow the gstack:qa-only workflow with these modifications:
+- **Skip the preamble** (already handled by gstack:ship)
 - **Use the plan's verification section as the primary test input** — treat each verification item as a test case
 - **Use the detected dev server URL** as the base URL
-- **Skip the fix loop** — this is report-only verification during /ship
+- **Skip the fix loop** — this is report-only verification during gstack:ship
 - **Cap at the verification items from the plan** — do not expand into general site QA
 
 ### 4. Gate logic
@@ -986,7 +986,7 @@ source <(~/.claude/skills/gstack/bin/gstack-diff-scope <base> 2>/dev/null)
 4. **Apply the design checklist** against the changed files. For each item:
    - **[HIGH] mechanical CSS fix** (`outline: none`, `!important`, `font-size < 16px`): classify as AUTO-FIX
    - **[HIGH/MEDIUM] design judgment needed**: classify as ASK
-   - **[LOW] intent-based detection**: present as "Possible — verify visually or run /design-review"
+   - **[LOW] intent-based detection**: present as "Possible — verify visually or run gstack:design-audit"
 
 5. **Include findings** in the review output under a "Design Review" header, following the output format in the checklist. Design findings merge with code review findings into the same Fix-First flow.
 
@@ -1036,7 +1036,7 @@ Present Codex output under a `CODEX (design):` header, merged with the checklist
    - If 3 or fewer ASK items, you may use individual AskUserQuestion calls instead
 
 7. **After all fixes (auto + user-approved):**
-   - If ANY fixes were applied: commit fixed files by name (`git add <fixed-files> && git commit -m "fix: pre-landing review fixes"`), then **STOP** and tell the user to run `/ship` again to re-test.
+   - If ANY fixes were applied: commit fixed files by name (`git add <fixed-files> && git commit -m "fix: pre-landing review fixes"`), then **STOP** and tell the user to run `gstack:ship` again to re-test.
    - If no fixes applied (all ASK items skipped, or no issues found): continue to Step 4.
 
 8. Output summary: `Pre-Landing Review: N issues — M auto-fixed, K asked (J fixed, L skipped)`
@@ -1048,7 +1048,7 @@ Present Codex output under a `CODEX (design):` header, merged with the checklist
 ~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"review","timestamp":"TIMESTAMP","status":"STATUS","issues_found":N,"critical":N,"informational":N,"commit":"'"$(git rev-parse --short HEAD)"'","via":"ship"}'
 ```
 Substitute TIMESTAMP (ISO 8601), STATUS ("clean" if no issues, "issues_found" otherwise),
-and N values from the summary counts above. The `via:"ship"` distinguishes from standalone `/review` runs.
+and N values from the summary counts above. The `via:"ship"` distinguishes from standalone `gstack:review` runs.
 
 Save the review output — it goes into the PR body in Step 8.
 
@@ -1501,13 +1501,13 @@ Print the branch name, remote URL, and instruct the user to create the PR/MR man
 
 ---
 
-## Step 8.5: Auto-invoke /document-release
+## Step 8.5: Auto-invoke gstack:document-release
 
 After the PR is created, automatically sync project documentation. Read the
 `document-release/SKILL.md` skill file (adjacent to this skill's directory) and
 execute its full workflow:
 
-1. Read the `/document-release` skill: `cat ${CLAUDE_SKILL_DIR}/../document-release/SKILL.md`
+1. Read the `gstack:document-release` skill: `cat ${CLAUDE_SKILL_DIR}/../document-release/SKILL.md`
 2. Follow its instructions — it reads all .md files in the project, cross-references
    the diff, and updates anything that drifted (README, ARCHITECTURE, CONTRIBUTING,
    CLAUDE.md, TODOS, etc.)
@@ -1518,7 +1518,7 @@ execute its full workflow:
 4. If no docs needed updating, say "Documentation is current — no updates needed."
 
 This step is automatic. Do not ask the user for confirmation. The goal is zero-friction
-doc updates — the user runs `/ship` and documentation stays current without a separate command.
+doc updates — the user runs `gstack:ship` and documentation stays current without a separate command.
 
 ---
 
@@ -1535,4 +1535,4 @@ doc updates — the user runs `/ship` and documentation stays current without a 
 - **Use Greptile reply templates from greptile-triage.md.** Every reply includes evidence (inline diff, code references, re-rank suggestion). Never post vague replies.
 - **Never push without fresh verification evidence.** If code changed after Step 3 tests, re-run before pushing.
 - **Step 3.4 generates coverage tests.** They must pass before committing. Never commit failing tests.
-- **The goal is: user says `/ship`, next thing they see is the review + PR URL + auto-synced docs.**
+- **The goal is: user says `gstack:ship`, next thing they see is the review + PR URL + auto-synced docs.**

@@ -21,22 +21,22 @@ preamble_tier: 1
 requires:
 - browser
 ---
-# /benchmark — Performance Regression Detection
+# gstack:benchmark — Performance Regression Detection
 
 You are a **Performance Engineer** who has optimized apps serving millions of requests. You know that performance doesn't degrade in one big regression — it dies by a thousand paper cuts. Each PR adds 50ms here, 20KB there, and one day the app takes 8 seconds to load and nobody knows when it got slow.
 
 Your job is to measure, baseline, compare, and alert. You use the browse daemon's `perf` command and JavaScript evaluation to gather real performance data from running pages.
 
 ## User-invocable
-When the user types `/benchmark`, run this skill.
+When the user types `gstack:benchmark`, run this skill.
 
 ## Arguments
-- `/benchmark <url>` — full performance audit with baseline comparison
-- `/benchmark <url> --baseline` — capture baseline (run before making changes)
-- `/benchmark <url> --quick` — single-pass timing check (no baseline needed)
-- `/benchmark <url> --pages /,/dashboard,/api/health` — specify pages
-- `/benchmark --diff` — benchmark only pages affected by current branch
-- `/benchmark --trend` — show performance trends from historical data
+- `gstack:benchmark <url>` — full performance audit with baseline comparison
+- `gstack:benchmark <url> --baseline` — capture baseline (run before making changes)
+- `gstack:benchmark <url> --quick` — single-pass timing check (no baseline needed)
+- `gstack:benchmark <url> --pages /,/dashboard,/api/health` — specify pages
+- `gstack:benchmark --diff` — benchmark only pages affected by current branch
+- `gstack:benchmark --trend` — show performance trends from historical data
 
 ## Instructions
 
@@ -50,7 +50,7 @@ mkdir -p .gstack/benchmark-reports/baselines
 
 ### Phase 2: Page Discovery
 
-Same as /canary — auto-discover from navigation or use `--pages`.
+Same as gstack:canary — auto-discover from navigation or use `--pages`.
 
 If `--diff` mode:
 ```bash

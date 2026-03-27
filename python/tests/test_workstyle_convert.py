@@ -130,6 +130,43 @@ Build the browser tool once.
         encoding="utf-8",
     )
 
+    (source_repo / "retro").mkdir()
+    (source_repo / "retro" / "SKILL.md").write_text(
+        """---
+name: retro
+version: 1.0.0
+description: Weekly retrospective.
+allowed-tools:
+  - Bash
+---
+# /retro — Weekly Engineering Retrospective
+
+# 12. gstack skill usage telemetry (if available)
+cat ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
+
+**Skill Usage (if analytics exist):** Read `~/.gstack/analytics/skill-usage.jsonl` if it exists. Filter entries within the retro time window by `ts` field. Separate skill activations from hook fires.
+
+```
+| Skill Usage | /ship(12) /qa(8) |
+```
+
+If the JSONL file doesn't exist or has no entries in the window, skip the Skill Usage row.
+
+**Eureka Moments (if logged):** Read `~/.gstack/analytics/eureka.jsonl` if it exists. Filter entries within the retro time window by `ts` field.
+
+```
+| Eureka Moments | 2 this period |
+```
+
+If the JSONL file doesn't exist or has no entries in the window, skip the Eureka Moments row.
+
+### Step 3: Commit Time Distribution
+
+Keep the actual retro.
+""",
+        encoding="utf-8",
+    )
+
     output_dir = tmp_path / "out"
     direction_output = tmp_path / "gstack.md"
     _init_git_repo(source_repo)
@@ -146,7 +183,7 @@ Build the browser tool once.
     assert manifest.source_repo == "garrytan/gstack"
     assert manifest.source_ref == "main"
     assert manifest.step_prefix == "gstack"
-    assert manifest.steps == ["gstack", "browse", "office-hours", "ceo-review"]
+    assert manifest.steps == ["gstack", "browse", "office-hours", "ceo-review", "retro"]
 
     workstyle = yaml.safe_load(output_dir.joinpath("workstyle.yaml").read_text(encoding="utf-8"))
     assert workstyle["prefix"] == "gstack"
@@ -171,6 +208,11 @@ Build the browser tool once.
     assert browse["requires"] == ["browser"]
     assert "## SETUP" in output_dir.joinpath("steps/browse.md").read_text(encoding="utf-8")
 
+    retro = output_dir.joinpath("steps/retro.md").read_text(encoding="utf-8")
+    assert "skill-usage.jsonl" not in retro
+    assert "eureka.jsonl" not in retro
+    assert "Keep the actual retro." in retro
+
     direction = direction_output.read_text(encoding="utf-8")
     assert "You are GStack." in direction
     assert "Builders ship." in direction
@@ -192,6 +234,71 @@ Be helpful.
     extracted = extract_openclaw_direction(soul)
 
     assert extracted == "# SOUL.md - Who You Are\n\nBe helpful.\n"
+
+
+def test_convert_gstack_repo_rewrites_loopflow_references(tmp_path: Path) -> None:
+    source_repo = tmp_path / "gstack"
+    source_repo.mkdir()
+    (source_repo / "SKILL.md").write_text(
+        """---
+name: gstack
+description: Root skill.
+---
+## Voice
+
+You are GStack.
+
+# /gstack — Root
+
+Root instructions.
+""",
+        encoding="utf-8",
+    )
+
+    (source_repo / "plan-eng-review").mkdir()
+    (source_repo / "plan-eng-review" / "SKILL.md").write_text(
+        """---
+name: plan-eng-review
+description: Review implementation plans after /office-hours.
+---
+## Voice
+
+Planner voice.
+
+# /plan-eng-review — Plan review
+
+If needed, run /office-hours first, then continue with /plan-design-review.
+
+Read the office-hours skill file from disk using the Read tool:
+`~/.claude/skills/gstack/office-hours/SKILL.md`
+
+Follow it inline, **skipping these sections** (already handled by the parent skill):
+- Preamble (run first)
+- Search Before Building
+- Contributor Mode
+- Telemetry (run last)
+
+Then load:
+- `~/.claude/skills/gstack/plan-design-review/SKILL.md`
+""",
+        encoding="utf-8",
+    )
+
+    _init_git_repo(source_repo)
+    output_dir = tmp_path / "out"
+
+    convert_gstack_repo(source_repo, output_dir)
+
+    review = output_dir.joinpath("steps/eng-review.md").read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(review.split("---", 2)[1])
+    assert "gstack:office-hours" in review
+    assert "gstack:design-review" in review
+    assert ".lf/workstyles/gstack/steps/office-hours.md" in review
+    assert ".lf/workstyles/gstack/steps/design-review.md" in review
+    assert "Search Before Building" not in review
+    assert "Contributor Mode" not in review
+    assert "Telemetry (run last)" not in review
+    assert frontmatter["description"] == "Review implementation plans after gstack:office-hours."
 
 
 def _init_git_repo(repo: Path) -> None:

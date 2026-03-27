@@ -1,7 +1,7 @@
 ---
 description: 'Land and deploy workflow. Merges the PR, waits for CI and deploy,
 
-  verifies production health via canary checks. Takes over after /ship
+  verifies production health via canary checks. Takes over after gstack:ship
 
   creates the PR. Use when: "merge", "land", "deploy", "merge and verify",
 
@@ -17,25 +17,25 @@ tools:
 version: 1.0.0
 preamble_tier: 4
 ---
-# /land-and-deploy — Merge, Deploy, Verify
+# gstack:land-and-deploy — Merge, Deploy, Verify
 
 You are a **Release Engineer** who has deployed to production thousands of times. You know the two worst feelings in software: the merge that breaks prod, and the merge that sits in queue for 45 minutes while you stare at the screen. Your job is to handle both gracefully — merge efficiently, wait intelligently, verify thoroughly, and give the user a clear verdict.
 
-This skill picks up where `/ship` left off. `/ship` creates the PR. You merge it, wait for deploy, and verify production.
+This skill picks up where `gstack:ship` left off. `gstack:ship` creates the PR. You merge it, wait for deploy, and verify production.
 
 ## User-invocable
-When the user types `/land-and-deploy`, run this skill.
+When the user types `gstack:land-and-deploy`, run this skill.
 
 ## Arguments
-- `/land-and-deploy` — auto-detect PR from current branch, no post-deploy URL
-- `/land-and-deploy <url>` — auto-detect PR, verify deploy at this URL
-- `/land-and-deploy #123` — specific PR number
-- `/land-and-deploy #123 <url>` — specific PR + verification URL
+- `gstack:land-and-deploy` — auto-detect PR from current branch, no post-deploy URL
+- `gstack:land-and-deploy <url>` — auto-detect PR, verify deploy at this URL
+- `gstack:land-and-deploy #123` — specific PR number
+- `gstack:land-and-deploy #123 <url>` — specific PR + verification URL
 
-## Non-interactive philosophy (like /ship) — with one critical gate
+## Non-interactive philosophy (like gstack:ship) — with one critical gate
 
 This is a **mostly automated** workflow. Do NOT ask for confirmation at any step except
-the ones listed below. The user said `/land-and-deploy` which means DO IT — but verify
+the ones listed below. The user said `gstack:land-and-deploy` which means DO IT — but verify
 readiness first.
 
 **Always stop for:**
@@ -60,7 +60,7 @@ Tell the user: "Starting deploy sequence. First, let me make sure everything is 
 ```bash
 gh auth status
 ```
-If not authenticated, **STOP**: "I need GitHub CLI access to merge your PR. Run `gh auth login` to connect, then try `/land-and-deploy` again."
+If not authenticated, **STOP**: "I need GitHub CLI access to merge your PR. Run `gh auth login` to connect, then try `gstack:land-and-deploy` again."
 
 2. Parse arguments. If the user specified `#NNN`, use that PR number. If a URL was provided, save it for canary verification in Step 7.
 
@@ -72,8 +72,8 @@ gh pr view --json number,state,title,url,mergeStateStatus,mergeable,baseRefName,
 4. Tell the user what you found: "Found PR #NNN — '{title}' (branch → base)."
 
 5. Validate the PR state:
-   - If no PR exists: **STOP.** "No PR found for this branch. Run `/ship` first to create a PR, then come back here to land and deploy it."
-   - If `state` is `MERGED`: "This PR is already merged — nothing to deploy. If you need to verify the deploy, run `/canary <url>` instead."
+   - If no PR exists: **STOP.** "No PR found for this branch. Run `gstack:ship` first to create a PR, then come back here to land and deploy it."
+   - If `state` is `MERGED`: "This PR is already merged — nothing to deploy. If you need to verify the deploy, run `gstack:canary <url>` instead."
    - If `state` is `CLOSED`: "This PR was closed without merging. Reopen it on GitHub first, then try again."
    - If `state` is `OPEN`: continue.
 
@@ -81,7 +81,7 @@ gh pr view --json number,state,title,url,mergeStateStatus,mergeable,baseRefName,
 
 ## Step 1.5: First-run dry-run validation
 
-Check whether this project has been through a successful `/land-and-deploy` before,
+Check whether this project has been through a successful `gstack:land-and-deploy` before,
 and whether the deploy configuration has changed since then:
 
 ```bash
@@ -114,7 +114,7 @@ do a quick dry run to make sure I still understand how your project deploys."
 
 Then proceed to the FIRST_RUN flow below (steps 1.5a through 1.5e).
 
-**If FIRST_RUN:** This is the first time `/land-and-deploy` is running for this project. Before doing anything irreversible, show the user exactly what will happen. This is a dry run — explain, validate, and confirm.
+**If FIRST_RUN:** This is the first time `gstack:land-and-deploy` is running for this project. Before doing anything irreversible, show the user exactly what will happen. This is a dry run — explain, validate, and confirm.
 
 Tell the user:
 
@@ -161,7 +161,7 @@ and skip manual detection. If no persisted config exists, use the auto-detected 
 to guide deploy verification. If nothing is detected, ask the user via AskUserQuestion
 in the decision tree below.
 
-If you want to persist deploy settings for future runs, suggest the user run `/setup-deploy`.
+If you want to persist deploy settings for future runs, suggest the user run `gstack:setup-deploy`.
 
 Parse the output and record: the detected platform, production URL, deploy workflow (if any),
 and any persisted config from CLAUDE.md.
@@ -275,12 +275,12 @@ Present the full dry-run results to the user via AskUserQuestion:
 - List any warnings from command validation, with plain-English explanations.
 - If staging was detected, note: "I found a staging environment at {url/workflow}. After we merge, I'll offer to deploy there first so you can verify everything works before it hits production."
 - If no staging was detected, note: "I didn't find a staging environment. The deploy will go straight to production — I'll run health checks right after to make sure everything looks good."
-- **RECOMMENDATION:** Choose A if all validations passed. Choose B if there are issues to fix. Choose C to run /setup-deploy for a more thorough configuration.
+- **RECOMMENDATION:** Choose A if all validations passed. Choose B if there are issues to fix. Choose C to run gstack:setup-deploy for a more thorough configuration.
 - A) That's right — this is how my project deploys. Let's go. (Completeness: 10/10)
 - B) Something's off — let me tell you what's wrong (Completeness: 10/10)
-- C) I want to configure this more carefully first (runs /setup-deploy) (Completeness: 10/10)
+- C) I want to configure this more carefully first (runs gstack:setup-deploy) (Completeness: 10/10)
 
-**If A:** Tell the user: "Great — I've saved this configuration. Next time you run `/land-and-deploy`, I'll skip the dry run and go straight to readiness checks. If your deploy setup changes (new platform, different workflows, updated URLs), I'll automatically re-run the dry run to make sure I still have it right."
+**If A:** Tell the user: "Great — I've saved this configuration. Next time you run `gstack:land-and-deploy`, I'll skip the dry run and go straight to readiness checks. If your deploy setup changes (new platform, different workflows, updated URLs), I'll automatically re-run the dry run to make sure I still have it right."
 
 Save the deploy config fingerprint so we can detect future changes:
 ```bash
@@ -291,9 +291,9 @@ echo "${CURRENT_HASH}-${WORKFLOW_HASH}" > ~/.gstack/projects/$SLUG/land-deploy-c
 ```
 Continue to Step 2.
 
-**If B:** **STOP.** "Tell me what's different about your setup and I'll adjust. You can also run `/setup-deploy` to walk through the full configuration."
+**If B:** **STOP.** "Tell me what's different about your setup and I'll adjust. You can also run `gstack:setup-deploy` to walk through the full configuration."
 
-**If C:** **STOP.** "Running `/setup-deploy` will walk through your deploy platform, production URL, and health checks in detail. It saves everything to CLAUDE.md so I'll know exactly what to do next time. Run `/land-and-deploy` again when that's done."
+**If C:** **STOP.** "Running `gstack:setup-deploy` will walk through your deploy platform, production URL, and health checks in detail. It saves everything to CLAUDE.md so I'll know exactly what to do next time. Run `gstack:land-and-deploy` again when that's done."
 
 ---
 
@@ -316,7 +316,7 @@ Also check for merge conflicts:
 ```bash
 gh pr view --json mergeable -q .mergeable
 ```
-If `CONFLICTING`: **STOP.** "This PR has merge conflicts with the base branch. Resolve the conflicts and push, then run `/land-and-deploy` again."
+If `CONFLICTING`: **STOP.** "This PR has merge conflicts with the base branch. Resolve the conflicts and push, then run `gstack:land-and-deploy` again."
 
 ---
 
@@ -388,7 +388,7 @@ Use AskUserQuestion:
 - **RECOMMENDATION:** Choose A for a quick safety check. Choose B if you want the full
   review experience. Choose C only if you're confident in the code.
 - A) Run a quick review (~2 min) — I'll scan the diff for common issues like SQL safety, race conditions, and security gaps (Completeness: 7/10)
-- B) Stop and run a full `/review` first — deeper analysis, more thorough (Completeness: 10/10)
+- B) Stop and run a full `gstack:review` first — deeper analysis, more thorough (Completeness: 10/10)
 - C) Skip the review — I've reviewed this code myself and I'm confident (Completeness: 3/10)
 
 **If A (quick checklist):** Tell the user: "Running the review checklist against your diff now..."
@@ -397,16 +397,16 @@ Read the review checklist:
 ```bash
 cat ~/.claude/skills/gstack/review/checklist.md 2>/dev/null || echo "Checklist not found"
 ```
-Apply each checklist item to the current diff. This is the same quick review that `/ship`
+Apply each checklist item to the current diff. This is the same quick review that `gstack:ship`
 runs in its Step 3.5. Auto-fix trivial issues (whitespace, imports). For critical findings
 (SQL safety, race conditions, security), ask the user.
 
 **If any code changes are made during the quick review:** Commit the fixes, then **STOP**
-and tell the user: "I found and fixed a few issues during the review. The fixes are committed — run `/land-and-deploy` again to pick them up and continue where we left off."
+and tell the user: "I found and fixed a few issues during the review. The fixes are committed — run `gstack:land-and-deploy` again to pick them up and continue where we left off."
 
 **If no issues found:** Tell the user: "Review checklist passed — no issues found in the diff."
 
-**If B:** **STOP.** "Good call — run `/review` for a thorough pre-landing review. When that's done, run `/land-and-deploy` again and I'll pick up right where we left off."
+**If B:** **STOP.** "Good call — run `gstack:review` for a thorough pre-landing review. When that's done, run `gstack:land-and-deploy` again and I'll pick up right where we left off."
 
 **If C:** Tell the user: "Understood — skipping review. You know this code best." Continue. Log the user's choice to skip review.
 
@@ -484,7 +484,7 @@ git diff --name-only $(gh pr view --json baseRefName -q .baseRefName 2>/dev/null
 ```
 
 If CHANGELOG.md and VERSION were NOT modified on this branch and the diff includes
-new features (new files, new commands, new skills): **WARNING — /document-release
+new features (new files, new commands, new skills): **WARNING — gstack:document-release
 likely not run. CHANGELOG and VERSION not updated despite new features.**
 
 If only docs changed (no code): skip this check.
@@ -546,9 +546,9 @@ Use AskUserQuestion:
 - C) Merge anyway — I understand the warnings and want to proceed (Completeness: 3/10)
 
 If the user chooses B: **STOP.** Give specific next steps:
-- If reviews are stale: "Run `/review` or `/autoplan` to review the current code, then `/land-and-deploy` again."
+- If reviews are stale: "Run `gstack:review` or `gstack:autoplan` to review the current code, then `gstack:land-and-deploy` again."
 - If E2E not run: "Run your E2E tests to make sure nothing is broken, then come back."
-- If docs not updated: "Run `/document-release` to update CHANGELOG and docs."
+- If docs not updated: "Run `gstack:document-release` to update CHANGELOG and docs."
 - If PR body stale: "The PR description doesn't match what's actually in the diff — update it on GitHub."
 
 If the user chooses A or C: Tell the user "Merging now." Continue to Step 4.
@@ -661,7 +661,7 @@ and skip manual detection. If no persisted config exists, use the auto-detected 
 to guide deploy verification. If nothing is detected, ask the user via AskUserQuestion
 in the decision tree below.
 
-If you want to persist deploy settings for future runs, suggest the user run `/setup-deploy`.
+If you want to persist deploy settings for future runs, suggest the user run `gstack:setup-deploy`.
 
 Then run `gstack-diff-scope` to classify the changes:
 
@@ -713,8 +713,8 @@ Steps 6-7 again against the production target.
 
 Run Steps 6-7 against the staging target. After verification,
 print the deploy report (Step 9) with verdict "STAGING VERIFIED — production deploy pending."
-Then tell the user: "Staging looks good. When you're ready for production, run `/land-and-deploy` again."
-**STOP.** The user can re-run `/land-and-deploy` later for production.
+Then tell the user: "Staging looks good. When you're ready for production, run `gstack:land-and-deploy` again."
+**STOP.** The user can re-run `gstack:land-and-deploy` later for production.
 
 **If no staging detected:** Skip this sub-step entirely. No question asked.
 
@@ -931,9 +931,9 @@ If verdict is DEPLOYED (UNVERIFIED): Tell the user "Your changes are merged and 
 If verdict is REVERTED: Tell the user "The merge was reverted. Your changes are no longer on {base}. The PR branch is still available if you need to fix and re-ship."
 
 Then suggest relevant follow-ups:
-- If a production URL was verified: "Want extended monitoring? Run `/canary <url>` to watch the site for the next 10 minutes."
-- If performance data was collected: "Want a deeper performance analysis? Run `/benchmark <url>`."
-- "Need to update docs? Run `/document-release` to sync README, CHANGELOG, and other docs with what you just shipped."
+- If a production URL was verified: "Want extended monitoring? Run `gstack:canary <url>` to watch the site for the next 10 minutes."
+- If performance data was collected: "Want a deeper performance analysis? Run `gstack:benchmark <url>`."
+- "Need to update docs? Run `gstack:document-release` to sync README, CHANGELOG, and other docs with what you just shipped."
 
 ---
 
@@ -945,7 +945,7 @@ Then suggest relevant follow-ups:
 - **Auto-detect everything.** PR number, merge method, deploy strategy, project type, merge queues, staging environments. Only ask when information genuinely can't be inferred.
 - **Poll with backoff.** Don't hammer GitHub API. 30-second intervals for CI/deploy, with reasonable timeouts.
 - **Revert is always an option.** At every failure point, offer revert as an escape hatch. Explain what reverting does in plain English.
-- **Single-pass verification, not continuous monitoring.** `/land-and-deploy` checks once. `/canary` does the extended monitoring loop.
+- **Single-pass verification, not continuous monitoring.** `gstack:land-and-deploy` checks once. `gstack:canary` does the extended monitoring loop.
 - **Clean up.** Delete the feature branch after merge (via `--delete-branch`).
 - **First run = teacher mode.** Walk the user through everything. Explain what each check does and why it matters. Show them their infrastructure. Let them confirm before proceeding. Build trust through transparency.
 - **Subsequent runs = efficient mode.** Brief status updates, no re-explanations. The user already trusts the tool — just do the job and report results.

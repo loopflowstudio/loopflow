@@ -28,6 +28,37 @@ _RENAMED_STEPS = {
     "plan-design-review": "design-review",
     "plan-eng-review": "eng-review",
 }
+_GSTACK_STEP_REFERENCES = (
+    "plan-design-review",
+    "plan-ceo-review",
+    "plan-eng-review",
+    "setup-browser-cookies",
+    "design-consultation",
+    "document-release",
+    "land-and-deploy",
+    "connect-chrome",
+    "gstack-upgrade",
+    "setup-deploy",
+    "office-hours",
+    "design-review",
+    "benchmark",
+    "investigate",
+    "autoplan",
+    "careful",
+    "canary",
+    "browse",
+    "freeze",
+    "unfreeze",
+    "guard",
+    "codex",
+    "retro",
+    "review",
+    "ship",
+    "cso",
+    "qa-only",
+    "qa",
+    "gstack",
+)
 _REMOVED_SECTION_PREFIXES = (
     "## Voice",
     "## Voice & Tone",
@@ -69,6 +100,31 @@ _CLEANUP_PATTERNS = (
             r"(?:\n```bash\n.*?mkdir -p ~/.gstack/projects/\$SLUG.*?\n```\n)?"
             r"\nWrite a JSONL entry(?: with timing data)?:"
             r"(?: .*?\n|\n```json\n.*?\n```\n)",
+            re.DOTALL,
+        ),
+        "\n",
+    ),
+    (
+        re.compile(
+            r"\n# \d+\. gstack skill usage telemetry \(if available\)\n"
+            r"cat ~/.gstack/analytics/skill-usage\.jsonl 2>/dev/null \|\| true\n"
+        ),
+        "\n",
+    ),
+    (
+        re.compile(
+            r"\n\*\*Skill Usage \(if analytics exist\):\*\*.*?"
+            r"If the JSONL file doesn't exist or has no entries in the window, "
+            r"skip the Skill Usage row\.\n",
+            re.DOTALL,
+        ),
+        "\n",
+    ),
+    (
+        re.compile(
+            r"\n\*\*Eureka Moments \(if logged\):\*\*.*?"
+            r"If the JSONL file doesn't exist or has no entries in the window, "
+            r"skip the Eureka Moments row\.\n",
             re.DOTALL,
         ),
         "\n",
@@ -180,12 +236,14 @@ def _convert_skill(skill_path: Path) -> tuple[GstackSkill, str | None]:
     voice = _extract_voice(body)
     body_without_preamble = _strip_preamble_and_wrapper(body)
     instructions = _strip_named_sections(body_without_preamble, _REMOVED_SECTION_PREFIXES)
-    instructions = _cleanup_imported_artifacts(instructions).strip()
+    instructions = _cleanup_imported_artifacts(instructions)
+    instructions = _rewrite_imported_references(instructions)
+    instructions = _cleanup_loopflow_integration_artifacts(instructions).strip()
 
     skill = GstackSkill(
         name=str(metadata["name"]),
         version=_maybe_string(metadata.get("version")),
-        description=_maybe_string(metadata.get("description")) or "",
+        description=_rewrite_imported_references(_maybe_string(metadata.get("description")) or ""),
         allowed_tools=_string_list(metadata.get("allowed-tools")),
         benefits_from=[_step_name(name) for name in _string_list(metadata.get("benefits-from"))],
         preamble_tier=_maybe_int(metadata.get("preamble-tier")),
@@ -365,6 +423,46 @@ def _cleanup_imported_artifacts(text: str) -> str:
         cleaned = pattern.sub(replacement, cleaned)
     for old, new in _CLEANUP_REPLACEMENTS:
         cleaned = cleaned.replace(old, new)
+    return cleaned
+
+
+def _rewrite_imported_references(text: str) -> str:
+    rewritten = re.sub(
+        r"~/.claude/skills/gstack/([a-z0-9-]+)/SKILL\.md",
+        lambda match: f".lf/workstyles/gstack/steps/{_step_name(match.group(1))}.md",
+        text,
+    )
+
+    for skill_name in _GSTACK_STEP_REFERENCES:
+        prefixed_name = f"gstack:{_step_name(skill_name)}"
+        rewritten = re.sub(
+            rf"(?<![\w.-])/{re.escape(skill_name)}(?![\w-])",
+            prefixed_name,
+            rewritten,
+        )
+
+    return rewritten
+
+
+def _cleanup_loopflow_integration_artifacts(text: str) -> str:
+    cleaned = re.sub(
+        r"\nFollow it inline, \*\*skipping these sections\*\* "
+        r"\(already handled by (?:the )?parent skill\):\n(?:- .+\n)+",
+        "\nFollow the imported loopflow step content directly.\n",
+        text,
+    )
+    cleaned = re.sub(
+        r"\nFollow it inline, skipping these sections "
+        r"\(already handled by (?:the )?parent skill\):\n(?:[^\n]*\n)+?(?=\n(?:Note current Step|After completion))",
+        "\nFollow the imported loopflow step content directly.\n\n",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"\n\*\*Section skip list — when following a loaded skill file, SKIP these sections\s*"
+        r"\(they are already handled by gstack:autoplan\):\*\*\n(?:- .+\n)+\n",
+        "\n",
+        cleaned,
+    )
     return cleaned
 
 

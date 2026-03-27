@@ -21,9 +21,9 @@ tools:
 version: 1.0.0
 preamble_tier: 3
 ---
-# /codex — Multi-AI Second Opinion
+# gstack:codex — Multi-AI Second Opinion
 
-You are running the `/codex` skill. This wraps the OpenAI Codex CLI to get an independent,
+You are running the `gstack:codex` skill. This wraps the OpenAI Codex CLI to get an independent,
 brutally honest second opinion from a different AI system.
 
 Codex is the "200 IQ autistic developer" — direct, terse, technically precise, challenges
@@ -47,9 +47,9 @@ If `NOT_FOUND`: stop and tell the user:
 
 Parse the user's input to determine which mode to run:
 
-1. `/codex review` or `/codex review <instructions>` — **Review mode** (Step 2A)
-2. `/codex challenge` or `/codex challenge <focus>` — **Challenge mode** (Step 2B)
-3. `/codex` with no arguments — **Auto-detect:**
+1. `gstack:codex review` or `gstack:codex review <instructions>` — **Review mode** (Step 2A)
+2. `gstack:codex challenge` or `gstack:codex challenge <focus>` — **Challenge mode** (Step 2B)
+3. `gstack:codex` with no arguments — **Auto-detect:**
    - Check for a diff (with fallback if origin isn't available):
      `git diff origin/<base> --stat 2>/dev/null | tail -1 || git diff <base> --stat 2>/dev/null | tail -1`
    - If a diff exists, use AskUserQuestion:
@@ -65,7 +65,7 @@ Parse the user's input to determine which mode to run:
      but warn the user: "Note: this plan may be from a different project."
    - If a plan file exists, offer to review it
    - Otherwise, ask: "What would you like to ask Codex?"
-4. `/codex <anything else>` — **Consult mode** (Step 2C), where the remaining text is the prompt
+4. `gstack:codex <anything else>` — **Consult mode** (Step 2C), where the remaining text is the prompt
 
 **Reasoning effort override:** If the user's input contains `--xhigh` anywhere,
 note it and remove it from the prompt text before passing to Codex. When `--xhigh`
@@ -109,7 +109,7 @@ codex review "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.a
 If the user passed `--xhigh`, use `"xhigh"` instead of `"high"`.
 
 Use `timeout: 300000` on the Bash call. If the user provided custom instructions
-(e.g., `/codex review focus on security`), append them after the boundary:
+(e.g., `gstack:codex review focus on security`), append them after the boundary:
 ```bash
 _REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git repo" >&2; exit 1; }
 cd "$_REPO_ROOT"
@@ -143,14 +143,14 @@ or
 GATE: FAIL (N critical findings)
 ```
 
-6. **Cross-model comparison:** If `/review` (Claude's own review) was already run
+6. **Cross-model comparison:** If `gstack:review` (Claude's own review) was already run
    earlier in this conversation, compare the two sets of findings:
 
 ```
 CROSS-MODEL ANALYSIS:
   Both found: [findings that overlap between Claude and Codex]
   Only Codex found: [findings unique to Codex]
-  Only Claude found: [findings unique to Claude's /review]
+  Only Claude found: [findings unique to Claude's gstack:review]
   Agreement rate: X% (N/M total unique findings overlap)
 ```
 
@@ -208,7 +208,7 @@ and failure modes that a normal review would miss.
 
 1. Construct the adversarial prompt. **Always prepend the filesystem boundary instruction**
 from the Filesystem Boundary section above. If the user provided a focus area
-(e.g., `/codex challenge security`), include it after the boundary:
+(e.g., `gstack:codex challenge security`), include it after the boundary:
 
 Default prompt (no focus):
 "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
@@ -292,7 +292,7 @@ TMPERR=$(mktemp /tmp/codex-err-XXXXXX.txt)
 ```
 
 3. **Plan review auto-detection:** If the user's prompt is about reviewing a plan,
-or if plan files exist and the user said `/codex` with no arguments:
+or if plan files exist and the user said `gstack:codex` with no arguments:
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
 ls -t ~/.claude/plans/*.md 2>/dev/null | xargs grep -l "$(basename $(pwd))" 2>/dev/null | head -1
@@ -326,7 +326,7 @@ Also review these source files referenced in the plan: <list of referenced files
 THE PLAN:
 <full plan content, embedded verbatim>"
 
-For non-plan consult prompts (user typed `/codex <question>`), still prepend the boundary:
+For non-plan consult prompts (user typed `gstack:codex <question>`), still prepend the boundary:
 "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
 
 <user's question>"
@@ -393,7 +393,7 @@ CODEX SAYS (consult):
 <full output, verbatim — includes [codex thinking] traces>
 ════════════════════════════════════════════════════════════
 Tokens: N | Est. cost: ~$X.XX
-Session saved — run /codex again to continue this conversation.
+Session saved — run gstack:codex again to continue this conversation.
 ```
 
 7. After presenting, note any points where Codex's analysis differs from your own
@@ -405,7 +405,7 @@ Session saved — run /codex again to continue this conversation.
 ## Model & Reasoning
 
 **Model:** No model is hardcoded — codex uses whatever its current default is (the frontier
-agentic coding model). This means as OpenAI ships newer models, /codex automatically
+agentic coding model). This means as OpenAI ships newer models, gstack:codex automatically
 uses them. If the user wants a specific model, pass `-m` through to codex.
 
 **Reasoning effort (per-mode defaults):**
@@ -415,13 +415,13 @@ uses them. If the user wants a specific model, pass `-m` through to codex.
 
 `xhigh` uses ~23x more tokens than `high` and causes 50+ minute hangs on large context
 tasks (OpenAI issues #8545, #8402, #6931). Users can override with `--xhigh` flag
-(e.g., `/codex review --xhigh`) when they want maximum reasoning and are willing to wait.
+(e.g., `gstack:codex review --xhigh`) when they want maximum reasoning and are willing to wait.
 
 **Web search:** All codex commands use `--enable web_search_cached` so Codex can look up
 docs and APIs during review. This is OpenAI's cached index — fast, no extra cost.
 
-If the user specifies a model (e.g., `/codex review -m gpt-5.1-codex-max`
-or `/codex challenge -m gpt-5.2`), pass the `-m` flag through to codex.
+If the user specifies a model (e.g., `gstack:codex review -m gpt-5.1-codex-max`
+or `gstack:codex challenge -m gpt-5.2`), pass the `-m` flag through to codex.
 
 ---
 
@@ -455,7 +455,7 @@ If token count is not available, display: `Tokens: unknown`
   before showing it. Show it in full inside the CODEX SAYS block.
 - **Add synthesis after, not instead of.** Any Claude commentary comes after the full output.
 - **5-minute timeout** on all Bash calls to codex (`timeout: 300000`).
-- **No double-reviewing.** If the user already ran `/review`, Codex provides a second
+- **No double-reviewing.** If the user already ran `gstack:review`, Codex provides a second
   independent opinion. Do not re-run Claude Code's own review.
 - **Detect skill-file rabbit holes.** After receiving Codex output, scan for signs
   that Codex got distracted by skill files: `gstack-config`, `gstack-update-check`,

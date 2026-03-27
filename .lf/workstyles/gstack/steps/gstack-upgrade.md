@@ -13,7 +13,7 @@ tools:
 - AskUserQuestion
 version: 1.1.0
 ---
-# /gstack-upgrade
+# gstack:gstack-upgrade
 
 Upgrade gstack to the latest version and show what's new.
 
@@ -31,7 +31,7 @@ _AUTO=""
 echo "AUTO_UPGRADE=$_AUTO"
 ```
 
-**If `AUTO_UPGRADE=true` or `AUTO_UPGRADE=1`:** Skip AskUserQuestion. Log "Auto-upgrading gstack v{old} → v{new}..." and proceed directly to Step 2. If `./setup` fails during auto-upgrade, restore from backup (`.bak` directory) and warn the user: "Auto-upgrade failed — restored previous version. Run `/gstack-upgrade` manually to retry."
+**If `AUTO_UPGRADE=true` or `AUTO_UPGRADE=1`:** Skip AskUserQuestion. Log "Auto-upgrading gstack v{old} → v{new}..." and proceed directly to Step 2. If `./setup` fails during auto-upgrade, restore from backup (`.bak` directory) and warn the user: "Auto-upgrade failed — restored previous version. Run `gstack:gstack-upgrade` manually to retry."
 
 **Otherwise**, use AskUserQuestion:
 - Question: "gstack **v{new}** is available (you're on v{old}). Upgrade now?"
@@ -167,7 +167,7 @@ If `./setup` fails, restore from backup and warn the user:
 rm -rf "$LOCAL_GSTACK"
 mv "$LOCAL_GSTACK.bak" "$LOCAL_GSTACK"
 ```
-Tell user: "Sync failed — restored previous version at `$LOCAL_GSTACK`. Run `/gstack-upgrade` manually to retry."
+Tell user: "Sync failed — restored previous version at `$LOCAL_GSTACK`. Run `gstack:gstack-upgrade` manually to retry."
 
 ### Step 5: Write marker + clear cache
 
@@ -202,7 +202,7 @@ After showing What's New, continue with whatever skill the user originally invok
 
 ## Standalone usage
 
-When invoked directly as `/gstack-upgrade` (not from a preamble):
+When invoked directly as `gstack:gstack-upgrade` (not from a preamble):
 
 1. Force a fresh update check (bypass cache):
 ```bash

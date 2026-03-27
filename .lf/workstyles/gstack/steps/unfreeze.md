@@ -1,5 +1,5 @@
 ---
-description: 'Clear the freeze boundary set by /freeze, allowing edits to all directories
+description: 'Clear the freeze boundary set by gstack:freeze, allowing edits to all directories
 
   again. Use when you want to widen edit scope without ending the session.
 
@@ -13,9 +13,9 @@ tools:
 - Read
 version: 0.1.0
 ---
-# /unfreeze — Clear Freeze Boundary
+# gstack:unfreeze — Clear Freeze Boundary
 
-Remove the edit restriction set by `/freeze`, allowing edits to all directories.
+Remove the edit restriction set by `gstack:freeze`, allowing edits to all directories.
 
 
 ## Clear the boundary
@@ -31,6 +31,6 @@ else
 fi
 ```
 
-Tell the user the result. Note that `/freeze` hooks are still registered for the
+Tell the user the result. Note that `gstack:freeze` hooks are still registered for the
 session — they will just allow everything since no state file exists. To re-freeze,
-run `/freeze` again.
+run `gstack:freeze` again.

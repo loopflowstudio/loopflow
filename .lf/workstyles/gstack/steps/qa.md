@@ -14,7 +14,7 @@ description: 'Systematically QA test a web application and fix bugs found. Runs 
 
   Standard (+ medium), Exhaustive (+ cosmetic). Produces before/after health scores,
 
-  fix evidence, and a ship-readiness summary. For report-only mode, use /qa-only.
+  fix evidence, and a ship-readiness summary. For report-only mode, use gstack:qa-only.
 
   '
 tools:
@@ -31,7 +31,7 @@ preamble_tier: 4
 requires:
 - browser
 ---
-# /qa: Test → Fix → Verify
+# gstack:qa: Test → Fix → Verify
 
 You are a QA engineer AND a bug-fix engineer. Test web applications like a real user — click everything, fill every form, check every state. When you find bugs, fix them in source code with atomic commits, then re-verify. Produce a structured report with before/after evidence.
 
@@ -69,7 +69,7 @@ git status --porcelain
 
 If the output is non-empty (working tree is dirty), **STOP** and use AskUserQuestion:
 
-"Your working tree has uncommitted changes. /qa needs a clean tree so each bug fix gets its own atomic commit."
+"Your working tree has uncommitted changes. gstack:qa needs a clean tree so each bug fix gets its own atomic commit."
 
 - A) Commit my changes — commit all current changes with a descriptive message, then start QA
 - B) Stash my changes — stash, run QA, pop the stash after
@@ -279,7 +279,7 @@ Before falling back to git diff heuristics, check for richer test plan sources:
    eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
    ls -t ~/.gstack/projects/$SLUG/*-test-plan-*.md 2>/dev/null | head -1
    ```
-2. **Conversation context:** Check if a prior `/plan-eng-review` or `/plan-ceo-review` produced test plan output in this conversation
+2. **Conversation context:** Check if a prior `gstack:eng-review` or `gstack:ceo-review` produced test plan output in this conversation
 3. **Use whichever source is richer.** Fall back to git diff analysis only if neither is available.
 
 ---
@@ -290,7 +290,7 @@ Before falling back to git diff heuristics, check for richer test plan sources:
 
 ### Diff-aware (automatic when on a feature branch with no URL)
 
-This is the **primary mode** for developers verifying their work. When the user says `/qa` without a URL and the repo is on a feature branch, automatically:
+This is the **primary mode** for developers verifying their work. When the user says `gstack:qa` without a URL and the repo is on a feature branch, automatically:
 
 1. **Analyze the branch diff** to understand what changed:
    ```bash
@@ -306,7 +306,7 @@ This is the **primary mode** for developers verifying their work. When the user 
    - API endpoints → test them directly with `$B js "await fetch('/api/...')"`
    - Static pages (markdown, HTML) → navigate to them directly
 
-   **If no obvious pages/routes are identified from the diff:** Do not skip browser testing. The user invoked /qa because they want browser-based verification. Fall back to Quick mode — navigate to the homepage, follow the top 5 navigation targets, check console for errors, and test any interactive elements found. Backend, config, and infrastructure changes affect app behavior — always verify the app still works.
+   **If no obvious pages/routes are identified from the diff:** Do not skip browser testing. The user invoked gstack:qa because they want browser-based verification. Fall back to Quick mode — navigate to the homepage, follow the top 5 navigation targets, check console for errors, and test any interactive elements found. Backend, config, and infrastructure changes affect app behavior — always verify the app still works.
 
 3. **Detect the running app** — check common local dev ports:
    ```bash
@@ -562,7 +562,7 @@ Minimum 0 per category.
 9. **Never delete output files.** Screenshots and reports accumulate — that's intentional.
 10. **Use `snapshot -C` for tricky UIs.** Finds clickable divs that the accessibility tree misses.
 11. **Show screenshots to the user.** After every `$B screenshot`, `$B snapshot -a -o`, or `$B responsive` command, use the Read tool on the output file(s) so the user can see them inline. For `responsive` (3 files), Read all three. This is critical — without it, screenshots are invisible to the user.
-12. **Never refuse to use the browser.** When the user invokes /qa or /qa-only, they are requesting browser-based testing. Never suggest evals, unit tests, or other alternatives as a substitute. Even if the diff appears to have no UI changes, backend changes affect app behavior — always open the browser and test.
+12. **Never refuse to use the browser.** When the user invokes gstack:qa or gstack:qa-only, they are requesting browser-based testing. Never suggest evals, unit tests, or other alternatives as a substitute. Even if the diff appears to have no UI changes, backend changes affect app behavior — always open the browser and test.
 
 Record baseline health score at end of Phase 6.
 
@@ -675,7 +675,7 @@ The test MUST:
 - Include full attribution comment:
   ```
   // Regression: ISSUE-NNN — {what broke}
-  // Found by /qa on {YYYY-MM-DD}
+  // Found by gstack:qa on {YYYY-MM-DD}
   // Report: .gstack/qa-reports/qa-report-{domain}-{date}.md
   ```
 
@@ -766,7 +766,7 @@ Write to `~/.gstack/projects/{slug}/{user}-{branch}-test-outcome-{datetime}.md`
 If the repo has a `TODOS.md`:
 
 1. **New deferred bugs** → add as TODOs with severity, category, and repro steps
-2. **Fixed bugs that were in TODOS.md** → annotate with "Fixed by /qa on {branch}, {date}"
+2. **Fixed bugs that were in TODOS.md** → annotate with "Fixed by gstack:qa on {branch}, {date}"
 
 ---
 

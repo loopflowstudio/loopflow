@@ -17,7 +17,7 @@ tools:
 - AskUserQuestion
 version: 0.1.0
 ---
-# /freeze — Restrict Edits to a Directory
+# gstack:freeze — Restrict Edits to a Directory
 
 Lock file edits to a specific directory. Any Edit or Write operation targeting
 a file outside the allowed path will be **blocked** (not just warned).
@@ -48,8 +48,8 @@ echo "Freeze boundary set: $FREEZE_DIR"
 ```
 
 Tell the user: "Edits are now restricted to `<path>/`. Any Edit or Write
-outside this directory will be blocked. To change the boundary, run `/freeze`
-again. To remove it, run `/unfreeze` or end the session."
+outside this directory will be blocked. To change the boundary, run `gstack:freeze`
+again. To remove it, run `gstack:unfreeze` or end the session."
 
 ## How it works
 
@@ -65,4 +65,4 @@ script reads it on every Edit/Write invocation.
 - The trailing `/` on the freeze directory prevents `/src` from matching `/src-old`
 - Freeze applies to Edit and Write tools only — Read, Bash, Glob, Grep are unaffected
 - This prevents accidental edits, not a security boundary — Bash commands like `sed` can still modify files outside the boundary
-- To deactivate, run `/unfreeze` or end the conversation
+- To deactivate, run `gstack:unfreeze` or end the conversation

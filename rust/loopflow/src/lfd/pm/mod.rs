@@ -1,4 +1,5 @@
 pub mod asana;
+pub mod asana_html;
 pub mod linear;
 pub mod notion;
 pub mod notion_blocks;

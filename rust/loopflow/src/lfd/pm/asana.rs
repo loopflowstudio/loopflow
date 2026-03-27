@@ -7,13 +7,14 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::engine::config::AsanaConfig;
+use crate::lfd::pm::asana_html::{asana_html_to_markdown, markdown_to_asana_html};
 use crate::lfd::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
     RATE_LIMIT_RETRIES,
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const TASK_FIELDS: &str = "name,notes,completed,assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
+const TASK_FIELDS: &str = "name,notes,html_notes,completed,assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
 const PROJECT_PRIORITY_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
@@ -310,7 +311,10 @@ impl PmProvider for AsanaClient {
             .to_string();
         let mut data = Map::new();
         data.insert("name".to_string(), json!(item.name));
-        data.insert("notes".to_string(), json!(item.description));
+        data.insert(
+            "html_notes".to_string(),
+            json!(markdown_to_asana_html(&item.description)),
+        );
         data.insert("projects".to_string(), json!([project_id]));
         data.insert(
             "custom_fields".to_string(),
@@ -336,7 +340,10 @@ impl PmProvider for AsanaClient {
             data.insert("name".to_string(), json!(name));
         }
         if let Some(description) = update.description {
-            data.insert("notes".to_string(), json!(description));
+            data.insert(
+                "html_notes".to_string(),
+                json!(markdown_to_asana_html(description)),
+            );
         }
 
         let body = json!({ "data": data });
@@ -442,6 +449,8 @@ struct AsanaTask {
     #[serde(default)]
     notes: String,
     #[serde(default)]
+    html_notes: String,
+    #[serde(default)]
     completed: bool,
     #[serde(default)]
     assignee: Option<AsanaGid>,
@@ -458,10 +467,16 @@ impl AsanaTask {
     fn into_pm_item(self) -> PmItem {
         let rank = self.priority_bucket().rank();
         let assignee = self.assignee.map(|a| a.gid);
+        let description = if self.html_notes.is_empty() {
+            self.notes
+        } else {
+            asana_html_to_markdown(&self.html_notes)
+        };
+
         PmItem {
             id: self.gid,
             name: self.name,
-            description: self.notes,
+            description,
             rank,
             completed: self.completed,
             assignee,
@@ -836,7 +851,8 @@ mod tests {
                         {
                             "gid": "task-2",
                             "name": "Second",
-                            "notes": "two",
+                            "notes": "fallback two",
+                            "html_notes": "<p><strong>two</strong></p>",
                             "completed": true,
                             "custom_fields": [{
                                 "gid": "field-priority",
@@ -862,7 +878,8 @@ mod tests {
                         {
                             "gid": "task-3",
                             "name": "Third",
-                            "notes": "three",
+                            "notes": "fallback three",
+                            "html_notes": "<p>three</p>",
                             "completed": false,
                             "custom_fields": [{
                                 "gid": "field-priority",
@@ -900,7 +917,7 @@ mod tests {
                 PmItem {
                     id: "task-2".to_string(),
                     name: "Second".to_string(),
-                    description: "two".to_string(),
+                    description: "**two**".to_string(),
                     rank: 0,
                     completed: true,
                     assignee: None,
@@ -936,6 +953,36 @@ mod tests {
             .as_deref()
             .expect("query")
             .contains("offset=cursor-2"));
+    }
+
+    #[test]
+    fn into_pm_item_prefers_html_notes_and_falls_back_to_notes() {
+        let html_task = AsanaTask {
+            gid: "task-html".to_string(),
+            name: "Rich".to_string(),
+            notes: "plaintext".to_string(),
+            html_notes: "<p><strong>formatted</strong></p>".to_string(),
+            completed: false,
+            assignee: Some(AsanaGid {
+                gid: "user-1".to_string(),
+            }),
+            custom_fields: Vec::new(),
+        };
+        let plain_task = AsanaTask {
+            gid: "task-plain".to_string(),
+            name: "Plain".to_string(),
+            notes: "plaintext".to_string(),
+            html_notes: String::new(),
+            completed: true,
+            assignee: None,
+            custom_fields: Vec::new(),
+        };
+
+        assert_eq!(html_task.into_pm_item().description, "**formatted**");
+        let item = plain_task.into_pm_item();
+        assert_eq!(item.description, "plaintext");
+        assert!(item.completed);
+        assert_eq!(item.assignee, None);
     }
 
     #[tokio::test]
@@ -1021,7 +1068,7 @@ mod tests {
             json!({
                 "data": {
                     "name": "Implement client",
-                    "notes": "Build the HTTP adapter",
+                    "html_notes": "<p>Build the HTTP adapter</p>",
                     "projects": ["project-123"],
                     "custom_fields": {
                         "field-priority": "opt-p0"
@@ -1037,7 +1084,7 @@ mod tests {
             json!({
                 "data": {
                     "name": "Implement Asana client",
-                    "notes": "Build the HTTP adapter and tests"
+                    "html_notes": "<p>Build the HTTP adapter and tests</p>"
                 }
             })
         );

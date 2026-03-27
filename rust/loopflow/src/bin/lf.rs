@@ -237,7 +237,21 @@ fn run_target(
     match loopflow::lf::discovery::discover_target(&repo_root, name)? {
         loopflow::lf::discovery::Target::Step(_) => with_runtime(&repo_root, command, || {
             with_step_runtime(&repo_root, name, || {
-                loopflow::lf::commands::run::run(Some(name), message, cli)
+                loopflow::lf::commands::run::run(Some(name), message, cli)?;
+                // Commit any uncommitted changes left by the step.
+                // When running inside a flow, the flow executor handles this;
+                // for standalone steps we must do it here.
+                let options = loopflow::ops::CommitOptions {
+                    add: true,
+                    message: Some(format!("lf commit: {name}")),
+                    ..loopflow::ops::CommitOptions::for_task(name)
+                };
+                loopflow::ops::commit_workflow(
+                    &repo_root,
+                    &options,
+                    &loopflow::ops::NullProgress,
+                )?;
+                Ok(())
             })
         }),
         loopflow::lf::discovery::Target::Flow(flow) => with_runtime(&repo_root, command, || {

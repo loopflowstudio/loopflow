@@ -4,7 +4,7 @@ Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomou
 
 ## What to build
 
-**A flow, not a workstyle.** Autoresearch is a loop pattern any workstyle can use: edit a file, run a measurement, keep or discard based on a single metric. The human writes the program.md (the "what to optimize"), the agent runs the loop.
+**A builtin flow, not a workstyle.** Autoresearch is a loop pattern any workstyle can use: edit a file, run a measurement, keep or discard based on a single metric. The steps are written directly as loopflow builtins (like `implement` or `gate`) — no external sync, no workstyle wrapper. Inspired by Karpathy's autoresearch repo but maintained as native loopflow prompts.
 
 **Four steps, not one.** Karpathy has it as a monolithic `program.md`, but it's doing four distinct things. Decomposing makes each step composable — swap evaluate for a benchmark, a test suite, a bundle size check. The loop pattern stays the same.
 
@@ -40,17 +40,17 @@ The user provides:
 - `prepare.py` (the fixed evaluation harness)
 - A `program.md` equivalent as the step content or in scratch/
 
-### Step conversion
+### Writing the steps
 
-Karpathy's `program.md` gets decomposed into four loopflow steps. Key elements to preserve across them:
-- The autonomous spirit ("NEVER STOP") — lives in the flow's loop, not a single step
-- The metric definition (val_bpb, lower is better) — parameterizable per wave
+These are builtin loopflow steps, not imports. We write them directly in `rust/loopflow/src/engine/builtins/steps/research/`. Key elements from Karpathy's design to carry forward:
+- The autonomous spirit ("NEVER STOP") — lives in the flow's loop construct
+- The metric definition — parameterizable per wave config
 - The git keep/discard pattern — lives in `decide` step
 - The fixed time budget per experiment — lives in `evaluate` step
 - The results.tsv logging format — lives in `decide` step
 - The single-file constraint — lives in wave `area` config
 
-Strip: repo-specific setup (data download, env verification) — that's wave config, not prompt content.
+No sync needed. These are our prompts, inspired by the pattern.
 
 ### What makes this general
 

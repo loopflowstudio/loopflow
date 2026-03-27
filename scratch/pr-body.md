@@ -1,6 +1,8 @@
 ## Try it!
 
 ```bash
+cargo fmt --check
+cargo clippy -p loopflow -- -D warnings
 cargo test -p loopflow terminal_sessions -- --nocapture
 swift test --package-path swift --filter GhosttyTerminalViewTests
 swift test --package-path swift --filter LocalWaveServiceAuthTests
@@ -10,29 +12,28 @@ xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination '
 ```
 
 What to look for:
-- Rust attach tests verify tmux-backed sessions return `session_name`, `host`, `cwd`, and `status`.
-- Swift tests verify Concerto builds `tmux attach-session -t <name>` locally and `ssh -t <host> "tmux attach-session -t <name>"` remotely.
-- Xcode tests exercise the app target with the new terminal attach contract.
+- Rust attach tests now model non-tmux sessions without a synthetic `tmux_name` and still reject attach with `412 Precondition Failed`.
+- Swift tmux attach tests verify both local and remote commands carry an empty env dictionary.
+- Concerto's targeted app tests still pass against the existing terminal workspace UI.
 
 ## Intent
 
-Move terminal attach from a daemon-supplied launch command to a transport-agnostic connection contract. `lfd` should own terminal-session lifecycle and metadata, while Concerto decides how to attach to tmux locally or over SSH without sending terminal bytes through the daemon.
+Polish the tmux attach follow-up so the remaining diff is smaller and easier to trust. The Rust test fixture now matches real tmux metadata more closely, and the Swift side keeps the attach launch contract explicit without changing behavior.
 
 ## Assumptions
 
-- Tmux-backed sessions are the only attachable terminal sessions right now.
-- The host a client uses for the HTTP API is also the host it should SSH to for remote tmux attach.
-- Concerto/Ghostty remains the terminal participant; `lfd` only supervises lifecycle and emits events.
+- Only tmux-backed sessions should have a tmux session name.
+- Tmux attach still launches without extra environment variables.
+- This branch is a helper/test polish pass, not a new daemon or client protocol change.
 
 ## Key decisions
 
-- Added explicit terminal-session HTTP routes and DTOs instead of overloading existing session APIs.
-- Normalized loopback hostnames to `localhost` so the client can consistently take the local tmux path.
-- Return `412 Precondition Failed` for non-tmux attach attempts instead of inventing a fake launch payload.
-- Kept the client-side attach command assembly in Concerto so remote/local transport policy stays in the client.
+- Gate tmux fixture data on `TMUX_TERMINAL_SOURCE` in the Rust route tests.
+- Keep `TerminalAttachCommand` as a full `{workingDirectory, argv, env}` bundle for Ghostty launch sites.
+- Preserve the existing terminal workspace dark background instead of mixing in a new visual change.
 
 ## Not included
 
-- Harness server mode for non-terminal clients.
-- SSH brokering or terminal byte forwarding through `lfd`.
-- Broader executor regression coverage beyond the targeted terminal attach/session tests on this branch.
+- No new attach behavior.
+- No HTTP contract changes.
+- No broader executor or end-to-end regression sweep beyond the targeted checks above.

@@ -37,3 +37,7 @@ Three launch workstyles: **lfjack** (loopflow native), **vsm** (governance), **g
 - Number of gstack SKILL.md files successfully converted (target: all 28)
 - Time to sync from upstream (target: <30s)
 - Zero manual edits needed after sync to run gstack flows
+
+## Key milestone
+
+Jack runs `lf gstack-sprint` on a real project and ships something with it. The gstack flow isn't done until it's been used end-to-end by an actual user, not just tested in isolation.

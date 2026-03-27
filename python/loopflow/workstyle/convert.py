@@ -33,13 +33,61 @@ _REMOVED_SECTION_PREFIXES = (
     "## Voice & Tone",
     "## Contributor Mode",
     "## Completion Status Protocol",
+    "## Completion: Write Review Logs",
     "## Telemetry",
     "## Plan Status Footer",
     "## GSTACK REVIEW REPORT",
     "## Repo Ownership",
+    "## Review Log",
     "## Search Before Building",
+    "## Step 8.75: Persist ship metrics",
     "## AskUserQuestion Format",
     "## Completeness Principle",
+)
+_CLEANUP_PATTERNS = (
+    (
+        re.compile(
+            r"\n```bash\nmkdir -p ~/.gstack/analytics\n"
+            r'echo \'{"skill":"[^"]+".*?skill-usage\.jsonl.*?\n```\n',
+            re.DOTALL,
+        ),
+        "\n",
+    ),
+    (
+        re.compile(
+            r"\n3\. Append metrics:\n```bash\n"
+            r"mkdir -p ~/.gstack/analytics\n"
+            r'.*?spec-review\.jsonl.*?\n```\n'
+            r"Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review\.\n",
+            re.DOTALL,
+        ),
+        "\n",
+    ),
+    (
+        re.compile(
+            r"\nLog (?:the result for the review dashboard|to the review dashboard):\n"
+            r"(?:\n```bash\n.*?mkdir -p ~/.gstack/projects/\$SLUG.*?\n```\n)?"
+            r"\nWrite a JSONL entry(?: with timing data)?:"
+            r"(?: .*?\n|\n```json\n.*?\n```\n)",
+            re.DOTALL,
+        ),
+        "\n",
+    ),
+)
+_CLEANUP_REPLACEMENTS = (
+    (
+        "Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments). "
+        "The preamble's Search Before Building section has the ETHOS.md path.",
+        "Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments).",
+    ),
+    (
+        "Read ETHOS.md for the Search Before Building framework "
+        "(the preamble's Search Before Building section has the path).",
+        "Read ETHOS.md for the Search Before Building framework.",
+    ),
+    (" Log the eureka moment (see preamble).", ""),
+    (" Log it (see preamble).", ""),
+    (" (see preamble's Search Before Building section)", ""),
 )
 
 
@@ -76,35 +124,38 @@ def convert_gstack_repo(
     skill_paths = _find_skill_paths(source_repo)
     converted_steps: list[tuple[str, GstackSkill]] = []
     extracted_voice: str | None = None
+    fallback_voice: str | None = None
+    last_commit = _git_head(source_repo)
+    last_sync = _utc_now()
 
     for skill_path in skill_paths:
         skill, voice = _convert_skill(skill_path)
         step_name = _step_name(skill.name)
         converted_steps.append((step_name, skill))
-        if extracted_voice is None and voice and "You are GStack" in voice:
-            extracted_voice = voice
-        elif extracted_voice is None and voice:
+        if fallback_voice is None and voice:
+            fallback_voice = voice
+        if voice and "You are GStack" in voice:
             extracted_voice = voice
 
+    extracted_voice = extracted_voice or fallback_voice
     if extracted_voice is None:
         raise ValueError("No gstack voice section found")
 
-    _write_workstyle(output_dir, converted_steps, source_repo_name, source_ref, source_repo)
-
-    if direction_output is not None:
-        direction_output.parent.mkdir(parents=True, exist_ok=True)
-        direction_output.write_text(extracted_voice.rstrip() + "\n", encoding="utf-8")
-
-    last_sync = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     manifest = WorkstyleManifest(
         name="gstack",
         source_repo=source_repo_name,
         source_ref=source_ref,
         last_sync=last_sync,
-        last_commit=_git_head(source_repo),
+        last_commit=last_commit,
         step_prefix="gstack",
         steps=[name for name, _skill in converted_steps],
     )
+    _write_workstyle(output_dir, converted_steps, manifest)
+
+    if direction_output is not None:
+        direction_output.parent.mkdir(parents=True, exist_ok=True)
+        direction_output.write_text(extracted_voice.rstrip() + "\n", encoding="utf-8")
+
     return manifest
 
 
@@ -128,7 +179,8 @@ def _convert_skill(skill_path: Path) -> tuple[GstackSkill, str | None]:
 
     voice = _extract_voice(body)
     body_without_preamble = _strip_preamble_and_wrapper(body)
-    instructions = _strip_named_sections(body_without_preamble, _REMOVED_SECTION_PREFIXES).strip()
+    instructions = _strip_named_sections(body_without_preamble, _REMOVED_SECTION_PREFIXES)
+    instructions = _cleanup_imported_artifacts(instructions).strip()
 
     skill = GstackSkill(
         name=str(metadata["name"]),
@@ -222,10 +274,9 @@ def _strip_named_sections(text: str, heading_prefixes: tuple[str, ...]) -> str:
 def _write_workstyle(
     output_dir: Path,
     converted_steps: list[tuple[str, GstackSkill]],
-    source_repo_name: str,
-    source_ref: str,
-    source_repo: Path,
+    manifest: WorkstyleManifest,
 ) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
     steps_dir = output_dir.joinpath("steps")
     if steps_dir.exists():
         shutil.rmtree(steps_dir)
@@ -234,23 +285,19 @@ def _write_workstyle(
     for step_name, skill in converted_steps:
         _write_step(steps_dir.joinpath(f"{step_name}.md"), step_name, skill)
 
-    manifest = {
-        "name": "gstack",
+    manifest_data = {
+        "name": manifest.name,
         "description": "Garry Tan's sprint factory",
         "source": {
-            "repo": source_repo_name,
-            "ref": source_ref,
-            "last_commit": _git_head(source_repo),
-            "last_sync": datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
+            "repo": manifest.source_repo,
+            "ref": manifest.source_ref,
+            "last_commit": manifest.last_commit,
+            "last_sync": manifest.last_sync,
         },
-        "prefix": "gstack",
+        "prefix": manifest.step_prefix,
     }
-    output_dir.mkdir(parents=True, exist_ok=True)
     output_dir.joinpath("workstyle.yaml").write_text(
-        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True),
+        yaml.safe_dump(manifest_data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
 
@@ -284,6 +331,10 @@ def _git_head(repo: Path) -> str:
     return result.stdout.strip()
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def _step_name(name: str) -> str:
     return _RENAMED_STEPS.get(name, name)
 
@@ -306,6 +357,15 @@ def _maybe_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _cleanup_imported_artifacts(text: str) -> str:
+    cleaned = text
+    for pattern, replacement in _CLEANUP_PATTERNS:
+        cleaned = pattern.sub(replacement, cleaned)
+    for old, new in _CLEANUP_REPLACEMENTS:
+        cleaned = cleaned.replace(old, new)
+    return cleaned
 
 
 def _find_first_top_level_heading(lines: list[str]) -> int | None:

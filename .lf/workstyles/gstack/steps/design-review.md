@@ -443,29 +443,6 @@ If any below 8: note what's unresolved and why (user chose to defer).
 ### Unresolved Decisions
 If any AskUserQuestion goes unanswered, note it here. Never silently default to an option.
 
-## Review Log
-
-After producing the Completion Summary above, persist the review result.
-
-**PLAN MODE EXCEPTION — ALWAYS RUN:** This command writes review metadata to
-`~/.gstack/` (user config directory, not project files). The skill preamble
-already writes to `~/.gstack/sessions/` and `~/.gstack/analytics/` — this is
-the same pattern. The review dashboard depends on this data. Skipping this
-command breaks the review readiness dashboard in /ship.
-
-```bash
-~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-design-review","timestamp":"TIMESTAMP","status":"STATUS","initial_score":N,"overall_score":N,"unresolved":N,"decisions_made":N,"commit":"COMMIT"}'
-```
-
-Substitute values from the Completion Summary:
-- **TIMESTAMP**: current ISO 8601 datetime
-- **STATUS**: "clean" if overall score 8+ AND 0 unresolved; otherwise "issues_open"
-- **initial_score**: initial overall design score before fixes (0-10)
-- **overall_score**: final overall design score after fixes (0-10)
-- **unresolved**: number of unresolved design decisions
-- **decisions_made**: number of design decisions added to the plan
-- **COMMIT**: output of `git rev-parse --short HEAD`
-
 ## Review Readiness Dashboard
 
 After completing the review, read the review log and config to display the dashboard.

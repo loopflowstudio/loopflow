@@ -11,6 +11,24 @@ from loopflow.workstyle.convert import convert_gstack_repo, extract_openclaw_dir
 def test_convert_gstack_repo_writes_steps_manifest_and_direction(tmp_path: Path) -> None:
     source_repo = tmp_path / "gstack"
     source_repo.mkdir()
+    (source_repo / "SKILL.md").write_text(
+        """---
+name: gstack
+version: 1.0.0
+description: Root skill.
+allowed-tools:
+  - Read
+---
+## Voice
+
+Short root voice.
+
+# /gstack — Root
+
+Root instructions.
+""",
+        encoding="utf-8",
+    )
 
     (source_repo / "office-hours").mkdir()
     (source_repo / "office-hours" / "SKILL.md").write_text(
@@ -40,7 +58,19 @@ Builders ship.
 
 # /office-hours — Office Hours
 
+```bash
+mkdir -p ~/.gstack/analytics
+echo '{"skill":"office-hours","ts":"2026-01-01T00:00:00Z"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
+```
+
 Do the work.
+
+3. Append metrics:
+```bash
+mkdir -p ~/.gstack/analytics
+echo '{"skill":"office-hours","ts":"2026-01-01T00:00:00Z","iterations":3}' >> ~/.gstack/analytics/spec-review.jsonl 2>/dev/null || true
+```
+Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review.
 
 ## Voice & Tone
 
@@ -72,6 +102,10 @@ Short voice.
 # /plan-ceo-review — CEO Review
 
 Focus on the wedge.
+
+## Review Log
+
+Persist review metadata.
 """,
         encoding="utf-8",
     )
@@ -112,7 +146,7 @@ Build the browser tool once.
     assert manifest.source_repo == "garrytan/gstack"
     assert manifest.source_ref == "main"
     assert manifest.step_prefix == "gstack"
-    assert manifest.steps == ["browse", "office-hours", "ceo-review"]
+    assert manifest.steps == ["gstack", "browse", "office-hours", "ceo-review"]
 
     workstyle = yaml.safe_load(output_dir.joinpath("workstyle.yaml").read_text(encoding="utf-8"))
     assert workstyle["prefix"] == "gstack"
@@ -122,12 +156,14 @@ Build the browser tool once.
     office_hours = output_dir.joinpath("steps/office-hours.md").read_text(encoding="utf-8")
     assert "## Preamble" not in office_hours
     assert "## Voice" not in office_hours
+    assert "skill-usage.jsonl" not in office_hours
+    assert "spec-review.jsonl" not in office_hours
     assert "Do the work." in office_hours
 
-    ceo_review = yaml.safe_load(
-        output_dir.joinpath("steps/ceo-review.md").read_text(encoding="utf-8").split("---", 2)[1]
-    )
+    ceo_review_text = output_dir.joinpath("steps/ceo-review.md").read_text(encoding="utf-8")
+    ceo_review = yaml.safe_load(ceo_review_text.split("---", 2)[1])
     assert ceo_review["after"] == ["office-hours"]
+    assert "## Review Log" not in ceo_review_text
 
     browse = yaml.safe_load(
         output_dir.joinpath("steps/browse.md").read_text(encoding="utf-8").split("---", 2)[1]

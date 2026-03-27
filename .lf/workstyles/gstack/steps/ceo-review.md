@@ -116,7 +116,7 @@ DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head
 [ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
 [ -n "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
 ```
-If a design doc exists (from `/office-hours`), read it. Use it as the source of truth for the problem statement, constraints, and chosen approach. If it has a `Supersedes:` field, note that this is a revised design.
+If a design doc exists (from `gstack:office-hours`), read it. Use it as the source of truth for the problem statement, constraints, and chosen approach. If it has a `Supersedes:` field, note that this is a revised design.
 
 **Handoff note check** (reuses $SLUG and $BRANCH from the design doc check above):
 ```bash
@@ -126,7 +126,7 @@ HANDOFF=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-ceo-handoff-*.md 2>/dev/null 
 ```
 If this block runs in a separate shell from the design doc check, recompute $SLUG and $BRANCH first using the same commands from that block.
 If a handoff note is found: read it. This contains system audit findings and discussion
-from a prior CEO review session that paused so the user could run `/office-hours`. Use it
+from a prior CEO review session that paused so the user could run `gstack:office-hours`. Use it
 as additional context alongside the design doc. The handoff note helps you avoid re-asking
 questions the user already answered. Do NOT skip any steps — run the full review, but use
 the handoff note to inform your analysis and avoid redundant questions.
@@ -141,39 +141,32 @@ skill before proceeding.
 
 Say to the user via AskUserQuestion:
 
-> "No design doc found for this branch. `/office-hours` produces a structured problem
+> "No design doc found for this branch. `gstack:office-hours` produces a structured problem
 > statement, premise challenge, and explored alternatives — it gives this review much
 > sharper input to work with. Takes about 10 minutes. The design doc is per-feature,
 > not per-product — it captures the thinking behind this specific change."
 
 Options:
-- A) Run /office-hours now (we'll pick up the review right after)
+- A) Run gstack:office-hours now (we'll pick up the review right after)
 - B) Skip — proceed with standard review
 
 If they skip: "No worries — standard review. If you ever want sharper input, try
-/office-hours first next time." Then proceed normally. Do not re-offer later in the session.
+gstack:office-hours first next time." Then proceed normally. Do not re-offer later in the session.
 
 If they choose A:
 
-Say: "Running /office-hours inline. Once the design doc is ready, I'll pick up
+Say: "Running gstack:office-hours inline. Once the design doc is ready, I'll pick up
 the review right where we left off."
 
 Read the office-hours skill file from disk using the Read tool:
-`~/.claude/skills/gstack/office-hours/SKILL.md`
+`.lf/workstyles/gstack/steps/office-hours.md`
 
-Follow it inline, **skipping these sections** (already handled by the parent skill):
-- Preamble (run first)
-- AskUserQuestion Format
-- Completeness Principle — Boil the Lake
-- Search Before Building
-- Contributor Mode
-- Completion Status Protocol
-- Telemetry (run last)
+Follow the imported loopflow step content directly.
 
 If the Read fails (file not found), say:
-"Could not load /office-hours — proceeding with standard review."
+"Could not load gstack:office-hours — proceeding with standard review."
 
-After /office-hours completes, re-run the design doc check:
+After gstack:office-hours completes, re-run the design doc check:
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
 SLUG=$(~/.claude/skills/gstack/browse/bin/remote-slug 2>/dev/null || basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
@@ -188,21 +181,20 @@ If none was produced (user may have cancelled), proceed with standard review.
 
 **Mid-session detection:** During Step 0A (Premise Challenge), if the user can't
 articulate the problem, keeps changing the problem statement, answers with "I'm not
-sure," or is clearly exploring rather than reviewing — offer `/office-hours`:
+sure," or is clearly exploring rather than reviewing — offer `gstack:office-hours`:
 
 > "It sounds like you're still figuring out what to build — that's totally fine, but
-> that's what /office-hours is designed for. Want to run /office-hours right now?
+> that's what gstack:office-hours is designed for. Want to run gstack:office-hours right now?
 > We'll pick up right where we left off."
 
-Options: A) Yes, run /office-hours now. B) No, keep going.
+Options: A) Yes, run gstack:office-hours now. B) No, keep going.
 If they keep going, proceed normally — no guilt, no re-asking.
 
 If they choose A: Read the office-hours skill file from disk:
-`~/.claude/skills/gstack/office-hours/SKILL.md`
+`.lf/workstyles/gstack/steps/office-hours.md`
 
-Follow it inline, skipping these sections (already handled by parent skill):
-Preamble, AskUserQuestion Format, Completeness Principle, Search Before Building,
-Contributor Mode, Completion Status Protocol, Telemetry.
+Follow the imported loopflow step content directly.
+
 
 Note current Step 0A progress so you don't re-ask questions already answered.
 After completion, re-run the design doc check and resume the review.
@@ -339,7 +331,7 @@ Write to `~/.gstack/projects/$SLUG/ceo-plans/{date}-{feature-slug}.md` using thi
 status: ACTIVE
 ---
 # CEO Plan: {Feature Name}
-Generated by /plan-ceo-review on {date}
+Generated by gstack:ceo-review on {date}
 Branch: {branch} | Mode: {EXPANSION / SELECTIVE EXPANSION}
 Repo: {owner/repo}
 
@@ -679,7 +671,7 @@ Evaluate:
 **STOP.** AskUserQuestion once per issue. Do NOT batch. Recommend + WHY. If no issues or fix is obvious, state what you'll do and move on — don't waste a question. Do NOT proceed until user responds.
 
 ### Section 11: Design & UX Review (skip if no UI scope detected)
-The CEO calling in the designer. Not a pixel-level audit — that's /plan-design-review and /design-review. This is ensuring the plan has design intentionality.
+The CEO calling in the designer. Not a pixel-level audit — that's gstack:design-review and gstack:design-audit. This is ensuring the plan has design intentionality.
 
 Evaluate:
 * Information architecture — what does the user see first, second, third?
@@ -697,7 +689,7 @@ Evaluate:
 
 Required ASCII diagram: user flow showing screens/states and transitions.
 
-If this plan has significant UI scope, recommend: "Consider running /plan-design-review for a deep design review of this plan before implementation."
+If this plan has significant UI scope, recommend: "Consider running gstack:design-review for a deep design review of this plan before implementation."
 **STOP.** AskUserQuestion once per issue. Do NOT batch. Recommend + WHY. If no issues or fix is obvious, state what you'll do and move on — don't waste a question. Do NOT proceed until user responds.
 
 ## Outside Voice — Independent Plan Challenge (optional, recommended)
@@ -822,7 +814,7 @@ SOURCE = "codex" if Codex ran, "claude" if subagent ran.
 ---
 
 ## Post-Implementation Design Audit (if UI scope detected)
-After implementation, run `/design-review` on the live site to catch visual issues that can only be evaluated with rendered output.
+After implementation, run `gstack:design-audit` on the live site to catch visual issues that can only be evaluated with rendered output.
 
 ## CRITICAL RULE — How to ask questions
 Follow the AskUserQuestion format from the Preamble above. Additional rules for plan reviews:
@@ -945,9 +937,9 @@ After completing the review, read the review log and config to display the dashb
 ~/.claude/skills/gstack/bin/gstack-review-read
 ```
 
-Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both /plan-ceo-review and /plan-eng-review.
+Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both gstack:ceo-review and gstack:eng-review.
 
-**Source attribution:** If the most recent entry for a skill has a \`"via"\` field, append it to the status label in parentheses. Examples: `plan-eng-review` with `via:"autoplan"` shows as "CLEAR (PLAN via /autoplan)". `review` with `via:"ship"` shows as "CLEAR (DIFF via /ship)". Entries without a `via` field show as "CLEAR (PLAN)" or "CLEAR (DIFF)" as before.
+**Source attribution:** If the most recent entry for a skill has a \`"via"\` field, append it to the status label in parentheses. Examples: `plan-eng-review` with `via:"autoplan"` shows as "CLEAR (PLAN via gstack:autoplan)". `review` with `via:"ship"` shows as "CLEAR (DIFF via gstack:ship)". Entries without a `via` field show as "CLEAR (PLAN)" or "CLEAR (DIFF)" as before.
 
 Note: `autoplan-voices` and `design-outside-voices` entries are audit-trail-only (forensic data for cross-model consensus analysis). They do not appear in the dashboard and are not checked by any consumer.
 
@@ -974,7 +966,7 @@ Display:
 - **CEO Review (optional):** Use your judgment. Recommend it for big product/business changes, new user-facing features, or scope decisions. Skip for bug fixes, refactors, infra, and cleanup.
 - **Design Review (optional):** Use your judgment. Recommend it for UI/UX changes. Skip for backend-only, infra, or prompt-only changes.
 - **Adversarial Review (automatic):** Auto-scales by diff size. Small diffs (<50 lines) skip adversarial. Medium diffs (50–199) get cross-model adversarial. Large diffs (200+) get all 4 passes: Claude structured, Codex structured, Claude adversarial subagent, Codex adversarial. No configuration needed.
-- **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in /plan-ceo-review and /plan-eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
+- **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in gstack:ceo-review and gstack:eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
 
 **Verdict logic:**
 - **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\`)
@@ -1025,15 +1017,15 @@ Produce this markdown table:
 
 After displaying the Review Readiness Dashboard, recommend the next review(s) based on what this CEO review discovered. Read the dashboard output to see which reviews have already been run and whether they are stale.
 
-**Recommend /plan-eng-review if eng review is not skipped globally** — check the dashboard output for `skip_eng_review`. If it is `true`, eng review is opted out — do not recommend it. Otherwise, eng review is the required shipping gate. If this CEO review expanded scope, changed architectural direction, or accepted scope expansions, emphasize that a fresh eng review is needed. If an eng review already exists in the dashboard but the commit hash shows it predates this CEO review, note that it may be stale and should be re-run.
+**Recommend gstack:eng-review if eng review is not skipped globally** — check the dashboard output for `skip_eng_review`. If it is `true`, eng review is opted out — do not recommend it. Otherwise, eng review is the required shipping gate. If this CEO review expanded scope, changed architectural direction, or accepted scope expansions, emphasize that a fresh eng review is needed. If an eng review already exists in the dashboard but the commit hash shows it predates this CEO review, note that it may be stale and should be re-run.
 
-**Recommend /plan-design-review if UI scope was detected** — specifically if Section 11 (Design & UX Review) was NOT skipped, or if accepted scope expansions included UI-facing features. If an existing design review is stale (commit hash drift), note that. In SCOPE REDUCTION mode, skip this recommendation — design review is unlikely relevant for scope cuts.
+**Recommend gstack:design-review if UI scope was detected** — specifically if Section 11 (Design & UX Review) was NOT skipped, or if accepted scope expansions included UI-facing features. If an existing design review is stale (commit hash drift), note that. In SCOPE REDUCTION mode, skip this recommendation — design review is unlikely relevant for scope cuts.
 
 **If both are needed, recommend eng review first** (required gate), then design review.
 
 Use AskUserQuestion to present the next step. Include only applicable options:
-- **A)** Run /plan-eng-review next (required gate)
-- **B)** Run /plan-design-review next (only if UI scope detected)
+- **A)** Run gstack:eng-review next (required gate)
+- **B)** Run gstack:design-review next (only if UI scope detected)
 - **C)** Skip — I'll handle reviews manually
 
 ## docs/designs Promotion (EXPANSION and SELECTIVE EXPANSION only)

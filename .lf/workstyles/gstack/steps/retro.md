@@ -19,22 +19,22 @@ tools:
 version: 2.0.0
 preamble_tier: 2
 ---
-# /retro — Weekly Engineering Retrospective
+# gstack:retro — Weekly Engineering Retrospective
 
 Generates a comprehensive engineering retrospective analyzing commit history, work patterns, and code quality metrics. Team-aware: identifies the user running the command, then analyzes every contributor with per-person praise and growth opportunities. Designed for a senior IC/CTO-level builder using Claude Code as a force multiplier.
 
 ## User-invocable
-When the user types `/retro`, run this skill.
+When the user types `gstack:retro`, run this skill.
 
 ## Arguments
-- `/retro` — default: last 7 days
-- `/retro 24h` — last 24 hours
-- `/retro 14d` — last 14 days
-- `/retro 30d` — last 30 days
-- `/retro compare` — compare current window vs prior same-length window
-- `/retro compare 14d` — compare with explicit window
-- `/retro global` — cross-project retro across all AI coding tools (7d default)
-- `/retro global 14d` — cross-project retro with explicit window
+- `gstack:retro` — default: last 7 days
+- `gstack:retro 24h` — last 24 hours
+- `gstack:retro 14d` — last 14 days
+- `gstack:retro 30d` — last 30 days
+- `gstack:retro compare` — compare current window vs prior same-length window
+- `gstack:retro compare 14d` — compare with explicit window
+- `gstack:retro global` — cross-project retro across all AI coding tools (7d default)
+- `gstack:retro global 14d` — cross-project retro with explicit window
 
 ## Instructions
 
@@ -44,15 +44,15 @@ Parse the argument to determine the time window. Default to 7 days if no argumen
 
 **Argument validation:** If the argument doesn't match a number followed by `d`, `h`, or `w`, the word `compare` (optionally followed by a window), or the word `global` (optionally followed by a window), show this usage and stop:
 ```
-Usage: /retro [window | compare | global]
-  /retro              — last 7 days (default)
-  /retro 24h          — last 24 hours
-  /retro 14d          — last 14 days
-  /retro 30d          — last 30 days
-  /retro compare      — compare this period vs prior period
-  /retro compare 14d  — compare with explicit window
-  /retro global       — cross-project retro across all AI tools (7d default)
-  /retro global 14d   — cross-project retro with explicit window
+Usage: gstack:retro [window | compare | global]
+  gstack:retro              — last 7 days (default)
+  gstack:retro 24h          — last 24 hours
+  gstack:retro 14d          — last 14 days
+  gstack:retro 30d          — last 30 days
+  gstack:retro compare      — compare this period vs prior period
+  gstack:retro compare 14d  — compare with explicit window
+  gstack:retro global       — cross-project retro across all AI tools (7d default)
+  gstack:retro global 14d   — cross-project retro with explicit window
 ```
 
 **If the first argument is `global`:** Skip the normal repo-scoped retro (Steps 1-14). Instead, follow the **Global Retrospective** flow at the end of this document. The optional second argument is the time window (default 7d). This mode does NOT require being inside a git repo.
@@ -107,9 +107,6 @@ find . -name '*.test.*' -o -name '*.spec.*' -o -name '*_test.*' -o -name '*_spec
 # 11. Regression test commits in window
 git log origin/<default> --since="<window>" --oneline --grep="test(qa):" --grep="test(design):" --grep="test: coverage"
 
-# 12. gstack skill usage telemetry (if available)
-cat ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-
 # 12. Test files changed in window
 git log origin/<default> --since="<window>" --format="" --name-only | grep -E '\.(test|spec)\.' | sort -u | wc -l
 ```
@@ -161,28 +158,6 @@ Include in the metrics table:
 ```
 
 If TODOS.md doesn't exist, skip the Backlog Health row.
-
-**Skill Usage (if analytics exist):** Read `~/.gstack/analytics/skill-usage.jsonl` if it exists. Filter entries within the retro time window by `ts` field. Separate skill activations (no `event` field) from hook fires (`event: "hook_fire"`). Aggregate by skill name. Present as:
-
-```
-| Skill Usage | /ship(12) /qa(8) /review(5) · 3 safety hook fires |
-```
-
-If the JSONL file doesn't exist or has no entries in the window, skip the Skill Usage row.
-
-**Eureka Moments (if logged):** Read `~/.gstack/analytics/eureka.jsonl` if it exists. Filter entries within the retro time window by `ts` field. For each eureka moment, show the skill that flagged it, the branch, and a one-line summary of the insight. Present as:
-
-```
-| Eureka Moments | 2 this period |
-```
-
-If moments exist, list them:
-```
-  EUREKA /office-hours (branch: garrytan/auth-rethink): "Session tokens don't need server storage — browser crypto API makes client-side JWT validation viable"
-  EUREKA /plan-eng-review (branch: garrytan/cache-layer): "Redis isn't needed here — Bun's built-in LRU cache handles this workload"
-```
-
-If the JSONL file doesn't exist or has no entries in the window, skip the Eureka Moments row.
 
 ### Step 3: Commit Time Distribution
 
@@ -454,7 +429,7 @@ Narrative covering:
 - If test ratio < 20%: flag as growth area — "100% test coverage is the goal. Tests make vibe coding safe."
 
 ### Plan Completion
-Check review JSONL logs for plan completion data from /ship runs this period:
+Check review JSONL logs for plan completion data from gstack:ship runs this period:
 
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
@@ -529,7 +504,7 @@ Small, practical, realistic. Each must be something that takes <5 minutes to ado
 
 ## Global Retrospective Mode
 
-When the user runs `/retro global` (or `/retro global 14d`), follow this flow instead of the repo-scoped Steps 1-14. This mode works from any directory — it does NOT require being inside a git repo.
+When the user runs `gstack:retro global` (or `gstack:retro global 14d`), follow this flow instead of the repo-scoped Steps 1-14. This mode works from any directory — it does NOT require being inside a git repo.
 
 ### Global Step 1: Compute time window
 
@@ -557,7 +532,7 @@ $DISCOVER_BIN --since "<window>" --format json 2>/tmp/gstack-discover-stderr
 
 Read the stderr output from `/tmp/gstack-discover-stderr` for diagnostic info. Parse the JSON output from stdout.
 
-If `total_sessions` is 0, say: "No AI coding sessions found in the last <window>. Try a longer window: `/retro global 30d`" and stop.
+If `total_sessions` is 0, say: "No AI coding sessions found in the last <window>. Try a longer window: `gstack:retro global 30d`" and stop.
 
 ### Global Step 3: Run git log on each discovered repo
 
@@ -677,8 +652,8 @@ align cleanly. Never truncate project names.
 - Ship of the Week: the user's single highest-LOC PR across ALL repos.
 - Top Work: 3 bullet points summarizing the user's major themes, inferred from
   commit messages. Not individual commits — synthesize into themes.
-  E.g., "Built /retro global — cross-project retrospective with AI session discovery"
-  not "feat: gstack-global-discover" + "feat: /retro global template".
+  E.g., "Built gstack:retro global — cross-project retrospective with AI session discovery"
+  not "feat: gstack-global-discover" + "feat: gstack:retro global template".
 - The card must be self-contained. Someone seeing ONLY this block should understand
   the user's week without any surrounding context.
 - Do NOT include team members, project totals, or context switching data here.
@@ -818,7 +793,7 @@ Use the Write tool to save JSON to `~/.gstack/retros/global-${today}-${next}.jso
 
 ## Compare Mode
 
-When the user runs `/retro compare` (or `/retro compare 14d`):
+When the user runs `gstack:retro compare` (or `gstack:retro compare 14d`):
 
 1. Compute metrics for the current window (default 7d) using the midnight-aligned start date (same logic as the main retro — e.g., if today is 2026-03-18 and window is 7d, use `--since="2026-03-11T00:00:00"`)
 2. Compute metrics for the immediately prior same-length window using both `--since` and `--until` with midnight-aligned dates to avoid overlap (e.g., for a 7d window starting 2026-03-11: prior window is `--since="2026-03-04T00:00:00" --until="2026-03-11T00:00:00"`)

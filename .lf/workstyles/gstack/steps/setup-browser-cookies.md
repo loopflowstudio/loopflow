@@ -82,7 +82,7 @@ Tell the user: **"Cookie picker opened — select the domains you want to import
 
 ### 3. Direct import (alternative)
 
-If the user specifies a domain directly (e.g., `/setup-browser-cookies github.com`), skip the UI:
+If the user specifies a domain directly (e.g., `gstack:setup-browser-cookies github.com`), skip the UI:
 
 ```bash
 $B cookie-import-browser comet --domain github.com

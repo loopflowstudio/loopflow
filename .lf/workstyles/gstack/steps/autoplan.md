@@ -31,11 +31,11 @@ preamble_tier: 3
 after:
 - office-hours
 ---
-# /autoplan — Auto-Review Pipeline
+# gstack:autoplan — Auto-Review Pipeline
 
 One command. Rough plan in, fully reviewed plan out.
 
-/autoplan reads the full CEO, design, and eng review skill files from disk and follows
+gstack:autoplan reads the full CEO, design, and eng review skill files from disk and follows
 them at full depth — same rigor, same sections, same methodology as running each skill
 manually. The only difference: intermediate AskUserQuestion calls are auto-decided using
 the 6 principles below. Taste decisions (where reasonable people could disagree) are
@@ -141,19 +141,19 @@ echo "RESTORE_PATH=$HOME/.gstack/projects/$SLUG/${BRANCH}-autoplan-restore-${DAT
 
 Write the plan file's full contents to the restore path with this header:
 ```
-# /autoplan Restore Point
+# gstack:autoplan Restore Point
 Captured: [timestamp] | Branch: [branch] | Commit: [short hash]
 
 ## Re-run Instructions
 1. Copy "Original Plan State" below back to your plan file
-2. Invoke /autoplan
+2. Invoke gstack:autoplan
 
 ## Original Plan State
 [verbatim plan file contents]
 ```
 
 Then prepend a one-line HTML comment to the plan file:
-`<!-- /autoplan restore point: [RESTORE_PATH] -->`
+`<!-- gstack:autoplan restore point: [RESTORE_PATH] -->`
 
 ### Step 2: Read context
 
@@ -166,25 +166,9 @@ Then prepend a one-line HTML comment to the plan file:
 ### Step 3: Load skill files from disk
 
 Read each file using the Read tool:
-- `~/.claude/skills/gstack/plan-ceo-review/SKILL.md`
-- `~/.claude/skills/gstack/plan-design-review/SKILL.md` (only if UI scope detected)
-- `~/.claude/skills/gstack/plan-eng-review/SKILL.md`
-
-**Section skip list — when following a loaded skill file, SKIP these sections
-(they are already handled by /autoplan):**
-- Preamble (run first)
-- AskUserQuestion Format
-- Completeness Principle — Boil the Lake
-- Search Before Building
-- Contributor Mode
-- Completion Status Protocol
-- Telemetry (run last)
-- Step 0: Detect base branch
-- Review Readiness Dashboard
-- Plan File Review Report
-- Prerequisite Skill Offer (BENEFITS_FROM)
-- Outside Voice — Independent Plan Challenge
-- Design Outside Voices (parallel)
+- `.lf/workstyles/gstack/steps/ceo-review.md`
+- `.lf/workstyles/gstack/steps/design-review.md` (only if UI scope detected)
+- `.lf/workstyles/gstack/steps/eng-review.md`
 
 Follow ONLY the review-specific methodology, sections, and required outputs.
 
@@ -557,7 +541,7 @@ noting which items are incomplete. Do not loop indefinitely.
 Present as a message, then use AskUserQuestion:
 
 ```
-## /autoplan Review Complete
+## gstack:autoplan Review Complete
 
 ### Plan Summary
 [1-3 sentence summary]
@@ -602,7 +586,7 @@ AskUserQuestion options:
 - E) Reject (start over)
 
 **Option handling:**
-- A: mark APPROVED, write review logs, suggest /ship
+- A: mark APPROVED, write review logs, suggest gstack:ship
 - B: ask which overrides, apply, re-present gate
 - C: answer freeform, re-present gate
 - D: make changes, re-run affected phases (scope→1B, design→2, test plan→3, arch→3). Max 3 cycles.
@@ -612,7 +596,7 @@ AskUserQuestion options:
 
 ## Important Rules
 
-- **Never abort.** The user chose /autoplan. Respect that choice. Surface all taste decisions, never redirect to interactive review.
+- **Never abort.** The user chose gstack:autoplan. Respect that choice. Surface all taste decisions, never redirect to interactive review.
 - **Premises are the one gate.** The only non-auto-decided AskUserQuestion is the premise confirmation in Phase 1.
 - **Log every decision.** No silent auto-decisions. Every choice gets a row in the audit trail.
 - **Full depth means full depth.** Do not compress or skip sections from the loaded skill files (except the skip list in Phase 0). "Full depth" means: read the code the section asks you to read, produce the outputs the section requires, identify every issue, and decide each one. A one-sentence summary of a section is not "full depth" — it is a skip. If you catch yourself writing fewer than 3 sentences for any review section, you are likely compressing.

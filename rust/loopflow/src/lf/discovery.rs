@@ -156,6 +156,8 @@ pub enum SkillSourceKind {
     SingleFile,
     /// Agent Skills cache sourced by `npx skills`
     Npx,
+    /// Loopflow-native workstyle bundle at .lf/workstyles/<name>/steps/
+    Workstyle,
 }
 
 /// Discover external skill sources (config, npx cache, superpowers, rams).
@@ -186,7 +188,43 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 2. npx skill cache in repo-local .agents/skills
+    // 2. Repo-local workstyles
+    if let Some(repo_root) = repo {
+        let workstyles_dir = repo_root.join(".lf/workstyles");
+        if let Ok(entries) = std::fs::read_dir(workstyles_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let Some(prefix) = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                else {
+                    continue;
+                };
+                if seen_prefixes.contains(&prefix) {
+                    continue;
+                }
+
+                let skills = discover_workstyle_skills(&path);
+                if skills.is_empty() {
+                    continue;
+                }
+
+                sources.push(SkillSource {
+                    name: prefix.clone(),
+                    prefix: prefix.clone(),
+                    path: Some(path),
+                    skills,
+                    kind: SkillSourceKind::Workstyle,
+                });
+                seen_prefixes.insert(prefix);
+            }
+        }
+    }
+
+    // 3. npx skill cache in repo-local .agents/skills
     if !seen_prefixes.contains("npx") {
         if let Some(repo_root) = repo {
             let cache_dir = repo_root.join(".agents/skills");
@@ -201,7 +239,7 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 3. Auto-detect superpowers
+    // 4. Auto-detect superpowers
     let sp_paths = [
         repo.map(|r| r.join("superpowers")),
         dirs::home_dir().map(|h| h.join(".superpowers")),
@@ -227,7 +265,7 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 4. Auto-detect rams
+    // 5. Auto-detect rams
     // Check for rams at ~/.claude/commands/rams.md
     if !seen_prefixes.contains("rams") {
         if let Some(home) = dirs::home_dir() {
@@ -245,6 +283,11 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     }
 
     sources
+}
+
+fn discover_workstyle_skills(workstyle_dir: &Path) -> Vec<String> {
+    let steps_dir = workstyle_dir.join("steps");
+    list_md_stems(std::slice::from_ref(&steps_dir))
 }
 
 fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
@@ -373,6 +416,9 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
         }
 
         let prompt_path = find_skill_prompt_path(source, skill_name)?;
+        if source.kind == SkillSourceKind::Workstyle {
+            return load_workstyle_from_path(name, &prompt_path);
+        }
         return load_skill_from_path(name, &prompt_path);
     }
 
@@ -477,6 +523,10 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
         interactive: Some(true),
         fast_path: None,
     })
+}
+
+fn load_workstyle_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
+    crate::engine::flow::load_step_from_path(name, prompt_path).ok()
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
@@ -669,6 +719,10 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
     match source.kind {
         SkillSourceKind::SingleFile => {
             let candidate = source_path.join(format!("{skill_name}.md"));
+            candidate.is_file().then_some(candidate)
+        }
+        SkillSourceKind::Workstyle => {
+            let candidate = source_path.join("steps").join(format!("{skill_name}.md"));
             candidate.is_file().then_some(candidate)
         }
         SkillSourceKind::Directory => {
@@ -1008,4 +1062,75 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
     }
 
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn discover_skill_sources_includes_workstyles() {
+        let tmp = TempDir::new().expect("tempdir");
+        let workstyle_steps = tmp.path().join(".lf/workstyles/gstack/steps");
+        fs::create_dir_all(&workstyle_steps).expect("create workstyle steps");
+        fs::write(
+            workstyle_steps.join("office-hours.md"),
+            "---\ninteractive: false\n---\nDo the work.\n",
+        )
+        .expect("write step");
+
+        let sources = discover_skill_sources(Some(tmp.path()));
+        let gstack = sources
+            .iter()
+            .find(|source| source.prefix == "gstack")
+            .expect("gstack source");
+
+        assert_eq!(gstack.kind, SkillSourceKind::Workstyle);
+        assert_eq!(gstack.skills, vec!["office-hours".to_string()]);
+    }
+
+    #[test]
+    fn discover_step_loads_workstyle_frontmatter() {
+        let tmp = TempDir::new().expect("tempdir");
+        let workstyle_steps = tmp.path().join(".lf/workstyles/gstack/steps");
+        fs::create_dir_all(&workstyle_steps).expect("create workstyle steps");
+        fs::write(
+            workstyle_steps.join("office-hours.md"),
+            "---\ninteractive: false\ndirections: [gstack]\n---\n# /office-hours\nShip it.\n",
+        )
+        .expect("write step");
+
+        let step = discover_step(tmp.path(), "gstack:office-hours").expect("discover step");
+
+        assert_eq!(step.name, "gstack:office-hours");
+        assert_eq!(step.interactive, Some(false));
+        assert_eq!(step.directions, vec!["gstack".to_string()]);
+        assert!(step
+            .content
+            .as_deref()
+            .expect("content")
+            .contains("# /office-hours"));
+    }
+
+    #[test]
+    fn list_all_steps_includes_workstyle_steps_as_external_skills() {
+        let tmp = TempDir::new().expect("tempdir");
+        let workstyle_steps = tmp.path().join(".lf/workstyles/gstack/steps");
+        fs::create_dir_all(&workstyle_steps).expect("create workstyle steps");
+        fs::write(workstyle_steps.join("office-hours.md"), "Ship it.\n").expect("write step");
+
+        let (_user, _global, _builtin, external) = list_all_steps(Some(tmp.path()));
+
+        assert!(external.contains(&("gstack:office-hours".to_string(), "gstack".to_string())));
+    }
+
+    #[test]
+    fn list_directions_includes_imported_builtin_directions() {
+        let directions = list_directions(None);
+
+        assert!(directions.contains(&"gstack".to_string()));
+        assert!(directions.contains(&"openclaw".to_string()));
+    }
 }

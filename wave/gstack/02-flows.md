@@ -43,18 +43,18 @@ Create loopflow flow YAML files that chain gstack steps into the sprint sequence
 **Flow discovery** (`flow.rs` or `discovery.rs`):
 - Load flows from `.lf/workstyles/<name>/flows/` in addition to `.lf/flows/`
 - Workstyle flows are namespaced: `gstack-sprint`, `gstack-review`
-- When a workstyle flow runs, the workstyle's voice.md is active
+- Workstyle flows can opt into imported style explicitly with `direction: [gstack]`
 
-**Voice resolution**:
-- Current: `.lf/voice.md` → `~/.lf/voice.md` → builtin
-- New: workstyle `voice.md` → `.lf/voice.md` → `~/.lf/voice.md` → builtin
-- Workstyle voice is active when any step from that workstyle is running
+**Direction use**:
+- gstack style is applied by including the `gstack` direction where it helps
+- OpenClaw style is available separately as the `openclaw` direction
+- No hidden workstyle-specific voice switching at runtime
 
 ## Done when
 
 1. `lf gstack-sprint` runs the full sprint sequence
 2. `lf gstack-plan-manual` runs the three-review planning flow
 3. `lf gstack-review` runs deep review (code + security + cross-model)
-4. gstack voice is active during gstack steps, loopflow voice during loopflow steps
+4. gstack flows can opt into `direction: [gstack]` explicitly
 5. Mixed flows (gstack steps + loopflow `implement`) work correctly
 6. `lf --list` shows gstack flows

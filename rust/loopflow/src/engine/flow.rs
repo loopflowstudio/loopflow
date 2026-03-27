@@ -254,8 +254,7 @@ pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadEr
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
     // Try file-based lookup first (repo-local, then global)
     if let Ok(step_path) = find_step_path(name, repo) {
-        let content = fs::read_to_string(&step_path)?;
-        return step_from_content(name, &content);
+        return load_step_from_path(name, &step_path);
     }
 
     // Fall back to built-in steps
@@ -269,6 +268,11 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
     }
 
     Err(LoadError::StepNotFound(name.to_string()))
+}
+
+pub(crate) fn load_step_from_path(name: &str, step_path: &Path) -> Result<Step, LoadError> {
+    let content = fs::read_to_string(step_path)?;
+    step_from_content(name, &content)
 }
 
 #[derive(Debug, Default)]
@@ -444,6 +448,17 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    if let Some((prefix, step_name)) = name.split_once(':') {
+        let workstyle_path = repo
+            .join(".lf/workstyles")
+            .join(prefix)
+            .join("steps")
+            .join(format!("{step_name}.md"));
+        if workstyle_path.exists() {
+            return Ok(workstyle_path);
+        }
+    }
+
     // 1. Check repo-local paths
     let repo_candidates = [
         repo.join(".lf/steps").join(format!("{name}.md")),
@@ -1316,6 +1331,23 @@ mod tests {
 
         let step = load_step("mystep", tmp.path()).unwrap();
         assert_eq!(step.name, "mystep");
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_workstyle_step() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/workstyles/gstack/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
+        )
+        .unwrap();
+
+        let step = load_step("gstack:office-hours", tmp.path()).unwrap();
+        assert_eq!(step.name, "gstack:office-hours");
+        assert_eq!(step.interactive, Some(false));
         assert!(step.content.unwrap().contains("Do the thing"));
     }
 

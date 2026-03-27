@@ -8,7 +8,7 @@ Build `lf ops workstyle sync` to pull latest prompts from garrytan/gstack and re
 1. Read `workstyle.yaml` for source repo and ref
 2. Clone/fetch the repo to a cache (`~/.lf/cache/workstyles/gstack/`)
 3. Run the converter on all SKILL.md files
-4. Write updated steps to `.lf/workstyles/gstack/steps/`
+4. Write updated steps to `.lf/workstyles/gstack/steps/` and refresh any extracted direction artifacts
 5. Update `workstyle.yaml` with new `last_sync` and `last_commit`
 
 **`lf ops workstyle sync --all`**: sync every workstyle with a remote source.
@@ -31,7 +31,7 @@ qa.md            | 8 ++
 
 $ lf ops workstyle sync gstack
 Fetching garrytan/gstack@main...
-Converting 28 skills...
+Converting 29 skills...
 Updated 3 steps, 25 unchanged.
 Synced to commit abc1234 (2026-03-26).
 ```
@@ -54,7 +54,6 @@ flows:
   - sprint
   - plan-manual
   - review
-voice: voice.md
 ```
 
 ## Sync cache
@@ -75,4 +74,5 @@ Shallow clone, fetch-only. Never modify the cache.
 2. `lf ops workstyle diff gstack` shows upstream changes
 3. `lf ops workstyle list` shows all installed workstyles
 4. Re-syncing after upstream changes updates only changed steps
-5. Sync completes in <30s on a warm cache
+5. Re-syncing refreshes extracted direction content when the upstream style doc changes
+6. Sync completes in <30s on a warm cache

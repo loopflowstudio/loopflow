@@ -92,6 +92,7 @@ Priority meanings:
 - **`4-*`** — Low: speculative work
 
 `ingest` picks from the highest-priority non-empty level first. Within a level, the default fast path uses filename order.
+For PM-backed waves, `lf ops ingest` refreshes the local wave mirror from the provider before it picks. If that pull fails, ingest warns and falls back to the existing local files.
 Use `lf ops ingest --item <filename-or-slug>` when you want to target a specific item instead of auto-picking.
 
 Each item needs:
@@ -174,7 +175,7 @@ When a wave runs, it cycles through four phases:
 ingest → kickoff → build → update-wave → [loop]
 ```
 
-**ingest** picks the highest-priority item from `wave/<name>/` and moves it to `scratch/`.
+**ingest** refreshes PM-backed waves from the provider, then picks the highest-priority item from `wave/<name>/` and moves it to `scratch/`.
 
 **kickoff** elaborates the item into an actionable design — alternatives considered, research done, success and failure imagined.
 

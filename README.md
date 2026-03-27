@@ -72,7 +72,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `polish` | Find polish priorities |
 | `expand` | Find expansion opportunities |
 | `iterate` | Read research, write design to address it |
-| `ingest` | Pick wave item, move to scratch/ |
+| `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `5whys` | Root cause analysis on a bug fix |
 
@@ -326,6 +326,8 @@ lf op pm push-diff pm      # push only branch-changed items to PM
 lf op pm push-diff --all   # push-diff every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
 ```
+
+PM-backed `lf ops ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.

@@ -551,6 +551,10 @@ impl Progress for TracingProgress {
         error!("{msg}");
     }
 
+    fn warning(&self, msg: &str) {
+        warn!("{msg}");
+    }
+
     fn confirm(&self, _msg: &str) -> bool {
         true
     }

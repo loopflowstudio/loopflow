@@ -4,9 +4,9 @@ produces: scratch/<slug>.md
 default_agent: claude
 fast-path: lf op ingest
 ---
-Pick the highest-priority item from the wave's backlog and move it to scratch/.
+Refresh PM-backed waves, then pick the highest-priority item from the wave's backlog and move it to scratch/.
 
-Fast path: `lf ops ingest --item <filename-or-slug>` targets a specific roadmap item instead of auto-picking.
+Fast path: `lf ops ingest --item <filename-or-slug>` targets a specific roadmap item instead of auto-picking. If the wave is PM-backed, ingest refreshes the local mirror before picking and warns if the pull fails.
 
 ## Wave context
 

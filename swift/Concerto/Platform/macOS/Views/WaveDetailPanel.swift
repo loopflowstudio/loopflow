@@ -65,7 +65,7 @@ struct WaveDetailPanel: View {
     }
 
     private var ideApp: IDEApp { .cursor }
-    private var terminalApp: TerminalApp { .warp }
+    private var terminalApp: TerminalApp { .defaultExternal }
 
     var body: some View {
         Group {

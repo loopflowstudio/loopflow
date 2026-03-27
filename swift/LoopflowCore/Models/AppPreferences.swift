@@ -9,6 +9,8 @@ public enum TerminalApp: String, Sendable, CaseIterable {
     case terminal
     case kitty
 
+    public static let defaultExternal: Self = .ghostty
+
     public var displayName: String {
         switch self {
         case .ghostty: return "Ghostty"

@@ -161,7 +161,7 @@ struct ContentView: View {
         if let wave = repoState.selectedWave,
            let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
-            let terminal = TerminalApp.ghostty
+            let terminal = TerminalApp.defaultExternal
             let ide = IDEApp.cursor
             let remoteHost = repoState.repoTarget?.remoteHost
 
@@ -374,7 +374,7 @@ struct ContentView: View {
 
     private func openTerminalForSelectedWave() {
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
-            try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
+            try launcher.openTerminal(.defaultExternal, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
         }
     }
 

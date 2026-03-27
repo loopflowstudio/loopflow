@@ -405,7 +405,7 @@ private struct TerminalContextSidebar: View {
         do {
             try await ensureWorkspaceShellSession(worktreePath: worktreePath)
             try terminalLauncher.launchTerminal(
-                .ghostty,
+                .defaultExternal,
                 at: URL(fileURLWithPath: worktreePath),
                 command: shellAttachCommand
             )

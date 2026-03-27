@@ -114,9 +114,12 @@ struct TerminalLauncher {
             throw LaunchError.launchFailed("Ghostty not found at /Applications/Ghostty.app")
         }
 
-        var arguments = ["--working-directory=\(path.path())"]
+        var arguments = [
+            "--working-directory=\(path.path())",
+            "--window-inherit-working-directory=false",
+        ]
         if let command, !command.isEmpty {
-            arguments.append("--command=\(command)")
+            arguments.append("--initial-command=shell:\(command)")
         }
 
         let process = Process()

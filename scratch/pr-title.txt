@@ -1,0 +1,1 @@
+concerto: make streaming transcript state incremental and open shells in Ghostty

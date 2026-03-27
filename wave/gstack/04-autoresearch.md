@@ -12,7 +12,6 @@ Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomou
 
 ```yaml
 # .lf/flows/autoresearch.yaml
-- autoresearch:setup
 - loop:
     steps:
       - autoresearch:experiment
@@ -20,10 +19,11 @@ Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomou
       - autoresearch:decide
 ```
 
-- **setup** — agree on run tag, create branch, verify data/harness, initialize results.tsv
 - **experiment** — read git state and results history, form hypothesis, edit the target file, commit
 - **evaluate** — run the measurement command, read metrics from output
 - **decide** — compare to best result, keep commit or git reset, log to results.tsv
+
+Setup (branch creation, data verification, results.tsv initialization) is stripped — loopflow handles that through wave config and `lf init`.
 
 ### Wave usage
 

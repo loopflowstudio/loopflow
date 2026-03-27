@@ -85,23 +85,8 @@ fn parse_markdown_blocks(
             break;
         }
 
-        if trimmed == "---" {
-            blocks.push(MarkdownBlock::HorizontalRule);
-            *index += 1;
-            continue;
-        }
-        if let Some(content) = trimmed.strip_prefix("# ") {
-            blocks.push(MarkdownBlock::Heading(1, content.to_string()));
-            *index += 1;
-            continue;
-        }
-        if let Some(content) = trimmed.strip_prefix("## ") {
-            blocks.push(MarkdownBlock::Heading(2, content.to_string()));
-            *index += 1;
-            continue;
-        }
-        if let Some(content) = trimmed.strip_prefix("### ") {
-            blocks.push(MarkdownBlock::Heading(3, content.to_string()));
+        if let Some(block) = parse_markdown_scalar_block(trimmed) {
+            blocks.push(block);
             *index += 1;
             continue;
         }
@@ -135,12 +120,7 @@ fn parse_markdown_paragraph(lines: &[&str], index: &mut usize, indent: usize) ->
         }
 
         let trimmed = line[current_indent..].trim_end();
-        if trimmed == "---"
-            || trimmed.starts_with("# ")
-            || trimmed.starts_with("## ")
-            || trimmed.starts_with("### ")
-            || parse_markdown_list_marker(trimmed, current_indent).is_some()
-        {
+        if is_markdown_block_boundary(trimmed, current_indent) {
             break;
         }
 
@@ -149,6 +129,32 @@ fn parse_markdown_paragraph(lines: &[&str], index: &mut usize, indent: usize) ->
     }
 
     MarkdownBlock::Paragraph(parts.join(" "))
+}
+
+fn parse_markdown_scalar_block(line: &str) -> Option<MarkdownBlock> {
+    if line == "---" {
+        return Some(MarkdownBlock::HorizontalRule);
+    }
+
+    for (level, prefix) in [(3, "### "), (2, "## "), (1, "# ")] {
+        if let Some(content) = line.strip_prefix(prefix) {
+            return Some(MarkdownBlock::Heading(level, content.to_string()));
+        }
+    }
+
+    None
+}
+
+fn is_markdown_block_boundary(line: &str, indent: usize) -> bool {
+    parse_markdown_scalar_block(line).is_some()
+        || parse_markdown_list_marker(line, indent).is_some()
+}
+
+fn push_markdown_line(content: &mut String, line: &str) {
+    if !content.is_empty() {
+        content.push(' ');
+    }
+    content.push_str(line);
 }
 
 fn parse_markdown_list_blocks(
@@ -229,20 +235,14 @@ fn parse_markdown_list_blocks(
                         continue;
                     }
                     if next_indent > indent {
-                        if !content.is_empty() {
-                            content.push(' ');
-                        }
-                        content.push_str(trimmed_next.trim());
+                        push_markdown_line(&mut content, trimmed_next.trim());
                         *index += 1;
                         continue;
                     }
                 }
 
                 if next_indent > indent {
-                    if !content.is_empty() {
-                        content.push(' ');
-                    }
-                    content.push_str(trimmed_next.trim());
+                    push_markdown_line(&mut content, trimmed_next.trim());
                     *index += 1;
                     continue;
                 }
@@ -332,10 +332,7 @@ fn render_markdown_block_html(block: &MarkdownBlock) -> String {
 }
 
 fn render_markdown_list_html(list: &MarkdownList) -> String {
-    let tag = match list.kind {
-        MarkdownListKind::Unordered => "ul",
-        MarkdownListKind::Ordered => "ol",
-    };
+    let tag = markdown_list_tag(list.kind);
     let items = list
         .items
         .iter()
@@ -346,14 +343,23 @@ fn render_markdown_list_html(list: &MarkdownList) -> String {
 }
 
 fn render_markdown_list_item_html(item: &MarkdownListItem) -> String {
-    let mut children = String::new();
-    for list in &item.children {
-        children.push_str(&render_markdown_list_html(list));
-    }
+    let children = item
+        .children
+        .iter()
+        .map(render_markdown_list_html)
+        .collect::<Vec<_>>()
+        .join("");
     format!(
         "<li>{}{children}</li>",
         render_markdown_inline_html(&item.content)
     )
+}
+
+fn markdown_list_tag(kind: MarkdownListKind) -> &'static str {
+    match kind {
+        MarkdownListKind::Unordered => "ul",
+        MarkdownListKind::Ordered => "ol",
+    }
 }
 
 fn render_markdown_inline_html(text: &str) -> String {
@@ -491,7 +497,7 @@ impl<'a> HtmlParser<'a> {
             return None;
         }
 
-        let name = self.parse_tag_name();
+        let name = self.parse_name();
         if name.is_empty() {
             self.skip_until('>');
             self.consume_if('>');
@@ -514,7 +520,7 @@ impl<'a> HtmlParser<'a> {
                 break;
             }
 
-            let attribute_name = self.parse_attribute_name();
+            let attribute_name = self.parse_name();
             if attribute_name.is_empty() {
                 self.index += 1;
                 continue;
@@ -549,25 +555,13 @@ impl<'a> HtmlParser<'a> {
 
     fn parse_closing_tag(&mut self) -> String {
         self.index += 2;
-        let name = self.parse_tag_name();
+        let name = self.parse_name();
         self.skip_until('>');
         self.consume_if('>');
         name
     }
 
-    fn parse_tag_name(&mut self) -> String {
-        let start = self.index;
-        while let Some(ch) = self.current_char() {
-            if ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-') {
-                self.index += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-        self.input[start..self.index].to_ascii_lowercase()
-    }
-
-    fn parse_attribute_name(&mut self) -> String {
+    fn parse_name(&mut self) -> String {
         let start = self.index;
         while let Some(ch) = self.current_char() {
             if ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-') {
@@ -697,18 +691,13 @@ fn render_html_nodes_markdown(nodes: &[HtmlNode], indent: usize) -> String {
 fn render_html_block_element_markdown(element: &HtmlElement, indent: usize) -> String {
     let prefix = " ".repeat(indent);
     match element.name.as_str() {
-        "h1" => format!(
-            "{prefix}# {}\n\n",
-            render_html_inline_nodes_markdown(&element.children).trim()
-        ),
-        "h2" => format!(
-            "{prefix}## {}\n\n",
-            render_html_inline_nodes_markdown(&element.children).trim()
-        ),
-        "h3" => format!(
-            "{prefix}### {}\n\n",
-            render_html_inline_nodes_markdown(&element.children).trim()
-        ),
+        name if matches!(name, "h1" | "h2" | "h3") => {
+            let marker = markdown_heading_marker(name).expect("matched heading should have marker");
+            format!(
+                "{prefix}{marker} {}\n\n",
+                render_html_inline_nodes_markdown(&element.children).trim()
+            )
+        }
         "p" => {
             let text = render_html_inline_nodes_markdown(&element.children)
                 .trim()
@@ -755,11 +744,7 @@ fn render_html_list_markdown(children: &[HtmlNode], ordered: bool, indent: usize
             HtmlNode::Text(text) => {
                 let text = text.trim();
                 if !text.is_empty() {
-                    let marker = if ordered {
-                        format!("{index}. ")
-                    } else {
-                        "- ".to_string()
-                    };
+                    let marker = markdown_list_item_marker(ordered, index);
                     rendered.push_str(&format!("{}{}{}\n", " ".repeat(indent), marker, text));
                     index += 1;
                 }
@@ -779,11 +764,7 @@ fn render_html_list_item_markdown(
     indent: usize,
     index: usize,
 ) -> String {
-    let marker = if ordered {
-        format!("{index}. ")
-    } else {
-        "- ".to_string()
-    };
+    let marker = markdown_list_item_marker(ordered, index);
 
     let mut content = String::new();
     let mut nested = String::new();
@@ -817,6 +798,23 @@ fn render_html_list_item_markdown(
     let mut rendered = format!("{}{}{}\n", " ".repeat(indent), marker, content.trim());
     rendered.push_str(&nested);
     rendered
+}
+
+fn markdown_heading_marker(name: &str) -> Option<&'static str> {
+    match name {
+        "h1" => Some("#"),
+        "h2" => Some("##"),
+        "h3" => Some("###"),
+        _ => None,
+    }
+}
+
+fn markdown_list_item_marker(ordered: bool, index: usize) -> String {
+    if ordered {
+        format!("{index}. ")
+    } else {
+        "- ".to_string()
+    }
 }
 
 fn render_html_inline_nodes_markdown(children: &[HtmlNode]) -> String {

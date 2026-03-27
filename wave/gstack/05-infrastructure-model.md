@@ -92,28 +92,41 @@ This is the homeostasis check. Like VSM watches wave health, this watches infras
 
 Workstyles declare **preferences**, not hard requirements. A preference says "I work best with X" — loopflow matches it to what you actually have.
 
+Loopflow maintains a map of service types to providers. When the system needs to run a service (deploy, store secrets, process payments), it uses the providers listed by the active workstyle.
+
 ```yaml
-# gstack workstyle preferences
-prefers:
+# Service type → provider map (builtin, extensible)
+providers:
+  deployment: [vercel, railway, fly, render, netlify]
+  ci: [github-actions, circleci, buildkite]
+  secrets: [doppler, vault, aws-ssm, 1password]
+  payments: [stripe, paddle]
+  cloud: [aws, gcp, azure]
+  dns: [cloudflare, google-domains, route53]
+  pm: [notion, linear, asana, github-issues]
+  auth: [clerk, auth0, supabase-auth]
+  database: [supabase, planetscale, neon, railway-postgres]
+  monitoring: [datadog, grafana, sentry]
+```
+
+```yaml
+# gstack workstyle
+providers:
   deployment: vercel
   ci: github-actions
   payments: stripe
   cloud: aws
   secrets: doppler
-  dns: cloudflare
 
-# lfjack workstyle preferences
-prefers:
+# lfjack workstyle
+providers:
   deployment: railway
   ci: github-actions
   secrets: doppler
   pm: notion
-  cloud: aws
 ```
 
-When you adopt a workstyle, its preferences become your defaults for new projects. You can override any of them. When you already have infrastructure configured, loopflow matches preferences to what exists — Stripe is Stripe whether gstack or lfjack recommended it.
-
-The preferences are specific providers, not abstract categories. "Use Stripe" not "use a payments provider." This makes workstyles opinionated and practical — you're adopting someone's actual stack, not a template.
+When the system needs to deploy, it checks the active workstyle's `providers.deployment`. When it needs to store a secret, it checks `providers.secrets`. The workstyle is opinionated about which providers to use — you're adopting someone's actual stack.
 
 ## Done when
 

@@ -20,7 +20,7 @@ The PM architecture now centers on provider roles, a shared seam, and a single s
 - `rust/loopflow/src/ops/pm.rs` remains the orchestration layer for `pm_init`, `pm_pull`, `pm_status`, `pm_import`, and `pm_sync`
 - `WaveExecutor::execute()` already imports from the read/write provider at PR-oriented run start and exports back to configured providers at the end; future work should keep using that lifecycle instead of inventing a second sync path
 
-Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. Notion item descriptions sync as real pages with full markdown↔blocks conversion (`pm/notion_blocks.rs`), not flattened text. Ingest now auto-refreshes from PM before picking (`ingest` calls `pm_pull` when a wave has a `pm` block, warns and falls back to local files on failure). The next steps are cleaning up auth to OAuth-only, adding item lifecycle comments, and extending Notion into doc-native README and supporting-doc sync.
+Prompts, ingest, and provider sync now assume four priority levels (Urgent / High / Medium / Low, files prefixed `1-` through `4-`) and translate that meaning into the native language of each PM tool. Notion item descriptions sync as real pages with full markdown↔blocks conversion (`pm/notion_blocks.rs`), not flattened text. Asana item descriptions now preserve markdown formatting via `html_notes` with a hand-rolled converter (`pm/asana_html.rs`), falling back to plaintext `notes` for older tasks. Ingest now auto-refreshes from PM before picking (`ingest` calls `pm_pull` when a wave has a `pm` block, warns and falls back to local files on failure). The next steps are cleaning up auth to OAuth-only, adding item lifecycle comments, and extending Notion into doc-native README and supporting-doc sync.
 
 ### Invariants
 
@@ -40,7 +40,6 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 - Complete item lifecycle comments (PR open, run failure, merge → comment/complete on PM item)
 - Move PM auth toward OAuth-only browser-connect flows
 - Add Notion README sync and supporting-doc import now that the Notion client is proven
-- Add Asana rich-text round-tripping via `html_notes` to match Notion's formatting fidelity
 
 ## Risks
 
@@ -50,6 +49,7 @@ Prompts, ingest, and provider sync now assume four priority levels (Urgent / Hig
 - **Notion body rewrites are destructive.** `update_item` deletes top-level blocks and re-appends the new body, so concurrent edits in Notion and locally can conflict at the page-body level. No merge — last writer wins.
 - **Notion read amplification.** `list_items` is inherently N+1 (1 database query + 1 block-children fetch per page). Inherent to Notion's API — no workaround.
 - **Credential drift is user-facing.** PM flows will still feel broken until the auth cleanup removes mixed setup paths and points users at the right browser-based connect flow.
+- **Asana HTML converter is hand-rolled.** `asana_html.rs` covers the current 10-tag subset. Future Asana formatting additions need explicit test coverage before support is added.
 
 ## Metrics
 

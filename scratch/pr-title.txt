@@ -1,1 +1,0 @@
-pm asana: preserve rich text descriptions via html_notes

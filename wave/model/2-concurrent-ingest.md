@@ -1,13 +1,12 @@
 # Concurrent Ingest
 
+**Needs:** model/2-wave-crons
+
 **Finish line:** Multiple workers in a pool call `ingest` and the PM provider (Linear/Asana) arbitrates who gets which item. No double-picks.
 
 ## Context
 
-With `workers: N` (item 02a), multiple workers call `ingest` simultaneously. `ingest` already talks to PM providers to pick items. The PM provider is the natural arbiter — it's already the source of truth for "who's working on what."
-
-Depends on:
-- 02a (worker pools exist)
+With `workers: N`, multiple workers call `ingest` simultaneously. `ingest` already talks to PM providers to pick items. The PM provider is the natural arbiter — it's already the source of truth for "who's working on what."
 
 ## The approach
 

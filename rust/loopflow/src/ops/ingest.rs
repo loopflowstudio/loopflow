@@ -97,8 +97,8 @@ fn refresh_wave_from_pm(repo: &Path, wave: &str, progress: &impl Progress) -> Op
             wave: wave.to_string(),
         },
         progress,
-    )?;
-    Ok(())
+    )
+    .map(|_| ())
 }
 
 #[cfg(test)]
@@ -229,6 +229,24 @@ mod tests {
     fn pm_test_lock() -> &'static Mutex<()> {
         static PM_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         PM_TEST_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct TestPmPullGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TestPmPullGuard {
+        fn install(hook: TestPmPullHook) -> Self {
+            let guard = pm_test_lock().lock().expect("pm test lock");
+            set_test_pm_pull_hook(Some(hook));
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for TestPmPullGuard {
+        fn drop(&mut self) {
+            set_test_pm_pull_hook(None);
+        }
     }
 
     fn write_pm_config(repo: &Path) {
@@ -499,14 +517,13 @@ mod tests {
 
     #[test]
     fn ingest_refreshes_pm_backed_waves_before_picking_an_item() {
-        let _guard = pm_test_lock().lock().expect("pm test lock");
+        let _guard = TestPmPullGuard::install(refresh_from_pm_fixture);
         let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
         write_pm_config(repo);
         write_wave_file(&wave_dir, "2-stale.md", "# Stale local item");
 
         PM_PULL_CALLS.store(0, Ordering::SeqCst);
-        set_test_pm_pull_hook(Some(refresh_from_pm_fixture));
 
         let result = ingest(
             repo,
@@ -518,8 +535,6 @@ mod tests {
         )
         .expect("ingest succeeds");
 
-        set_test_pm_pull_hook(None);
-
         assert_eq!(PM_PULL_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(result.slug, "fresh");
         assert!(result.dest.ends_with("scratch/test-wave-fresh.md"));
@@ -530,13 +545,12 @@ mod tests {
 
     #[test]
     fn ingest_warns_when_pm_pull_fails_and_continues_with_local_items() {
-        let _guard = pm_test_lock().lock().expect("pm test lock");
+        let _guard = TestPmPullGuard::install(fail_pm_pull);
         let (dir, wave_dir) = init_test_wave();
         let repo = dir.path();
         write_pm_config(repo);
         write_wave_file(&wave_dir, "2-stale.md", "# Stale local item");
         let progress = RecordingProgress::default();
-        set_test_pm_pull_hook(Some(fail_pm_pull));
 
         let result = ingest(
             repo,
@@ -547,8 +561,6 @@ mod tests {
             &progress,
         )
         .expect("ingest succeeds");
-
-        set_test_pm_pull_hook(None);
 
         assert_eq!(result.slug, "stale");
         assert_eq!(

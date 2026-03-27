@@ -32,6 +32,7 @@ Three launch workstyles: **lfjack** (loopflow native), **vsm** (governance), **g
 - gstack moves fast (v0.12 in two weeks from creation). Sync tooling needs to handle format changes gracefully.
 - Some gstack skills depend on the browser daemon — those won't work without it. Need clear error messages.
 - Converting style docs into directions may reveal that "voice" is too narrow a concept. The imported document may need reshaping to fit loopflow's direction model cleanly.
+- The converter performs opinionated reference rewriting and telemetry stripping. Upstream format changes may break these rules — sync tooling needs to handle this gracefully.
 
 ## Metrics
 

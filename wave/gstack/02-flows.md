@@ -50,6 +50,12 @@ Create loopflow flow YAML files that chain gstack steps into the sprint sequence
 - OpenClaw style is available separately as the `openclaw` direction
 - No hidden workstyle-specific voice switching at runtime
 
+## Known state from stage 1
+
+- Some imported steps still reference gstack helper binaries (`gstack-review-read`, `gstack-review-log`, `gstack-config`). These are not loopflow-native. Flows that chain review steps may hit these — either stub them, strip the references, or wire loopflow equivalents.
+- `design-review` is the planning skill (from `plan-design-review`). The original audit/fix skill was renamed to `design-audit` to avoid collision after dropping the `plan-` prefix.
+- Converted steps live in `.lf/workstyles/gstack/steps/*.md` and resolve as `gstack:<name>` via `SkillSourceKind::Workstyle` in discovery.
+
 ## Done when
 
 1. `lf gstack-sprint` runs the full sprint sequence

@@ -1,0 +1,9 @@
+flow: build
+mode: manual
+area:
+- rust/loopflow/src/lf/discovery.rs
+- rust/loopflow/src/engine/
+- python/loopflow/
+- .lf/workstyles/gstack/
+direction:
+- clarity

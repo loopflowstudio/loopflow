@@ -90,24 +90,30 @@ This is the homeostasis check. Like VSM watches wave health, this watches infras
 
 ## Workstyle integration
 
-Each workstyle can declare what infrastructure it expects:
+Workstyles declare **preferences**, not hard requirements. A preference says "I work best with X" — loopflow matches it to what you actually have.
 
 ```yaml
-# gstack workstyle declares
-needs:
-  accounts: [deployment, ci]
-  services: [deployment-target, test-runner]
+# gstack workstyle preferences
+prefers:
+  deployment: vercel
+  ci: github-actions
+  payments: stripe
+  cloud: aws
+  secrets: doppler
+  dns: cloudflare
 
-# autoresearch declares
-needs:
-  services: [gpu, training-data]
-
-# vsm declares
-needs:
-  accounts: [pm-provider]
+# lfjack workstyle preferences
+prefers:
+  deployment: railway
+  ci: github-actions
+  secrets: doppler
+  pm: notion
+  cloud: aws
 ```
 
-When syncing a workstyle, loopflow checks whether the required infrastructure exists. Missing pieces surface as setup tasks, not runtime failures.
+When you adopt a workstyle, its preferences become your defaults for new projects. You can override any of them. When you already have infrastructure configured, loopflow matches preferences to what exists — Stripe is Stripe whether gstack or lfjack recommended it.
+
+The preferences are specific providers, not abstract categories. "Use Stripe" not "use a payments provider." This makes workstyles opinionated and practical — you're adopting someone's actual stack, not a template.
 
 ## Done when
 

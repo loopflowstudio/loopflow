@@ -161,6 +161,14 @@ impl Store {
         WaveStateStore::create_wave_cron(self, cron).await
     }
 
+    pub async fn replace_wave_crons(&self, wave_id: &LfdId, crons: &[WaveCron]) -> StoreResult<()> {
+        self.delete_wave_crons(wave_id).await?;
+        for cron in crons {
+            self.create_wave_cron(cron).await?;
+        }
+        Ok(())
+    }
+
     pub async fn update_wave_cron_last_triggered(
         &self,
         cron_id: &LfdId,

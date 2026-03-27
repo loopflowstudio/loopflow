@@ -475,13 +475,13 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListWaveCrons
     QueryDef {
-        template: "SELECT id, wave_id, flow, schedule, last_triggered_at, created_at\n             FROM wave_crons WHERE wave_id = {p1}\n             ORDER BY created_at, id",
+        template: "SELECT id, wave_id, flow, schedule, last_triggered_at, created_at\n             FROM wave_crons WHERE wave_id = {p1}\n             ORDER BY created_at, flow, schedule, id",
         sqlite_override: None,
         postgres_override: None,
     },
     // ListAllActiveCrons
     QueryDef {
-        template: "SELECT wc.id, wc.wave_id, wc.flow, wc.schedule, wc.last_triggered_at, wc.created_at\n             FROM wave_crons wc\n             JOIN waves w ON wc.wave_id = w.id\n             WHERE w.status != 4\n             ORDER BY wc.wave_id, wc.created_at, wc.id",
+        template: "SELECT wc.id, wc.wave_id, wc.flow, wc.schedule, wc.last_triggered_at, wc.created_at\n             FROM wave_crons wc\n             JOIN waves w ON wc.wave_id = w.id\n             WHERE w.status != 4\n             ORDER BY wc.wave_id, wc.created_at, wc.flow, wc.schedule, wc.id",
         sqlite_override: None,
         postgres_override: None,
     },

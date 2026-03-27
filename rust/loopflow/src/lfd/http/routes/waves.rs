@@ -268,12 +268,10 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    for cron in &crons {
-        if let Err(err) = state.store.create_wave_cron(cron).await {
-            let wave_id = wave.id().clone();
-            let _ = state.store.delete_wave(&wave_id).await;
-            return Err(map_store_error(err));
-        }
+    if let Err(err) = state.store.replace_wave_crons(wave.id(), &crons).await {
+        let wave_id = wave.id().clone();
+        let _ = state.store.delete_wave(&wave_id).await;
+        return Err(map_store_error(err));
     }
 
     if let Err(err) = ensure_wave_workspace(&state, &wave).await {
@@ -426,14 +424,11 @@ fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn parse_wave_cron_def(
-    cron: &WaveCronDef,
-) -> Result<WaveCronDef, (StatusCode, Json<ErrorResponse>)> {
-    let flow = trimmed_non_empty(Some(&cron.flow))
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "wave cron flow is required"))?;
-    let schedule = trimmed_non_empty(Some(&cron.schedule))
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "wave cron schedule is required"))?;
-    Ok(WaveCronDef { flow, schedule })
+fn required_trimmed(
+    value: &str,
+    message: &'static str,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    trimmed_non_empty(Some(value)).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, message))
 }
 
 fn build_wave_crons(
@@ -442,13 +437,12 @@ fn build_wave_crons(
 ) -> Result<Vec<WaveCron>, (StatusCode, Json<ErrorResponse>)> {
     cron_defs
         .iter()
-        .map(parse_wave_cron_def)
-        .map(|result| {
-            result.map(|cron| WaveCron {
+        .map(|cron| {
+            Ok(WaveCron {
                 id: LfdId::new(),
                 wave_id: wave_id.clone(),
-                flow: cron.flow,
-                schedule: cron.schedule,
+                flow: required_trimmed(&cron.flow, "wave cron flow is required")?,
+                schedule: required_trimmed(&cron.schedule, "wave cron schedule is required")?,
                 last_triggered_at: None,
                 created_at: Some(OffsetDateTime::now_utc()),
             })
@@ -661,16 +655,9 @@ pub async fn update_wave_handler(
         let crons = build_wave_crons(wave.id(), &cron_defs)?;
         state
             .store
-            .delete_wave_crons(wave.id())
+            .replace_wave_crons(wave.id(), &crons)
             .await
             .map_err(map_store_error)?;
-        for cron in &crons {
-            state
-                .store
-                .create_wave_cron(cron)
-                .await
-                .map_err(map_store_error)?;
-        }
     }
 
     state.event_hub.send(Event::wave_updated(wave.id().clone()));

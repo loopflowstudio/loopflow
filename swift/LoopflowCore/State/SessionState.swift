@@ -927,7 +927,7 @@ public final class SessionState {
             transcriptIndexById[updated.id] = index
         }
 
-        updateDerivedTranscriptState(previous: previous, updated: updated, at: index)
+        updateDerivedTranscriptState(previous: previous, updated: updated)
     }
 
     private func rebuildTranscriptIndex() {
@@ -936,13 +936,7 @@ public final class SessionState {
 
     private func rebuildDerivedTranscriptState() {
         groupedTranscript = buildTranscriptGroups(from: transcript)
-        latestAssistantMessageId = transcript.reversed().compactMap { entry -> UUID? in
-            guard case .message(let message) = entry,
-                  message.role == .assistant else {
-                return nil
-            }
-            return message.id
-        }.first
+        latestAssistantMessageId = latestAssistantMessageID(in: transcript)
         timestampLabels = messageTimestampLabels(for: transcript)
     }
 
@@ -1007,7 +1001,7 @@ public final class SessionState {
         timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
     }
 
-    private func updateDerivedTranscriptState(previous: TranscriptEntry, updated: TranscriptEntry, at index: Int) {
+    private func updateDerivedTranscriptState(previous: TranscriptEntry, updated: TranscriptEntry) {
         if shouldRebuildDerivedTranscriptState(previous: previous, updated: updated) {
             rebuildDerivedTranscriptState()
             return
@@ -1017,13 +1011,7 @@ public final class SessionState {
            message.role == .assistant {
             latestAssistantMessageId = message.id
         } else if latestAssistantMessageId == previous.id {
-            latestAssistantMessageId = transcript.reversed().compactMap { entry -> UUID? in
-                guard case .message(let message) = entry,
-                      message.role == .assistant else {
-                    return nil
-                }
-                return message.id
-            }.first
+            latestAssistantMessageId = latestAssistantMessageID(in: transcript)
         }
 
         guard let groupIndex = groupedTranscript.lastIndex(where: { groupContainsEntry($0, id: previous.id) }) else {
@@ -1044,18 +1032,6 @@ public final class SessionState {
             var nextItems = items
             nextItems[itemIndex] = updatedItem
             groupedTranscript[groupIndex] = .toolRun(nextItems)
-        }
-
-        if index == transcript.count - 1,
-           case .message(let message) = updated,
-           message.role != .system {
-            if timestampLabels[message.id] == nil,
-               transcript.dropLast().contains(where: { entry in
-                   guard case .message(let previousMessage) = entry else { return false }
-                   return previousMessage.role != .system
-               }) == false {
-                timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
-            }
         }
     }
 
@@ -1080,7 +1056,17 @@ public final class SessionState {
     }
 }
 
-public func buildTranscriptGroups(from transcript: [TranscriptEntry]) -> [TranscriptGroup] {
+func latestAssistantMessageID(in transcript: [TranscriptEntry]) -> UUID? {
+    transcript.reversed().compactMap { entry -> UUID? in
+        guard case .message(let message) = entry,
+              message.role == .assistant else {
+            return nil
+        }
+        return message.id
+    }.first
+}
+
+func buildTranscriptGroups(from transcript: [TranscriptEntry]) -> [TranscriptGroup] {
     var groups: [TranscriptGroup] = []
     var currentRun: [TranscriptItem] = []
 
@@ -1108,7 +1094,7 @@ public func buildTranscriptGroups(from transcript: [TranscriptEntry]) -> [Transc
     return groups
 }
 
-public func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
+func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
     var labels: [UUID: String] = [:]
     var previousTimestamp: Date?
 
@@ -1141,7 +1127,7 @@ public func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: 
     return labels
 }
 
-public func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
+func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
     if gap <= 60 {
         return nil
     }
@@ -1152,11 +1138,11 @@ public func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timesta
     return "\(minutes)m ago"
 }
 
-public func formatMessageTimestamp(_ timestamp: Date) -> String {
+func formatMessageTimestamp(_ timestamp: Date) -> String {
     timestamp.formatted(date: .omitted, time: .shortened)
 }
 
-extension SessionItemType {
+private extension SessionItemType {
     var isToolLike: Bool {
         switch self {
         case .command, .tool, .file:

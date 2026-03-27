@@ -72,12 +72,10 @@ struct TerminalLauncher {
 
     private func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
         let command = sshCommand(host: host, path: path)
+        let homeDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         switch terminal {
-        case .ghostty:
-            try launchGhostty(at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
-        case .warp, .iterm, .terminal:
-            // Use AppleScript-based terminals with the ssh command
-            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
+        case .ghostty, .warp, .iterm, .terminal:
+            try launchTerminal(terminal, at: homeDirectoryURL, command: command)
         case .kitty:
             guard let executableURL = findExecutable("kitty") else {
                 throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")

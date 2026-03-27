@@ -234,6 +234,14 @@ private struct TerminalContextSidebar: View {
         "shell-\(session.waveId)"
     }
 
+    private var shellAttachCommand: String {
+        "tmux attach-session -t \(shellTmuxSessionName)"
+    }
+
+    private var shellAttachArguments: [String] {
+        ["tmux", "attach-session", "-t", shellTmuxSessionName]
+    }
+
     private var isUserShellSession: Bool {
         session.source == "user_shell"
     }
@@ -399,7 +407,7 @@ private struct TerminalContextSidebar: View {
             try terminalLauncher.launchTerminal(
                 .ghostty,
                 at: URL(fileURLWithPath: worktreePath),
-                command: "tmux attach-session -t \(shellTmuxSessionName)"
+                command: shellAttachCommand
             )
         } catch {
             repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
@@ -419,7 +427,7 @@ private struct TerminalContextSidebar: View {
                 step: "shell",
                 agent: "interactive",
                 cwd: worktreePath,
-                argv: ["tmux", "attach-session", "-t", shellTmuxSessionName],
+                argv: shellAttachArguments,
                 env: existingSession?.env ?? [:],
                 source: "user_shell",
                 status: .attached,

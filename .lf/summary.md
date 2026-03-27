@@ -37,7 +37,7 @@ enum WaveStatus { Idle, Running, Waiting, Paused, Failed }
 enum WaveRunStatus { Unspecified, Pending, Running, Waiting, Completed, Failed }
 enum WaveRunStackStatus { Active, Superseded, Merged }
 enum LivePrState { Unknown, Open, Closed, Merged }
-enum WaveMode { Loop, Cron, Manual }
+enum WaveMode { Loop, Manual }
 enum QueueBlockReason { MissingPr, WaveRunning, ScratchDirty, RebaseConflict, PromotionFailed }
 
 enum Signal { Repo, Wave, CiFailure }

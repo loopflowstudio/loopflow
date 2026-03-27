@@ -123,7 +123,7 @@ Triggers are a list. Multiple triggers of the same signal are fine — watch dif
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("swift-falcon", repo=".", flow="build", mode="loop", area=["src/"])
+loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
 loopflow.add_trigger("swift-falcon", signal="wave", source_wave_id="infra")
 loopflow.run_wave("swift-falcon")
 PY

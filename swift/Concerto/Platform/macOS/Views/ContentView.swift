@@ -431,6 +431,8 @@ struct ContentView: View {
         case .terminal, .launchpad:
             .roadmap
         case .roadmap:
+            .roadmapDetail
+        case .roadmapDetail:
             .runs
         case .runs:
             .readme
@@ -465,7 +467,7 @@ struct ContentView: View {
     }
 
     private var panePaletteTypes: [PaneType] {
-        [.roadmap, .readme, .runs, .launcher, .terminal, .diff, .launchpad]
+        [.roadmap, .roadmapDetail, .readme, .runs, .launcher, .terminal, .diff, .launchpad]
     }
 
     private func openIDEForSelectedWave() {

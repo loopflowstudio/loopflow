@@ -14,6 +14,7 @@ public enum PaneType: String, Codable, Sendable {
     case diff
     case launchpad
     case roadmap
+    case roadmapDetail
     case readme
     case runs
     case launcher

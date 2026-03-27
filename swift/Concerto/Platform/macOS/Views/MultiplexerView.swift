@@ -10,6 +10,7 @@ struct MultiplexerView: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
+    @State private var roadmapSelection = RoadmapSelection()
 
     private var currentWave: WaveViewModel {
         repoState.waveStore.wave(for: wave.id) ?? wave
@@ -27,6 +28,7 @@ struct MultiplexerView: View {
             focusedPaneId: focusedPaneId
         )
         .background(LoopflowPalette.dark.background)
+        .environment(roadmapSelection)
     }
 }
 
@@ -139,6 +141,8 @@ private struct PaneContainerView: View {
             LaunchpadPaneView(pane: pane, waveId: wave.id, worktreePath: worktreePath)
         case .roadmap:
             RoadmapPaneView(waveId: wave.id)
+        case .roadmapDetail:
+            RoadmapDetailPaneView(waveId: wave.id)
         case .readme:
             ReadmePaneView(waveId: wave.id)
         case .runs:
@@ -336,9 +340,11 @@ private struct RoadmapPaneView: View {
     let waveId: String
 
     @Environment(RepoState.self) private var repoState
+    @Environment(RoadmapSelection.self) private var roadmapSelection
     @Environment(\.palette) private var palette
 
-    @State private var expandedItemIds: Set<String> = []
+    @FocusState private var isKeyboardFocused: Bool
+    @State private var hoveredItemId: String?
     @State private var actionErrors: [String: String] = [:]
     @State private var ingestingItemIds: Set<String> = []
     @State private var reprioritizingItemIds: Set<String> = []
@@ -348,7 +354,11 @@ private struct RoadmapPaneView: View {
     }
 
     private var roadmapItems: [RoadmapItem] {
-        wave?.content?.roadmapItems ?? []
+        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    }
+
+    private var selectedItemId: String? {
+        roadmapSelection.selectedWaveId == waveId ? roadmapSelection.selectedItemId : nil
     }
 
     private var waveIsRunning: Bool {
@@ -356,108 +366,95 @@ private struct RoadmapPaneView: View {
         return wave.status == .running || wave.status == .waiting
     }
 
+    @ViewBuilder
     var body: some View {
-        Group {
-            if wave?.content == nil {
-                ProgressView("Loading roadmap…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if roadmapItems.isEmpty {
-                paneUnavailable(
-                    title: "No roadmap items",
-                    systemImage: "list.bullet.rectangle",
-                    description: "Add numbered roadmap docs under wave/ to surface them here."
-                )
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        ForEach(roadmapItems) { item in
-                            roadmapCard(item)
-                        }
-                    }
-                    .padding(Spacing.lg)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .background(palette.surface)
-            }
+        if wave?.content == nil {
+            ProgressView("Loading roadmap…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if roadmapItems.isEmpty {
+            paneUnavailable(
+                title: "No roadmap items",
+                systemImage: "list.bullet.rectangle",
+                description: "Add numbered roadmap docs under wave/ to surface them here."
+            )
+        } else {
+            roadmapList
         }
     }
 
-    private func roadmapCard(_ item: RoadmapItem) -> some View {
-        let isExpanded = expandedItemIds.contains(item.id)
-        let preview = previewText(item.content, maxLines: 3)
-        let isIngesting = ingestingItemIds.contains(item.id)
-        let isReprioritizing = reprioritizingItemIds.contains(item.id)
-        let errorMessage = actionErrors[item.id]
-
-        return VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(item.title)
-                        .font(Typography.body())
-                        .fontWeight(.medium)
-                        .foregroundStyle(Color.loopflowBurgundy)
-                    HStack(spacing: Spacing.sm) {
-                        Text(item.isShipped ? "Shipped" : "Planned")
-                            .font(Typography.caption(10))
-                            .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
-                        Text("·")
-                            .font(Typography.caption(10))
-                            .foregroundStyle(palette.textSecondary)
-                        priorityMenu(for: item, isLoading: isReprioritizing)
-                    }
-                }
-                Spacer()
-                if !item.isShipped {
-                    Button {
-                        ingestAndBuild(item)
-                    } label: {
-                        Group {
-                            if isIngesting {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "play.fill")
-                            }
-                        }
-                        .frame(width: HitTarget.minimum, height: HitTarget.minimum)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(waveIsRunning ? palette.textSecondary : Color.statusSuccess)
-                    .disabled(waveIsRunning || isIngesting)
-                    .accessibilityLabel("Ingest \(item.title) and run the wave")
-                }
-            }
-
-            if let text = item.content, !text.isEmpty {
-                Text(renderMarkdown(isExpanded ? text : preview))
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-
-                if preview != text {
-                    Button(isExpanded ? "Show less" : "Show more") {
-                        toggleExpansion(for: item.id)
-                    }
-                    .buttonStyle(.plain)
-                    .font(Typography.caption())
-                    .foregroundStyle(Color.loopflowBurgundy)
-                }
-            }
-
-            if let errorMessage, !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .font(Typography.caption())
-                    .foregroundStyle(Color.statusError)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+    private var roadmapList: some View {
+        ScrollViewReader { proxy in
+            roadmapScrollView(proxy: proxy)
         }
-        .padding(Spacing.md)
-        .background(palette.surfaceMuted)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
+    private func roadmapScrollView(proxy: ScrollViewProxy) -> some View {
+        let itemIds = roadmapItems.map(\.id)
+
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(roadmapItems) { item in
+                    roadmapRow(item)
+                        .id(item.id)
+                }
+            }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(palette.surface)
+        .macOSFocusable()
+        .focused($isKeyboardFocused)
+        .onAppear(perform: syncSelection)
+        .onChange(of: itemIds) { _, _ in
+            syncSelection()
+        }
+        .onChange(of: selectedItemId) { _, newId in
+            guard let newId else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                proxy.scrollTo(newId, anchor: .center)
+            }
+        }
+        .onTapGesture {
+            isKeyboardFocused = true
+        }
+        .onKeyPress(.downArrow) {
+            selectNext()
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            selectPrevious()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "jJ")) { _ in
+            selectNext()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "kK")) { _ in
+            selectPrevious()
+            return .handled
+        }
+        .onKeyPress(.return) {
+            ingestSelected()
+            return .handled
+        }
+    }
+
+    private func roadmapRow(_ item: RoadmapItem) -> some View {
+        RoadmapRowView(
+            item: item,
+            isSelected: selectedItemId == item.id,
+            isHovered: hoveredItemId == item.id,
+            waveIsRunning: waveIsRunning,
+            isIngesting: ingestingItemIds.contains(item.id),
+            errorMessage: actionErrors[item.id],
+            onSelect: { select(item.id) },
+            onPlay: { ingestAndBuild(item) },
+            onHoverChanged: { isHovering in
+                hoveredItemId = isHovering ? item.id : (hoveredItemId == item.id ? nil : hoveredItemId)
+            }
+        ) {
+            priorityMenu(for: item, isLoading: reprioritizingItemIds.contains(item.id))
+        }
     }
 
     private func priorityMenu(for item: RoadmapItem, isLoading: Bool) -> some View {
@@ -474,15 +471,15 @@ private struct RoadmapPaneView: View {
                 }
             }
         } label: {
-            HStack(spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xxs) {
                 if isLoading {
                     ProgressView()
                         .controlSize(.small)
                 }
                 Text(item.priority.displayName)
-                    .font(Typography.caption(10))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.caption())
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
             }
             .foregroundStyle(palette.textSecondary)
         }
@@ -490,12 +487,45 @@ private struct RoadmapPaneView: View {
         .disabled(isLoading)
     }
 
-    private func toggleExpansion(for itemId: String) {
-        if expandedItemIds.contains(itemId) {
-            expandedItemIds.remove(itemId)
-        } else {
-            expandedItemIds.insert(itemId)
+    private func syncSelection() {
+        guard !roadmapItems.isEmpty else {
+            if roadmapSelection.selectedWaveId == waveId {
+                roadmapSelection.select(itemId: nil, waveId: waveId)
+            }
+            return
         }
+
+        let selectionStillValid = roadmapSelection.selectedWaveId == waveId
+            && roadmapItems.contains(where: { $0.id == roadmapSelection.selectedItemId })
+
+        guard !selectionStillValid else { return }
+        roadmapSelection.select(itemId: roadmapItems[0].id, waveId: waveId)
+    }
+
+    private func select(_ itemId: String) {
+        roadmapSelection.select(itemId: itemId, waveId: waveId)
+        isKeyboardFocused = true
+    }
+
+    private func selectNext() {
+        moveSelection(delta: 1)
+    }
+
+    private func selectPrevious() {
+        moveSelection(delta: -1)
+    }
+
+    private func moveSelection(delta: Int) {
+        guard !roadmapItems.isEmpty else { return }
+
+        let currentIndex = roadmapItems.firstIndex { $0.id == selectedItemId } ?? 0
+        let nextIndex = (currentIndex + delta + roadmapItems.count) % roadmapItems.count
+        select(roadmapItems[nextIndex].id)
+    }
+
+    private func ingestSelected() {
+        guard let selectedItem = roadmapItems.first(where: { $0.id == selectedItemId }) else { return }
+        ingestAndBuild(selectedItem)
     }
 
     private func ingestAndBuild(_ item: RoadmapItem) {
@@ -525,7 +555,265 @@ private struct RoadmapPaneView: View {
             }
         }
     }
+}
 
+private struct RoadmapRowView<PriorityControl: View>: View {
+    let item: RoadmapItem
+    let isSelected: Bool
+    let isHovered: Bool
+    let waveIsRunning: Bool
+    let isIngesting: Bool
+    let errorMessage: String?
+    let onSelect: () -> Void
+    let onPlay: () -> Void
+    let onHoverChanged: (Bool) -> Void
+    @ViewBuilder let priorityControl: () -> PriorityControl
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.sm) {
+                Text(item.title)
+                    .font(Typography.body())
+                    .foregroundStyle(item.isShipped ? palette.textSecondary : palette.text)
+                    .strikethrough(item.isShipped)
+                    .lineLimit(1)
+
+                Spacer(minLength: Spacing.sm)
+
+                if isHovered && !item.isShipped {
+                    Button(action: onPlay) {
+                        Group {
+                            if isIngesting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                        }
+                        .frame(width: HitTarget.minimum, height: HitTarget.minimum)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(waveIsRunning ? palette.textSecondary : Color.statusSuccess)
+                    .disabled(waveIsRunning || isIngesting)
+                    .accessibilityLabel("Ingest \(item.title) and run the wave")
+                }
+
+                priorityControl()
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(rowBackground)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            .overlay {
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .stroke(isSelected ? Color.loopflowBurgundy.opacity(0.4) : .clear, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            .onTapGesture(perform: onSelect)
+
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                    .padding(.horizontal, Spacing.md)
+            }
+        }
+        .hoverTracking(onHoverChanged)
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.loopflowBurgundy.opacity(0.12)
+        }
+        if isHovered {
+            return palette.surfaceMuted.opacity(0.7)
+        }
+        return Color.clear
+    }
+}
+
+private struct RoadmapDetailPaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(RoadmapSelection.self) private var roadmapSelection
+    @Environment(\.palette) private var palette
+
+    @State private var fullMarkdown = ""
+    @State private var loadError: String?
+    @State private var actionError: String?
+    @State private var isIngesting = false
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var roadmapItems: [RoadmapItem] {
+        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    }
+
+    private var selectedItem: RoadmapItem? {
+        guard roadmapSelection.selectedWaveId == waveId,
+              let selectedItemId = roadmapSelection.selectedItemId else {
+            return nil
+        }
+        return roadmapItems.first { $0.id == selectedItemId }
+    }
+
+    private var waveIsRunning: Bool {
+        guard let wave else { return false }
+        return wave.status == .running || wave.status == .waiting
+    }
+
+    var body: some View {
+        Group {
+            if wave?.content == nil {
+                ProgressView("Loading roadmap item…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let selectedItem {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Text(selectedItem.title)
+                                    .font(Typography.sectionTitle())
+                                    .foregroundStyle(Color.loopflowBurgundy)
+                                    .strikethrough(selectedItem.isShipped)
+
+                                HStack(spacing: Spacing.sm) {
+                                    Text(selectedItem.priority.displayName)
+                                    Text(selectedItem.isShipped ? "Shipped" : "Planned")
+                                }
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                ingestAndBuild(selectedItem)
+                            } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    if isIngesting {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Image(systemName: "play.fill")
+                                    }
+                                    Text("Ingest & build")
+                                        .fontWeight(.semibold)
+                                }
+                                .padding(.horizontal, Spacing.lg)
+                                .padding(.vertical, Spacing.sm)
+                                .background(playButtonBackground(for: selectedItem))
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedItem.isShipped || waveIsRunning || isIngesting)
+                            .opacity((selectedItem.isShipped || waveIsRunning) ? 0.65 : 1)
+                        }
+
+                        if let fileName = selectedItem.filePath.map({ URL(fileURLWithPath: $0).lastPathComponent }) {
+                            Text(fileName)
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if !fullMarkdown.isEmpty {
+                            Text(renderFullMarkdown(fullMarkdown))
+                                .font(Typography.body())
+                                .foregroundStyle(palette.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if let loadError {
+                            ContentUnavailableView(
+                                "Roadmap item unavailable",
+                                systemImage: "exclamationmark.triangle",
+                                description: Text(loadError)
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+
+                        if let actionError, !actionError.isEmpty {
+                            Text(actionError)
+                                .font(Typography.caption())
+                                .foregroundStyle(Color.statusError)
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .background(palette.surface)
+                .task(id: detailTaskKey) {
+                    loadMarkdown()
+                }
+            } else {
+                paneUnavailable(
+                    title: "Select a roadmap item",
+                    systemImage: "text.document",
+                    description: "Choose a roadmap item in the list to read its full markdown."
+                )
+            }
+        }
+    }
+
+    private var detailTaskKey: String {
+        [waveId, selectedItem?.id ?? "", selectedItem?.filePath ?? ""].joined(separator: "|")
+    }
+
+    private func loadMarkdown() {
+        guard let selectedItem else {
+            fullMarkdown = ""
+            loadError = nil
+            actionError = nil
+            return
+        }
+
+        loadError = nil
+
+        if let filePath = selectedItem.filePath,
+           let text = try? String(contentsOfFile: filePath, encoding: .utf8),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fullMarkdown = text
+            return
+        }
+
+        if let content = selectedItem.content, !content.isEmpty {
+            fullMarkdown = content
+            return
+        }
+
+        fullMarkdown = ""
+        loadError = "Could not load markdown for \(selectedItem.title)."
+    }
+
+    private func ingestAndBuild(_ item: RoadmapItem) {
+        guard let wave else { return }
+        actionError = nil
+        isIngesting = true
+        Task { @MainActor in
+            defer { isIngesting = false }
+            do {
+                try await repoState.ingestAndBuild(wave: wave, item: item)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func playButtonBackground(for item: RoadmapItem) -> Color {
+        if item.isShipped || waveIsRunning {
+            return Color.statusNeutral
+        }
+        return Color.statusSuccess
+    }
 }
 
 private struct ReadmePaneView: View {
@@ -939,6 +1227,7 @@ extension PaneType {
         case .diff: "Diff"
         case .launchpad: "Launchpad"
         case .roadmap: "Roadmap"
+        case .roadmapDetail: "Roadmap Detail"
         case .readme: "README"
         case .runs: "Runs"
         case .launcher: "Launcher"
@@ -952,11 +1241,23 @@ extension PaneType {
         case .diff: "arrow.left.arrow.right.square"
         case .launchpad: "sparkles.rectangle.stack"
         case .roadmap: "list.bullet.rectangle"
+        case .roadmapDetail: "doc.text.magnifyingglass"
         case .readme: "text.document"
         case .runs: "clock.arrow.circlepath"
         case .launcher: "play.square"
         }
     }
+}
+
+private func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
+    items.enumerated()
+        .sorted { lhs, rhs in
+            if lhs.element.isShipped != rhs.element.isShipped {
+                return !lhs.element.isShipped && rhs.element.isShipped
+            }
+            return lhs.offset < rhs.offset
+        }
+        .map(\.element)
 }
 
 @ViewBuilder
@@ -1028,11 +1329,6 @@ private func renderMarkdown(_ text: String) -> AttributedString {
     )) ?? AttributedString(text)
 }
 
-private func previewText(_ text: String?, maxLines: Int = 4) -> String {
-    guard let text else { return "" }
-    let lines = text.components(separatedBy: .newlines)
-    if lines.count <= maxLines {
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    return lines.prefix(maxLines).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+private func renderFullMarkdown(_ text: String) -> AttributedString {
+    (try? AttributedString(markdown: text)) ?? AttributedString(text)
 }

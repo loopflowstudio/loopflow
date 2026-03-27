@@ -57,10 +57,13 @@ public enum WaveContentParser {
             return ReadmeSections()
         }
 
+        let lines = text.components(separatedBy: .newlines)
+        let leadingParagraph = extractLeadingParagraph(from: lines)
+
         var sectionBuffers: [ReadmeSection: [String]] = [:]
         var currentSection: ReadmeSection?
 
-        for line in text.components(separatedBy: .newlines) {
+        for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if let section = section(forHeader: trimmed) {
@@ -78,8 +81,10 @@ public enum WaveContentParser {
             }
         }
 
+        let sectionVision = normalizedSectionText(sectionBuffers[.vision])
+
         return ReadmeSections(
-            vision: normalizedSectionText(sectionBuffers[.vision]),
+            vision: leadingParagraph ?? sectionVision,
             strategy: normalizedSectionText(sectionBuffers[.strategy]),
             goals: normalizedSectionText(sectionBuffers[.goals]),
             risks: normalizedSectionText(sectionBuffers[.risks]),
@@ -110,6 +115,37 @@ public enum WaveContentParser {
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
+    }
+
+    private static func extractLeadingParagraph(from lines: [String]) -> String? {
+        var index = 0
+
+        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
+            index += 1
+        }
+
+        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("# ") {
+            index += 1
+        }
+
+        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
+            index += 1
+        }
+
+        guard index < lines.count else { return nil }
+        guard !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("#") else {
+            return nil
+        }
+
+        var paragraphLines: [String] = []
+        while index < lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { break }
+            paragraphLines.append(lines[index])
+            index += 1
+        }
+
+        return normalizedSectionText(paragraphLines)
     }
 
     private static func parseRoadmapItems(in waveDirectory: URL) -> [RoadmapItem] {

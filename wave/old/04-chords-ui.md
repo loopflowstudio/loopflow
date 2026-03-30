@@ -1,3 +1,6 @@
+---
+asana_id: '1213877387051448'
+---
 # 04: Concerto Chord UI
 
 **Finish line:** Concerto shows chords as named sections in the wave list. Waves within a chord are visually grouped. Ungrouped waves display cleanly. Creating chords and managing membership works from the app.

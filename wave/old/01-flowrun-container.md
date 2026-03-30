@@ -1,3 +1,6 @@
+---
+asana_id: '1213877387060784'
+---
 # 01: FlowRun Container
 
 **Finish line:** WaveRun is an iteration container (branch, worktree, PR). FlowRun is one flow execution within it. The executor operates on FlowRuns. Reactive triggers during active iterations create triggered FlowRuns, not new WaveRuns.

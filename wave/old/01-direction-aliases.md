@@ -1,3 +1,6 @@
+---
+asana_id: '1213869424221500'
+---
 # 01: Direction Aliases
 
 **Finish line:** `lfq direction create designer -d ux,craft,aesthetics` works. Waves using `designer` expand it automatically.

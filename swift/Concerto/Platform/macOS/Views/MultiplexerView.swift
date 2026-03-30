@@ -643,8 +643,6 @@ private struct RoadmapDetailPaneView: View {
     @Environment(RoadmapSelection.self) private var roadmapSelection
     @Environment(\.palette) private var palette
 
-    @State private var fullMarkdown = ""
-    @State private var loadError: String?
     @State private var actionError: String?
     @State private var isIngesting = false
 
@@ -675,6 +673,8 @@ private struct RoadmapDetailPaneView: View {
                 ProgressView("Loading roadmap item…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let selectedItem {
+                let markdown = roadmapMarkdown(for: selectedItem)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         HStack(alignment: .top, spacing: Spacing.md) {
@@ -725,18 +725,18 @@ private struct RoadmapDetailPaneView: View {
                                 .textSelection(.enabled)
                         }
 
-                        if !fullMarkdown.isEmpty {
-                            Text(renderFullMarkdown(fullMarkdown))
+                        if let markdown {
+                            Text(renderMarkdown(markdown, fullSyntax: true))
                                 .font(Typography.body())
                                 .foregroundStyle(palette.text)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                        } else if let loadError {
+                        } else {
                             ContentUnavailableView(
                                 "Roadmap item unavailable",
                                 systemImage: "exclamationmark.triangle",
-                                description: Text(loadError)
+                                description: Text("Could not load markdown for \(selectedItem.title).")
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
@@ -751,8 +751,8 @@ private struct RoadmapDetailPaneView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .background(palette.surface)
-                .task(id: detailTaskKey) {
-                    loadMarkdown()
+                .onChange(of: selectedItem.id) { _, _ in
+                    actionError = nil
                 }
             } else {
                 paneUnavailable(
@@ -764,35 +764,18 @@ private struct RoadmapDetailPaneView: View {
         }
     }
 
-    private var detailTaskKey: String {
-        [waveId, selectedItem?.id ?? "", selectedItem?.filePath ?? ""].joined(separator: "|")
-    }
-
-    private func loadMarkdown() {
-        guard let selectedItem else {
-            fullMarkdown = ""
-            loadError = nil
-            actionError = nil
-            return
-        }
-
-        loadError = nil
-        actionError = nil
-
-        if let filePath = selectedItem.filePath,
+    private func roadmapMarkdown(for item: RoadmapItem) -> String? {
+        if let filePath = item.filePath,
            let text = try? String(contentsOfFile: filePath, encoding: .utf8),
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            fullMarkdown = text
-            return
+            return text
         }
 
-        if let content = selectedItem.content, !content.isEmpty {
-            fullMarkdown = content
-            return
+        if let content = item.content, !content.isEmpty {
+            return content
         }
 
-        fullMarkdown = ""
-        loadError = "Could not load markdown for \(selectedItem.title)."
+        return nil
     }
 
     private func ingestAndBuild(_ item: RoadmapItem) {
@@ -1251,14 +1234,7 @@ extension PaneType {
 }
 
 private func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
-    items.enumerated()
-        .sorted { lhs, rhs in
-            if lhs.element.isShipped != rhs.element.isShipped {
-                return !lhs.element.isShipped && rhs.element.isShipped
-            }
-            return lhs.offset < rhs.offset
-        }
-        .map(\.element)
+    items.filter { !$0.isShipped } + items.filter(\.isShipped)
 }
 
 @ViewBuilder
@@ -1323,13 +1299,13 @@ private func runShellCommand(_ argv: [String]) async throws -> String {
     return stdoutText
 }
 
-private func renderMarkdown(_ text: String) -> AttributedString {
-    (try? AttributedString(
+private func renderMarkdown(_ text: String, fullSyntax: Bool = false) -> AttributedString {
+    if fullSyntax {
+        return (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    }
+
+    return (try? AttributedString(
         markdown: text,
         options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     )) ?? AttributedString(text)
-}
-
-private func renderFullMarkdown(_ text: String) -> AttributedString {
-    (try? AttributedString(markdown: text)) ?? AttributedString(text)
 }

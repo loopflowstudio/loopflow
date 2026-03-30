@@ -17,4 +17,4 @@ Streaming a long response with tool calls looks smooth — no layout jumps, no a
 - Thinking indicator entry/exit transitions
 - Message appearance animation for new messages vs. streamed content
 - Context snapshot expand/collapse (SessionContextView transition gap)
-- Audit all remaining `withAnimation` calls to ensure they use `DesignAnimation` helpers
+- Migrate two `withAnimation` calls in `WaveSessionView.swift` that use bare `.easeInOut` instead of `DesignAnimation` helpers: `SessionThinkingIndicator` pulsing animation (~line 390) and `StreamingCursorView` visibility animation (~line 450). Both respect `reduceMotion` via guards but bypass the `DesignAnimation` abstraction.

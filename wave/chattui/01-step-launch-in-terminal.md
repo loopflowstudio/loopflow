@@ -15,10 +15,10 @@ Running a step from Concerto opens an external Ghostty window with the agent run
 
 ## Remaining
 
-- Wire flow/step launch to create a tmux session and run the agent command in it (currently step launch uses embedded terminal only)
+- Wire flow/step launch to create a tmux session and run the agent command in it. `TerminalLauncher.launchStep()` exists but currently only user-initiated — step execution via `repoState.runWave()` doesn't trigger external terminal launch automatically.
 - Open external terminal attached to that tmux session on step start
-- Session registry tracks active sessions, survives app restart (registry exists but persistence across restart is untested)
-- Sidebar shows session status: running, waiting, completed, detached (status display exists but "detached" state detection needs work)
+- Session registry persistence across app restart — `TerminalWorkspaceStore` persists selection/ordering via UserDefaults, but `TmuxSessionRegistry` is in-memory only and calls `killAllSynchronously()` on app quit. Surviving restarts means discovering pre-existing tmux sessions on launch.
+- Sidebar detached state detection — `TerminalWorkspaceView` shows session status (pending/attached/running/succeeded/failed/canceled) but doesn't detect whether a tmux session is externally attached, embedded, or detached.
 
 ## What exists
 

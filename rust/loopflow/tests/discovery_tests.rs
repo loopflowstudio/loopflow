@@ -146,6 +146,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
       - step: gstack:review
       - step: gstack:cso
       - step: gstack:codex
+    synthesize: gstack:review-synthesize
 "#,
     )
     .expect("write flow");
@@ -167,6 +168,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
             "gstack:review",
             "gstack:cso",
             "gstack:codex",
+            "gstack:review-synthesize",
         ]
     );
 }

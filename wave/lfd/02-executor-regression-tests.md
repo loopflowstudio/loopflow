@@ -1,5 +1,4 @@
 ---
-asana_id: '1213879276226072'
 notion_id: 333f8f99-3d81-819a-bede-f1f43c596b22
 ---
 # 02: Executor Regression Tests

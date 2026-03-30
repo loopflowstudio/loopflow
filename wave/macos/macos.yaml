@@ -9,3 +9,4 @@ direction:
 pm:
   linear_project: eb129b60-6dcf-411d-a7b8-c75b81b2fb96
   provider: asana
+  asana_project: '1213879918684766'

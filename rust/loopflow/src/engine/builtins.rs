@@ -64,6 +64,10 @@ static NAMESPACED_STEPS: std::sync::LazyLock<
             "vsm/s2-assess",
             include_str!("builtins/steps/vsm/s2-assess.md"),
         ),
+        (
+            "garden/wave-report",
+            include_str!("builtins/steps/garden/wave-report.md"),
+        ),
     ])
 });
 

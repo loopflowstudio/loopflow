@@ -98,7 +98,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "release-notes",
         ],
     ),
-    ("Garden", &["garden/scan", "garden/assess"]),
+    ("Garden", &["garden/scan", "garden/assess", "garden/wave-report"]),
     ("Wave", &["wave/mutate", "wave/review"]),
     (
         "VSM",
@@ -168,6 +168,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
             "garden/assess",
             "Judge wave health and identify pressure points",
         ),
+        ("garden/wave-report", "Read health signals across all waves"),
         ("wave/mutate", "Compose and apply coordinated mutations"),
         ("wave/review", "Review mutations, amend or revert"),
         ("vsm/s2-scan", "Scan backlogs, PR overlap, conflict history"),

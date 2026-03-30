@@ -1,3 +1,6 @@
+---
+notion_id: 333f8f99-3d81-8124-82cb-d3b989884d36
+---
 # 01: Harness Server Mode
 
 **Finish line:** Non-terminal clients (iPhone Concerto) can interact with agent sessions through a structured API — observing output, responding to tool approvals and questions — without terminal access.

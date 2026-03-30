@@ -1,3 +1,8 @@
+---
+asana_id: '1213877387464961'
+---
+---
+---
 # 05: Full Sandbox Rollout
 
 **Status (2026-03-04):** Deferred from production path. Host sandbox capability is validated, but DinD remains blocked on Linux sandbox CLI plugin distribution. Provider tokens are now AES-256-GCM encrypted at rest — credential proxy design (open question below) should use `token_crypto::decrypt_if_needed()` rather than reading raw DB values.

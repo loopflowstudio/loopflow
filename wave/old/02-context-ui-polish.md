@@ -1,3 +1,8 @@
+---
+asana_id: '1213869424643568'
+---
+---
+---
 # 02: Context UI Polish
 
 **Finish line:** Concerto's context panel shows all files (not capped at 10), budget is customizable from the UI, and small sources render visibly in the stacked bar.

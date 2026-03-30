@@ -1,3 +1,7 @@
+---
+asana_id: '1213883255344337'
+notion_id: 333f8f99-3d81-8164-abe4-d80f2062ca44
+---
 # Wave Scheduling — Loops, Crons, and `parent` Replacing `mode`
 
 **Finish line:** Waves are scheduled by `loops` and `crons`. The `mode` field and standalone `flow`/`workers` fields are gone. A wave is: loops + crons + triggers, all optional, all carrying their own flow.

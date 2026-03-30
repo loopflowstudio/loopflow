@@ -1,3 +1,8 @@
+---
+asana_id: '1213883255370913'
+---
+---
+---
 # 04: Bundled Container Hardening
 
 **Finish line:** Native fallback behavior intentional, documented, reflected in UX. Concerto UI test behavior stable or documented as known flake.

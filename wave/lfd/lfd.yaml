@@ -9,5 +9,4 @@ direction:
 - clarity
 - simplicity
 pm:
-  provider: notion
-  notion_project: 32af8f99-3d81-816c-9756-dfb16aaa93bf
+  provider: asana

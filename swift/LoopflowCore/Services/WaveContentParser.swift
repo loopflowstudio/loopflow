@@ -120,27 +120,36 @@ public enum WaveContentParser {
     private static func extractLeadingParagraph(from lines: [String]) -> String? {
         var index = 0
 
-        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
-            index += 1
-        }
+        while index < lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
 
-        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("# ") {
-            index += 1
-        }
+            if trimmed.isEmpty {
+                index += 1
+                continue
+            }
 
-        while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
-            index += 1
+            if trimmed.hasPrefix("# ") {
+                index += 1
+                continue
+            }
+
+            if trimmed.hasPrefix("#") {
+                if section(forHeader: trimmed) != nil {
+                    return nil
+                }
+                index += 1
+                continue
+            }
+
+            break
         }
 
         guard index < lines.count else { return nil }
-        guard !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("#") else {
-            return nil
-        }
 
         var paragraphLines: [String] = []
         while index < lines.count {
             let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { break }
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { break }
             paragraphLines.append(lines[index])
             index += 1
         }

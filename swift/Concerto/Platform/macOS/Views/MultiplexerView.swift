@@ -777,6 +777,7 @@ private struct RoadmapDetailPaneView: View {
         }
 
         loadError = nil
+        actionError = nil
 
         if let filePath = selectedItem.filePath,
            let text = try? String(contentsOfFile: filePath, encoding: .utf8),

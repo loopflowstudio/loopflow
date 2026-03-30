@@ -23,6 +23,7 @@ public final class WaveStore {
     public private(set) var waves: [String: WaveViewModel] = [:] {
         didSet { recompute() }
     }
+    private var orderedIds: [String] = []
 
     // Derived state — recomputed on any change to waves
     public private(set) var ordered: [WaveViewModel] = []
@@ -45,6 +46,9 @@ public final class WaveStore {
     }
 
     private func _set(_ wave: WaveViewModel) {
+        if waves[wave.id] == nil {
+            orderedIds.append(wave.id)
+        }
         let oldStatus = previousStatuses[wave.id]
         if oldStatus != wave.status {
             onStatusChange?(wave, oldStatus, wave.status)
@@ -76,18 +80,24 @@ public final class WaveStore {
             updatedStatuses[wave.id] = wave.status
         }
 
+        let existingIds = orderedIds.filter { updatedWaves[$0] != nil }
+        let existingIdSet = Set(existingIds)
+        let appendedIds = newWaves.map(\.id).filter { !existingIdSet.contains($0) }
+        orderedIds = existingIds + appendedIds
         waves = updatedWaves
         previousStatuses = updatedStatuses
     }
 
     @discardableResult
     public func remove(_ id: String) -> WaveViewModel? {
+        orderedIds.removeAll { $0 == id }
         let removed = waves.removeValue(forKey: id)
         previousStatuses.removeValue(forKey: id)
         return removed
     }
 
     public func removeAll() {
+        orderedIds = []
         waves = [:]
         previousStatuses = [:]
     }
@@ -142,7 +152,7 @@ public final class WaveStore {
     // MARK: - Private
 
     private func recompute() {
-        let allWaves = Array(waves.values)
+        let allWaves = orderedIds.compactMap { waves[$0] }
 
         let active = allWaves.filter { $0.status != .idle }
         let idle = allWaves.filter { $0.status == .idle }

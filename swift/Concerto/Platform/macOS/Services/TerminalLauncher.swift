@@ -33,6 +33,8 @@ struct TerminalLauncher {
 
     func launchTerminal(_ terminal: TerminalApp, at path: URL, command: String? = nil) throws {
         switch terminal {
+        case .ghostty:
+            try launchGhostty(at: path, command: command)
         case .warp:
             try launchWarp(at: path, command: command)
         case .iterm:
@@ -70,10 +72,10 @@ struct TerminalLauncher {
 
     private func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
         let command = sshCommand(host: host, path: path)
+        let homeDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         switch terminal {
-        case .warp, .iterm, .terminal:
-            // Use AppleScript-based terminals with the ssh command
-            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
+        case .ghostty, .warp, .iterm, .terminal:
+            try launchTerminal(terminal, at: homeDirectoryURL, command: command)
         case .kitty:
             guard let executableURL = findExecutable("kitty") else {
                 throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")
@@ -105,6 +107,26 @@ struct TerminalLauncher {
     }
 
     // MARK: - Terminal Launchers
+
+    private func launchGhostty(at path: URL, command: String?) throws {
+        let executableURL = URL(fileURLWithPath: "/Applications/Ghostty.app/Contents/MacOS/ghostty")
+        guard FileManager.default.fileExists(atPath: executableURL.path) else {
+            throw LaunchError.launchFailed("Ghostty not found at /Applications/Ghostty.app")
+        }
+
+        var arguments = [
+            "--working-directory=\(path.path())",
+            "--window-inherit-working-directory=false",
+        ]
+        if let command, !command.isEmpty {
+            arguments.append("--initial-command=shell:\(command)")
+        }
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        try process.run()
+    }
 
     private func launchWarp(at path: URL, command: String?) throws {
         // Warp requires UI scripting via Accessibility - check permission first
@@ -397,4 +419,3 @@ struct TerminalLauncher {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
-

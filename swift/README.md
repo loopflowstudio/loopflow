@@ -161,6 +161,7 @@ Selected waves now open into a multiplexer workspace:
 - The selected roadmap item renders its full markdown in **Roadmap Detail**, with an always-visible **Ingest & build** action
 - `j`/`k`, `↑`/`↓`, and `Return` work directly in the roadmap list for keyboard-first triage
 - Wave taglines now come from the opening README paragraph when present, with `## Vision` still supported as a fallback
+- Local worktrees expose **Open Terminal** and **Open Internally** actions that both attach the same tmux-backed shell
 - Cmd+K switches waves and opens or focuses panes like **README**, **Runs**, and **Launcher**
 - Waves without worktrees still keep roadmap/readme/detail panes available; only terminal-style panes show a worktree placeholder
 - Interactive sessions still take over the workspace when a flow needs input
@@ -190,7 +191,7 @@ Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
 J / K        Move wave focus down/up
 Enter        Select focused wave
 C            Create wave
-E D R S L N  Edit/Delete/Retry/Stop/Land/Next
+D R S L N    Delete/Retry/Stop/Land/Next
 T I F P      Open Terminal/IDE/Finder/PR
 1 / 2        Switch Current/Runs tab
 / or ⌘K      Open command palette

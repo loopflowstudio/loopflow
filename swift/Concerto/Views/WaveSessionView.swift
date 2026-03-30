@@ -4,6 +4,7 @@ import LoopflowCore
 struct WaveSessionView: View {
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Bindable var state: SessionState
     let showsSuggestedActions: Bool
@@ -35,7 +36,7 @@ struct WaveSessionView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                        ForEach(groupedTranscript) { group in
+                        ForEach(state.groupedTranscript) { group in
                             transcriptGroupRow(group)
                                 .id(group.id)
                         }
@@ -68,7 +69,7 @@ struct WaveSessionView: View {
                 .focused($focusedField, equals: .transcript)
                 .onChange(of: state.transcript.count) { _, _ in
                     guard isNearBottom, let last = state.transcript.last else { return }
-                    withAnimation {
+                    withAnimation(DesignAnimation.fast(reduceMotion)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
@@ -171,46 +172,6 @@ struct WaveSessionView: View {
         self.managesLifecycle = managesLifecycle
     }
 
-    private var groupedTranscript: [TranscriptGroup] {
-        var groups: [TranscriptGroup] = []
-        var currentRun: [TranscriptItem] = []
-
-        func flushRun() {
-            guard !currentRun.isEmpty else { return }
-            if currentRun.count == 1 {
-                groups.append(.single(.item(currentRun[0])))
-            } else {
-                groups.append(.toolRun(currentRun))
-            }
-            currentRun = []
-        }
-
-        for entry in state.transcript {
-            switch entry {
-            case .item(let item) where item.card.type.isToolLike:
-                currentRun.append(item)
-            default:
-                flushRun()
-                groups.append(.single(entry))
-            }
-        }
-        flushRun()
-        return groups
-    }
-
-    private var latestAssistantMessageId: UUID? {
-        state.transcript.reversed().compactMap { entry -> UUID? in
-            guard case .message(let message) = entry, message.role == .assistant else {
-                return nil
-            }
-            return message.id
-        }.first
-    }
-
-    private var timestampLabelByMessageId: [UUID: String] {
-        messageTimestampLabels(for: state.transcript)
-    }
-
     @ViewBuilder
     private func transcriptGroupRow(_ group: TranscriptGroup) -> some View {
         switch group {
@@ -232,11 +193,11 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            let timestamp = timestampLabelByMessageId[message.id]
+            let timestamp = state.timestampLabels[message.id]
             MessageRow(
                 message: message,
                 timestampLabel: timestamp,
-                showStreamingCursor: state.turnState == .running && latestAssistantMessageId == message.id
+                showStreamingCursor: state.turnState == .running && state.latestAssistantMessageId == message.id
             ) { newEntry in
                 replyQueue.add(newEntry)
                 isReplyTrayExpanded = true
@@ -681,18 +642,6 @@ private struct TranscriptItemCardView: View {
     }
 }
 
-private enum TranscriptGroup: Identifiable {
-    case single(TranscriptEntry)
-    case toolRun([TranscriptItem])
-
-    var id: UUID {
-        switch self {
-        case .single(let entry): return entry.id
-        case .toolRun(let items): return items[0].id
-        }
-    }
-}
-
 private struct ToolRunView: View {
     @Environment(\.palette) private var palette
 
@@ -742,54 +691,6 @@ private struct ToolRunView: View {
 enum MessageSegment: Equatable {
     case text(String)
     case code(language: String?, content: String)
-}
-
-func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
-    var labels: [UUID: String] = [:]
-    var previousTimestamp: Date?
-
-    for entry in transcript {
-        guard case .message(let message) = entry,
-              message.role != .system else {
-            continue
-        }
-
-        let timestamp = message.timestamp
-
-        guard let previous = previousTimestamp else {
-            labels[message.id] = formatMessageTimestamp(timestamp)
-            previousTimestamp = timestamp
-            continue
-        }
-
-        if message.role == .user {
-            labels[message.id] = formatMessageTimestamp(timestamp)
-        } else if let label = timestampLabel(
-            forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
-            timestamp: timestamp
-        ) {
-            labels[message.id] = label
-        }
-
-        previousTimestamp = timestamp
-    }
-
-    return labels
-}
-
-func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
-    if gap <= 60 {
-        return nil
-    }
-    if gap > 3600 {
-        return formatMessageTimestamp(timestamp)
-    }
-    let minutes = max(1, Int(gap / 60))
-    return "\(minutes)m ago"
-}
-
-func formatMessageTimestamp(_ timestamp: Date) -> String {
-    timestamp.formatted(date: .omitted, time: .shortened)
 }
 
 func parseMessageSegments(_ content: String) -> [MessageSegment] {
@@ -854,16 +755,6 @@ func parseMessageSegments(_ content: String) -> [MessageSegment] {
 private func toggleMembership(_ id: UUID, in set: inout Set<UUID>) {
     if !set.insert(id).inserted {
         set.remove(id)
-    }
-}
-
-
-extension SessionItemType {
-    var isToolLike: Bool {
-        switch self {
-        case .command, .tool, .file: return true
-        case .message, .thought, .unknown: return false
-        }
     }
 }
 

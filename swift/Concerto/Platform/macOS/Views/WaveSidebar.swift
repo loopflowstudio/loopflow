@@ -13,7 +13,6 @@ struct WaveSidebar: View {
     @State private var showingActionError = false
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
-    @State private var isEditingWaveName = false
 
     private var waveGroups: WaveGroups {
         repoState.waveGroups
@@ -49,13 +48,7 @@ struct WaveSidebar: View {
                     Task {
                         try? await repoState.deleteWaveAndCleanupTmux(wave)
                     }
-                },
-                onRename: { newName in
-                    Task {
-                        try? await repoState.renameWave(wave, to: newName)
-                    }
-                },
-                isEditingAnyName: $isEditingWaveName
+                }
             )
         }
     }
@@ -341,12 +334,12 @@ struct WaveSidebar: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.active.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", count: waveGroups.active.count)
+                    sectionHeader("In Flight", icon: "circle.fill", count: waveGroups.active.count)
                     waveRows(waveGroups.active)
                 }
 
                 if !waveGroups.idle.isEmpty {
-                    sectionHeader("Idle", icon: "circle", count: waveGroups.idle.count)
+                    sectionHeader("Ready", icon: "circle", count: waveGroups.idle.count)
                     waveRows(waveGroups.idle)
                 }
             }
@@ -355,7 +348,6 @@ struct WaveSidebar: View {
     }
 
     private func moveFocus(_ delta: Int) {
-        guard !isEditingWaveName else { return }
         let waves = waveGroups.allInOrder
         guard !waves.isEmpty else { return }
 
@@ -382,7 +374,6 @@ struct WaveSidebar: View {
     }
 
     private func selectFocusedWave() {
-        guard !isEditingWaveName else { return }
         if let id = keyboardFocusedId,
            repoState.waveStore.wave(for: id) != nil {
             selectWave(id)

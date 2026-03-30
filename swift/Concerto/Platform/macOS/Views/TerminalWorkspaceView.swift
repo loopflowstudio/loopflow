@@ -121,13 +121,21 @@ private struct SessionTerminalSurface: View {
     @State private var connectionInfo: TerminalConnectionInfo?
     @State private var errorMessage: String?
 
+    private var directAttachCommand: TerminalAttachCommand? {
+        guard session.source == "user_shell",
+              !session.argv.isEmpty else {
+            return nil
+        }
+        return TerminalAttachCommand(workingDirectory: session.cwd, argv: session.argv)
+    }
+
     var body: some View {
         Group {
-            if let command = connectionInfo.map({ TerminalAttachCommand($0) }) {
+            if let command = directAttachCommand ?? connectionInfo.map({ TerminalAttachCommand($0) }) {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
-                    env: command.env,
+                    env: session.env,
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
@@ -150,7 +158,11 @@ private struct SessionTerminalSurface: View {
             ghosttyManager.destroySession(session.id)
         }
         .task(id: session.id) {
-            guard connectionInfo == nil, !session.status.isTerminal else { return }
+            guard directAttachCommand == nil,
+                  connectionInfo == nil,
+                  !session.status.isTerminal else {
+                return
+            }
             do {
                 connectionInfo = try await repoState.attachTerminalSession(session.id)
                 errorMessage = nil
@@ -164,7 +176,11 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
-    let env: [String: String] = [:]
+
+    init(workingDirectory: String, argv: [String]) {
+        self.workingDirectory = workingDirectory
+        self.argv = argv
+    }
 
     init(_ connection: TerminalConnectionInfo) {
         if connection.usesLocalTmux {
@@ -180,6 +196,46 @@ struct TerminalAttachCommand: Equatable {
             connection.host,
             "tmux attach-session -t \(shellEscape(connection.sessionName))",
         ]
+    }
+}
+
+private struct WorkspaceShell {
+    let waveId: String
+    let worktreePath: String
+
+    var sessionId: String { "shell-\(waveId)" }
+    var tmuxSessionName: String { "lf-\(waveId)-shell" }
+    var worktreeURL: URL { URL(fileURLWithPath: worktreePath) }
+    var attachCommand: String { "tmux attach-session -t \(tmuxSessionName)" }
+    var attachArguments: [String] { ["tmux", "attach-session", "-t", tmuxSessionName] }
+
+    @MainActor
+    func ensureBaseSession() async throws {
+        let tmuxSession = TmuxSession(
+            sessionName: tmuxSessionName,
+            worktreePath: worktreePath,
+            registry: .shared
+        )
+        try await tmuxSession.ensureBaseSession()
+    }
+
+    func makeTerminalSession(existingSession: TerminalSession?) -> TerminalSession {
+        TerminalSession(
+            id: sessionId,
+            waveId: waveId,
+            waveRunId: existingSession?.waveRunId,
+            step: "shell",
+            agent: "interactive",
+            cwd: worktreePath,
+            argv: attachArguments,
+            env: existingSession?.env ?? [:],
+            source: "user_shell",
+            status: .attached,
+            createdAt: existingSession?.createdAt ?? Date(),
+            attachedAt: Date(),
+            startedAt: existingSession?.startedAt,
+            completedAt: nil
+        )
     }
 }
 
@@ -202,6 +258,24 @@ private struct TerminalContextSidebar: View {
 
     private var recentRuns: [WaveRun] {
         Array(repoState.runStore.runs(for: session.waveId).prefix(3))
+    }
+
+    private var workspaceShell: WorkspaceShell? {
+        if let worktreePath = wave?.worktreePath, !worktreePath.isEmpty {
+            return WorkspaceShell(waveId: session.waveId, worktreePath: worktreePath)
+        }
+        guard !session.cwd.isEmpty else {
+            return nil
+        }
+        return WorkspaceShell(waveId: session.waveId, worktreePath: session.cwd)
+    }
+
+    private var userShellTmuxSessionName: String {
+        workspaceShell?.tmuxSessionName ?? "lf-\(session.waveId)-shell"
+    }
+
+    private var isUserShellSession: Bool {
+        session.source == "user_shell"
     }
 
     var body: some View {
@@ -308,7 +382,12 @@ private struct TerminalContextSidebar: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Button("Stop session", role: .destructive) {
                     Task {
-                        _ = try? await repoState.cancelTerminalSession(session.id)
+                        if isUserShellSession {
+                            TmuxSessionRegistry.shared.killSession(named: userShellTmuxSessionName)
+                            repoState.terminalWorkspaceStore.remove(session.id)
+                        } else {
+                            _ = try? await repoState.cancelTerminalSession(session.id)
+                        }
                         GhosttyManager.shared.destroySession(session.id)
                     }
                 }
@@ -320,20 +399,69 @@ private struct TerminalContextSidebar: View {
                 }
                 .buttonStyle(.bordered)
 
-                if let worktree = wave?.worktreePath {
+                if let workspaceShell {
+                    if !repoState.isRemoteTarget {
+                        Button("Open Terminal") {
+                            Task {
+                                await openWorkspaceShellExternally(workspaceShell)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Open Internally") {
+                            Task {
+                                await openWorkspaceShellInternally(workspaceShell)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
                     Button("Open in Cursor") {
-                        try? terminalLauncher.openInIDE(.cursor, at: URL(fileURLWithPath: worktree), remoteHost: repoState.repoTarget?.remoteHost)
+                        try? terminalLauncher.openInIDE(
+                            .cursor,
+                            at: workspaceShell.worktreeURL,
+                            remoteHost: repoState.repoTarget?.remoteHost
+                        )
                     }
                     .buttonStyle(.bordered)
 
                     if !repoState.isRemoteTarget {
                         Button("Reveal in Finder") {
-                            terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktree))
+                            terminalLauncher.openInFinder(at: workspaceShell.worktreeURL)
                         }
                         .buttonStyle(.bordered)
                     }
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func openWorkspaceShellExternally(_ workspaceShell: WorkspaceShell) async {
+        do {
+            try await workspaceShell.ensureBaseSession()
+            try terminalLauncher.launchTerminal(
+                .defaultExternal,
+                at: workspaceShell.worktreeURL,
+                command: workspaceShell.attachCommand
+            )
+        } catch {
+            repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func openWorkspaceShellInternally(_ workspaceShell: WorkspaceShell) async {
+        do {
+            try await workspaceShell.ensureBaseSession()
+
+            let existingSession = repoState.terminalWorkspaceStore.sessionsById[workspaceShell.sessionId]
+            let shellSession = workspaceShell.makeTerminalSession(existingSession: existingSession)
+
+            repoState.terminalWorkspaceStore.upsert(shellSession, select: true)
+            repoState.selectTerminalSession(shellSession.id, waveId: shellSession.waveId)
+        } catch {
+            repoState.errorMessage = "Failed to open embedded terminal: \(error.localizedDescription)"
         }
     }
 

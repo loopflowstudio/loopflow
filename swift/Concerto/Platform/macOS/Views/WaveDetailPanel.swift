@@ -24,8 +24,6 @@ struct WaveDetailPanel: View {
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
-    @State private var editingName: String = ""
-    @State private var isEditingName = false
     @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
     @State private var hasAppliedScreenshotTab = false
@@ -39,7 +37,6 @@ struct WaveDetailPanel: View {
     @State private var diffHeaderPulseActive = false
     @State private var runTargetSelection: String = ""
     @State private var isSendingHeaderRun = false
-    @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -65,7 +62,7 @@ struct WaveDetailPanel: View {
     }
 
     private var ideApp: IDEApp { .cursor }
-    private var terminalApp: TerminalApp { .warp }
+    private var terminalApp: TerminalApp { .defaultExternal }
 
     var body: some View {
         Group {
@@ -94,12 +91,6 @@ struct WaveDetailPanel: View {
         } message: {
             Text("Stop '\(wave.displayName)'? It can be restarted later.")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
-            // Only respond if this wave is selected
-            if isSelectedWave {
-                startNameEdit()
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .switchToCurrentTab)) { _ in
             guard isSelectedWave else { return }
             selectedTab = .current
@@ -107,11 +98,6 @@ struct WaveDetailPanel: View {
         .onReceive(NotificationCenter.default.publisher(for: .switchToRunsTab)) { _ in
             guard isSelectedWave else { return }
             selectedTab = .runs
-        }
-        .onChange(of: isNameFocused) { _, focused in
-            if !focused && isEditingName {
-                commitNameChange()
-            }
         }
         .onReceive(elapsedTimeTimer) { time in
             // Update current time for elapsed time display (only when running)
@@ -265,28 +251,9 @@ struct WaveDetailPanel: View {
                             .font(Typography.body())
                             .foregroundStyle(wave.statusIndicator.color)
 
-                        if isEditingName {
-                            TextField("Wave name", text: $editingName)
-                                .font(Typography.sectionTitle())
-                                .fontWeight(.semibold)
-                                .textFieldStyle(.plain)
-                                .focused($isNameFocused)
-                                .frame(minWidth: 150)
-                                .onSubmit {
-                                    commitNameChange()
-                                }
-                                .onExitCommand {
-                                    cancelNameEdit()
-                                }
-                        } else {
-                            Text(wave.displayName)
-                                .font(Typography.sectionTitle())
-                                .fontWeight(.semibold)
-                                .help("Edit wave name (E)")
-                                .onTapGesture {
-                                    startNameEdit()
-                                }
-                        }
+                        Text(wave.displayName)
+                            .font(Typography.sectionTitle())
+                            .fontWeight(.semibold)
 
                         if wave.iteration > 0 {
                             Text("iter \(wave.iteration)")
@@ -1257,41 +1224,6 @@ struct WaveDetailPanel: View {
         try await repoState.combinePRs(wave.id)
     }
 
-    // MARK: - Name Editing
-
-    private func startNameEdit() {
-        editingName = wave.name
-        isEditingName = true
-        // Small delay to ensure TextField is mounted
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(50))
-            isNameFocused = true
-        }
-    }
-
-    private func cancelNameEdit() {
-        isEditingName = false
-        isNameFocused = false
-    }
-
-    private func commitNameChange() {
-        let newName = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
-        isEditingName = false
-        isNameFocused = false
-
-        guard !newName.isEmpty, newName != wave.name else { return }
-
-        Task {
-            do {
-                try await repoState.renameWave(wave, to: newName)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to rename: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
-    }
 }
 
 #Preview {

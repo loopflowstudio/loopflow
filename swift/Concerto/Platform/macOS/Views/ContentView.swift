@@ -161,7 +161,7 @@ struct ContentView: View {
         if let wave = repoState.selectedWave,
            let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
-            let terminal = TerminalApp.warp
+            let terminal = TerminalApp.defaultExternal
             let ide = IDEApp.cursor
             let remoteHost = repoState.repoTarget?.remoteHost
 
@@ -271,8 +271,6 @@ struct ContentView: View {
             post(.goToLastWave)
         case .createWave:
             post(.newWaveRequested)
-        case .editName:
-            post(.editWaveName)
         case .deleteWave:
             guard let wave = repoState.selectedWave else { return }
             performWaveAction("delete wave") {
@@ -374,7 +372,7 @@ struct ContentView: View {
 
     private func openTerminalForSelectedWave() {
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
-            try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
+            try launcher.openTerminal(.defaultExternal, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
         }
     }
 

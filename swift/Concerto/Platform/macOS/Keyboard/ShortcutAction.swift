@@ -96,7 +96,6 @@ enum ShortcutAction: Hashable {
 
     // Wave actions
     case createWave
-    case editName
     case deleteWave
     case retryWave
     case stopWave
@@ -168,13 +167,6 @@ enum ShortcutCatalog {
             label: "Create wave",
             category: .waveActions,
             requiresWave: false
-        ),
-        ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("e"), modifiers: [], allowsRepeat: false),
-            action: .editName,
-            label: "Edit name",
-            category: .waveActions,
-            requiresWave: true
         ),
         ShortcutBinding(
             gesture: ShortcutGesture(key: .character("d"), modifiers: [], allowsRepeat: false),
@@ -348,7 +340,6 @@ extension Notification.Name {
     static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
     static let selectPortfolioWave = Notification.Name("selectPortfolioWave")
     static let newWaveRequested = Notification.Name("newWaveRequested")
-    static let editWaveName = Notification.Name("editWaveName")
     static let moveFocusDown = Notification.Name("moveFocusDown")
     static let moveFocusUp = Notification.Name("moveFocusUp")
     static let selectFocusedWave = Notification.Name("selectFocusedWave")

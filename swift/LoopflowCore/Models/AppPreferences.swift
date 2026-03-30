@@ -3,13 +3,17 @@
 import Foundation
 
 public enum TerminalApp: String, Sendable, CaseIterable {
+    case ghostty
     case warp
     case iterm
     case terminal
     case kitty
 
+    public static let defaultExternal: Self = .ghostty
+
     public var displayName: String {
         switch self {
+        case .ghostty: return "Ghostty"
         case .warp: return "Warp"
         case .iterm: return "iTerm"
         case .terminal: return "Terminal"

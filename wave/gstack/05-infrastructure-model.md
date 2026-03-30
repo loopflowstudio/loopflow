@@ -1,113 +1,103 @@
 # Stage 5: Infrastructure model
 
-Loopflow's model of the world outside the codebase. Accounts, secrets, services — and the invariant that they should match.
+Loopflow's model of the world outside the codebase. Built on Stripe Projects for provisioning, with loopflow's own drift detection and health layer on top.
 
-## Why this is core
+## Why Stripe Projects
 
-Agents can write code now. The hard part has shifted to managing and distributing code and turning on services. A codebase is inert without the machinery around it — deployment targets, databases, DNS, payment processors, secrets. Loopflow needs a representation of all of this to maintain homeostasis for a codebase serving customers.
+Agents can write code now. The hard part has shifted to managing the machinery around it — deployment targets, databases, DNS, payment processors, secrets. Stripe Projects already handles provisioning and credentials for 10+ providers (Vercel, Supabase, Clerk, etc.) with a single CLI. Building our own provisioning layer would reinvent what they've already negotiated.
 
-This isn't a workstyle feature. It's foundational — every workstyle inherits it. gstack's `/ship` assumes deployment exists. Autoresearch assumes a GPU and training data. vsm assumes PM providers. The infrastructure model is what makes "run this flow end-to-end" actually work instead of hitting a wall at ship time.
+Stripe Projects provisions. Loopflow watches, reasons, and acts.
 
-## Three layers
+## Architecture
 
-### Accounts
+```
+Stripe Projects (provisioning layer)
+  ├── provider accounts (Vercel, Supabase, Clerk, AWS, ...)
+  ├── credential vault + env sync
+  ├── multi-environment (dev/staging/prod)
+  └── billing (one payment method for all services)
 
-Organizational relationships with providers. Above any single codebase.
-
-```yaml
-# .lf/accounts.yaml (or repo-level, or org-level)
-accounts:
-  - provider: doppler
-    type: secrets
-  - provider: vercel
-    type: deployment
-  - provider: aws
-    type: cloud
-    region: us-east-1
-  - provider: google-domains
-    type: dns
-  - provider: stripe
-    type: payments
-  - provider: railway
-    type: deployment
-  - provider: github
-    type: source
+Loopflow (intelligence layer)
+  ├── drift detection (declared vs actual)
+  ├── health monitoring (is it running?)
+  ├── workstyle defaults (which services a workstyle expects)
+  ├── governance (VSM s4 watches infrastructure changes)
+  └── company flows (stage 6) query across all of it
 ```
 
-### Secrets
-
-Credentials that connect code to accounts. Managed by a secrets provider (Doppler). The bridge between accounts and services.
+## Two backends
 
 ```yaml
-# Secrets are stored in Doppler, not in loopflow
-# Loopflow knows what should exist and can verify
-secrets:
-  provider: doppler
-  project: myapp
-  environments: [dev, staging, production]
-  expected:
-    - STRIPE_SECRET_KEY        # account: stripe
-    - STRIPE_WEBHOOK_SECRET    # account: stripe
-    - DATABASE_URL             # account: railway
-    - VERCEL_TOKEN             # account: vercel
+# .lf/config.yaml
+infrastructure:
+  backend: stripe-projects    # uses Stripe Projects CLI/API
+  project: proj_abc123        # Stripe Projects project ID
 ```
 
-### Services
+```yaml
+# For teams not on Stripe
+infrastructure:
+  backend: manual
+```
 
-What's actually running for this codebase. The health layer.
+With `stripe-projects` backend, loopflow reads state from Stripe Projects' API. With `manual`, loopflow reads from local config (the fallback).
+
+## What loopflow models
+
+### Services (from Stripe Projects)
+
+Stripe Projects knows what's provisioned. Loopflow reads this and adds health checks:
 
 ```yaml
+# .lf/infra.yaml — loopflow's view of the project
 services:
   - name: api
-    account: railway
+    provider: vercel          # provisioned via Stripe Projects
     check: curl -s https://api.myapp.com/health
     required: true
   - name: db
-    account: railway
-    type: postgres
+    provider: supabase        # provisioned via Stripe Projects
     check: pg_isready -h $DB_HOST
     required: true
+  - name: auth
+    provider: clerk           # provisioned via Stripe Projects
+    required: true
   - name: payments
-    account: stripe
+    provider: stripe
     secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET]
-    required: false    # degraded without it
-  - name: web
-    account: vercel
-    check: curl -s https://myapp.com
-    kind: deployment
+    required: false           # degraded without it
 ```
+
+### Secrets (vault sync)
+
+Stripe Projects manages the credential vault. Loopflow declares what each service needs and checks for drift:
+
+```yaml
+secrets:
+  expected:
+    - STRIPE_SECRET_KEY        # service: payments
+    - STRIPE_WEBHOOK_SECRET    # service: payments
+    - DATABASE_URL             # service: db
+    - CLERK_SECRET_KEY         # service: auth
+```
+
+`lf ops infra check` compares expected secrets against what Stripe Projects' vault actually contains.
 
 ## The invariant
 
-Accounts, secrets, and services should be in agreement. When they drift, loopflow detects it:
+Services, secrets, and providers should be in agreement. When they drift, loopflow detects it:
 
-- **Missing secret**: service `payments` needs `STRIPE_SECRET_KEY`, Doppler doesn't have it → flag
-- **Orphaned secret**: Doppler has `OLD_API_KEY`, no service references it → flag
-- **Account disconnected**: Vercel account exists but auth token expired → flag
-- **Service unhealthy**: deployment target returns non-200 → flag
+- **Missing secret**: service `payments` needs `STRIPE_SECRET_KEY`, vault doesn't have it
+- **Orphaned secret**: vault has `OLD_API_KEY`, no service references it
+- **Provider disconnected**: Vercel account auth expired in Stripe Projects
+- **Service unhealthy**: health check returns non-200
+- **Provisioning gap**: workstyle expects Supabase but `stripe projects list` shows no database
 
-This is the homeostasis check. Like VSM watches wave health, this watches infrastructure health. The garden/govern flows can incorporate it — s4 (intelligence) already watches for environmental changes.
+This is the homeostasis check. VSM's s4 (intelligence) already watches for environmental changes — the infrastructure model gives it something concrete to watch.
 
 ## Workstyle integration
 
-Workstyles declare **preferences**, not hard requirements. A preference says "I work best with X" — loopflow matches it to what you actually have.
-
-Loopflow maintains a map of service types to providers. When the system needs to run a service (deploy, store secrets, process payments), it uses the providers listed by the active workstyle.
-
-```yaml
-# Service type → provider map (builtin, extensible)
-providers:
-  deployment: [vercel, railway, fly, render, netlify]
-  ci: [github-actions, circleci, buildkite]
-  secrets: [doppler, vault, aws-ssm, 1password]
-  payments: [stripe, paddle]
-  cloud: [aws, gcp, azure]
-  dns: [cloudflare, google-domains, route53]
-  pm: [notion, linear, asana, github-issues]
-  auth: [clerk, auth0, supabase-auth]
-  database: [supabase, planetscale, neon, railway-postgres]
-  monitoring: [datadog, grafana, sentry]
-```
+Workstyles declare which services they expect. `lf init --workstyle gstack` provisions them via Stripe Projects:
 
 ```yaml
 # gstack workstyle
@@ -115,23 +105,48 @@ providers:
   deployment: vercel
   ci: github-actions
   payments: stripe
-  cloud: aws
-  secrets: doppler
-
-# lfjack workstyle
-providers:
-  deployment: railway
-  ci: github-actions
-  secrets: doppler
-  pm: notion
+  auth: clerk
+  database: supabase
+  secrets: stripe-projects    # vault, not Doppler
 ```
 
-`lf workstyle apply gstack` writes these provider defaults into your config. `lf workstyle apply lfjack` resets them. You can reapply any workstyle at any time — it's a config reset, not a runtime dispatch layer. Override individual providers after applying if you want gstack's flow but Railway instead of Vercel.
+```bash
+lf init --workstyle gstack
+# → stripe projects add vercel
+# → stripe projects add supabase
+# → stripe projects add clerk
+# Already has: stripe (it's a Stripe project)
+# CI stays on GitHub Actions (not a Stripe Projects provider)
+```
+
+Workstyles declare preferences. Stripe Projects handles provisioning. Loopflow bridges them.
+
+## LLM context
+
+Stripe Projects generates LLM context about provisioned services. Loopflow can consume this as part of area/context assembly — agents working on payment code get Stripe's service context, agents working on auth get Clerk's.
+
+```yaml
+# .lf/config.yaml
+context:
+  - source: stripe-projects   # auto-generated service context
+```
+
+## CLI
+
+```bash
+lf ops infra check              # drift detection: secrets, health, provisioning gaps
+lf ops infra status             # current state: providers, services, health
+lf ops infra provision           # run stripe projects add for missing services
+lf ops infra env                # sync env vars from Stripe Projects vault
+```
+
+Under the hood, `lf ops infra provision` calls `stripe projects add <provider>`. `lf ops infra env` calls `stripe projects env --pull`. Loopflow is the orchestrator, Stripe Projects is the engine.
 
 ## Done when
 
-1. `lf ops infra check` verifies accounts, secrets, and services are in agreement
-2. Drift between Doppler secrets and declared service needs is detected
-3. Workstyles can declare infrastructure requirements
+1. `lf ops infra check` reads from Stripe Projects and reports drift
+2. `lf ops infra status` shows provisioned services + health checks
+3. Workstyles can declare expected services; `lf init` provisions via Stripe Projects
 4. Missing infrastructure surfaces during `lf init --workstyle` not during flow execution
-5. The infrastructure model is available to all flows (garden, VSM, gstack ship)
+5. Manual backend works for teams without Stripe Projects
+6. The infrastructure model is available to all flows (garden, VSM, gstack ship)

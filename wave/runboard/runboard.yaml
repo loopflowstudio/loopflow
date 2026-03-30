@@ -1,0 +1,9 @@
+flow: build
+mode: manual
+area:
+- rust/loopflow/src/lfd/
+- swift/Concerto/
+- python/loopflow/lfd/
+direction:
+- ux
+- clarity

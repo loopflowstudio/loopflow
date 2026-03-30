@@ -764,7 +764,7 @@ fn has_loopflow_marker(skill_path: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(skill_path) else {
         return false;
     };
-    let Some((frontmatter, _body)) = split_frontmatter(&content) else {
+    let Some((frontmatter, _body)) = crate::engine::flow::split_frontmatter(&content) else {
         return false;
     };
     let Ok(value) = serde_yaml_ng::from_str::<Value>(&frontmatter) else {
@@ -778,28 +778,12 @@ fn has_loopflow_marker(skill_path: &Path) -> bool {
         == Some(true)
 }
 
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
-    if !content.starts_with("---") {
-        return None;
-    }
-    let mut parts = content.splitn(3, "---");
-    let _ = parts.next();
-    let frontmatter = parts.next()?;
-    let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
-    Some((frontmatter.to_string(), body))
-}
-
 /// Find the prompt file for a skill within a source.
 fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<PathBuf> {
     let source_path = source.path.as_ref()?;
 
     match source.kind {
-        SkillSourceKind::SingleFile => {
-            let candidate = source_path.join(format!("{skill_name}.md"));
-            candidate.is_file().then_some(candidate)
-        }
-        SkillSourceKind::Namespaced => {
+        SkillSourceKind::SingleFile | SkillSourceKind::Namespaced => {
             let candidate = source_path.join(format!("{skill_name}.md"));
             candidate.is_file().then_some(candidate)
         }

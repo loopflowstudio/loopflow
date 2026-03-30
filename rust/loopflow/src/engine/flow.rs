@@ -318,7 +318,7 @@ fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
     })
 }
 
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
+pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     if !content.starts_with("---") {
         return None;
     }
@@ -442,17 +442,29 @@ fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
     stems
 }
 
+fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths.into_iter().find(|path| path.exists())
+}
+
+fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<PathBuf> {
+    extensions
+        .iter()
+        .map(|extension| dir.join(format!("{name}.{extension}")))
+        .collect()
+}
+
+fn markdown_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}.md"))
+}
+
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     // 1. Repo-local flows
-    let candidates = [
-        repo.join(".lf/flows").join(format!("{name}.yaml")),
-        repo.join(".lf/flows").join(format!("{name}.yml")),
-        repo.join(".lf/flows").join(format!("{name}.json")),
-    ];
-    for path in candidates {
-        if path.exists() {
-            return Ok(path);
-        }
+    if let Some(path) = first_existing_path(paths_with_extensions(
+        &repo.join(".lf/flows"),
+        name,
+        &["yaml", "yml", "json"],
+    )) {
+        return Ok(path);
     }
 
     // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
@@ -463,18 +475,12 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
         .chain(name.split_once('-'))
         .collect();
     for (prefix, flow_name) in splits {
-        let ns_candidates = [
-            repo.join(".lf/flows")
-                .join(prefix)
-                .join(format!("{flow_name}.yaml")),
-            repo.join(".lf/flows")
-                .join(prefix)
-                .join(format!("{flow_name}.yml")),
-        ];
-        for path in ns_candidates {
-            if path.exists() {
-                return Ok(path);
-            }
+        if let Some(path) = first_existing_path(paths_with_extensions(
+            &repo.join(".lf/flows").join(prefix),
+            flow_name,
+            &["yaml", "yml"],
+        )) {
+            return Ok(path);
         }
     }
 
@@ -485,36 +491,27 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     // Namespaced steps: "gstack/office-hours" → .lf/steps/gstack/office-hours.md
     // (colon form is already normalized to slash by load_step)
     if let Some((prefix, step_name)) = name.split_once('/') {
-        let namespaced_path = repo
-            .join(".lf/steps")
-            .join(prefix)
-            .join(format!("{step_name}.md"));
+        let namespaced_path = markdown_path(&repo.join(".lf/steps").join(prefix), step_name);
         if namespaced_path.exists() {
             return Ok(namespaced_path);
         }
     }
 
     // 1. Check repo-local paths
-    let repo_candidates = [
-        repo.join(".lf/steps").join(format!("{name}.md")),
-        repo.join(".claude/commands").join(format!("{name}.md")),
-    ];
-    for path in repo_candidates {
-        if path.exists() {
-            return Ok(path);
-        }
+    if let Some(path) = first_existing_path([
+        markdown_path(&repo.join(".lf/steps"), name),
+        markdown_path(&repo.join(".claude/commands"), name),
+    ]) {
+        return Ok(path);
     }
 
     // 2. Check global paths
     if let Some(home) = home_dir() {
-        let global_candidates = [
-            home.join(".lf/steps").join(format!("{name}.md")),
-            home.join(".claude/commands").join(format!("{name}.md")),
-        ];
-        for path in global_candidates {
-            if path.exists() {
-                return Ok(path);
-            }
+        if let Some(path) = first_existing_path([
+            markdown_path(&home.join(".lf/steps"), name),
+            markdown_path(&home.join(".claude/commands"), name),
+        ]) {
+            return Ok(path);
         }
     }
 

@@ -1,8 +1,4 @@
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime};
 
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
@@ -15,9 +11,6 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
-const INGEST_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
-const INGEST_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
-const INGEST_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Default)]
 pub struct IngestOptions {
@@ -71,7 +64,6 @@ pub fn ingest(
         )));
     }
 
-    let _lock = acquire_ingest_lock(&main_repo, &wave)?;
     let items = list_wave_items(&wave_dir)?;
 
     if items.is_empty() {
@@ -176,56 +168,6 @@ fn select_ingest_item<'a>(
     }
 
     select_wave_item(items, None)
-}
-
-#[derive(Debug)]
-struct IngestLock {
-    path: PathBuf,
-}
-
-impl Drop for IngestLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-fn acquire_ingest_lock(repo: &Path, wave: &str) -> OpsResult<IngestLock> {
-    let lock_dir = repo.join(".lf").join("tmp").join("ingest-locks");
-    std::fs::create_dir_all(&lock_dir)?;
-    let path = lock_dir.join(format!("{wave}.lock"));
-    let deadline = Instant::now() + INGEST_LOCK_TIMEOUT;
-
-    loop {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let _ = writeln!(file, "pid={}", std::process::id());
-                return Ok(IngestLock { path });
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                if lock_is_stale(&path)? {
-                    let _ = std::fs::remove_file(&path);
-                    continue;
-                }
-                if Instant::now() >= deadline {
-                    return Err(OpsError::Message(format!(
-                        "timed out waiting for ingest lock for wave/{wave}"
-                    )));
-                }
-                sleep(INGEST_LOCK_POLL_INTERVAL);
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-}
-
-fn lock_is_stale(path: &Path) -> OpsResult<bool> {
-    let modified = std::fs::metadata(path)?
-        .modified()
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    let age = SystemTime::now()
-        .duration_since(modified)
-        .unwrap_or_default();
-    Ok(age > INGEST_LOCK_STALE_AGE)
 }
 
 fn write_claim_status(path: &Path, repo: &Path) -> OpsResult<()> {
@@ -452,9 +394,7 @@ mod tests {
     use crate::lfd::pm::RoadmapItemDocument;
     use crate::ops::NullProgress;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
     use std::sync::{Mutex, OnceLock};
-    use std::thread;
     use tempfile::TempDir;
 
     fn set_test_pm_hooks(pull: Option<TestPmPullHook>, claim: Option<TestPmClaimHook>) {
@@ -874,55 +814,5 @@ mod tests {
             progress.warnings.lock().expect("warnings lock").as_slice(),
             ["warning: failed to pull PM items for wave/test-wave: pm unavailable"]
         );
-    }
-
-    #[test]
-    fn concurrent_ingest_picks_different_items() {
-        let (dir, wave_dir) = init_test_wave();
-        let repo = Arc::new(dir.path().to_path_buf());
-        write_wave_file(&wave_dir, "1-alpha.md", "# Alpha");
-        write_wave_file(&wave_dir, "2-beta.md", "# Beta");
-
-        let barrier = Arc::new(std::sync::Barrier::new(2));
-        let repo_a = Arc::clone(&repo);
-        let barrier_a = Arc::clone(&barrier);
-        let handle_a = thread::spawn(move || {
-            barrier_a.wait();
-            ingest(
-                &repo_a,
-                &IngestOptions {
-                    wave: Some("test-wave".to_string()),
-                    item: None,
-                },
-                &NullProgress,
-            )
-            .expect("first ingest")
-            .slug
-        });
-
-        let repo_b = Arc::clone(&repo);
-        let barrier_b = Arc::clone(&barrier);
-        let handle_b = thread::spawn(move || {
-            barrier_b.wait();
-            ingest(
-                &repo_b,
-                &IngestOptions {
-                    wave: Some("test-wave".to_string()),
-                    item: None,
-                },
-                &NullProgress,
-            )
-            .expect("second ingest")
-            .slug
-        });
-
-        let first = handle_a.join().expect("join first");
-        let second = handle_b.join().expect("join second");
-        assert_ne!(first, second);
-        assert!(repo.join("scratch").join("test-wave-alpha.md").exists());
-        assert!(repo.join("scratch").join("test-wave-beta.md").exists());
-        assert!(list_wave_items(&wave_dir)
-            .expect("remaining items")
-            .is_empty());
     }
 }

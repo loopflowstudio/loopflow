@@ -174,6 +174,11 @@ pub trait PmProvider: Send + Sync {
     async fn complete_item(&self, item_id: &str) -> PmResult<()>;
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<()>;
     /// Claim an item: assign to the API token owner and set the working branch.
+    ///
+    /// Providers that support it should verify the assignment stuck (optimistic
+    /// concurrency). Return `Err` if another worker claimed the item first.
+    /// Providers without verification (Notion) treat claiming as best-effort
+    /// notification — duplicates are caught at PR time.
     async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()>;
 }
 

@@ -85,6 +85,9 @@ const CLAIM_ITEM_MUTATION: &str = r#"mutation ClaimIssue($id: String!, $assignee
   issueUpdate(id: $id, input: { assigneeId: $assigneeId, branchName: $branchName }) {
     issue {
       id
+      assignee {
+        id
+      }
     }
   }
 }"#;
@@ -390,7 +393,7 @@ impl PmProvider for LinearClient {
             .ok_or_else(|| PmError::Message("failed to resolve viewer ID".to_string()))?
             .to_string();
 
-        let _: Value = self
+        let response: Value = self
             .graphql(
                 CLAIM_ITEM_MUTATION,
                 json!({
@@ -400,6 +403,18 @@ impl PmProvider for LinearClient {
                 }),
             )
             .await?;
+
+        // Optimistic verify: check the response confirms we're the assignee.
+        // Another worker may have assigned themselves between our read and write.
+        let actual_assignee = response
+            .pointer("/issueUpdate/issue/assignee/id")
+            .and_then(|v| v.as_str());
+        if actual_assignee != Some(&viewer_id) {
+            return Err(PmError::Message(format!(
+                "item claimed by another assignee (expected {viewer_id}, got {actual_assignee:?})"
+            )));
+        }
+
         Ok(())
     }
 }
@@ -1268,6 +1283,83 @@ mod tests {
             );
         }
         panic!("expected graphql error message")
+    }
+
+    #[tokio::test]
+    async fn claim_item_verifies_assignee_matches_viewer() {
+        let (base_url, requests) = test_server::spawn(vec![
+            // viewer query
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "viewer": { "id": "user-42" } } }),
+            ),
+            // claim mutation — response confirms our assignee
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issueUpdate": {
+                            "issue": {
+                                "id": "issue-1",
+                                "assignee": { "id": "user-42" }
+                            }
+                        }
+                    }
+                }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .claim_item("issue-1", "feature/test")
+            .await
+            .expect("claim should succeed when assignee matches");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].body.contains("ClaimIssue"));
+    }
+
+    #[tokio::test]
+    async fn claim_item_fails_when_another_assignee_wins() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            // viewer query
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "viewer": { "id": "user-42" } } }),
+            ),
+            // claim mutation — response shows a different assignee won
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issueUpdate": {
+                            "issue": {
+                                "id": "issue-1",
+                                "assignee": { "id": "user-99" }
+                            }
+                        }
+                    }
+                }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        let error = client
+            .claim_item("issue-1", "feature/test")
+            .await
+            .expect_err("claim should fail when another assignee wins");
+        assert!(error.to_string().contains("another assignee"));
     }
 
     #[test]

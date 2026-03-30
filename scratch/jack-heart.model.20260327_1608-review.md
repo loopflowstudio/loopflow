@@ -2,10 +2,13 @@
 
 ## Try it
 
-Create a wave config with supplemental crons and inspect the returned wave JSON/UI payload for `crons`, then run concurrent ingest tests:
+Create a wave config with supplemental crons and inspect the returned wave JSON/UI payload for `crons`, then run ingest claim tests:
 
 ```bash
-cargo test ops::ingest::tests::concurrent_ingest_picks_different_items
+cargo test ops::ingest::tests::ingest_prefers_pm_claimed_item
+cargo test lfd::pm::notion::tests::claim_item
+cargo test lfd::pm::linear::tests
+cargo test lfd::pm::asana::tests
 ```
 
 ## Needs CI confirmation

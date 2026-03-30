@@ -49,7 +49,13 @@ Flows without coordination (like `garden`) are single-track — multiple workers
 
 ### Current ingest coordination state
 
-Concurrent ingest shipped with two layers: PM-backed waves try `pm_try_claim` first (provider-native assignment), non-PM waves use a PID-based file lock to serialize picks. Both sort local items by `priority` → `rank` → alphabetical.
+Concurrent ingest uses the PM provider as the coordination mechanism. When a worker calls `ingest`, it tries `pm_try_claim` first — walk unassigned items in priority order, assign to self, then verify the assignment stuck.
+
+**Linear and Asana** support optimistic verify: assign, then check the response (Linear) or re-read the task (Asana) to confirm you're still the assignee. If someone else won the race, try the next item. The race window is small (between assign and verify) and the failure mode is graceful.
+
+**Notion** can't verify — the status field ("In Progress") doesn't identify the claimant. Claiming is best-effort notification. Two workers can both claim the same item. Duplicate work is caught at PR time.
+
+**Non-PM waves** have no coordination. Each worktree picks independently by local `priority` → `rank` → alphabetical ordering. Workers may pick the same item. This is acceptable — non-PM waves are typically single-worker.
 
 Remaining gap: PM adapters don't yet translate provider-native ordering signals (Linear's `prioritySortOrder`, Asana's custom fields, Notion's database properties) into local `priority`/`rank` frontmatter during pull. The local ordering contract is established but depends on manually-authored frontmatter until adapters normalize automatically.
 

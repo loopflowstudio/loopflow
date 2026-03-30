@@ -520,6 +520,10 @@ impl PmProvider for NotionClient {
     }
 
     async fn claim_item(&self, item_id: &str, _branch: &str) -> PmResult<()> {
+        // Best-effort notification: mark the page "In Progress" so other workers
+        // see it as assigned on their next list_items call. Notion doesn't support
+        // conditional writes or claimant identity on the status field, so two
+        // concurrent claims can both succeed. Duplicate work is caught at PR time.
         let response = self
             .request(Method::PATCH, &format!("/pages/{item_id}"))
             .json(&json!({
@@ -528,10 +532,6 @@ impl PmProvider for NotionClient {
             .send()
             .await
             .map_err(|err| PmError::Message(format!("notion request failed: {err}")))?;
-
-        if response.status() == StatusCode::CONFLICT {
-            return Err(PmError::Message("item already claimed".to_string()));
-        }
 
         let _ = parse_response(response).await?;
         Ok(())
@@ -1056,26 +1056,6 @@ mod tests {
         assert_eq!(request.method, "PATCH");
         assert_eq!(request.path, "/pages/page-1");
         assert!(request.body.contains("In Progress"));
-    }
-
-    #[tokio::test]
-    async fn claim_item_treats_conflict_as_already_claimed() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::CONFLICT,
-            json!({ "message": "conflict" }),
-        )])
-        .await;
-        let client = NotionClient::with_base_url(
-            "secret-token".to_string(),
-            NotionConfig::default(),
-            base_url,
-        );
-
-        let error = client
-            .claim_item("page-1", "feature/test")
-            .await
-            .expect_err("conflict should fail");
-        assert_eq!(error.to_string(), "item already claimed");
     }
 
     #[tokio::test]

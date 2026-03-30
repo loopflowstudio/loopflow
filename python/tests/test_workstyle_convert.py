@@ -293,8 +293,8 @@ Then load:
     frontmatter = yaml.safe_load(review.split("---", 2)[1])
     assert "gstack:office-hours" in review
     assert "gstack:design-review" in review
-    assert ".lf/workstyles/gstack/steps/office-hours.md" in review
-    assert ".lf/workstyles/gstack/steps/design-review.md" in review
+    assert ".lf/steps/gstack/office-hours.md" in review
+    assert ".lf/steps/gstack/design-review.md" in review
     assert "Search Before Building" not in review
     assert "Contributor Mode" not in review
     assert "Telemetry (run last)" not in review

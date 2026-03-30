@@ -46,7 +46,11 @@ impl Step {
 pub enum FlowItem {
     Step(Step),
     Op(Op),
-    And { branches: Vec<FlowItem> },
+    And {
+        branches: Vec<FlowItem>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        synthesize: Option<String>,
+    },
     FlowRef(String),
     Xor(XorDef),
     Or(OrDef),
@@ -160,6 +164,7 @@ pub struct ConcreteAndBranch {
 pub struct ConcreteAnd {
     pub branches: Vec<ConcreteAndBranch>,
     pub flow_parents: Vec<String>,
+    pub synthesize: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +257,10 @@ pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadEr
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
+    // Normalize colon to slash: "gstack:office-hours" → "gstack/office-hours"
+    let canonical = name.replace(':', "/");
+    let name = canonical.as_str();
+
     // Try file-based lookup first (repo-local, then global)
     if let Ok(step_path) = find_step_path(name, repo) {
         return load_step_from_path(name, &step_path);
@@ -434,6 +443,7 @@ fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
 }
 
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    // 1. Repo-local flows
     let candidates = [
         repo.join(".lf/flows").join(format!("{name}.yaml")),
         repo.join(".lf/flows").join(format!("{name}.yml")),
@@ -444,18 +454,43 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
             return Ok(path);
         }
     }
+
+    // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
+    // Accept both "gstack/sprint" and "gstack-sprint"
+    let splits: Vec<(&str, &str)> = name
+        .split_once('/')
+        .into_iter()
+        .chain(name.split_once('-'))
+        .collect();
+    for (prefix, flow_name) in splits {
+        let ns_candidates = [
+            repo.join(".lf/flows")
+                .join(prefix)
+                .join(format!("{flow_name}.yaml")),
+            repo.join(".lf/flows")
+                .join(prefix)
+                .join(format!("{flow_name}.yml")),
+        ];
+        for path in ns_candidates {
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
     Err(LoadError::FlowNotFound(name.to_string()))
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    if let Some((prefix, step_name)) = name.split_once(':') {
-        let workstyle_path = repo
-            .join(".lf/workstyles")
+    // Namespaced steps: "gstack/office-hours" → .lf/steps/gstack/office-hours.md
+    // (colon form is already normalized to slash by load_step)
+    if let Some((prefix, step_name)) = name.split_once('/') {
+        let namespaced_path = repo
+            .join(".lf/steps")
             .join(prefix)
-            .join("steps")
             .join(format!("{step_name}.md"));
-        if workstyle_path.exists() {
-            return Ok(workstyle_path);
+        if namespaced_path.exists() {
+            return Ok(namespaced_path);
         }
     }
 
@@ -694,7 +729,15 @@ fn parse_and_value(value: &Value) -> Result<FlowItem, LoadError> {
             "and prompts are not supported; and always runs all branches".to_string(),
         ));
     }
-    Ok(FlowItem::And { branches })
+    let synthesize = map
+        .get(key("synthesize"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(FlowItem::And {
+        branches,
+        synthesize,
+    })
 }
 
 /// Parse and-drafts for the step/flow shorthand format.
@@ -1100,8 +1143,11 @@ fn expand_with_chain(
                     flow_parents: chain.clone(),
                 }));
             }
-            FlowItem::And { branches } => {
-                let fork = expand_and(branches, repo, &chain, depth)?;
+            FlowItem::And {
+                branches,
+                synthesize,
+            } => {
+                let fork = expand_and(branches, synthesize.clone(), repo, &chain, depth)?;
                 items.push(ConcreteItem::And(fork));
             }
             FlowItem::Xor(branch_def) => {
@@ -1141,6 +1187,7 @@ fn expand_items_with_chain(
 
 fn expand_and(
     branches: &[FlowItem],
+    synthesize: Option<String>,
     repo: &Path,
     chain: &[String],
     depth: usize,
@@ -1152,6 +1199,7 @@ fn expand_and(
     Ok(ConcreteAnd {
         branches,
         flow_parents: chain.to_vec(),
+        synthesize,
     })
 }
 
@@ -1335,9 +1383,9 @@ mod tests {
     }
 
     #[test]
-    fn load_step_finds_workstyle_step() {
+    fn load_step_finds_namespaced_step_with_colon() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/workstyles/gstack/steps");
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
         fs::create_dir_all(&steps_dir).unwrap();
         fs::write(
             steps_dir.join("office-hours.md"),
@@ -1345,8 +1393,26 @@ mod tests {
         )
         .unwrap();
 
+        // Colon form normalizes to slash
         let step = load_step("gstack:office-hours", tmp.path()).unwrap();
-        assert_eq!(step.name, "gstack:office-hours");
+        assert_eq!(step.name, "gstack/office-hours");
+        assert_eq!(step.interactive, Some(false));
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_namespaced_step_with_slash() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
+        )
+        .unwrap();
+
+        let step = load_step("gstack/office-hours", tmp.path()).unwrap();
+        assert_eq!(step.name, "gstack/office-hours");
         assert_eq!(step.interactive, Some(false));
         assert!(step.content.unwrap().contains("Do the thing"));
     }
@@ -1951,6 +2017,50 @@ Be careful.
     }
 
     #[test]
+    fn parse_and_with_custom_synthesize() {
+        let yaml = r#"
+- and:
+    branches:
+      - step: gstack:review
+      - step: gstack:cso
+      - step: gstack:codex
+    synthesize: gstack:review-synthesize
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::And {
+                branches,
+                synthesize,
+            } => {
+                assert_eq!(branches.len(), 3);
+                assert_eq!(synthesize.as_deref(), Some("gstack:review-synthesize"));
+            }
+            _ => panic!("expected And item"),
+        }
+    }
+
+    #[test]
+    fn parse_and_without_synthesize_defaults_to_none() {
+        let yaml = r#"
+- and:
+    branches:
+      - step: review
+      - step: cso
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        match &items[0] {
+            FlowItem::And { synthesize, .. } => {
+                assert!(synthesize.is_none());
+            }
+            _ => panic!("expected And item"),
+        }
+    }
+
+    #[test]
     fn parse_and_explicit_branches_with_flow_and_step() {
         let yaml = r#"
 - and:
@@ -2021,6 +2131,7 @@ Be careful.
                         ..Step::named("multi")
                     }),
                 ],
+                synthesize: None,
             }],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
@@ -2066,6 +2177,7 @@ Be careful.
                         ..Step::named("reduce")
                     }),
                 ],
+                synthesize: None,
             }],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
@@ -2116,6 +2228,7 @@ Be careful.
                     directions: vec!["infra".to_string()],
                     ..Step::named("has-and")
                 })],
+                synthesize: None,
             }],
         };
         let result = expand_flow(&flow, tmp.path());

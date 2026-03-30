@@ -8,7 +8,7 @@ Build `lf ops workstyle sync` to pull latest prompts from garrytan/gstack and re
 1. Read `workstyle.yaml` for source repo and ref
 2. Clone/fetch the repo to a cache (`~/.lf/cache/workstyles/gstack/`)
 3. Run the converter on all SKILL.md files
-4. Write updated steps to `.lf/workstyles/gstack/steps/` and refresh any extracted direction artifacts
+4. Write updated steps to `.lf/steps/gstack/` and refresh any extracted direction artifacts
 5. Update `workstyle.yaml` with new `last_sync` and `last_commit`
 
 **`lf ops workstyle sync --all`**: sync every workstyle with a remote source.
@@ -39,7 +39,7 @@ Synced to commit abc1234 (2026-03-26).
 ## Data structures
 
 ```yaml
-# .lf/workstyles/gstack/workstyle.yaml
+# .lf/steps/gstack/workstyle.yaml
 name: gstack
 description: "Garry Tan's sprint factory"
 source:
@@ -49,7 +49,7 @@ source:
   last_commit: abc1234def5678
 steps:
   prefix: gstack
-  path: steps/
+  path: ./
 flows:
   - sprint
   - plan-manual
@@ -70,10 +70,10 @@ Shallow clone, fetch-only. Never modify the cache.
 
 ## Known state from stage 1
 
-- The converter (`python/loopflow/workstyle/convert.py`) rewrites cross-step references (`/plan-*` → `gstack:<step>`) and skill-file paths (`~/.claude/skills/gstack/.../SKILL.md` → `.lf/workstyles/gstack/steps/*.md`) during conversion. Re-sync must re-run these rewrites.
+- The converter (`python/loopflow/workstyle/convert.py`) rewrites cross-step references (`/plan-*` → `gstack:<step>`) and skill-file paths (`~/.claude/skills/gstack/.../SKILL.md` → `.lf/steps/gstack/*.md`) during conversion. Re-sync must re-run these rewrites.
 - The converter strips retro analytics/eureka telemetry instructions. If upstream adds new telemetry patterns, the strip rules may need updating.
 - `plan-design-review` was renamed to `design-review` and the original `design-review` audit skill became `design-audit`. Sync must preserve this mapping to avoid overwriting.
-- The committed `.lf/workstyles/gstack/steps/*.md` files are generated output — any converter change must be followed by re-running conversion to keep them aligned.
+- The committed `.lf/steps/gstack/*.md` files are generated output — any converter change must be followed by re-running conversion to keep them aligned.
 
 ## Done when
 

@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -16,8 +17,6 @@ private final class MessageSegmentCache {
         return cachedSegments
     }
 }
-
-#if os(macOS)
 
 struct MessageRow: View {
     @Environment(\.palette) private var palette
@@ -162,6 +161,24 @@ struct MessageRow: View {
 }
 
 #else
+import SwiftUI
+import LoopflowCore
+
+private final class MessageSegmentCache {
+    private var cachedContentLength = -1
+    private var cachedSegments: [MessageSegment] = []
+
+    func segments(for content: String) -> [MessageSegment] {
+        let contentLength = content.count
+        guard contentLength != cachedContentLength else {
+            return cachedSegments
+        }
+
+        cachedContentLength = contentLength
+        cachedSegments = parseMessageSegments(content)
+        return cachedSegments
+    }
+}
 
 struct MessageRow: View {
     @Environment(\.palette) private var palette

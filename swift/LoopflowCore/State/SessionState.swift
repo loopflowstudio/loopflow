@@ -947,58 +947,18 @@ public final class SessionState {
         }
 
         updateTimestampLabelsAfterAppend(entry)
-
-        switch entry {
-        case .item(let item) where item.card.type.isToolLike:
-            appendToolLikeGroup(item)
-        default:
-            groupedTranscript.append(.single(entry))
-        }
-    }
-
-    private func appendToolLikeGroup(_ item: TranscriptItem) {
-        guard let lastGroup = groupedTranscript.last else {
-            groupedTranscript.append(.single(.item(item)))
-            return
-        }
-
-        switch lastGroup {
-        case .toolRun(let items):
-            groupedTranscript[groupedTranscript.count - 1] = .toolRun(items + [item])
-        case .single(.item(let existing)) where existing.card.type.isToolLike:
-            groupedTranscript[groupedTranscript.count - 1] = .toolRun([existing, item])
-        default:
-            groupedTranscript.append(.single(.item(item)))
-        }
+        appendTranscriptGroup(entry, to: &groupedTranscript)
     }
 
     private func updateTimestampLabelsAfterAppend(_ entry: TranscriptEntry) {
         guard case .message(let message) = entry,
-              message.role != .system else {
+              let label = messageTimestampLabel(
+                for: message,
+                previousMessage: latestVisibleMessage(in: transcript.dropLast().reversed())
+              ) else {
             return
         }
-
-        let previousMessage = transcript.dropLast().reversed().compactMap { entry -> SessionMessage? in
-            guard case .message(let message) = entry,
-                  message.role != .system else {
-                return nil
-            }
-            return message
-        }.first
-
-        if let previousMessage {
-            if message.role == .user {
-                timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
-            } else if let label = timestampLabel(
-                forGapSincePreviousMessage: message.timestamp.timeIntervalSince(previousMessage.timestamp),
-                timestamp: message.timestamp
-            ) {
-                timestampLabels[message.id] = label
-            }
-            return
-        }
-
-        timestampLabels[message.id] = formatMessageTimestamp(message.timestamp)
+        timestampLabels[message.id] = label
     }
 
     private func updateDerivedTranscriptState(previous: TranscriptEntry, updated: TranscriptEntry) {
@@ -1068,63 +1028,81 @@ func latestAssistantMessageID(in transcript: [TranscriptEntry]) -> UUID? {
 
 func buildTranscriptGroups(from transcript: [TranscriptEntry]) -> [TranscriptGroup] {
     var groups: [TranscriptGroup] = []
-    var currentRun: [TranscriptItem] = []
-
-    func flushRun() {
-        guard !currentRun.isEmpty else { return }
-        if currentRun.count == 1 {
-            groups.append(.single(.item(currentRun[0])))
-        } else {
-            groups.append(.toolRun(currentRun))
-        }
-        currentRun.removeAll(keepingCapacity: true)
-    }
 
     for entry in transcript {
-        switch entry {
-        case .item(let item) where item.card.type.isToolLike:
-            currentRun.append(item)
-        default:
-            flushRun()
-            groups.append(.single(entry))
-        }
+        appendTranscriptGroup(entry, to: &groups)
     }
 
-    flushRun()
     return groups
 }
 
 func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
     var labels: [UUID: String] = [:]
-    var previousTimestamp: Date?
+    var previousMessage: SessionMessage?
 
     for entry in transcript {
+        guard case .message(let message) = entry else {
+            continue
+        }
+
+        if let label = messageTimestampLabel(for: message, previousMessage: previousMessage) {
+            labels[message.id] = label
+        }
+
+        if message.role != .system {
+            previousMessage = message
+        }
+    }
+
+    return labels
+}
+
+private func appendTranscriptGroup(_ entry: TranscriptEntry, to groups: inout [TranscriptGroup]) {
+    switch entry {
+    case .item(let item) where item.card.type.isToolLike:
+        guard let lastGroup = groups.last else {
+            groups.append(.single(.item(item)))
+            return
+        }
+
+        switch lastGroup {
+        case .toolRun(let items):
+            groups[groups.count - 1] = .toolRun(items + [item])
+        case .single(.item(let existing)) where existing.card.type.isToolLike:
+            groups[groups.count - 1] = .toolRun([existing, item])
+        default:
+            groups.append(.single(.item(item)))
+        }
+    default:
+        groups.append(.single(entry))
+    }
+}
+
+private func latestVisibleMessage<S: Sequence>(in entries: S) -> SessionMessage? where S.Element == TranscriptEntry {
+    for entry in entries {
         guard case .message(let message) = entry,
               message.role != .system else {
             continue
         }
+        return message
+    }
+    return nil
+}
 
-        let timestamp = message.timestamp
-
-        guard let previous = previousTimestamp else {
-            labels[message.id] = formatMessageTimestamp(timestamp)
-            previousTimestamp = timestamp
-            continue
-        }
-
-        if message.role == .user {
-            labels[message.id] = formatMessageTimestamp(timestamp)
-        } else if let label = timestampLabel(
-            forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
-            timestamp: timestamp
-        ) {
-            labels[message.id] = label
-        }
-
-        previousTimestamp = timestamp
+private func messageTimestampLabel(for message: SessionMessage, previousMessage: SessionMessage?) -> String? {
+    guard message.role != .system else { return nil }
+    guard let previousMessage else {
+        return formatMessageTimestamp(message.timestamp)
     }
 
-    return labels
+    if message.role == .user {
+        return formatMessageTimestamp(message.timestamp)
+    }
+
+    return timestampLabel(
+        forGapSincePreviousMessage: message.timestamp.timeIntervalSince(previousMessage.timestamp),
+        timestamp: message.timestamp
+    )
 }
 
 func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {

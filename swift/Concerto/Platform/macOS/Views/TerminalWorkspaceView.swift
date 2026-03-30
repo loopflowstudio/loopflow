@@ -176,6 +176,7 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
+
     init(workingDirectory: String, argv: [String]) {
         self.workingDirectory = workingDirectory
         self.argv = argv
@@ -195,6 +196,46 @@ struct TerminalAttachCommand: Equatable {
             connection.host,
             "tmux attach-session -t \(shellEscape(connection.sessionName))",
         ]
+    }
+}
+
+private struct WorkspaceShell {
+    let waveId: String
+    let worktreePath: String
+
+    var sessionId: String { "shell-\(waveId)" }
+    var tmuxSessionName: String { "lf-\(waveId)-shell" }
+    var worktreeURL: URL { URL(fileURLWithPath: worktreePath) }
+    var attachCommand: String { "tmux attach-session -t \(tmuxSessionName)" }
+    var attachArguments: [String] { ["tmux", "attach-session", "-t", tmuxSessionName] }
+
+    @MainActor
+    func ensureBaseSession() async throws {
+        let tmuxSession = TmuxSession(
+            sessionName: tmuxSessionName,
+            worktreePath: worktreePath,
+            registry: .shared
+        )
+        try await tmuxSession.ensureBaseSession()
+    }
+
+    func makeTerminalSession(existingSession: TerminalSession?) -> TerminalSession {
+        TerminalSession(
+            id: sessionId,
+            waveId: waveId,
+            waveRunId: existingSession?.waveRunId,
+            step: "shell",
+            agent: "interactive",
+            cwd: worktreePath,
+            argv: attachArguments,
+            env: existingSession?.env ?? [:],
+            source: "user_shell",
+            status: .attached,
+            createdAt: existingSession?.createdAt ?? Date(),
+            attachedAt: Date(),
+            startedAt: existingSession?.startedAt,
+            completedAt: nil
+        )
     }
 }
 
@@ -219,27 +260,18 @@ private struct TerminalContextSidebar: View {
         Array(repoState.runStore.runs(for: session.waveId).prefix(3))
     }
 
-    private var shellWorktreePath: String? {
+    private var workspaceShell: WorkspaceShell? {
         if let worktreePath = wave?.worktreePath, !worktreePath.isEmpty {
-            return worktreePath
+            return WorkspaceShell(waveId: session.waveId, worktreePath: worktreePath)
         }
-        return session.cwd.isEmpty ? nil : session.cwd
+        guard !session.cwd.isEmpty else {
+            return nil
+        }
+        return WorkspaceShell(waveId: session.waveId, worktreePath: session.cwd)
     }
 
-    private var shellTmuxSessionName: String {
-        "lf-\(session.waveId)-shell"
-    }
-
-    private var shellSessionId: String {
-        "shell-\(session.waveId)"
-    }
-
-    private var shellAttachCommand: String {
-        "tmux attach-session -t \(shellTmuxSessionName)"
-    }
-
-    private var shellAttachArguments: [String] {
-        ["tmux", "attach-session", "-t", shellTmuxSessionName]
+    private var userShellTmuxSessionName: String {
+        workspaceShell?.tmuxSessionName ?? "lf-\(session.waveId)-shell"
     }
 
     private var isUserShellSession: Bool {
@@ -351,7 +383,7 @@ private struct TerminalContextSidebar: View {
                 Button("Stop session", role: .destructive) {
                     Task {
                         if isUserShellSession {
-                            TmuxSessionRegistry.shared.killSession(named: shellTmuxSessionName)
+                            TmuxSessionRegistry.shared.killSession(named: userShellTmuxSessionName)
                             repoState.terminalWorkspaceStore.remove(session.id)
                         } else {
                             _ = try? await repoState.cancelTerminalSession(session.id)
@@ -367,31 +399,35 @@ private struct TerminalContextSidebar: View {
                 }
                 .buttonStyle(.bordered)
 
-                if let worktree = shellWorktreePath {
+                if let workspaceShell {
                     if !repoState.isRemoteTarget {
                         Button("Open Terminal") {
                             Task {
-                                await openWorkspaceShellExternally(worktreePath: worktree)
+                                await openWorkspaceShellExternally(workspaceShell)
                             }
                         }
                         .buttonStyle(.bordered)
 
                         Button("Open Internally") {
                             Task {
-                                await openWorkspaceShellInternally(worktreePath: worktree)
+                                await openWorkspaceShellInternally(workspaceShell)
                             }
                         }
                         .buttonStyle(.bordered)
                     }
 
                     Button("Open in Cursor") {
-                        try? terminalLauncher.openInIDE(.cursor, at: URL(fileURLWithPath: worktree), remoteHost: repoState.repoTarget?.remoteHost)
+                        try? terminalLauncher.openInIDE(
+                            .cursor,
+                            at: workspaceShell.worktreeURL,
+                            remoteHost: repoState.repoTarget?.remoteHost
+                        )
                     }
                     .buttonStyle(.bordered)
 
                     if !repoState.isRemoteTarget {
                         Button("Reveal in Finder") {
-                            terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktree))
+                            terminalLauncher.openInFinder(at: workspaceShell.worktreeURL)
                         }
                         .buttonStyle(.bordered)
                     }
@@ -401,13 +437,13 @@ private struct TerminalContextSidebar: View {
     }
 
     @MainActor
-    private func openWorkspaceShellExternally(worktreePath: String) async {
+    private func openWorkspaceShellExternally(_ workspaceShell: WorkspaceShell) async {
         do {
-            try await ensureWorkspaceShellSession(worktreePath: worktreePath)
+            try await workspaceShell.ensureBaseSession()
             try terminalLauncher.launchTerminal(
                 .defaultExternal,
-                at: URL(fileURLWithPath: worktreePath),
-                command: shellAttachCommand
+                at: workspaceShell.worktreeURL,
+                command: workspaceShell.attachCommand
             )
         } catch {
             repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
@@ -415,39 +451,18 @@ private struct TerminalContextSidebar: View {
     }
 
     @MainActor
-    private func openWorkspaceShellInternally(worktreePath: String) async {
+    private func openWorkspaceShellInternally(_ workspaceShell: WorkspaceShell) async {
         do {
-            try await ensureWorkspaceShellSession(worktreePath: worktreePath)
+            try await workspaceShell.ensureBaseSession()
 
-            let existingSession = repoState.terminalWorkspaceStore.sessionsById[shellSessionId]
-            let shellSession = TerminalSession(
-                id: shellSessionId,
-                waveId: session.waveId,
-                waveRunId: existingSession?.waveRunId,
-                step: "shell",
-                agent: "interactive",
-                cwd: worktreePath,
-                argv: shellAttachArguments,
-                env: existingSession?.env ?? [:],
-                source: "user_shell",
-                status: .attached,
-                createdAt: existingSession?.createdAt ?? Date(),
-                attachedAt: Date(),
-                startedAt: existingSession?.startedAt,
-                completedAt: nil
-            )
+            let existingSession = repoState.terminalWorkspaceStore.sessionsById[workspaceShell.sessionId]
+            let shellSession = workspaceShell.makeTerminalSession(existingSession: existingSession)
 
             repoState.terminalWorkspaceStore.upsert(shellSession, select: true)
             repoState.selectTerminalSession(shellSession.id, waveId: shellSession.waveId)
         } catch {
             repoState.errorMessage = "Failed to open embedded terminal: \(error.localizedDescription)"
         }
-    }
-
-    @MainActor
-    private func ensureWorkspaceShellSession(worktreePath: String) async throws {
-        let tmuxSession = TmuxSession(sessionName: shellTmuxSessionName, worktreePath: worktreePath, registry: .shared)
-        try await tmuxSession.ensureBaseSession()
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

@@ -1,108 +1,21 @@
-# Roadmap pane redesign
+# Roadmap pane redesign — validation
 
-Minimal list + detail, driven by the README.
+## Try it
 
-> "the README, reshaped to optimize for this usecase"
-
-## What to build
-
-Replace the current fat-card roadmap view with a tight list/detail pattern. The roadmap pane becomes a minimal list (title + priority per row). Detail lives in a separate multiplexer pane (`roadmapDetail`) showing the selected item's markdown. The wave README first paragraph becomes the sidebar tagline.
-
-## Data structures
-
-```swift
-// Shared selection state — lives in environment, read by both panes
-@Observable class RoadmapSelection {
-    var selectedItemId: String?
-    var selectedWaveId: String?
-}
-
-// New pane type added to PaneType enum
-case roadmapDetail  // shows selected roadmap item's markdown + play button
+```bash
+swift test --package-path swift
+cd swift && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -only-testing:ConcertoTests
+uv run python scripts/concerto-dev.py run-debug
 ```
 
-`RoadmapItem`, `RoadmapPriority`, `WaveContent` — unchanged.
+In the app, open any wave with roadmap items and verify:
 
-## Key functions
-
-### RoadmapPaneView (list)
-
-Rewrite `RoadmapPaneView` in `MultiplexerView.swift`. Strip it down to tight rows:
-
-```swift
-struct RoadmapRowView: View {
-    let item: RoadmapItem
-    let isSelected: Bool
-    let isHovered: Bool
-    let waveIsRunning: Bool
-
-    var body: some View {
-        HStack {
-            Text(item.title)
-                .foregroundStyle(item.isShipped ? palette.textSecondary : palette.text)
-                .strikethrough(item.isShipped)
-
-            Spacer()
-
-            if isHovered && !item.isShipped {
-                // play button (ingest & build)
-            }
-
-            priorityMenu(for: item)  // dropdown, same as today
-        }
-    }
-}
-```
-
-- Title left, priority right, no badges/icons/content preview
-- Shipped items: dimmed + strikethrough, sorted below unshipped
-- Play button: appears on hover only, inline with the row
-- Selected row: highlighted background, updates `RoadmapSelection.selectedItemId`
-- Priority: inline dropdown menu on the priority text (same interaction as today)
-
-### Keyboard navigation
-
-The list pane captures focus and responds to:
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Select next item |
-| `k` / `↑` | Select previous item |
-| `Enter` | Ingest & build selected item |
-
-```swift
-.onKeyPress(.downArrow) { selectNext(); return .handled }
-.onKeyPress(.upArrow) { selectPrevious(); return .handled }
-.onKeyPress(characters: "j") { selectNext(); return .handled }
-.onKeyPress(characters: "k") { selectPrevious(); return .handled }
-.onKeyPress(.return) { ingestSelected(); return .handled }
-```
-
-### RoadmapDetailPaneView (new)
-
-New pane type in the multiplexer. Reads `RoadmapSelection` from environment:
-
-- Full markdown rendering of the selected item's `.md` file
-- Play button always visible (not hover-gated)
-- Empty state when nothing selected: "Select a roadmap item"
-- Updates reactively when selection changes
-
-### README tagline extraction
-
-`WaveContentParser` changes how it extracts the sidebar tagline:
-
-- **New behavior:** first paragraph of the README (text before the first blank line, skipping any `#` heading) = `wave.visionTagline`
-- **Backwards compat:** if the README has the old `## Vision` section and no leading paragraph, fall back to extracting from that section
-
-### ReadmePaneView
-
-Stays as-is for now. It shows the structured README sections. Can be revisited later — this change is about the roadmap, not killing the README pane.
-
-## Constraints
-
-- Pane communication goes through `RoadmapSelection` in the environment — multiplexer panes don't know about each other
-- Keyboard navigation must not conflict with multiplexer-level shortcuts
-- README parser must handle both old format (## Vision section) and new format (first paragraph) gracefully
+- the left pane is a compact roadmap list with title + priority only
+- shipped items are dimmed, struck through, and sorted below planned items
+- hovering a planned item reveals the inline play button
+- `j`/`k`, `↑`/`↓`, and `Return` work in the roadmap list
+- selecting a row updates the **Roadmap Detail** pane with full markdown and the always-visible **Ingest & build** button
+- the wave sidebar tagline comes from the README opening paragraph when present
 
 ## Done when
 

@@ -40,8 +40,7 @@ struct WaveRowViewTests {
         WaveRow(
             wave: wave,
             isSelected: isSelected,
-            onSelect: {},
-            isEditingAnyName: .constant(false)
+            onSelect: {}
         )
     }
 

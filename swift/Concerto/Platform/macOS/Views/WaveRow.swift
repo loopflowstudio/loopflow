@@ -9,38 +9,17 @@ struct WaveRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
-    var onRename: ((String) -> Void)? = nil
-    @Binding var isEditingAnyName: Bool
 
     @State private var isHovering = false
-    @State private var isEditingName = false
-    @State private var editingName = ""
-    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                // Display name (click to edit)
-                if isEditingName {
-                    TextField("Wave name", text: $editingName)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .textFieldStyle(.plain)
-                        .focused($isNameFocused)
-                        .onSubmit { commitNameEdit() }
-                        .onExitCommand { cancelNameEdit() }
-                        .accessibilityIdentifier("wave-name-edit")
-                } else {
-                    Text(wave.displayName)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("wave-name")
-                        .onTapGesture {
-                            guard isSelected else { return }
-                            startNameEdit()
-                        }
-                }
+                Text(wave.displayName)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("wave-name")
 
                 Spacer()
 
@@ -147,43 +126,6 @@ struct WaveRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Wave: \(wave.displayName)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .onChange(of: isNameFocused) { _, focused in
-            if !focused && isEditingName {
-                commitNameEdit()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
-            if isSelected {
-                startNameEdit()
-            }
-        }
-    }
-
-    // MARK: - Name Editing
-
-    private func startNameEdit() {
-        editingName = wave.name
-        isEditingName = true
-        isEditingAnyName = true
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(50))
-            isNameFocused = true
-        }
-    }
-
-    private func commitNameEdit() {
-        let newName = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
-        isEditingName = false
-        isEditingAnyName = false
-        isNameFocused = false
-        guard !newName.isEmpty, newName != wave.name else { return }
-        onRename?(newName)
-    }
-
-    private func cancelNameEdit() {
-        isEditingName = false
-        isEditingAnyName = false
-        isNameFocused = false
     }
 
     /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").

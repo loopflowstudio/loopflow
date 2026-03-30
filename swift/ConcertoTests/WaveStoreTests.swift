@@ -360,6 +360,42 @@ struct WaveStoreOptimisticTests {
         #expect(store.wave(for: "pending-1")?.name == "pending wave")
     }
 
+    @Test("setAll keeps existing sidebar order when server refresh order changes")
+    func setAllKeepsExistingOrderAcrossRefresh() {
+        let store = WaveStore()
+        store.setAll([
+            makeWave(id: "wave-1", name: "one"),
+            makeWave(id: "wave-2", name: "two"),
+            makeWave(id: "wave-3", name: "three"),
+        ])
+
+        store.setAll([
+            makeWave(id: "wave-3", name: "three"),
+            makeWave(id: "wave-1", name: "one"),
+            makeWave(id: "wave-2", name: "two"),
+        ])
+
+        #expect(store.ordered.map(\.id) == ["wave-1", "wave-2", "wave-3"])
+        #expect(store.groups.idle.map(\.id) == ["wave-1", "wave-2", "wave-3"])
+    }
+
+    @Test("setAll appends newly discovered waves after existing ones")
+    func setAllAppendsNewWaves() {
+        let store = WaveStore()
+        store.setAll([
+            makeWave(id: "wave-1", name: "one"),
+            makeWave(id: "wave-2", name: "two"),
+        ])
+
+        store.setAll([
+            makeWave(id: "wave-3", name: "three"),
+            makeWave(id: "wave-1", name: "one"),
+            makeWave(id: "wave-2", name: "two"),
+        ])
+
+        #expect(store.ordered.map(\.id) == ["wave-1", "wave-2", "wave-3"])
+    }
+
     // MARK: - Responsive actions (optimistic status)
 
     @Test("optimistic run sets status to running, blocks events")

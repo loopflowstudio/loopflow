@@ -271,8 +271,6 @@ struct ContentView: View {
             post(.goToLastWave)
         case .createWave:
             post(.newWaveRequested)
-        case .editName:
-            post(.editWaveName)
         case .deleteWave:
             guard let wave = repoState.selectedWave else { return }
             performWaveAction("delete wave") {

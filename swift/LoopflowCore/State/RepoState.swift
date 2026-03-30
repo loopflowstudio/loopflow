@@ -504,6 +504,7 @@ public final class RepoState {
                         case .connected(let connected):
                             self.updateConnectionState(.connected)
                             self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
+                            self.preloadWaveContent(for: self.waves)
                             await self.refreshAttention()
                             await self.refreshTerminalSessions()
                             await self.refreshWorktrees()
@@ -691,6 +692,7 @@ public final class RepoState {
                 await refreshFlowsAsync()
             }
             waveStore.setAll(newWaves.map(makeWaveViewModel))
+            preloadWaveContent(for: waves)
             await refreshAttention()
             if let selectedWaveId {
                 loadWaveContent(for: selectedWaveId)
@@ -1089,12 +1091,6 @@ public final class RepoState {
         } catch {
             waveStore.rollback(wave)
             throw error
-        }
-    }
-
-    public func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
-        try await optimistic(wave.id, mutation: { $0.name = newName }) {
-            _ = try await self.waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         }
     }
 
@@ -1497,6 +1493,16 @@ public final class RepoState {
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
         _ = waveStore.applyOptimistic(waveId) { $0.content = content }
         waveStore.commitMutation(waveId)
+    }
+
+    private func preloadWaveContent(for waves: [WaveViewModel]) {
+        guard currentRepo != nil, repoTarget?.isRemote != true else {
+            return
+        }
+
+        for wave in waves {
+            loadWaveContent(for: wave.id)
+        }
     }
 
     public func fileDiff(waveId: String, path: String) async throws -> String {

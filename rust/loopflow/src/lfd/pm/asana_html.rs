@@ -43,14 +43,14 @@ struct HtmlElement {
     children: Vec<HtmlNode>,
 }
 
-pub fn markdown_to_asana_html(markdown: &str) -> String {
+pub(crate) fn markdown_to_asana_html(markdown: &str) -> String {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut index = 0;
     let blocks = parse_markdown_blocks(&lines, &mut index, 0, 0);
     format!("<body>{}</body>", render_markdown_blocks_html(&blocks))
 }
 
-pub fn asana_html_to_markdown(html: &str) -> String {
+pub(crate) fn asana_html_to_markdown(html: &str) -> String {
     let mut parser = HtmlParser::new(html);
     let nodes = parser.parse_nodes(None);
     render_html_nodes_markdown(&nodes, 0).trim_end().to_string()

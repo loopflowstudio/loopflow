@@ -47,6 +47,12 @@ Flows are suitable for `workers > 1` when they start with a coordination step (l
 
 Flows without coordination (like `garden`) are single-track — multiple workers would produce redundant runs. The system doesn't enforce this, but it's the design contract: `workers > 1` means "this flow has a coordination mechanism at the front."
 
+### Current ingest coordination state
+
+Concurrent ingest shipped with two layers: PM-backed waves try `pm_try_claim` first (provider-native assignment), non-PM waves use a PID-based file lock to serialize picks. Both sort local items by `priority` → `rank` → alphabetical.
+
+Remaining gap: PM adapters don't yet translate provider-native ordering signals (Linear's `prioritySortOrder`, Asana's custom fields, Notion's database properties) into local `priority`/`rank` frontmatter during pull. The local ordering contract is established but depends on manually-authored frontmatter until adapters normalize automatically.
+
 ## Fields removed
 
 | Old field | Replacement |

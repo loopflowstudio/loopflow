@@ -169,8 +169,6 @@ impl Store {
         Ok(())
     }
 
-
-
     pub async fn update_wave_cron_last_triggered(
         &self,
         cron_id: &LfdId,

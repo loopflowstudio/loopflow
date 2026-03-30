@@ -106,13 +106,13 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::And { branches } => {
+        FlowItem::And { branches, .. } => {
             assert_eq!(branches.len(), 2);
         }
         _ => panic!("expected and"),
     }
     match &flow.items[1] {
-        FlowItem::And { branches } => {
+        FlowItem::And { branches, .. } => {
             assert_eq!(branches.len(), 2);
         }
         _ => panic!("expected and"),

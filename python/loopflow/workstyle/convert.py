@@ -429,7 +429,7 @@ def _cleanup_imported_artifacts(text: str) -> str:
 def _rewrite_imported_references(text: str) -> str:
     rewritten = re.sub(
         r"~/.claude/skills/gstack/([a-z0-9-]+)/SKILL\.md",
-        lambda match: f".lf/workstyles/gstack/steps/{_step_name(match.group(1))}.md",
+        lambda match: f".lf/steps/gstack/{_step_name(match.group(1))}.md",
         text,
     )
 

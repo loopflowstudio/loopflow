@@ -535,7 +535,8 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         return Err(err);
     }
 
-    let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
+    let synth_step = fork.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
+    let synthesize_result = crate::lf::commands::run::run(Some(synth_step), message, cli);
     cleanup_fork_artifacts(repo, &worktrees);
 
     synthesize_result?;

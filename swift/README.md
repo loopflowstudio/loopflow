@@ -156,10 +156,13 @@ Repo windows now open into a queue view when no wave is selected:
 
 Selected waves now open into a multiplexer workspace:
 
-- Default panes show **Roadmap**, **Runs**, and a Ghostty-backed **Terminal**
-- Roadmap cards show inline summaries, let you change priority, and can ingest + run a specific item from the play button
-- Cmd+K switches waves and opens or focuses panes like **README** and **Launcher**
-- Waves without worktrees still keep roadmap/readme/runs panes available; only terminal-style panes show a worktree placeholder
+- Default panes show a minimal **Roadmap** list, **Roadmap Detail**, and a Ghostty-backed **Terminal**
+- Roadmap rows keep just the title and priority, sort shipped items to the bottom, and reveal an inline play button on hover
+- The selected roadmap item renders its full markdown in **Roadmap Detail**, with an always-visible **Ingest & build** action
+- `j`/`k`, `↑`/`↓`, and `Return` work directly in the roadmap list for keyboard-first triage
+- Wave taglines now come from the opening README paragraph when present, with `## Vision` still supported as a fallback
+- Cmd+K switches waves and opens or focuses panes like **README**, **Runs**, and **Launcher**
+- Waves without worktrees still keep roadmap/readme/detail panes available; only terminal-style panes show a worktree placeholder
 - Interactive sessions still take over the workspace when a flow needs input
 
 ## Session quote replies (macOS)

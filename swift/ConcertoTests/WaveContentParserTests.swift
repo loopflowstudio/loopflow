@@ -75,6 +75,61 @@ struct WaveContentParserTests {
         #expect(content?.roadmapItems[1].isShipped == false)
     }
 
+    @Test("uses the first README paragraph as vision when present")
+    func usesLeadingParagraphAsVision() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("tagline-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        let readme = """
+        # Tagline Wave
+
+        Agents that remember.
+        Work that compounds.
+
+        ## Strategy
+        Start with the README.
+        """
+        try readme.write(to: waveDir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let content = try #require(WaveContentParser.parse(repoRoot: repoRoot, waveName: "tagline-wave"))
+
+        #expect(content.vision == "Agents that remember.\nWork that compounds.")
+        #expect(content.strategy == "Start with the README.")
+    }
+
+    @Test("skips leading README headings before the tagline paragraph")
+    func skipsLeadingHeadingsBeforeVisionParagraph() throws {
+        let repoRoot = try makeTempRepo()
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let waveDir = repoRoot
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent("heading-wave", isDirectory: true)
+        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+
+        let readme = """
+        # Heading Wave
+
+        ## Overview
+
+        Agents that remember.
+        Work that compounds.
+
+        ## Vision
+        Legacy fallback.
+        """
+        try readme.write(to: waveDir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let content = try #require(WaveContentParser.parse(repoRoot: repoRoot, waveName: "heading-wave"))
+
+        #expect(content.vision == "Agents that remember.\nWork that compounds.")
+    }
+
     @Test("returns nil when wave has no README sections or roadmap")
     func returnsNilForEmptyWaveContent() throws {
         let repoRoot = try makeTempRepo()

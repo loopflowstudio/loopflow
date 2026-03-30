@@ -10,9 +10,11 @@ notion_id: 32af8f99-3d81-818c-af27-c6add76d0279
 
 ## Context
 
-The core lifecycle surface shipped. Concerto can create, configure (flow/area/direction/agent/triggers), start/stop, delete/rename, land/next, and view PRs. The workspace multiplexer provides launcher, runs, roadmap, terminal, and other panes in a persistent binary split tree per wave. Roadmap cards are now actionable (inline content preview, priority editing via file rename, play button for targeted ingest + flow run). `WaveSidebar` supports creation, rename, and deletion via context menu.
+The core lifecycle surface shipped. Concerto can create, configure (flow/area/direction/agent/triggers), start/stop, delete/rename, land/next, and view PRs. The workspace multiplexer provides launcher, runs, roadmap list, roadmap detail, terminal, and other panes in a persistent binary split tree per wave. The default layout is roadmap list (left, 32%) + roadmap detail + terminal (right vertical split). Roadmap is now a compact selectable list (title + priority per row, shipped items dimmed and sorted last, hover-to-play, `j`/`k`/arrow/`Return` keyboard navigation). Selecting an item updates the detail pane with full markdown rendering and an always-visible ingest/build action. Cross-pane state flows through a shared `RoadmapSelection` environment object. Priority editing remains inline. `WaveSidebar` supports creation, rename, and deletion via context menu.
 
 Multi-run display exists: `WaveRunsTab` shows all runs for a wave sorted by iteration, with combine-PRs action for multiple open PRs. `FlowProgressPills` shows step progress during a running flow. Worktree names appear as read-only metadata in run detail rows.
+
+Note: roadmap keyboard navigation and list/detail selection have model/parser test coverage but no dedicated UI test yet.
 
 Two gaps remain before the "full lifecycle without touching the terminal" finish line is crossed:
 

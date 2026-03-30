@@ -36,19 +36,19 @@ public final class MultiplexerStore {
 
     public func defaultLayout(for wave: WaveViewModel) -> LayoutNode {
         let roadmap = makePane(type: .roadmap, for: wave.id)
-        let runs = makePane(type: .runs, for: wave.id)
+        let roadmapDetail = makePane(type: .roadmapDetail, for: wave.id)
         let terminal = makePane(type: .terminal, for: wave.id)
 
         return .split(
             .horizontal,
-            first: .split(
+            first: .leaf(roadmap),
+            second: .split(
                 .vertical,
-                first: .leaf(roadmap),
-                second: .leaf(runs),
-                ratio: 0.58
+                first: .leaf(roadmapDetail),
+                second: .leaf(terminal),
+                ratio: 0.62
             ),
-            second: .leaf(terminal),
-            ratio: 0.42
+            ratio: 0.32
         )
     }
 

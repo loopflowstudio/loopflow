@@ -179,7 +179,7 @@ struct MultiplexerStoreTests {
         #expect(layout.allPanes.first?.config.terminalSessionName == "lf-wave-1-\(layout.allPanes.first?.id ?? "")")
     }
 
-    @Test("workspace default layout uses roadmap runs and terminal panes")
+    @Test("workspace default layout uses roadmap detail and terminal panes")
     @MainActor
     func workspaceDefaultLayout() {
         let store = makeStore()
@@ -189,7 +189,7 @@ struct MultiplexerStoreTests {
 
         #expect(layout.allPanes.count == 3)
         #expect(paneTypes.contains(.roadmap))
-        #expect(paneTypes.contains(.runs))
+        #expect(paneTypes.contains(.roadmapDetail))
         #expect(paneTypes.contains(.terminal))
         #expect(store.pane(ofType: .terminal, for: wave.id)?.config.terminalSessionName?.hasPrefix("lf-\(wave.id)-") == true)
     }

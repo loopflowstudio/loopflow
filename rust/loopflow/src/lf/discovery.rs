@@ -98,7 +98,10 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "release-notes",
         ],
     ),
-    ("Garden", &["garden/scan", "garden/assess", "garden/wave-report"]),
+    (
+        "Garden",
+        &["garden/scan", "garden/assess", "garden/wave-report"],
+    ),
     ("Wave", &["wave/mutate", "wave/review"]),
     (
         "VSM",

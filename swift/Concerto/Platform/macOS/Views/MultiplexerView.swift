@@ -1,6 +1,6 @@
 // Wave multiplexer — recursive split layout with pane-scoped tmux-backed terminals.
-// The workspace persists per wave and surfaces roadmap/readme/runs/launcher panes
-// alongside terminal, diff, markdown, and launchpad panes.
+// The workspace persists per wave and surfaces roadmap list/detail, readme, runs,
+// and launcher panes alongside terminal, diff, markdown, and launchpad panes.
 
 import AppKit
 import SwiftUI
@@ -1227,7 +1227,7 @@ extension PaneType {
     }
 }
 
-private func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
+func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
     items.filter { !$0.isShipped } + items.filter(\.isShipped)
 }
 

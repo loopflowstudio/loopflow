@@ -3,7 +3,7 @@ mode: manual
 workers: 0
 crons:
 - flow: garden
-  schedule: "0 0 * * *"
+  schedule: 0 0 * * *
 area:
 - wave/model/
 - wave/macos/
@@ -15,3 +15,5 @@ direction:
 - clarity
 pm:
   linear_project: bb56cb54-560c-470d-91eb-f49bd8e23f07
+  provider: asana
+  asana_project: '1213879275965753'

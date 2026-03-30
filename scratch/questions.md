@@ -1,3 +1,0 @@
-# Open questions
-
-(none)

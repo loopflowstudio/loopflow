@@ -30,7 +30,7 @@ Three launch workstyles: **lfjack** (loopflow native), **vsm** (governance), **g
 
 - gstack's SKILL.md format has substantial preamble machinery (telemetry, update checks, session tracking). The converter must strip this cleanly without losing prompt content.
 - gstack moves fast (v0.12 in two weeks from creation). Sync tooling needs to handle format changes gracefully.
-- Some gstack skills depend on the browser daemon — those won't work without it. Need clear error messages.
+- Some gstack skills depend on the browser daemon — `browse`, `qa`, `connect-chrome`, `setup-browser-cookies` won't work without it. Imported steps now reference `.lf/steps/gstack/` paths but the actual binaries and helper scripts aren't imported. Need separate asset packaging or clear runtime errors.
 - Converting style docs into directions may reveal that "voice" is too narrow a concept. The imported document may need reshaping to fit loopflow's direction model cleanly.
 - The converter performs opinionated reference rewriting and telemetry stripping. Upstream format changes may break these rules — sync tooling needs to handle this gracefully.
 

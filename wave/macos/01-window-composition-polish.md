@@ -1,5 +1,4 @@
 ---
-asana_id: '1213879275802077'
 notion_id: 32af8f99-3d81-81c8-a089-d47185436add
 ---
 # Window Composition — Polish

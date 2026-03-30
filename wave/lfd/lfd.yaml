@@ -10,3 +10,4 @@ direction:
 - simplicity
 pm:
   provider: asana
+  asana_project: '1213877387361684'

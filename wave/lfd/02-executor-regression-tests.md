@@ -1,3 +1,6 @@
+---
+notion_id: 333f8f99-3d81-819a-bede-f1f43c596b22
+---
 # 02: Executor Regression Tests
 
 **Finish line:** A test suite pins parity between `CliExecutor` and `DaemonFlowExecutor` for the cases that matter: serialized vs parallel waves, queued activations, CI-fix runs, cancellation, failure propagation, and run-scoped overrides.

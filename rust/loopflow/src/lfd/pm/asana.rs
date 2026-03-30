@@ -310,7 +310,6 @@ impl PmProvider for AsanaClient {
             .option_gid(PriorityBucket::from_rank(item.rank))
             .to_string();
         let html_notes = markdown_to_asana_html(&item.description);
-        eprintln!("DEBUG create_item name={:?} html_notes={:?}", item.name, html_notes);
         let mut data = Map::new();
         data.insert("name".to_string(), json!(item.name));
         data.insert("html_notes".to_string(), json!(html_notes));
@@ -346,7 +345,7 @@ impl PmProvider for AsanaClient {
         }
 
         let body = json!({ "data": data });
-        let path = task_path(item_id);
+        let path = format!("/tasks/{item_id}");
         let _: AsanaResponse<Value> = self
             .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
             .await?;
@@ -357,7 +356,7 @@ impl PmProvider for AsanaClient {
         let body = AsanaRequest {
             data: UpdateTaskRequest::completed(),
         };
-        let path = task_path(item_id);
+        let path = format!("/tasks/{item_id}");
         let _: AsanaResponse<Value> = self
             .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
             .await?;
@@ -409,18 +408,15 @@ struct CreateTeamRequest<'a> {
 }
 
 #[derive(Serialize)]
-struct UpdateTaskRequest<'a> {
+struct UpdateTaskRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     completed: Option<bool>,
-    #[serde(skip_serializing)]
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> UpdateTaskRequest<'a> {
+impl UpdateTaskRequest {
     fn completed() -> Self {
         Self {
             completed: Some(true),
-            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -490,9 +486,8 @@ impl AsanaTask {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct AsanaCustomFieldValue {
-    gid: String,
     #[serde(default)]
     resource_subtype: String,
     #[serde(default)]
@@ -501,12 +496,12 @@ struct AsanaCustomFieldValue {
     enum_options: Vec<AsanaEnumOption>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct AsanaCustomFieldSetting {
     custom_field: AsanaCustomFieldMetadata,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct AsanaCustomFieldMetadata {
     gid: String,
     #[serde(default)]
@@ -515,14 +510,14 @@ struct AsanaCustomFieldMetadata {
     enum_options: Vec<AsanaEnumOption>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct AsanaEnumOption {
     gid: String,
     #[serde(default)]
     name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct AsanaPriorityField {
     gid: String,
     options: [String; 4],
@@ -553,16 +548,19 @@ impl AsanaPriorityField {
         })
     }
 
-    fn from_value(field: AsanaCustomFieldValue) -> Option<Self> {
-        Self::from_metadata(AsanaCustomFieldMetadata {
-            gid: field.gid,
-            resource_subtype: field.resource_subtype,
-            enum_options: field.enum_options,
-        })
-    }
-
     fn priority_from_value(field: &AsanaCustomFieldValue) -> Option<PriorityBucket> {
-        Self::from_value(field.clone())?;
+        if field.resource_subtype != "enum" {
+            return None;
+        }
+        let mut buckets = [false; 4];
+        for option in &field.enum_options {
+            if let Some(bucket) = PriorityBucket::from_semantic_label(&option.name) {
+                buckets[usize::from(bucket.order())] = true;
+            }
+        }
+        if buckets.into_iter().any(|present| !present) {
+            return None;
+        }
         let current = field.enum_value.as_ref()?;
         PriorityBucket::from_semantic_label(&current.name)
     }
@@ -641,10 +639,6 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
     } else {
         format!("asana request failed with status {status}: {body_text}")
     }
-}
-
-fn task_path(item_id: &str) -> String {
-    format!("/tasks/{item_id}")
 }
 
 #[cfg(test)]

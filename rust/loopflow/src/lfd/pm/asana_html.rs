@@ -26,7 +26,6 @@ enum MarkdownBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MarkdownListMarker {
-    indent: usize,
     kind: MarkdownListKind,
     content: String,
 }
@@ -78,10 +77,7 @@ fn parse_markdown_blocks(
         }
 
         let trimmed = line[current_indent..].trim_end();
-        if depth > 0
-            && current_indent > indent
-            && parse_markdown_list_marker(trimmed, current_indent).is_some()
-        {
+        if depth > 0 && current_indent > indent && parse_markdown_list_marker(trimmed).is_some() {
             break;
         }
 
@@ -90,7 +86,7 @@ fn parse_markdown_blocks(
             *index += 1;
             continue;
         }
-        if parse_markdown_list_marker(trimmed, current_indent).is_some() {
+        if parse_markdown_list_marker(trimmed).is_some() {
             blocks.extend(parse_markdown_list_blocks(
                 lines,
                 index,
@@ -120,7 +116,7 @@ fn parse_markdown_paragraph(lines: &[&str], index: &mut usize, indent: usize) ->
         }
 
         let trimmed = line[current_indent..].trim_end();
-        if is_markdown_block_boundary(trimmed, current_indent) {
+        if is_markdown_block_boundary(trimmed) {
             break;
         }
 
@@ -145,9 +141,8 @@ fn parse_markdown_scalar_block(line: &str) -> Option<MarkdownBlock> {
     None
 }
 
-fn is_markdown_block_boundary(line: &str, indent: usize) -> bool {
-    parse_markdown_scalar_block(line).is_some()
-        || parse_markdown_list_marker(line, indent).is_some()
+fn is_markdown_block_boundary(line: &str) -> bool {
+    parse_markdown_scalar_block(line).is_some() || parse_markdown_list_marker(line).is_some()
 }
 
 fn push_markdown_line(content: &mut String, line: &str) {
@@ -178,10 +173,10 @@ fn parse_markdown_list_blocks(
         }
 
         let trimmed = line[current_indent..].trim_end();
-        let Some(marker) = parse_markdown_list_marker(trimmed, current_indent) else {
+        let Some(marker) = parse_markdown_list_marker(trimmed) else {
             break;
         };
-        if marker.indent != indent {
+        if current_indent != indent {
             break;
         }
 
@@ -192,10 +187,10 @@ fn parse_markdown_list_blocks(
             let current_line = lines[*index];
             let current_indent = count_indent(current_line);
             let current_trimmed = current_line[current_indent..].trim_end();
-            let Some(marker) = parse_markdown_list_marker(current_trimmed, current_indent) else {
+            let Some(marker) = parse_markdown_list_marker(current_trimmed) else {
                 break;
             };
-            if marker.indent != indent || marker.kind != group_kind {
+            if current_indent != indent || marker.kind != group_kind {
                 break;
             }
 
@@ -216,17 +211,13 @@ fn parse_markdown_list_blocks(
                 }
 
                 let trimmed_next = next[next_indent..].trim_end();
-                if let Some(child_marker) = parse_markdown_list_marker(trimmed_next, next_indent) {
+                if parse_markdown_list_marker(trimmed_next).is_some() {
                     if next_indent == indent {
                         break;
                     }
                     if next_indent > indent && depth == 0 {
-                        let child_blocks = parse_markdown_list_blocks(
-                            lines,
-                            index,
-                            child_marker.indent,
-                            depth + 1,
-                        );
+                        let child_blocks =
+                            parse_markdown_list_blocks(lines, index, next_indent, depth + 1);
                         for block in child_blocks {
                             if let MarkdownBlock::List(list) = block {
                                 children.push(list);
@@ -265,7 +256,7 @@ fn parse_markdown_list_blocks(
                 break;
             }
             let trimmed_next = next[next_indent..].trim_end();
-            let Some(next_marker) = parse_markdown_list_marker(trimmed_next, next_indent) else {
+            let Some(next_marker) = parse_markdown_list_marker(trimmed_next) else {
                 break;
             };
             if next_marker.kind != group_kind {
@@ -282,14 +273,13 @@ fn parse_markdown_list_blocks(
     blocks
 }
 
-fn parse_markdown_list_marker(line: &str, indent: usize) -> Option<MarkdownListMarker> {
+fn parse_markdown_list_marker(line: &str) -> Option<MarkdownListMarker> {
     if let Some(content) = line
         .strip_prefix("- ")
         .or_else(|| line.strip_prefix("* "))
         .or_else(|| line.strip_prefix("+ "))
     {
         return Some(MarkdownListMarker {
-            indent,
             kind: MarkdownListKind::Unordered,
             content: content.to_string(),
         });
@@ -298,7 +288,6 @@ fn parse_markdown_list_marker(line: &str, indent: usize) -> Option<MarkdownListM
     let digits = line.chars().take_while(|ch| ch.is_ascii_digit()).count();
     if digits > 0 && line[digits..].starts_with(". ") {
         return Some(MarkdownListMarker {
-            indent,
             kind: MarkdownListKind::Ordered,
             content: line[digits + 2..].to_string(),
         });
@@ -708,15 +697,19 @@ fn render_html_block_element_markdown(element: &HtmlElement, indent: usize) -> S
                 format!("{prefix}{text}\n\n")
             }
         }
-        "ul" => render_html_list_markdown(&element.children, false, indent),
-        "ol" => render_html_list_markdown(&element.children, true, indent),
-        "li" => render_html_list_item_markdown(element, false, indent, 1),
+        "ul" => render_html_list_markdown(&element.children, MarkdownListKind::Unordered, indent),
+        "ol" => render_html_list_markdown(&element.children, MarkdownListKind::Ordered, indent),
+        "li" => render_html_list_item_markdown(element, MarkdownListKind::Unordered, indent, 1),
         "hr" => format!("{prefix}---\n\n"),
         _ => render_html_nodes_markdown(&element.children, indent),
     }
 }
 
-fn render_html_list_markdown(children: &[HtmlNode], ordered: bool, indent: usize) -> String {
+fn render_html_list_markdown(
+    children: &[HtmlNode],
+    kind: MarkdownListKind,
+    indent: usize,
+) -> String {
     let mut rendered = String::new();
     let mut index = 1usize;
 
@@ -725,7 +718,7 @@ fn render_html_list_markdown(children: &[HtmlNode], ordered: bool, indent: usize
             HtmlNode::Text(text) if text.trim().is_empty() => {}
             HtmlNode::Element(element) if element.name == "li" => {
                 rendered.push_str(&render_html_list_item_markdown(
-                    element, ordered, indent, index,
+                    element, kind, indent, index,
                 ));
                 index += 1;
             }
@@ -744,7 +737,7 @@ fn render_html_list_markdown(children: &[HtmlNode], ordered: bool, indent: usize
             HtmlNode::Text(text) => {
                 let text = text.trim();
                 if !text.is_empty() {
-                    let marker = markdown_list_item_marker(ordered, index);
+                    let marker = markdown_list_item_marker(kind, index);
                     rendered.push_str(&format!("{}{}{}\n", " ".repeat(indent), marker, text));
                     index += 1;
                 }
@@ -760,11 +753,11 @@ fn render_html_list_markdown(children: &[HtmlNode], ordered: bool, indent: usize
 
 fn render_html_list_item_markdown(
     element: &HtmlElement,
-    ordered: bool,
+    kind: MarkdownListKind,
     indent: usize,
     index: usize,
 ) -> String {
-    let marker = markdown_list_item_marker(ordered, index);
+    let marker = markdown_list_item_marker(kind, index);
 
     let mut content = String::new();
     let mut nested = String::new();
@@ -774,14 +767,14 @@ fn render_html_list_item_markdown(
             HtmlNode::Element(child_element) if child_element.name == "ul" => {
                 nested.push_str(&render_html_list_markdown(
                     &child_element.children,
-                    false,
+                    MarkdownListKind::Unordered,
                     indent + 2,
                 ));
             }
             HtmlNode::Element(child_element) if child_element.name == "ol" => {
                 nested.push_str(&render_html_list_markdown(
                     &child_element.children,
-                    true,
+                    MarkdownListKind::Ordered,
                     indent + 2,
                 ));
             }
@@ -809,11 +802,10 @@ fn markdown_heading_marker(name: &str) -> Option<&'static str> {
     }
 }
 
-fn markdown_list_item_marker(ordered: bool, index: usize) -> String {
-    if ordered {
-        format!("{index}. ")
-    } else {
-        "- ".to_string()
+fn markdown_list_item_marker(kind: MarkdownListKind, index: usize) -> String {
+    match kind {
+        MarkdownListKind::Ordered => format!("{index}. "),
+        MarkdownListKind::Unordered => "- ".to_string(),
     }
 }
 

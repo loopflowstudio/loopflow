@@ -3,15 +3,21 @@ requires: scratch/<slug>.md (ingested wave item)
 produces: scratch/<slug>.md (elaborated design)
 default_agent: claude
 ---
-Transform a wave item into a bold, well-considered design.
+Research risks that could derail the work, then transform a wave item into a bold, well-considered design.
 
 ## Workflow
 
 1. **Understand the intent.** Read the ingested item. What problem does it solve? Who benefits?
 
-2. **Consider alternatives.** What are 2-3 different approaches? What are the tradeoffs? Don't settle for the first idea.
+2. **De-risk.** Before designing anything, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-3. **Research.** What are known solutions in this problem space? What patterns exist? What have others learned?
+   **Start with what's already flagged.** If the ingested item or wave README calls out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+
+   **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
+
+   The output of this step is concrete findings, not a worry list. "Linear's API doesn't support conditional assignment, so we need read-then-assign with conflict detection" — not "there might be API limitations."
+
+3. **Consider alternatives.** What are 2-3 different approaches? What are the tradeoffs? Don't settle for the first idea. Let the risks you found shape which alternatives are viable.
 
 4. **Imagine wild success.** The feature ships and users love it. What details made it great? What surprised you about how people use it?
 
@@ -35,6 +41,12 @@ Update `scratch/<slug>.md`:
 ## Approach
 
 <The chosen direction. Be specific.>
+
+## De-risking
+
+| Question | Finding | Impact on design |
+|----------|---------|-----------------|
+| ... | ... | ... |
 
 ## Alternatives considered
 

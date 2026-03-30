@@ -375,7 +375,13 @@ impl PmProvider for AsanaClient {
     }
 
     async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
-        // Assign to "me" (the API token owner) and leave a comment with the branch.
+        // Resolve our own user GID so we can verify the claim.
+        let me: AsanaResponse<AsanaGid> = self
+            .send_json(|| self.request(Method::GET, "/users/me", &[("opt_fields", "gid")]))
+            .await?;
+        let my_gid = me.data.gid;
+
+        // Assign to "me" (the API token owner).
         let path = format!("/tasks/{item_id}");
         let _: AsanaResponse<Value> = self
             .send_json(|| {
@@ -383,6 +389,19 @@ impl PmProvider for AsanaClient {
                     .json(&json!({ "data": { "assignee": "me" } }))
             })
             .await?;
+
+        // Optimistic verify: re-read the task and check we're still the assignee.
+        // Another worker may have assigned themselves between our write and this read.
+        let task: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", "assignee.gid")]))
+            .await?;
+        let actual_assignee = task.data.pointer("/assignee/gid").and_then(|v| v.as_str());
+        if actual_assignee != Some(&my_gid) {
+            return Err(PmError::Message(format!(
+                "item claimed by another assignee (expected {my_gid}, got {actual_assignee:?})"
+            )));
+        }
+
         // Record the branch as a comment since Asana has no native branch field.
         self.comment(item_id, &format!("Working branch: `{branch}`"))
             .await?;
@@ -1203,5 +1222,67 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[tokio::test]
+    async fn claim_item_verifies_assignee_after_assignment() {
+        let (base_url, requests) = test_server::spawn(vec![
+            // GET /users/me
+            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
+            // PUT /tasks/task-1 (assign)
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            // GET /tasks/task-1 (verify)
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "gid": "task-1", "assignee": { "gid": "user-42" } } }),
+            ),
+            // POST /tasks/task-1/stories (comment)
+            json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        client
+            .claim_item("task-1", "feature/test")
+            .await
+            .expect("claim should succeed when assignee matches");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests[0].method, "GET");
+        assert!(requests[0].path.contains("/users/me"));
+        assert_eq!(requests[1].method, "PUT");
+        assert_eq!(requests[2].method, "GET");
+        assert_eq!(requests[3].method, "POST");
+    }
+
+    #[tokio::test]
+    async fn claim_item_fails_when_another_assignee_wins() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            // GET /users/me
+            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
+            // PUT /tasks/task-1 (assign)
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            // GET /tasks/task-1 (verify — different assignee)
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "gid": "task-1", "assignee": { "gid": "user-99" } } }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        let error = client
+            .claim_item("task-1", "feature/test")
+            .await
+            .expect_err("claim should fail when another assignee wins");
+        assert!(error.to_string().contains("another assignee"));
     }
 }

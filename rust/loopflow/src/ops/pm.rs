@@ -1457,6 +1457,7 @@ fn read_local_items(
 
 fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapItemDocument {
     let mut frontmatter = RoadmapItemFrontmatter::default();
+    frontmatter.set_priority_rank(item.rank);
     frontmatter.set_id(provider, item.id.clone());
 
     RoadmapItemDocument {

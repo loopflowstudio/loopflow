@@ -15,6 +15,8 @@ const NOTION_BASE_URL: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2022-06-28";
 const DEFAULT_TEAM_NAME: &str = "Waves";
 const NOTION_PAGE_SIZE: usize = 100;
+const NOTION_TODO_STATUS: &str = "Todo";
+const NOTION_IN_PROGRESS_STATUS: &str = "In Progress";
 
 #[derive(Debug, Clone)]
 pub struct NotionClient {
@@ -269,11 +271,29 @@ impl NotionClient {
         })
     }
 
-    fn page_status_property(&self, done: bool) -> Value {
-        let name = if done { self.done_value() } else { "Todo" };
+    fn page_status_property_name(&self, name: &str) -> Value {
         json!({
             self.status_property_name(): {
                 "status": { "name": name }
+            }
+        })
+    }
+
+    fn page_status_property(&self, done: bool) -> Value {
+        let name = if done {
+            self.done_value()
+        } else {
+            NOTION_TODO_STATUS
+        };
+        self.page_status_property_name(name)
+    }
+
+    fn page_priority_property(&self, rank: u32) -> Value {
+        json!({
+            self.priority_property_name(): {
+                "select": {
+                    "name": PriorityBucket::from_rank(rank).semantic_label()
+                }
             }
         })
     }
@@ -282,6 +302,7 @@ impl NotionClient {
         let mut properties = Map::new();
         properties.extend(value_object(self.page_title_property(&item.name)));
         properties.extend(value_object(self.page_status_property(false)));
+        properties.extend(value_object(self.page_priority_property(item.rank)));
         properties
     }
 
@@ -339,7 +360,8 @@ impl NotionClient {
                         self.status_property_name(): {
                             "status": {
                                 "options": [
-                                    { "name": "Todo", "color": "default" },
+                                    { "name": NOTION_TODO_STATUS, "color": "default" },
+                                    { "name": NOTION_IN_PROGRESS_STATUS, "color": "blue" },
                                     { "name": self.done_value(), "color": "green" }
                                 ]
                             }
@@ -391,19 +413,30 @@ impl PmProvider for NotionClient {
         for page in pages {
             let id = value_string(&page, "id")?;
             let description = self.fetch_page_body_markdown(&id).await?;
+            let status = property_select_name(
+                item_property(&page, self.status_property_name()).unwrap_or(&Value::Null),
+            );
             items.push(PmItem {
                 id,
                 name: page_item_name(&page, self.title_property_name())?,
                 description,
-                rank: 0,
+                rank: page_item_rank(&page, self.priority_property_name()),
                 completed: page_item_completed(
                     &page,
                     self.status_property_name(),
                     self.done_value(),
                 ),
-                assignee: None,
+                assignee: status
+                    .as_deref()
+                    .filter(|value| value.eq_ignore_ascii_case(NOTION_IN_PROGRESS_STATUS))
+                    .map(str::to_string),
             });
         }
+        items.sort_by(|left, right| {
+            left.rank
+                .cmp(&right.rank)
+                .then_with(|| left.name.cmp(&right.name))
+        });
         Ok(items)
     }
 
@@ -426,6 +459,9 @@ impl PmProvider for NotionClient {
         let mut properties = Map::new();
         if let Some(name) = &update.name {
             properties.extend(value_object(self.page_title_property(name)));
+        }
+        if let Some(rank) = update.rank {
+            properties.extend(value_object(self.page_priority_property(rank)));
         }
 
         if !properties.is_empty() {
@@ -483,7 +519,21 @@ impl PmProvider for NotionClient {
         Ok(())
     }
 
-    async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
+    async fn claim_item(&self, item_id: &str, _branch: &str) -> PmResult<()> {
+        // Best-effort notification: mark the page "In Progress" so other workers
+        // see it as assigned on their next list_items call. Notion doesn't support
+        // conditional writes or claimant identity on the status field, so two
+        // concurrent claims can both succeed. Duplicate work is caught at PR time.
+        let response = self
+            .request(Method::PATCH, &format!("/pages/{item_id}"))
+            .json(&json!({
+                "properties": self.page_status_property_name(NOTION_IN_PROGRESS_STATUS)
+            }))
+            .send()
+            .await
+            .map_err(|err| PmError::Message(format!("notion request failed: {err}")))?;
+
+        let _ = parse_response(response).await?;
         Ok(())
     }
 }
@@ -588,6 +638,17 @@ fn page_item_completed(page: &Value, status_property: &str, done_value: &str) ->
     }
 
     property_select_name(property).is_some_and(|name| name.eq_ignore_ascii_case(done_value))
+}
+
+fn page_item_rank(page: &Value, priority_property: &str) -> u32 {
+    let Some(property) = item_property(page, priority_property) else {
+        return 0;
+    };
+
+    property_select_name(property)
+        .and_then(|name| PriorityBucket::from_semantic_label(&name))
+        .map(PriorityBucket::rank)
+        .unwrap_or(0)
 }
 
 fn property_select_name(property: &Value) -> Option<String> {
@@ -830,6 +891,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "page-1");
         assert_eq!(items[0].name, "Build it");
+        assert_eq!(items[0].rank, 1);
         assert!(items[0].completed);
         assert_eq!(items[0].description, "First paragraph");
 
@@ -867,6 +929,8 @@ mod tests {
         let requests = requests.lock().await.clone();
         assert_eq!(requests[0].path, "/pages");
         assert!(requests[0].body.contains("\"database_id\":\"db-1\""));
+        assert!(requests[0].body.contains("\"Priority\""));
+        assert!(requests[0].body.contains("Urgent"));
         assert_eq!(requests[1].path, "/blocks/page-1/children");
         assert!(requests[1].body.contains("heading_1"));
         assert!(requests[1].body.contains("paragraph"));
@@ -899,7 +963,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("New title".to_string()),
                     description: Some("Updated body".to_string()),
-                    rank: None,
+                    rank: Some(2),
                 },
             )
             .await
@@ -908,6 +972,8 @@ mod tests {
         let requests = requests.lock().await.clone();
         assert_eq!(requests[0].path, "/pages/page-1");
         assert!(requests[0].body.contains("New title"));
+        assert!(requests[0].body.contains("\"Priority\""));
+        assert!(requests[0].body.contains("Medium"));
         assert_eq!(requests[1].path, "/blocks/page-1/children");
         assert_eq!(requests[2].method, "DELETE");
         assert_eq!(requests[2].path, "/blocks/block-1");
@@ -966,6 +1032,30 @@ mod tests {
         assert_eq!(request.path, "/comments");
         assert!(request.body.contains("\"page_id\":\"page-1\""));
         assert!(request.body.contains("Looks good"));
+    }
+
+    #[tokio::test]
+    async fn claim_item_marks_page_in_progress() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "id": "page-1" }),
+        )])
+        .await;
+        let client = NotionClient::with_base_url(
+            "secret-token".to_string(),
+            NotionConfig::default(),
+            base_url,
+        );
+
+        client
+            .claim_item("page-1", "feature/test")
+            .await
+            .expect("claim item");
+
+        let request = requests.lock().await[0].clone();
+        assert_eq!(request.method, "PATCH");
+        assert_eq!(request.path, "/pages/page-1");
+        assert!(request.body.contains("In Progress"));
     }
 
     #[tokio::test]

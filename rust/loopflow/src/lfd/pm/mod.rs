@@ -174,11 +174,26 @@ pub trait PmProvider: Send + Sync {
     async fn complete_item(&self, item_id: &str) -> PmResult<()>;
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<()>;
     /// Claim an item: assign to the API token owner and set the working branch.
+    ///
+    /// Providers that support it should verify the assignment stuck (optimistic
+    /// concurrency). Return `Err` if another worker claimed the item first.
+    /// Providers without verification (Notion) treat claiming as best-effort
+    /// notification — duplicates are caught at PR time.
     async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RoadmapItemFrontmatter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<PriorityBucket>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asana_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -189,7 +204,14 @@ pub struct RoadmapItemFrontmatter {
 
 impl RoadmapItemFrontmatter {
     fn is_empty(&self) -> bool {
-        self.asana_id.is_none() && self.linear_id.is_none() && self.notion_id.is_none()
+        self.priority.is_none()
+            && self.rank.is_none()
+            && self.status.is_none()
+            && self.claimed_by.is_none()
+            && self.claimed_at.is_none()
+            && self.asana_id.is_none()
+            && self.linear_id.is_none()
+            && self.notion_id.is_none()
     }
 
     pub fn id_for(&self, provider: PmProviderKind) -> Option<&str> {
@@ -215,9 +237,20 @@ impl RoadmapItemFrontmatter {
             PmProviderKind::Notion => self.notion_id = None,
         }
     }
+
+    pub fn set_priority_rank(&mut self, rank: u32) {
+        self.priority = Some(PriorityBucket::from_rank(rank));
+        self.rank = None;
+    }
+
+    pub fn mark_in_progress(&mut self, claimed_by: String, claimed_at: String) {
+        self.status = Some("in-progress".to_string());
+        self.claimed_by = Some(claimed_by);
+        self.claimed_at = Some(claimed_at);
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RoadmapItemDocument {
     pub frontmatter: RoadmapItemFrontmatter,
     pub body: String,
@@ -469,6 +502,7 @@ mod tests {
             asana_id: Some("asa-1".to_string()),
             linear_id: Some("lin-1".to_string()),
             notion_id: Some("not-1".to_string()),
+            ..RoadmapItemFrontmatter::default()
         };
 
         frontmatter.clear_id(PmProviderKind::Asana);
@@ -482,5 +516,18 @@ mod tests {
 
         frontmatter.clear_id(PmProviderKind::Notion);
         assert_eq!(frontmatter.notion_id, None);
+    }
+
+    #[test]
+    fn roadmap_item_frontmatter_mark_in_progress_sets_claim_metadata() {
+        let mut frontmatter = RoadmapItemFrontmatter::default();
+        frontmatter.mark_in_progress("run-123".to_string(), "2026-03-29T12:00:00Z".to_string());
+
+        assert_eq!(frontmatter.status.as_deref(), Some("in-progress"));
+        assert_eq!(frontmatter.claimed_by.as_deref(), Some("run-123"));
+        assert_eq!(
+            frontmatter.claimed_at.as_deref(),
+            Some("2026-03-29T12:00:00Z")
+        );
     }
 }

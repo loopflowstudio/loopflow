@@ -4,15 +4,12 @@ import Foundation
 @Observable
 public final class RoadmapSelection {
     public var selectedItemId: String?
-    public var selectedWaveId: String?
 
-    public init(selectedItemId: String? = nil, selectedWaveId: String? = nil) {
+    public init(selectedItemId: String? = nil) {
         self.selectedItemId = selectedItemId
-        self.selectedWaveId = selectedWaveId
     }
 
-    public func select(itemId: String?, waveId: String) {
+    public func select(itemId: String?) {
         selectedItemId = itemId
-        selectedWaveId = waveId
     }
 }

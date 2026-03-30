@@ -358,7 +358,7 @@ private struct RoadmapPaneView: View {
     }
 
     private var selectedItemId: String? {
-        roadmapSelection.selectedWaveId == waveId ? roadmapSelection.selectedItemId : nil
+        roadmapSelection.selectedItemId
     }
 
     private var waveIsRunning: Bool {
@@ -489,21 +489,18 @@ private struct RoadmapPaneView: View {
 
     private func syncSelection() {
         guard !roadmapItems.isEmpty else {
-            if roadmapSelection.selectedWaveId == waveId {
-                roadmapSelection.select(itemId: nil, waveId: waveId)
-            }
+            roadmapSelection.select(itemId: nil)
             return
         }
 
-        let selectionStillValid = roadmapSelection.selectedWaveId == waveId
-            && roadmapItems.contains(where: { $0.id == roadmapSelection.selectedItemId })
+        let selectionStillValid = roadmapItems.contains(where: { $0.id == roadmapSelection.selectedItemId })
 
         guard !selectionStillValid else { return }
-        roadmapSelection.select(itemId: roadmapItems[0].id, waveId: waveId)
+        roadmapSelection.select(itemId: roadmapItems[0].id)
     }
 
     private func select(_ itemId: String) {
-        roadmapSelection.select(itemId: itemId, waveId: waveId)
+        roadmapSelection.select(itemId: itemId)
         isKeyboardFocused = true
     }
 
@@ -655,11 +652,8 @@ private struct RoadmapDetailPaneView: View {
     }
 
     private var selectedItem: RoadmapItem? {
-        guard roadmapSelection.selectedWaveId == waveId,
-              let selectedItemId = roadmapSelection.selectedItemId else {
-            return nil
-        }
-        return roadmapItems.first { $0.id == selectedItemId }
+        guard let selectedItemId = roadmapSelection.selectedItemId else { return nil }
+        return roadmapItems.first(where: { $0.id == selectedItemId })
     }
 
     private var waveIsRunning: Bool {
@@ -718,8 +712,8 @@ private struct RoadmapDetailPaneView: View {
                             .opacity((selectedItem.isShipped || waveIsRunning) ? 0.65 : 1)
                         }
 
-                        if let fileName = selectedItem.filePath.map({ URL(fileURLWithPath: $0).lastPathComponent }) {
-                            Text(fileName)
+                        if !selectedItem.fileName.isEmpty {
+                            Text(selectedItem.fileName)
                                 .font(Typography.caption())
                                 .foregroundStyle(palette.textSecondary)
                                 .textSelection(.enabled)

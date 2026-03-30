@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -287,20 +287,11 @@ def _remove_auto_generated_comments(body: str) -> str:
 
 def _extract_section_body(text: str, heading_prefix: str) -> str | None:
     lines = text.splitlines(keepends=True)
-    start = _find_section_heading(lines, heading_prefix)
+    start = _find_markdown_line(lines, lambda line: line.startswith(heading_prefix))
     if start is None:
         return None
 
-    end = len(lines)
-    in_fence = False
-    for index in range(start + 1, len(lines)):
-        if _is_fence_boundary(lines[index]):
-            in_fence = not in_fence
-            continue
-        if not in_fence and _SECTION_BREAK.match(lines[index]):
-            end = index
-            break
-
+    end = _find_section_end(lines, start)
     return "".join(lines[start + 1 : end]).strip() or None
 
 
@@ -312,16 +303,7 @@ def _strip_named_sections(text: str, heading_prefixes: tuple[str, ...]) -> str:
     while index < len(lines):
         line = lines[index]
         if any(line.startswith(prefix) for prefix in heading_prefixes):
-            index += 1
-            in_fence = False
-            while index < len(lines):
-                if _is_fence_boundary(lines[index]):
-                    in_fence = not in_fence
-                    index += 1
-                    continue
-                if not in_fence and _SECTION_BREAK.match(lines[index]):
-                    break
-                index += 1
+            index = _find_section_end(lines, index)
             continue
         kept.append(line)
         index += 1
@@ -467,25 +449,30 @@ def _cleanup_loopflow_integration_artifacts(text: str) -> str:
 
 
 def _find_first_top_level_heading(lines: list[str]) -> int | None:
+    return _find_markdown_line(lines, lambda line: _TOP_LEVEL_HEADING.match(line) is not None)
+
+
+def _find_markdown_line(lines: list[str], predicate: Callable[[str], bool]) -> int | None:
     in_fence = False
     for index, line in enumerate(lines):
         if _is_fence_boundary(line):
             in_fence = not in_fence
             continue
-        if not in_fence and _TOP_LEVEL_HEADING.match(line):
+        if not in_fence and predicate(line):
             return index
     return None
 
 
-def _find_section_heading(lines: list[str], heading_prefix: str) -> int | None:
+def _find_section_end(lines: list[str], start: int) -> int:
     in_fence = False
-    for index, line in enumerate(lines):
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
         if _is_fence_boundary(line):
             in_fence = not in_fence
             continue
-        if not in_fence and line.startswith(heading_prefix):
+        if not in_fence and _SECTION_BREAK.match(line):
             return index
-    return None
+    return len(lines)
 
 
 def _is_fence_boundary(line: str) -> bool:

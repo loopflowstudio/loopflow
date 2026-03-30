@@ -1,3 +1,6 @@
+---
+asana_id: '1213879918388232'
+---
 # Dependency Sync
 
 **Finish line:** `needs:` declarations on wave items round-trip as native dependencies in Asana, Linear, and Notion. A human looking at any of the three tools sees which items block which, without consulting the repo.

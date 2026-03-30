@@ -48,7 +48,7 @@ pub fn markdown_to_asana_html(markdown: &str) -> String {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut index = 0;
     let blocks = parse_markdown_blocks(&lines, &mut index, 0, 0);
-    render_markdown_blocks_html(&blocks)
+    format!("<body>{}</body>", render_markdown_blocks_html(&blocks))
 }
 
 pub fn asana_html_to_markdown(html: &str) -> String {
@@ -318,13 +318,13 @@ fn render_markdown_blocks_html(blocks: &[MarkdownBlock]) -> String {
 fn render_markdown_block_html(block: &MarkdownBlock) -> String {
     match block {
         MarkdownBlock::Heading(level, content) => {
-            format!(
-                "<h{level}>{}</h{level}>",
-                render_markdown_inline_html(content)
-            )
+            // Asana supports h1 and h2; h3 maps to h2
+            let tag = if *level <= 2 { *level } else { 2 };
+            format!("<h{tag}>{}</h{tag}>", render_markdown_inline_html(content))
         }
         MarkdownBlock::Paragraph(content) => {
-            format!("<p>{}</p>", render_markdown_inline_html(content))
+            // Asana doesn't support <p> — use inline text with trailing newline
+            format!("{}\n", render_markdown_inline_html(content))
         }
         MarkdownBlock::HorizontalRule => "<hr/>".to_string(),
         MarkdownBlock::List(list) => render_markdown_list_html(list),
@@ -1004,6 +1004,7 @@ mod tests {
         assert!(html.contains("<ul><li>bullet<ul><li>nested bullet</li></ul></li></ul>"));
         assert!(html.contains("<ol><li>numbered</li></ol>"));
         assert!(html.contains("<hr/>"));
+        assert!(!html.contains("<p>"));
         assert!(round_trip.contains("# Heading"));
         assert!(round_trip.contains("**bold**"));
         assert!(round_trip.contains("*italic*"));
@@ -1045,7 +1046,7 @@ mod tests {
 
         assert_eq!(
             html,
-            "<p>Paragraph with &lt;angle brackets&gt; and <a href=\"https://example.com?a=1&amp;b=&quot;two&quot;\">quote</a></p>"
+            "<body>Paragraph with &lt;angle brackets&gt; and <a href=\"https://example.com?a=1&amp;b=&quot;two&quot;\">quote</a>\n</body>"
         );
     }
 
@@ -1056,7 +1057,7 @@ mod tests {
 
         assert_eq!(
             html,
-            "<ul><li>parent<ul><li>child - grandchild</li></ul></li></ul>"
+            "<body><ul><li>parent<ul><li>child - grandchild</li></ul></li></ul></body>"
         );
         assert_eq!(markdown, "- parent\n  - child - grandchild");
     }
@@ -1064,5 +1065,22 @@ mod tests {
     #[test]
     fn html_to_markdown_handles_self_closing_hr() {
         assert_eq!(asana_html_to_markdown("<hr><hr/>"), "---\n\n---");
+    }
+
+    #[test]
+    fn markdown_to_html_wraps_in_body_and_uses_html_hr() {
+        let markdown = "# Title\n\nSome **bold** text.\n\n---\n\n- item one\n- item two\n";
+        let html = markdown_to_asana_html(markdown);
+
+        assert!(html.starts_with("<body>"));
+        assert!(html.ends_with("</body>"));
+        assert!(html.contains("<hr/>"));
+        assert!(!html.contains("<p>"));
+
+        let round_trip = asana_html_to_markdown(&html);
+        assert!(round_trip.contains("# Title"));
+        assert!(round_trip.contains("**bold**"));
+        assert!(round_trip.contains("---"));
+        assert!(round_trip.contains("- item one"));
     }
 }

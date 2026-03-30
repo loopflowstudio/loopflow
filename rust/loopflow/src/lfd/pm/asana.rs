@@ -309,12 +309,11 @@ impl PmProvider for AsanaClient {
         let priority_option_id = priority_field
             .option_gid(PriorityBucket::from_rank(item.rank))
             .to_string();
+        let html_notes = markdown_to_asana_html(&item.description);
+        eprintln!("DEBUG create_item name={:?} html_notes={:?}", item.name, html_notes);
         let mut data = Map::new();
         data.insert("name".to_string(), json!(item.name));
-        data.insert(
-            "html_notes".to_string(),
-            json!(markdown_to_asana_html(&item.description)),
-        );
+        data.insert("html_notes".to_string(), json!(html_notes));
         data.insert("projects".to_string(), json!([project_id]));
         data.insert(
             "custom_fields".to_string(),
@@ -1068,7 +1067,7 @@ mod tests {
             json!({
                 "data": {
                     "name": "Implement client",
-                    "html_notes": "<p>Build the HTTP adapter</p>",
+                    "html_notes": "<body>Build the HTTP adapter\n</body>",
                     "projects": ["project-123"],
                     "custom_fields": {
                         "field-priority": "opt-p0"
@@ -1084,7 +1083,7 @@ mod tests {
             json!({
                 "data": {
                     "name": "Implement Asana client",
-                    "html_notes": "<p>Build the HTTP adapter and tests</p>"
+                    "html_notes": "<body>Build the HTTP adapter and tests\n</body>"
                 }
             })
         );

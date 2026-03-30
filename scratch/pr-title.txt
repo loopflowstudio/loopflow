@@ -1,1 +1,1 @@
-concerto: make streaming transcript state incremental and open shells in Ghostty
+concerto: cache transcript state and unify Ghostty workspace shells

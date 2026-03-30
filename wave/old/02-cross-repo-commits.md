@@ -1,5 +1,4 @@
 ---
-asana_id: '1213869424243403'
 ---
 # 02: Cross-Repo File Tracking and Commits
 

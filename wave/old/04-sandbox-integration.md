@@ -1,5 +1,4 @@
 ---
-asana_id: '1213879275899711'
 ---
 # 04: Sandbox Integration and Validation
 

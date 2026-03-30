@@ -1,5 +1,4 @@
 ---
-asana_id: '1213869424211155'
 ---
 # 02: Mac Mini Dogfood Lane
 

@@ -1,5 +1,4 @@
 ---
-asana_id: '1213877387057339'
 ---
 # 03: API Expansion
 

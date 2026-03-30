@@ -1,5 +1,4 @@
 ---
-asana_id: '1213877387051448'
 ---
 # 04: Concerto Chord UI
 

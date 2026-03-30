@@ -1,5 +1,4 @@
 ---
-asana_id: '1213869424220475'
 ---
 # 03: Cross-Repo Triggers
 

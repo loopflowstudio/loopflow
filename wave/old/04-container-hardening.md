@@ -1,5 +1,4 @@
 ---
-asana_id: '1213879706142610'
 ---
 # 04: Bundled Container Hardening
 

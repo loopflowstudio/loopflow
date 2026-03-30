@@ -1,5 +1,4 @@
 ---
-asana_id: '1213869424206586'
 ---
 # 05: Full Sandbox Rollout
 

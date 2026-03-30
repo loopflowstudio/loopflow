@@ -1,5 +1,4 @@
 ---
-asana_id: '1213879918331880'
 ---
 # 02: Context UI Polish
 

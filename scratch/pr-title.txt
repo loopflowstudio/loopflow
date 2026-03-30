@@ -1,1 +1,0 @@
-concerto: cache transcript state and unify Ghostty workspace shells

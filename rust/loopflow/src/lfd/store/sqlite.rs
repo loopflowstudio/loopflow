@@ -190,6 +190,20 @@ impl SqliteStore {
         Ok(waves)
     }
 
+    fn read_wave_crons<P>(&self, query: Query, params: P) -> StoreResult<Vec<WaveCron>>
+    where
+        P: rusqlite::Params,
+    {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(query))?;
+        let rows = stmt.query_map(params, |row| Ok(map_wave_cron_row(row)))?;
+        let mut crons = Vec::new();
+        for cron in rows {
+            crons.push(cron??);
+        }
+        Ok(crons)
+    }
+
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let direction_json = serde_json::to_string(wave.direction())?;
@@ -1013,25 +1027,11 @@ impl SqliteStore {
     }
 
     pub fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListWaveCrons))?;
-        let rows = stmt.query_map(params![wave_id], |row| Ok(map_wave_cron_row(row)))?;
-        let mut crons = Vec::new();
-        for cron in rows {
-            crons.push(cron??);
-        }
-        Ok(crons)
+        self.read_wave_crons(Query::ListWaveCrons, params![wave_id])
     }
 
     pub fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListAllActiveCrons))?;
-        let rows = stmt.query_map([], |row| Ok(map_wave_cron_row(row)))?;
-        let mut crons = Vec::new();
-        for cron in rows {
-            crons.push(cron??);
-        }
-        Ok(crons)
+        self.read_wave_crons(Query::ListAllActiveCrons, [])
     }
 
     pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {

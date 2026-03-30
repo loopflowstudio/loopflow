@@ -271,15 +271,29 @@ impl NotionClient {
         })
     }
 
+    fn page_status_property_name(&self, name: &str) -> Value {
+        json!({
+            self.status_property_name(): {
+                "status": { "name": name }
+            }
+        })
+    }
+
     fn page_status_property(&self, done: bool) -> Value {
         let name = if done {
             self.done_value()
         } else {
             NOTION_TODO_STATUS
         };
+        self.page_status_property_name(name)
+    }
+
+    fn page_priority_property(&self, rank: u32) -> Value {
         json!({
-            self.status_property_name(): {
-                "status": { "name": name }
+            self.priority_property_name(): {
+                "select": {
+                    "name": PriorityBucket::from_rank(rank).semantic_label()
+                }
             }
         })
     }
@@ -288,14 +302,7 @@ impl NotionClient {
         let mut properties = Map::new();
         properties.extend(value_object(self.page_title_property(&item.name)));
         properties.extend(value_object(self.page_status_property(false)));
-        properties.insert(
-            self.priority_property_name().to_string(),
-            json!({
-                "select": {
-                    "name": PriorityBucket::from_rank(item.rank).semantic_label()
-                }
-            }),
-        );
+        properties.extend(value_object(self.page_priority_property(item.rank)));
         properties
     }
 
@@ -454,14 +461,7 @@ impl PmProvider for NotionClient {
             properties.extend(value_object(self.page_title_property(name)));
         }
         if let Some(rank) = update.rank {
-            properties.insert(
-                self.priority_property_name().to_string(),
-                json!({
-                    "select": {
-                        "name": PriorityBucket::from_rank(rank).semantic_label()
-                    }
-                }),
-            );
+            properties.extend(value_object(self.page_priority_property(rank)));
         }
 
         if !properties.is_empty() {
@@ -523,11 +523,7 @@ impl PmProvider for NotionClient {
         let response = self
             .request(Method::PATCH, &format!("/pages/{item_id}"))
             .json(&json!({
-                "properties": {
-                    self.status_property_name(): {
-                        "status": { "name": NOTION_IN_PROGRESS_STATUS }
-                    }
-                }
+                "properties": self.page_status_property_name(NOTION_IN_PROGRESS_STATUS)
             }))
             .send()
             .await

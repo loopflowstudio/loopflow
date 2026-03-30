@@ -113,7 +113,7 @@ pub fn ingest(
 
 fn refresh_wave_from_pm(repo: &Path, wave: &str, progress: &impl Progress) -> OpsResult<()> {
     #[cfg(test)]
-    if let Some(hook) = *test_pm_pull_hook().lock().expect("pm pull hook lock") {
+    if let Some(hook) = test_pm_hooks().lock().expect("pm hooks lock").pull {
         return hook(repo, wave, progress);
     }
 
@@ -134,22 +134,22 @@ type TestPmPullHook = fn(&Path, &str, &dyn Progress) -> OpsResult<()>;
 type TestPmClaimHook = fn(&Path, &str, &dyn Progress) -> Option<String>;
 
 #[cfg(test)]
-fn test_pm_pull_hook() -> &'static std::sync::Mutex<Option<TestPmPullHook>> {
-    static TEST_PM_PULL_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<TestPmPullHook>>> =
-        std::sync::OnceLock::new();
-    TEST_PM_PULL_HOOK.get_or_init(|| std::sync::Mutex::new(None))
+#[derive(Default)]
+struct TestPmHooks {
+    pull: Option<TestPmPullHook>,
+    claim: Option<TestPmClaimHook>,
 }
 
 #[cfg(test)]
-fn test_pm_claim_hook() -> &'static std::sync::Mutex<Option<TestPmClaimHook>> {
-    static TEST_PM_CLAIM_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<TestPmClaimHook>>> =
+fn test_pm_hooks() -> &'static std::sync::Mutex<TestPmHooks> {
+    static TEST_PM_HOOKS: std::sync::OnceLock<std::sync::Mutex<TestPmHooks>> =
         std::sync::OnceLock::new();
-    TEST_PM_CLAIM_HOOK.get_or_init(|| std::sync::Mutex::new(None))
+    TEST_PM_HOOKS.get_or_init(|| std::sync::Mutex::new(TestPmHooks::default()))
 }
 
 fn try_claim_pm_item(repo: &Path, wave: &str, progress: &impl Progress) -> Option<String> {
     #[cfg(test)]
-    if let Some(hook) = *test_pm_claim_hook().lock().expect("pm claim hook lock") {
+    if let Some(hook) = test_pm_hooks().lock().expect("pm hooks lock").claim {
         return hook(repo, wave, progress);
     }
 
@@ -457,12 +457,10 @@ mod tests {
     use std::thread;
     use tempfile::TempDir;
 
-    fn set_test_pm_pull_hook(hook: Option<TestPmPullHook>) {
-        *test_pm_pull_hook().lock().expect("pm pull hook lock") = hook;
-    }
-
-    fn set_test_pm_claim_hook(hook: Option<TestPmClaimHook>) {
-        *test_pm_claim_hook().lock().expect("pm claim hook lock") = hook;
+    fn set_test_pm_hooks(pull: Option<TestPmPullHook>, claim: Option<TestPmClaimHook>) {
+        let mut hooks = test_pm_hooks().lock().expect("pm hooks lock");
+        hooks.pull = pull;
+        hooks.claim = claim;
     }
 
     fn pm_test_lock() -> &'static Mutex<()> {
@@ -477,22 +475,20 @@ mod tests {
     impl TestPmPullGuard {
         fn install(hook: TestPmPullHook) -> Self {
             let guard = pm_test_lock().lock().expect("pm test lock");
-            set_test_pm_pull_hook(Some(hook));
+            set_test_pm_hooks(Some(hook), None);
             Self { _guard: guard }
         }
 
         fn install_with_claim(hook: TestPmPullHook, claim_hook: TestPmClaimHook) -> Self {
             let guard = pm_test_lock().lock().expect("pm test lock");
-            set_test_pm_pull_hook(Some(hook));
-            set_test_pm_claim_hook(Some(claim_hook));
+            set_test_pm_hooks(Some(hook), Some(claim_hook));
             Self { _guard: guard }
         }
     }
 
     impl Drop for TestPmPullGuard {
         fn drop(&mut self) {
-            set_test_pm_pull_hook(None);
-            set_test_pm_claim_hook(None);
+            set_test_pm_hooks(None, None);
         }
     }
 

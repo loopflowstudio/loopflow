@@ -1342,7 +1342,7 @@ mod tests {
             .await
             .expect("prepare session prompt");
 
-        assert!(prompt.system_prompt.contains("Surface: Concerto (iPhone)"));
+        assert!(prompt.task_prompt.contains("Surface: Concerto (iPhone)"));
     }
 
     #[tokio::test]

@@ -255,8 +255,21 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote prompt log"
     );
 
+    let context_file_start = Instant::now();
+    let context_file = Some(write_prompt_log(
+        &built.repo_root,
+        &built.agent_config.system_prompt,
+        &format!("{}.context", built.log_name),
+        None,
+    )?);
+    debug!(
+        elapsed_ms = context_file_start.elapsed().as_millis(),
+        "wrote context log"
+    );
+
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
     let mut process = built.process.clone();
+    process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
 
     // Set up directive relay so agent steps can issue shell directives

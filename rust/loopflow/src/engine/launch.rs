@@ -7,8 +7,7 @@ use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, trim_context_with_breakdown, write_prompt_log,
-    ContextBreakdown, Document,
+    format_task_prompt, gather_context, trim_context_with_breakdown, ContextBreakdown, Document,
     DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext,
     Surface, DEFAULT_CONTEXT_BUDGET,
 };
@@ -135,27 +134,8 @@ pub fn prepare_launch_prompt(
 
     let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
     let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
-
-    // Write context to .lf/prompts/ so the LLM can read it via tools
-    // instead of passing it as a system prompt (which is restricted on some plans).
-    let context = format_context_prompt(&budgeted);
-    let step_name = budgeted
-        .step
-        .as_ref()
-        .map(|s| s.name.as_str())
-        .unwrap_or("run");
-    let context_log_name = format!("{step_name}.context");
-    let context_path = write_prompt_log(&repo_root, &context, &context_log_name, None)?;
-    let context_rel = context_path
-        .strip_prefix(&repo_root)
-        .unwrap_or(&context_path);
-
-    let system_prompt = String::new();
-    let task_prompt = format!(
-        "Read {} first — it contains your full context for this task.\n\n{}",
-        context_rel.display(),
-        format_task_prompt(&budgeted),
-    );
+    let system_prompt = format_context_prompt(&budgeted);
+    let task_prompt = format_task_prompt(&budgeted);
 
     let agent = agent
         .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))

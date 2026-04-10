@@ -1,28 +1,6 @@
 <lf:loopflow>
 # Loopflow
 
-Run prompts, hand off cleanly. Each step does one thing and leaves state for the next.
-
----
-
-## Area
-
-Your working scope. Everything here is relevant.
-
-**Area docs**: Patterns and constraints for this part of the codebase.
-
-**Repo docs**: STYLE, CLAUDE.md, and other guidelines. Follow them.
-
-**Direction**: Your perspective. Follow its principles.
-
-**Step**: Your task. Do what it says.
-
-**Diff**: What's changed on this branch. Your primary working material.
-
-**Clipboard**: User-provided input. If present, it's why you're here.
-
----
-
 ## Surfaces
 
 Check the surface at the top of the prompt. It determines your interaction
@@ -105,28 +83,6 @@ lf op next                            # preserve worktree, fresh branch
 In headless mode, commit when a step completes. Small, atomic commits. Don't leave the branch broken.
 
 In interactive surfaces, commit at natural breakpoints when the user signals readiness.
-
----
-
-## Chaining
-
-Steps produce artifacts that later steps consume:
-
-| Step | Reads | Writes |
-|------|-------|--------|
-| design | — | scratch/<branch>.md |
-| implement | scratch/<branch>.md | code, tests |
-| review | code on branch | verdict in scratch/ |
-
-If a required artifact is missing, check scratch/ first. If still missing, note it in `scratch/questions.md` and proceed with what you have.
-
----
-
-## Quality
-
-Ship working code. Tests pass. No regressions.
-
-When unsure between two approaches, pick the simpler one. You can always iterate.
 
 ---
 

@@ -1621,21 +1621,17 @@ fn format_direction_tags(directions: &[Direction]) -> String {
     }
 }
 
-/// Render shared reference context sections.
+/// Render system-safe reference sections (instructions only, no user content).
 ///
-/// These sections are common to both `format_prompt` (all-in-one) and
-/// `format_context_prompt` (system prompt file). Extracted to avoid duplication.
-///
-/// Order: loopflow_doc, rlm_doc, surface, wave, docs, summaries, area_docs, diff+diff_files.
-fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
+/// These are safe to include in the system prompt without triggering
+/// third-party app classifiers: loopflow instructions, RLM, voice, surface.
+pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    // System docs (loopflow)
     if let Some(ref doc) = components.loopflow_doc {
         parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
     }
 
-    // RLM instructions (recursive processing capability)
     if components.loopflow_doc.is_some() {
         parts.push(format!(
             "<lf:rlm>\n{}\n</lf:rlm>",
@@ -1643,15 +1639,23 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Voice/tone guidance (interactive surfaces only — headless has no user to talk to)
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
             parts.push(format!("<lf:voice>\n{}\n</lf:voice>", voice));
         }
     }
 
-    // Surface (interaction + rendering guidance)
     parts.push(components.surface.instructions().to_string());
+
+    parts
+}
+
+/// Render user-content reference sections (docs, diffs, wave context).
+///
+/// These contain repo content that may trigger third-party app classifiers
+/// if placed in the system prompt. Safe to include in the user message.
+pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
+    let mut parts = Vec::new();
 
     // Wave context
     if let Some(ref wave) = components.wave {
@@ -1722,25 +1726,6 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    if !components.summaries.is_empty() {
-        let summary_parts: Vec<String> = components
-            .summaries
-            .iter()
-            .map(|s| {
-                format!(
-                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
-                    s.path, s.content
-                )
-            })
-            .collect();
-        let summaries_body = summary_parts.join("\n\n");
-        parts.push(format!(
-            "Pre-generated codebase summaries.\n\n\
-             <lf:summaries>\n{}\n</lf:summaries>",
-            summaries_body
-        ));
-    }
-
     // Area docs (ancestor + descendant docs when -a is set)
     if !components.area_docs.is_empty() {
         let area_label = components.area.as_deref().unwrap_or("area");
@@ -1763,7 +1748,47 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Working context (diff, diff_files)
+    parts
+}
+
+/// Format step tag.
+fn format_step_tag(step: &Step) -> String {
+    if let Some(ref content) = step.content {
+        format!(
+            "<lf:step:{}>\n{}\n</lf:step:{}>",
+            step.name, content, step.name
+        )
+    } else {
+        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+    }
+}
+
+/// All reference sections combined (system + content).
+fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
+    let mut parts = format_system_sections(components);
+    parts.extend(format_content_sections(components));
+
+    // Summaries (included in full prompt log but not in task prompt)
+    if !components.summaries.is_empty() {
+        let summary_parts: Vec<String> = components
+            .summaries
+            .iter()
+            .map(|s| {
+                format!(
+                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
+                    s.path, s.content
+                )
+            })
+            .collect();
+        let summaries_body = summary_parts.join("\n\n");
+        parts.push(format!(
+            "Pre-generated codebase summaries.\n\n\
+             <lf:summaries>\n{}\n</lf:summaries>",
+            summaries_body
+        ));
+    }
+
+    // Diff (included in full prompt log but not in task prompt)
     if components.diff.is_some() || !components.diff_files.is_empty() {
         let mut diff_parts = Vec::new();
 
@@ -1783,18 +1808,6 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     parts
-}
-
-/// Format step tag.
-fn format_step_tag(step: &Step) -> String {
-    if let Some(ref content) = step.content {
-        format!(
-            "<lf:step:{}>\n{}\n</lf:step:{}>",
-            step.name, content, step.name
-        )
-    } else {
-        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
-    }
 }
 
 /// Format prompt content for the requested mode.
@@ -1883,6 +1896,43 @@ pub fn format_context_prompt(components: &BudgetedContext) -> String {
 /// Format task prompt for user message (step + free text).
 pub fn format_task_prompt(components: &BudgetedContext) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
+}
+
+/// Format system prompt for Claude (system-safe sections only).
+///
+/// Excludes docs, diffs, wave context, and clipboard — those go in the task
+/// prompt to avoid triggering third-party app classifiers.
+pub fn format_claude_system_prompt(components: &BudgetedContext) -> String {
+    let mut parts = format_system_sections(components);
+
+    if !components.directions.is_empty() {
+        parts.push(format_direction_tags(&components.directions));
+    }
+
+    parts.join("\n\n")
+}
+
+/// Format task prompt for Claude (includes content sections + clipboard + step + message).
+pub fn format_claude_task_prompt(components: &BudgetedContext) -> String {
+    let mut parts = format_content_sections(components);
+
+    if let Some(ref clipboard) = components.clipboard {
+        parts.push(format!(
+            "Content from clipboard.\n\n\
+             <lf:clipboard>\n{}\n</lf:clipboard>",
+            clipboard
+        ));
+    }
+
+    if let Some(ref step) = components.step {
+        parts.push(format_step_tag(step));
+    }
+
+    if let Some(ref message) = components.message {
+        parts.push(message.clone());
+    }
+
+    parts.join("\n\n")
 }
 
 /// Write prompt to both in-repo and durable locations, return the in-repo path.

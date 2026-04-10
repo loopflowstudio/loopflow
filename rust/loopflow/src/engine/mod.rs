@@ -42,10 +42,11 @@ pub use launch::{
 };
 pub use prompt::{
     count_tokens, default_gather_sources, drop_native_instruction_docs, durable_log_dir,
-    format_context_prompt, format_prompt, format_task_prompt, gather_context, gather_documents,
-    trim_context_with_breakdown, write_prompt_log, BudgetedContext, ContextBreakdown, DiffTier,
-    Document, DocumentSource, GatherContextOpts, GatherSpec, GatheredContext, PromptComponents,
-    PromptFormatMode, RenderedPrompt, Surface, DEFAULT_CONTEXT_BUDGET,
+    format_claude_system_prompt, format_claude_task_prompt, format_context_prompt, format_prompt,
+    format_task_prompt, gather_context, gather_documents, trim_context_with_breakdown,
+    write_prompt_log, BudgetedContext, ContextBreakdown, DiffTier, Document, DocumentSource,
+    GatherContextOpts, GatherSpec, GatheredContext, PromptComponents, PromptFormatMode,
+    RenderedPrompt, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,

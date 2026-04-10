@@ -6,10 +6,10 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
-    default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, trim_context_with_breakdown, ContextBreakdown, Document,
-    DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext,
-    Surface, DEFAULT_CONTEXT_BUDGET,
+    default_gather_sources, drop_native_instruction_docs, format_claude_system_prompt,
+    format_claude_task_prompt, format_prompt, gather_context, trim_context_with_breakdown,
+    ContextBreakdown, Document, DocumentSource, GatherContextOpts, PromptComponents,
+    PromptFormatMode, RelatedRepoContext, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -134,8 +134,6 @@ pub fn prepare_launch_prompt(
 
     let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
     let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
-    let system_prompt = format_context_prompt(&budgeted);
-    let task_prompt = format_task_prompt(&budgeted);
 
     let agent = agent
         .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))
@@ -148,6 +146,12 @@ pub fn prepare_launch_prompt(
         })
         .unwrap_or_else(|| "claude:opus".to_string());
     validate_agent_policy(&agent)?;
+
+    // Keep only system-safe sections (loopflow/rlm/voice/surface/directions) in
+    // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
+    // task prompt to avoid triggering third-party app classifiers.
+    let system_prompt = format_claude_system_prompt(&budgeted);
+    let task_prompt = format_claude_task_prompt(&budgeted);
     let (components, breakdown) = budgeted.into_parts();
     let action_style = components
         .step

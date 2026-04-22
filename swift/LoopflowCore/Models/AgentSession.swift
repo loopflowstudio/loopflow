@@ -211,6 +211,7 @@ public struct AgentSession: Sendable, Hashable {
     public let status: String
     public let waveRunId: String?
     public let providerSessionId: String?
+    public let inputSupported: Bool
     public let config: AgentSessionConfig
     public let createdAt: Date?
     public let endedAt: Date?
@@ -221,6 +222,7 @@ public struct AgentSession: Sendable, Hashable {
         status: String,
         waveRunId: String?,
         providerSessionId: String?,
+        inputSupported: Bool = true,
         config: AgentSessionConfig,
         createdAt: Date?,
         endedAt: Date?
@@ -230,6 +232,7 @@ public struct AgentSession: Sendable, Hashable {
         self.status = status
         self.waveRunId = waveRunId
         self.providerSessionId = providerSessionId
+        self.inputSupported = inputSupported
         self.config = config
         self.createdAt = createdAt
         self.endedAt = endedAt

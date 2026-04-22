@@ -359,7 +359,7 @@ class Client:
         payload = self._request_json(
             "POST",
             f"/v0/sessions/{session_id}/input",
-            json={"content": content},
+            json={"text": content},
         )
         return Session.model_validate(payload)
 

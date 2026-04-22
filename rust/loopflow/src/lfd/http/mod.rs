@@ -222,7 +222,8 @@ pub fn router(state: HttpState) -> Router {
         // Unauthenticated: health probes, metrics, git hooks.
         .route("/health", get(system::health_handler))
         .route("/metrics", get(system::metrics_handler))
-        .nest("/v0", api_routes)
+        .nest("/v0", api_routes.clone())
+        .nest("/v1", api_routes)
         .merge(protected_routes)
         .merge(hook_routes)
         .layer(middleware::from_fn(normalize_payload_too_large))

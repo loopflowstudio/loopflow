@@ -86,6 +86,10 @@ pub fn canonical_harness(name: &str) -> Option<&'static str> {
     HarnessKind::parse(name).map(HarnessKind::as_str)
 }
 
+pub fn input_supported(name: &str) -> bool {
+    matches!(HarnessKind::parse(name), Some(HarnessKind::Codex))
+}
+
 pub fn default_create_harness(
     name: &str,
     event_tx: mpsc::UnboundedSender<SessionEvent>,
@@ -124,5 +128,14 @@ mod tests {
     fn terminal_harness_error_recognizes_opencode_disconnect() {
         assert!(is_terminal_harness_error("opencode_disconnected"));
         assert!(!is_terminal_harness_error("opencode_error"));
+    }
+
+    #[test]
+    fn input_supported_is_codex_only() {
+        assert!(input_supported("codex"));
+        assert!(input_supported(" CODEX "));
+        assert!(!input_supported("claude"));
+        assert!(!input_supported("opencode"));
+        assert!(!input_supported("unknown"));
     }
 }

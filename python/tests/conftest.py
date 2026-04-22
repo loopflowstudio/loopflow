@@ -81,6 +81,7 @@ SESSION_FULL = {
     **SESSION_MINIMAL,
     "wave_run_id": "run-1",
     "provider_session_id": "provider-1",
+    "input_supported": False,
     "config": {
         "agent": "claude-sonnet-4-5-20250929",
         "cwd": "/tmp/repo",

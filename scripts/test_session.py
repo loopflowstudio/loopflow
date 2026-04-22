@@ -193,7 +193,7 @@ def test_session_lifecycle(client: Client) -> bool:
     # Create session
     log("\n  create session...")
     try:
-        session = client.create_session("claude")
+        session = client.create_session("codex")
     except LoopflowError as err:
         log(f"    FAIL: {err}")
         return False
@@ -266,7 +266,7 @@ def test_reconnect_replay(client: Client) -> bool:
     """Create session, send input, wait for completion, then replay events."""
     log("\n  create session for replay test...")
     try:
-        session = client.create_session("claude")
+        session = client.create_session("codex")
     except LoopflowError as err:
         log(f"    FAIL: {err}")
         return False

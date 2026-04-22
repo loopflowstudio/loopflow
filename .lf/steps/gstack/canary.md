@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Post-deploy canary monitoring. Watches the live app for console errors,
 
   performance regressions, and page failures using the browse daemon. Takes
@@ -8,7 +7,7 @@ description: 'Post-deploy canary monitoring. Watches the live app for console er
 
   on anomalies. Use when: "monitor deploy", "canary", "post-deploy check",
 
-  "watch production", "verify deploy".
+  "watch production", "verify deploy". (gstack)
 
   '
 tools:
@@ -43,6 +42,7 @@ When the user types `gstack:canary`, run this skill.
 ### Phase 1: Setup
 
 ```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null || echo "SLUG=unknown")"
 mkdir -p .gstack/canary-reports
 mkdir -p .gstack/canary-reports/baselines
 mkdir -p .gstack/canary-reports/screenshots

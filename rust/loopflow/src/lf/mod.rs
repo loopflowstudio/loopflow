@@ -256,6 +256,21 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
+    /// Gstack workstyle operations (sync, diff, list)
+    Gstack {
+        #[command(subcommand)]
+        cmd: GstackCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GstackCommand {
+    /// Pull latest skills from garrytan/gstack and re-convert
+    Sync,
+    /// Show what changed upstream since last sync (without applying)
+    Diff,
+    /// Show installed gstack steps and sync status
+    List,
 }
 
 #[derive(Subcommand, Debug)]

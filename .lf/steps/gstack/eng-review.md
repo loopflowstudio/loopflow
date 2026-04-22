@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Eng manager-mode plan review. Lock in the execution plan — architecture,
 
   data flow, diagrams, edge cases, test coverage, performance. Walks through
@@ -10,7 +9,10 @@ description: 'Eng manager-mode plan review. Lock in the execution plan — archi
 
   Proactively suggest when the user has a plan or design doc and is about to
 
-  start coding — to catch architecture issues before implementation.
+  start coding — to catch architecture issues before implementation. (gstack)
+
+  Voice triggers (speech-to-text aliases): "tech review", "technical review", "plan
+  engineering review".
 
   '
 tools:
@@ -31,7 +33,7 @@ after:
 Review this plan thoroughly before making any code changes. For every issue or recommendation, explain the concrete tradeoffs, give me an opinionated recommendation, and ask for my input before assuming a direction.
 
 ## Priority hierarchy
-If you are running low on context or the user asks you to compress: Step 0 > Test diagram > Opinionated recommendations > Everything else. Never skip Step 0 or the test diagram.
+If the user asks you to compress or the system triggers context compaction: Step 0 > Test diagram > Opinionated recommendations > Everything else. Never skip Step 0 or the test diagram. Do not preemptively warn about context limits -- the system handles compaction automatically.
 
 ## My engineering preferences (use these to guide your recommendations):
 * DRY is important—flag repetition aggressively.
@@ -72,9 +74,12 @@ When evaluating architecture, think "boring by default." When reviewing tests, t
 
 ### Design Doc Check
 ```bash
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+SLUG=$(~/.claude/skills/gstack/browse/bin/remote-slug 2>/dev/null || basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
-DESIGN="scratch/$BRANCH.md"
-[ -f "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
+DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
+[ -n "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
 ```
 If a design doc exists, read it. Use it as the source of truth for the problem statement, constraints, and chosen approach. If it has a `Supersedes:` field, note that this is a revised design — check the prior version for context on what changed and why.
 
@@ -102,19 +107,34 @@ If they choose A:
 Say: "Running gstack:office-hours inline. Once the design doc is ready, I'll pick up
 the review right where we left off."
 
-Read the office-hours skill file from disk using the Read tool:
-`.lf/steps/gstack/office-hours.md`
+Read the `gstack:office-hours` skill file at `.lf/steps/gstack/office-hours.md` using the Read tool.
 
-Follow the imported loopflow step content directly.
+**If unreadable:** Skip with "Could not load gstack:office-hours — skipping." and continue.
 
-If the Read fails (file not found), say:
-"Could not load gstack:office-hours — proceeding with standard review."
+Follow its instructions from top to bottom, **skipping these sections** (already handled by the parent skill):
+- Preamble (run first)
+- AskUserQuestion Format
+- Completeness Principle — Boil the Lake
+- Search Before Building
+- Contributor Mode
+- Completion Status Protocol
+- Telemetry (run last)
+- Step 0: Detect platform and base branch
+- Review Readiness Dashboard
+- Plan File Review Report
+- Prerequisite Skill Offer
+- Plan Status Footer
+
+Execute every other section at full depth. When the loaded skill's instructions are complete, continue with the next step below.
 
 After gstack:office-hours completes, re-run the design doc check:
 ```bash
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+SLUG=$(~/.claude/skills/gstack/browse/bin/remote-slug 2>/dev/null || basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
-DESIGN="scratch/$BRANCH.md"
-[ -f "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
+DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
+[ -n "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
 ```
 
 If a design doc is now found, read it and continue the review.
@@ -151,6 +171,46 @@ Always work through the full interactive review: one section at a time (Architec
 
 ## Review Sections (after scope is agreed)
 
+**Anti-skip rule:** Never condense, abbreviate, or skip any review section (1-4) regardless of plan type (strategy, spec, code, infra). Every section in this skill exists for a reason. "This is a strategy doc so implementation sections don't apply" is always wrong — implementation details are where strategy breaks down. If a section genuinely has zero findings, say "No issues found" and move on — but you must evaluate it.
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
+
 ### 1. Architecture review
 Evaluate:
 * Overall system design and component boundaries.
@@ -163,6 +223,31 @@ Evaluate:
 * **Distribution architecture:** If this introduces a new artifact (binary, package, container), how does it get built, published, and updated? Is the CI/CD pipeline part of the plan or deferred?
 
 **STOP.** For each issue found in this section, call AskUserQuestion individually. One issue per call. Present options, state your recommendation, explain WHY. Do NOT batch multiple issues into one AskUserQuestion. Only proceed to the next section after ALL issues in this section are resolved.
+
+## Confidence Calibration
+
+Every finding MUST include a confidence score (1-10):
+
+| Score | Meaning | Display rule |
+|-------|---------|-------------|
+| 9-10 | Verified by reading specific code. Concrete bug or exploit demonstrated. | Show normally |
+| 7-8 | High confidence pattern match. Very likely correct. | Show normally |
+| 5-6 | Moderate. Could be a false positive. | Show with caveat: "Medium confidence, verify this is actually an issue" |
+| 3-4 | Low confidence. Pattern is suspicious but may be fine. | Suppress from main report. Include in appendix only. |
+| 1-2 | Speculation. | Only report if severity would be P0. |
+
+**Finding format:**
+
+\`[SEVERITY] (confidence: N/10) file:line — description\`
+
+Example:
+\`[P1] (confidence: 9/10) app/models/user.rb:42 — SQL injection via string interpolation in where clause\`
+\`[P2] (confidence: 5/10) app/controllers/api/v1/users_controller.rb:18 — Possible N+1 query, verify with production logs\`
+
+**Calibration learning:** If you report a finding with confidence < 7 and the user
+confirms it IS a real issue, that is a calibration event. Your initial confidence was
+too low. Log the corrected pattern as a learning so future reviews catch it with
+higher confidence.
 
 ### 2. Code quality review
 Evaluate:
@@ -347,11 +432,12 @@ The plan should be complete enough that when implementation begins, every test i
 After producing the coverage diagram, write a test plan artifact to the project directory so `gstack:qa` and `gstack:qa-only` can consume it as primary test input:
 
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-mkdir -p .gstack/qa-reports
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+USER=$(whoami)
+DATETIME=$(date +%Y%m%d-%H%M%S)
 ```
 
-Write to `.gstack/qa-reports/test-plan.md`:
+Write to `~/.gstack/projects/{slug}/{user}-{branch}-eng-review-test-plan-{datetime}.md`:
 
 ```markdown
 # Test Plan
@@ -372,7 +458,7 @@ Repo: {owner/repo}
 - {end-to-end flow that must work}
 ```
 
-This file (`.gstack/qa-reports/test-plan.md`) is consumed by `gstack:qa` and `gstack:qa-only` as primary test input. Include only the information that helps a QA tester know **what to test and where** — not implementation details.
+This file is consumed by `gstack:qa` and `gstack:qa-only` as primary test input. Include only the information that helps a QA tester know **what to test and where** — not implementation details.
 
 For LLM/prompt changes: check the "Prompt/LLM changes" file patterns listed in CLAUDE.md. If this plan touches ANY of those patterns, state which eval suites must be run, which cases should be added, and what baselines to compare against. Then use AskUserQuestion to confirm the eval scope with the user.
 
@@ -424,7 +510,7 @@ Construct this prompt (substitute the actual plan content — if plan content ex
 truncate to the first 30KB and note "Plan truncated for size"). **Always start with the
 filesystem boundary instruction:**
 
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Stay focused on the repository code only.\n\nYou are a brutally honest technical reviewer examining a development plan that has
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code only.\n\nYou are a brutally honest technical reviewer examining a development plan that has
 already been through a multi-section review. Your job is NOT to repeat that review.
 Instead, find what it missed. Look for: logical gaps and unstated assumptions that
 survived the review scrutiny, overcomplexity (is there a fundamentally simpler
@@ -482,23 +568,38 @@ disagrees with the review findings from earlier sections. Flag these as:
 
 ```
 CROSS-MODEL TENSION:
-  [Topic]: Review said X. Outside voice says Y. [Your assessment of who's right.]
+  [Topic]: Review said X. Outside voice says Y. [Present both perspectives neutrally.
+  State what context you might be missing that would change the answer.]
 ```
 
-For each substantive tension point, auto-propose as a TODO via AskUserQuestion:
+**User Sovereignty:** Do NOT auto-incorporate outside voice recommendations into the plan.
+Present each tension point to the user. The user decides. Cross-model agreement is a
+strong signal — present it as such — but it is NOT permission to act. You may state
+which argument you find more compelling, but you MUST NOT apply the change without
+explicit user approval.
+
+For each substantive tension point, use AskUserQuestion:
 
 > "Cross-model disagreement on [topic]. The review found [X] but the outside voice
-> argues [Y]. Worth investigating further?"
+> argues [Y]. [One sentence on what context you might be missing.]"
+>
+> RECOMMENDATION: Choose [A or B] because [one-line reason explaining which argument
+> is more compelling and why]. Completeness: A=X/10, B=Y/10.
 
 Options:
-- A) Add to TODOS.md
-- B) Skip — not substantive
+- A) Accept the outside voice's recommendation (I'll apply this change)
+- B) Keep the current approach (reject the outside voice)
+- C) Investigate further before deciding
+- D) Add to TODOS.md for later
+
+Wait for the user's response. Do NOT default to accepting because you agree with the
+outside voice. If the user chooses B, the current approach stands — do not re-argue.
 
 If no tension points exist, note: "No cross-model tension — both reviewers agree."
 
 **Persist the result:**
 ```bash
-echo '{"skill":"codex-plan-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}' >> .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"codex-plan-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 
 Substitute: STATUS = "clean" if no findings, "issues_found" if findings exist.
@@ -507,6 +608,14 @@ SOURCE = "codex" if Codex ran, "claude" if subagent ran.
 **Cleanup:** Run `rm -f "$TMPERR_PV"` after processing (if Codex was used).
 
 ---
+
+### Outside Voice Integration Rule
+
+Outside voice findings are INFORMATIONAL until the user explicitly approves each one.
+Do NOT incorporate outside voice recommendations into the plan without presenting each
+finding via AskUserQuestion and getting explicit approval. This applies even when you
+agree with the outside voice. Cross-model consensus is a strong signal — present it as
+such — but the user makes the decision.
 
 ## CRITICAL RULE — How to ask questions
 Follow the AskUserQuestion format from the Preamble above. Additional rules for plan reviews:
@@ -608,7 +717,7 @@ Check the git log for this branch. If there are prior commits suggesting a previ
 After completing the review, read the review log and config to display the dashboard.
 
 ```bash
-cat .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-read
 ```
 
 Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both gstack:ceo-review and gstack:eng-review.
@@ -636,17 +745,17 @@ Display:
 ```
 
 **Review tiers:**
-- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally by setting `skip_eng_review: true` in `.lf/config.yaml` (the "don't bother me" setting).
+- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally with \`gstack-config set skip_eng_review true\` (the "don't bother me" setting).
 - **CEO Review (optional):** Use your judgment. Recommend it for big product/business changes, new user-facing features, or scope decisions. Skip for bug fixes, refactors, infra, and cleanup.
 - **Design Review (optional):** Use your judgment. Recommend it for UI/UX changes. Skip for backend-only, infra, or prompt-only changes.
-- **Adversarial Review (automatic):** Auto-scales by diff size. Small diffs (<50 lines) skip adversarial. Medium diffs (50–199) get cross-model adversarial. Large diffs (200+) get all 4 passes: Claude structured, Codex structured, Claude adversarial subagent, Codex adversarial. No configuration needed.
+- **Adversarial Review (automatic):** Always-on for every review. Every diff gets both Claude adversarial subagent and Codex adversarial challenge. Large diffs (200+ lines) additionally get Codex structured review with P1 gate. No configuration needed.
 - **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in gstack:ceo-review and gstack:eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
 
 **Verdict logic:**
-- **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\` in `.lf/config.yaml`)
+- **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\`)
 - **NOT CLEARED**: Eng Review missing, stale (>7 days), or has open issues
 - CEO, Design, and Codex reviews are shown for context but never block shipping
-- If \`skip_eng_review\` is \`true\` in `.lf/config.yaml`, Eng Review shows "SKIPPED (global)" and verdict is CLEARED
+- If \`skip_eng_review\` config is \`true\`, Eng Review shows "SKIPPED (global)" and verdict is CLEARED
 
 **Staleness detection:** After displaying the dashboard, check if any existing reviews may be stale:
 - Parse the \`---HEAD---\` section from the bash output to get the current HEAD commit hash
@@ -677,6 +786,10 @@ Parse each JSONL entry. Each skill logs different fields:
   → Findings: "{issues_found} issues, {critical_gaps} critical gaps"
 - **plan-design-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`unresolved\`, \`decisions_made\`, \`commit\`
   → Findings: "score: {initial_score}/10 → {overall_score}/10, {decisions_made} decisions"
+- **plan-devex-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`product_type\`, \`tthw_current\`, \`tthw_target\`, \`mode\`, \`persona\`, \`competitive_tier\`, \`unresolved\`, \`commit\`
+  → Findings: "score: {initial_score}/10 → {overall_score}/10, TTHW: {tthw_current} → {tthw_target}"
+- **devex-review**: \`status\`, \`overall_score\`, \`product_type\`, \`tthw_measured\`, \`dimensions_tested\`, \`dimensions_inferred\`, \`boomerang\`, \`commit\`
+  → Findings: "score: {overall_score}/10, TTHW: {tthw_measured}, {dimensions_tested} tested/{dimensions_inferred} inferred"
 - **codex-review**: \`status\`, \`gate\`, \`findings\`, \`findings_fixed\`
   → Findings: "{findings} findings, {findings_fixed}/{findings} fixed"
 
@@ -687,6 +800,31 @@ Summary. For prior reviews, use the JSONL fields directly — they contain all r
 Produce this markdown table:
 
 \`\`\`markdown
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"plan-eng-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
+
 ## Next Steps — Review Chaining
 
 After displaying the Review Readiness Dashboard, check if additional reviews would be valuable. Read the dashboard output to see which reviews have already been run and whether they are stale.
@@ -697,7 +835,7 @@ After displaying the Review Readiness Dashboard, check if additional reviews wou
 
 **Note staleness** of existing CEO or design reviews if this eng review found assumptions that contradict them, or if the commit hash shows significant drift.
 
-**If no additional reviews are needed** (or `skip_eng_review` is `true` in `.lf/config.yaml`, meaning this eng review was optional): state "All relevant reviews complete. Run gstack:ship when ready."
+**If no additional reviews are needed** (or `skip_eng_review` is `true` in the dashboard config, meaning this eng review was optional): state "All relevant reviews complete. Run gstack:ship when ready."
 
 Use AskUserQuestion with only the applicable options:
 - **A)** Run gstack:design-review (only if UI scope detected and no design review exists)

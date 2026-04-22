@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'OpenAI Codex CLI wrapper — three modes. Code review: independent diff
   review via
 
@@ -9,7 +8,9 @@ description: 'OpenAI Codex CLI wrapper — three modes. Code review: independent
 
   The "200 IQ autistic developer" second opinion. Use when asked to "codex review",
 
-  "codex challenge", "ask codex", "second opinion", or "consult codex".
+  "codex challenge", "ask codex", "second opinion", or "consult codex". (gstack)
+
+  Voice triggers (speech-to-text aliases): "code x", "code ex", "get another opinion".
 
   '
 tools:
@@ -60,9 +61,10 @@ Parse the user's input to determine which mode to run:
      B) Challenge the diff (adversarial — try to break it)
      C) Something else — I'll provide a prompt
      ```
-   - If no diff, check for the design doc: `scratch/$(git rev-parse --abbrev-ref HEAD).md`
-     If no loopflow design doc, fall back to `~/.claude/plans/` plan files.
-     Warn the user if using a legacy plan file: "Note: this plan may be from a different project."
+   - If no diff, check for plan files scoped to the current project:
+     `ls -t ~/.claude/plans/*.md 2>/dev/null | xargs grep -l "$(basename $(pwd))" 2>/dev/null | head -1`
+     If no project-scoped match, fall back to: `ls -t ~/.claude/plans/*.md 2>/dev/null | head -1`
+     but warn the user: "Note: this plan may be from a different project."
    - If a plan file exists, offer to review it
    - Otherwise, ask: "What would you like to ask Codex?"
 4. `gstack:codex <anything else>` — **Consult mode** (Step 2C), where the remaining text is the prompt
@@ -81,7 +83,7 @@ per-mode default below. Otherwise, use the per-mode defaults:
 
 All prompts sent to Codex MUST be prefixed with this boundary instruction:
 
-> IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Stay focused on the repository code only.
+> IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code only.
 
 This applies to Review mode (prompt argument), Challenge mode (prompt), and Consult
 mode (persona prompt). Reference this section as "the filesystem boundary" below.
@@ -103,7 +105,7 @@ instructions, append them after the boundary separated by a newline:
 ```bash
 _REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git repo" >&2; exit 1; }
 cd "$_REPO_ROOT"
-codex review "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only." --base <base> -c 'model_reasoning_effort="high"' --enable web_search_cached 2>"$TMPERR"
+codex review "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only." --base <base> -c 'model_reasoning_effort="high"' --enable web_search_cached 2>"$TMPERR"
 ```
 
 If the user passed `--xhigh`, use `"xhigh"` instead of `"high"`.
@@ -113,7 +115,7 @@ Use `timeout: 300000` on the Bash call. If the user provided custom instructions
 ```bash
 _REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git repo" >&2; exit 1; }
 cd "$_REPO_ROOT"
-codex review "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
+codex review "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only.
 
 focus on security" --base <base> -c 'model_reasoning_effort="high"' --enable web_search_cached 2>"$TMPERR"
 ```
@@ -156,7 +158,7 @@ CROSS-MODEL ANALYSIS:
 
 7. Persist the review result:
 ```bash
-echo '{"skill":"codex-review","timestamp":"TIMESTAMP","status":"STATUS","gate":"GATE","findings":N,"findings_fixed":N,"commit":"'"$(git rev-parse --short HEAD)"'"}' >> .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"codex-review","timestamp":"TIMESTAMP","status":"STATUS","gate":"GATE","findings":N,"findings_fixed":N,"commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 
 Substitute: TIMESTAMP (ISO 8601), STATUS ("clean" if PASS, "issues_found" if FAIL),
@@ -191,6 +193,10 @@ Parse each JSONL entry. Each skill logs different fields:
   → Findings: "{issues_found} issues, {critical_gaps} critical gaps"
 - **plan-design-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`unresolved\`, \`decisions_made\`, \`commit\`
   → Findings: "score: {initial_score}/10 → {overall_score}/10, {decisions_made} decisions"
+- **plan-devex-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`product_type\`, \`tthw_current\`, \`tthw_target\`, \`mode\`, \`persona\`, \`competitive_tier\`, \`unresolved\`, \`commit\`
+  → Findings: "score: {initial_score}/10 → {overall_score}/10, TTHW: {tthw_current} → {tthw_target}"
+- **devex-review**: \`status\`, \`overall_score\`, \`product_type\`, \`tthw_measured\`, \`dimensions_tested\`, \`dimensions_inferred\`, \`boomerang\`, \`commit\`
+  → Findings: "score: {overall_score}/10, TTHW: {tthw_measured}, {dimensions_tested} tested/{dimensions_inferred} inferred"
 - **codex-review**: \`status\`, \`gate\`, \`findings\`, \`findings_fixed\`
   → Findings: "{findings} findings, {findings_fixed}/{findings} fixed"
 
@@ -211,12 +217,12 @@ from the Filesystem Boundary section above. If the user provided a focus area
 (e.g., `gstack:codex challenge security`), include it after the boundary:
 
 Default prompt (no focus):
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only.
 
 Review the changes on this branch against the base branch. Run `git diff origin/<base>` to see the diff. Your job is to find ways this code will fail in production. Think like an attacker and a chaos engineer. Find edge cases, race conditions, security holes, resource leaks, failure modes, and silent data corruption paths. Be adversarial. Be thorough. No compliments — just the problems."
 
 With focus (e.g., "security"):
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only.
 
 Review the changes on this branch against the base branch. Run `git diff origin/<base>` to see the diff. Focus specifically on SECURITY. Your job is to find every way an attacker could exploit this code. Think about injection vectors, auth bypasses, privilege escalation, data exposure, and timing attacks. Be adversarial."
 
@@ -294,11 +300,11 @@ TMPERR=$(mktemp /tmp/codex-err-XXXXXX.txt)
 3. **Plan review auto-detection:** If the user's prompt is about reviewing a plan,
 or if plan files exist and the user said `gstack:codex` with no arguments:
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-[ -f "scratch/${BRANCH}.md" ] && echo "scratch/${BRANCH}.md" || echo "NO_PLAN_FILE"
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+ls -t ~/.claude/plans/*.md 2>/dev/null | xargs grep -l "$(basename $(pwd))" 2>/dev/null | head -1
 ```
-If no loopflow design doc exists, fall back to `~/.claude/plans/` plan files.
-Warn: "Note: this plan may be from a different project — verify before sending to Codex."
+If no project-scoped match, fall back to `ls -t ~/.claude/plans/*.md 2>/dev/null | head -1`
+but warn: "Note: this plan may be from a different project — verify before sending to Codex."
 
 **IMPORTANT — embed content, don't reference path:** Codex runs sandboxed to the repo
 root (`-C`) and cannot access `~/.claude/plans/` or any files outside the repo. You MUST
@@ -315,7 +321,7 @@ section above to every prompt sent to Codex, including plan reviews and free-for
 consult questions.
 
 Prepend the boundary and persona to the user's prompt:
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only.
 
 You are a brutally honest technical reviewer. Review this plan for: logical gaps and
 unstated assumptions, missing error handling or edge cases, overcomplexity (is there a
@@ -327,7 +333,7 @@ THE PLAN:
 <full plan content, embedded verbatim>"
 
 For non-plan consult prompts (user typed `gstack:codex <question>`), still prepend the boundary:
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. Stay focused on repository code only.
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only.
 
 <user's question>"
 
@@ -458,7 +464,7 @@ If token count is not available, display: `Tokens: unknown`
 - **No double-reviewing.** If the user already ran `gstack:review`, Codex provides a second
   independent opinion. Do not re-run Claude Code's own review.
 - **Detect skill-file rabbit holes.** After receiving Codex output, scan for signs
-  that Codex got distracted by skill files: `gstack-update-check`,
+  that Codex got distracted by skill files: `gstack-config`, `gstack-update-check`,
   `SKILL.md`, or `skills/gstack`. If any of these appear in the output, append a
   warning: "Codex appears to have read gstack skill files instead of reviewing your
   code. Consider retrying."

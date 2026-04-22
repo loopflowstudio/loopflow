@@ -1,5 +1,4 @@
 ---
-interactive: false
 description: 'Performance regression detection using the browse daemon. Establishes
 
   baselines for page load times, Core Web Vitals, and resource sizes.
@@ -8,7 +7,9 @@ description: 'Performance regression detection using the browse daemon. Establis
 
   Use when: "performance", "benchmark", "page speed", "lighthouse", "web vitals",
 
-  "bundle size", "load time".
+  "bundle size", "load time". (gstack)
+
+  Voice triggers (speech-to-text aliases): "speed test", "check performance".
 
   '
 tools:
@@ -44,6 +45,7 @@ When the user types `gstack:benchmark`, run this skill.
 ### Phase 1: Setup
 
 ```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null || echo "SLUG=unknown")"
 mkdir -p .gstack/benchmark-reports
 mkdir -p .gstack/benchmark-reports/baselines
 ```

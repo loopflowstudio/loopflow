@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Restrict file edits to a specific directory for the session. Blocks
   Edit and
 
@@ -9,7 +8,7 @@ description: 'Restrict file edits to a specific directory for the session. Block
 
   Use when asked to "freeze", "restrict edits", "only edit this folder",
 
-  or "lock down edits".
+  or "lock down edits". (gstack)
 
   '
 tools:

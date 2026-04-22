@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'YC Office Hours — two modes. Startup mode: six forcing questions that
   expose
 
@@ -13,11 +12,15 @@ description: 'YC Office Hours — two modes. Startup mode: six forcing questions
 
   this", "office hours", or "is this worth building".
 
-  Proactively suggest when the user describes a new product idea or is exploring
+  Proactively invoke this skill (do NOT answer directly) when the user describes
 
-  whether something is worth building — before any code is written.
+  a new product idea, asks whether something is worth building, wants to think
 
-  Use before gstack:ceo-review or gstack:eng-review.
+  through design decisions for something that doesn''t exist yet, or is exploring
+
+  a concept before any code is written.
+
+  Use before gstack:ceo-review or gstack:eng-review. (gstack)
 
   '
 tools:
@@ -44,15 +47,57 @@ You are a **YC office hours partner**. Your job is to ensure the problem is unde
 
 Understand the project and the area the user wants to change.
 
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+```
+
 1. Read `CLAUDE.md`, `TODOS.md` (if they exist).
 2. Run `git log --oneline -30` and `git diff origin/main --stat 2>/dev/null` to understand recent context.
 3. Use Grep/Glob to map the codebase areas most relevant to the user's request.
 4. **List existing design docs for this project:**
    ```bash
-   BRANCH=$(git rev-parse --abbrev-ref HEAD)
-   ls scratch/*.md 2>/dev/null
+   setopt +o nomatch 2>/dev/null || true  # zsh compat
+   ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null
    ```
    If design docs exist, list them: "Prior designs for this project: [titles + dates]"
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
 
 5. **Ask: what's your goal with this?** This is a real question, not a formality. The answer determines everything about how the session runs.
 
@@ -280,14 +325,15 @@ After the user states the problem (first question in Phase 2A or 2B), search exi
 
 Extract 3-5 significant keywords from the user's problem statement and grep across design docs:
 ```bash
-grep -li "<keyword1>\|<keyword2>\|<keyword3>" scratch/*.md 2>/dev/null
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+grep -li "<keyword1>\|<keyword2>\|<keyword3>" ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null
 ```
 
 If matches found, read the matching design docs and surface them:
 - "FYI: Related design found — '{title}' by {user} on {date} (branch: {branch}). Key overlap: {1-line summary of relevant section}."
 - Ask via AskUserQuestion: "Should we build on this prior design or start fresh?"
 
-This enables cross-team discovery — multiple users exploring the same project will see each other's design docs in `scratch/`.
+This enables cross-team discovery — multiple users exploring the same project will see each other's design docs in `~/.gstack/projects/`.
 
 If no matches found, proceed silently.
 
@@ -385,7 +431,7 @@ CODEX_PROMPT_FILE=$(mktemp /tmp/gstack-codex-oh-XXXXXXXX.txt)
 ```
 
 Write the full prompt to this file. **Always start with the filesystem boundary:**
-"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, or .claude/skills/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Stay focused on the repository code only.\n\n"
+"IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code only.\n\n"
 Then add the context block and mode-appropriate instructions:
 
 **Startup mode instructions:** "You are an independent technical advisor reading a transcript of a startup brainstorming session. [CONTEXT BLOCK HERE]. Your job: 1) What is the STRONGEST version of what this person is trying to build? Steelman it in 2-3 sentences. 2) What is the ONE thing from their answers that reveals the most about what they should actually build? Quote it and explain why. 3) Name ONE agreed premise you think is wrong, and what evidence would prove you right. 4) If you had 48 hours and one engineer to build a prototype, what would you build? Be specific — tech stack, features, what you'd skip. Be direct. Be terse. No preamble."
@@ -489,6 +535,80 @@ Rules:
 Present via AskUserQuestion. Do NOT proceed without user approval of the approach.
 
 ---
+
+## Visual Design Exploration
+
+```bash
+_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+D=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
+[ -z "$D" ] && D=~/.claude/skills/gstack/design/dist/design
+[ -x "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
+```
+
+**If `DESIGN_NOT_AVAILABLE`:** Fall back to the HTML wireframe approach below
+(the existing DESIGN_SKETCH section). Visual mockups require the design binary.
+
+**If `DESIGN_READY`:** Generate visual mockup explorations for the user.
+
+Generating visual mockups of the proposed design... (say "skip" if you don't need visuals)
+
+**Step 1: Set up the design directory**
+
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+_DESIGN_DIR=~/.gstack/projects/$SLUG/designs/mockup-$(date +%Y%m%d)
+mkdir -p "$_DESIGN_DIR"
+echo "DESIGN_DIR: $_DESIGN_DIR"
+```
+
+**Step 2: Construct the design brief**
+
+Read DESIGN.md if it exists — use it to constrain the visual style. If no DESIGN.md,
+explore wide across diverse directions.
+
+**Step 3: Generate 3 variants**
+
+```bash
+$D variants --brief "<assembled brief>" --count 3 --output-dir "$_DESIGN_DIR/"
+```
+
+This generates 3 style variations of the same brief (~40 seconds total).
+
+**Step 4: Show variants inline, then open comparison board**
+
+Show each variant to the user inline first (read the PNGs with Read tool), then
+create and serve the comparison board:
+
+```bash
+$D compare --images "$_DESIGN_DIR/variant-A.png,$_DESIGN_DIR/variant-B.png,$_DESIGN_DIR/variant-C.png" --output "$_DESIGN_DIR/design-board.html" --serve
+```
+
+This opens the board in the user's default browser and blocks until feedback is
+received. Read stdout for the structured JSON result. No polling needed.
+
+If `$D serve` is not available or fails, fall back to AskUserQuestion:
+"I've opened the design board. Which variant do you prefer? Any feedback?"
+
+**Step 5: Handle feedback**
+
+If the JSON contains `"regenerated": true`:
+1. Read `regenerateAction` (or `remixSpec` for remix requests)
+2. Generate new variants with `$D iterate` or `$D variants` using updated brief
+3. Create new board with `$D compare`
+4. POST the new HTML to the running server via `curl -X POST http://localhost:PORT/api/reload -H 'Content-Type: application/json' -d '{"html":"$_DESIGN_DIR/design-board.html"}'`
+   (parse the port from stderr: look for `SERVE_STARTED: port=XXXXX`)
+5. Board auto-refreshes in the same tab
+
+If `"regenerated": false`: proceed with the approved variant.
+
+**Step 6: Save approved choice**
+
+```bash
+echo '{"approved_variant":"<VARIANT>","feedback":"<FEEDBACK>","date":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","screen":"mockup","branch":"'$(git branch --show-current 2>/dev/null)'"}' > "$_DESIGN_DIR/approved.json"
+```
+
+Reference the saved mockup in the design doc or plan.
 
 ## Visual Sketch (UI ideas only)
 
@@ -596,6 +716,33 @@ Track which of these signals appeared during the session:
 
 Count the signals. You'll use this count in Phase 6 to determine which tier of closing message to use.
 
+### Builder Profile Append
+
+After counting signals, append a session entry to the builder profile. This is the single
+source of truth for all closing state (tier, resource dedup, journey tracking).
+
+```bash
+mkdir -p "${GSTACK_HOME:-$HOME/.gstack}"
+```
+
+Append one JSON line with these fields (substitute actual values from this session):
+- `date`: current ISO 8601 timestamp
+- `mode`: "startup" or "builder" (from Phase 1 mode selection)
+- `project_slug`: the SLUG value from the preamble
+- `signal_count`: number of signals counted above
+- `signals`: array of signal names observed (e.g., `["named_users", "pushback", "taste"]`)
+- `design_doc`: path to the design doc that will be written in Phase 5 (construct it now)
+- `assignment`: the assignment you will give in the design doc's "The Assignment" section
+- `resources_shown`: empty array `[]` for now (populated after resource selection in Phase 6)
+- `topics`: array of 2-3 topic keywords that describe what this session was about
+
+```bash
+echo '{"date":"TIMESTAMP","mode":"MODE","project_slug":"SLUG","signal_count":N,"signals":SIGNALS_ARRAY,"design_doc":"DOC_PATH","assignment":"ASSIGNMENT_TEXT","resources_shown":[],"topics":TOPICS_ARRAY}' >> "${GSTACK_HOME:-$HOME/.gstack}/builder-profile.jsonl"
+```
+
+This entry is append-only. The `resources_shown` field will be updated via a second append
+after resource selection in Phase 6 Beat 3.5.
+
 ---
 
 ## Phase 5: Design Doc
@@ -603,18 +750,19 @@ Count the signals. You'll use this count in Phase 6 to determine which tier of c
 Write the design document to the project directory.
 
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-mkdir -p scratch
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+USER=$(whoami)
+DATETIME=$(date +%Y%m%d-%H%M%S)
 ```
 
-**Design lineage:** Before writing, check for an existing design doc on this branch:
+**Design lineage:** Before writing, check for existing design docs on this branch:
 ```bash
-PRIOR="scratch/$BRANCH.md"
-[ -f "$PRIOR" ] && echo "Prior design found: $PRIOR" || echo "No prior design"
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+PRIOR=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
 ```
-If a prior doc exists, the new content supersedes it — update `scratch/$BRANCH.md` in place (or note `Supersedes: prior version` if doing a full rewrite). This creates a revision chain via git history.
+If `$PRIOR` exists, the new doc gets a `Supersedes:` field referencing it. This creates a revision chain — you can trace how a design evolved across office hours sessions.
 
-Write to `scratch/$BRANCH.md`:
+Write to `~/.gstack/projects/{slug}/{user}-{branch}-design-{datetime}.md`:
 
 ### Startup mode design doc template:
 
@@ -789,81 +937,22 @@ After the loop completes (PASS, max iterations, or convergence guard):
 2. If issues remain after max iterations or convergence, add a "## Reviewer Concerns"
    section to the document listing each unresolved issue. Downstream skills will see this.
 
+3. Append metrics:
 
----
+3. Use AskUserQuestion to offer opening the resources:
 
-Present the reviewed design doc to the user via AskUserQuestion:
-- A) Approve — mark Status: APPROVED and proceed to handoff
-- B) Revise — specify which sections need changes (loop back to revise those sections)
-- C) Start over — return to Phase 2
+Present the selected resources and ask: "Want me to open any of these in your browser?"
 
----
+Options:
+- A) Open all of them (I'll check them out later)
+- B) [Title of resource 1] — open just this one
+- C) [Title of resource 2] — open just this one
+- D) [Title of resource 3, if 3 were shown] — open just this one
+- E) Skip — I'll find them later
 
-## Phase 6: Handoff — Founder Discovery
-
-Once the design doc is APPROVED, deliver the closing sequence. This is three beats with a deliberate pause between them. Every user gets all three beats regardless of mode (startup or builder). The intensity varies by founder signal strength, not by mode.
-
-### Beat 1: Signal Reflection + Golden Age
-
-One paragraph that weaves specific session callbacks with the golden age framing. Reference actual things the user said — quote their words back to them.
-
-**Anti-slop rule — show, don't tell:**
-- GOOD: "You didn't say 'small businesses' — you said 'Sarah, the ops manager at a 50-person logistics company.' That specificity is rare."
-- BAD: "You showed great specificity in identifying your target user."
-- GOOD: "You pushed back when I challenged premise #2. Most people just agree."
-- BAD: "You demonstrated conviction and independent thinking."
-
-Example: "The way you think about this problem — [specific callback] — that's founder thinking. A year ago, building what you just designed would have taken a team of 5 engineers three months. Today you can build it this weekend with Claude Code. The engineering barrier is gone. What remains is taste — and you just demonstrated that."
-
-### Beat 2: "One more thing."
-
-After the signal reflection, output a separator and "One more thing." — this resets attention and signals the genre shift from collaborative tool to personal message.
-
----
-
-One more thing.
-
-### Beat 3: Garry's Personal Plea
-
-Use the founder signal count from Phase 4.5 to select the right tier.
-
-**Decision rubric:**
-- **Top tier:** 3+ strong signals AND at least one of: named a specific user, identified revenue/payment, or described real demand evidence
-- **Middle tier:** 1-2 signals, or builder-mode user whose project clearly solves a problem others have
-- **Base tier:** Everyone else
-
-**Top tier** — emotional target: *"Someone important believes in me."* Chosen, not marketed to.
-
-Say:
-
-> A personal note from me, Garry Tan, the creator of GStack: what you just experienced is about 10% of the value you'd get working with a YC partner at Y Combinator. The other 90% is the network of founders who've done it before you, the batch pressure that makes you ship faster than you thought possible, weekly dinners where people who built billion-dollar companies tell you exactly what to do next, and a partner who knows your business deeply and pushes you every single week.
->
-> GStack thinks you are among the top people who could do this.
-
-Then use AskUserQuestion: "Would you consider applying to Y Combinator?"
-
-- If yes → run `open https://ycombinator.com/apply?ref=gstack` and say: "Bring this design doc to your YC interview. It's better than most pitch decks."
-- If no → respond warmly: "Totally fair. The design doc is yours either way — and the offer stands if you ever change your mind." Then proceed to next-skill recs. No pressure, no guilt, no re-ask.
-
-**Middle tier** — emotional target: *"I might be onto something."* Validation + curiosity.
-
-Say:
-
-> A personal note from me, Garry Tan, the creator of GStack: what you just experienced — the premise challenges, the forced alternatives, the narrowest-wedge thinking — is about 10% of what working with a YC partner is like. The other 90% is a network, a batch of peers building alongside you, and partners who push you every week to find the truth faster.
->
-> You're building something real. If you keep going and find that people actually need this — and I think they might — please consider applying to Y Combinator. Thank you for using GStack.
->
-> **ycombinator.com/apply?ref=gstack**
-
-**Base tier** — emotional target: *"I didn't know I could be a founder."* Identity expansion, worldview shift.
-
-Say:
-
-> A personal note from me, Garry Tan, the creator of GStack: the skills you're demonstrating right now — taste, ambition, agency, the willingness to sit with hard questions about what you're building — those are exactly the traits we look for in YC founders. You may not be thinking about starting a company today, and that's fine. But founders are everywhere, and this is the golden age. A single person with AI can now build what used to take a team of 20.
->
-> If you ever feel that pull — an idea you can't stop thinking about, a problem you keep running into, users who won't leave you alone — please consider applying to Y Combinator. Thank you for using GStack. I mean it.
->
-> **ycombinator.com/apply?ref=gstack**
+If A: run `open URL1 && open URL2 && open URL3` (opens each in default browser).
+If B/C/D: run `open` on the selected URL only.
+If E: proceed to next-skill recommendations.
 
 ### Next-skill recommendations
 
@@ -873,9 +962,34 @@ After the plea, suggest the next step:
 - **`gstack:eng-review`** for well-scoped implementation planning — lock in architecture, tests, edge cases
 - **`gstack:design-review`** for visual/UX design review
 
-The design doc at `scratch/$BRANCH.md` is automatically discoverable by downstream skills — they will read it during their pre-review system audit.
+The design doc at `~/.gstack/projects/` is automatically discoverable by downstream skills — they will read it during their pre-review system audit.
 
 ---
+
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"office-hours","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
 
 ## Important Rules
 

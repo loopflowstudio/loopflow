@@ -1,29 +1,28 @@
 ---
-interactive: true
-description: 'Launch real Chrome controlled by gstack with the Side Panel extension
-  auto-loaded.
+description: 'Launch GStack Browser — AI-controlled Chromium with the sidebar extension
+  baked in.
 
-  One command: connects Claude to a visible Chrome window where you can watch every
+  Opens a visible browser window where you can watch every action in real time.
 
-  action in real time. The extension shows a live activity feed in the Side Panel.
+  The sidebar shows a live activity feed and chat. Anti-bot stealth built in.
 
-  Use when asked to "connect chrome", "open chrome", "real browser", "launch chrome",
+  Use when asked to "open gstack browser", "launch browser", "connect chrome",
 
-  "side panel", or "control my browser".
+  "open chrome", "real browser", "launch chrome", "side panel", or "control my browser".
+
+  Voice triggers (speech-to-text aliases): "show me the browser".
 
   '
 tools:
 - Bash
 - Read
 - AskUserQuestion
-version: 0.1.0
-requires:
-- browser
+version: 0.2.0
 ---
-# gstack:connect-chrome — Launch Real Chrome with Side Panel
+# /open-gstack-browser — Launch GStack Browser
 
-Connect Claude to a visible Chrome window with the gstack extension auto-loaded.
-You see every click, every navigation, every action in real time.
+Launch GStack Browser — AI-controlled Chromium with the sidebar extension,
+anti-bot stealth, and custom branding. You see every action in real time.
 
 ## SETUP (run this check BEFORE any browse command)
 
@@ -31,7 +30,7 @@ You see every click, every navigation, every action in real time.
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 B=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
-[ -z "$B" ] && B=.lf/steps/gstack/browse/dist/browse
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
 if [ -x "$B" ]; then
   echo "READY: $B"
 else
@@ -45,7 +44,19 @@ If `NEEDS_SETUP`:
 3. If `bun` is not installed:
    ```bash
    if ! command -v bun >/dev/null 2>&1; then
-     curl -fsSL https://bun.sh/install | BUN_VERSION=1.3.10 bash
+     BUN_VERSION="1.3.10"
+     BUN_INSTALL_SHA="bab8acfb046aac8c72407bdcce903957665d655d7acaa3e11c7c4616beae68dd"
+     tmpfile=$(mktemp)
+     curl -fsSL "https://bun.sh/install" -o "$tmpfile"
+     actual_sha=$(shasum -a 256 "$tmpfile" | awk '{print $1}')
+     if [ "$actual_sha" != "$BUN_INSTALL_SHA" ]; then
+       echo "ERROR: bun install script checksum mismatch" >&2
+       echo "  expected: $BUN_INSTALL_SHA" >&2
+       echo "  got:      $actual_sha" >&2
+       rm "$tmpfile"; exit 1
+     fi
+     BUN_VERSION="$BUN_VERSION" bash "$tmpfile"
+     rm "$tmpfile"
    fi
    ```
 
@@ -78,10 +89,11 @@ echo "Pre-flight cleanup done"
 $B connect
 ```
 
-This launches Playwright's bundled Chromium in headed mode with:
+This launches GStack Browser (rebranded Chromium) in headed mode with:
 - A visible window you can watch (not your regular Chrome — it stays untouched)
-- The gstack Chrome extension auto-loaded via `launchPersistentContext`
-- A golden shimmer line at the top of every page so you know which window is controlled
+- The gstack sidebar extension auto-loaded via `launchPersistentContext`
+- Anti-bot stealth patches (sites like Google and NYTimes work without captchas)
+- Custom user agent and GStack Browser branding in Dock/menu bar
 - A sidebar agent process for chat commands
 
 The `connect` command auto-discovers the extension from the gstack install

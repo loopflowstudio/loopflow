@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Design consultation: understands your product, researches the landscape,
   proposes a
 
@@ -15,7 +14,7 @@ description: 'Design consultation: understands your product, researches the land
 
   Proactively suggest when starting a new project''s UI with no existing
 
-  design system or DESIGN.md.
+  design system or DESIGN.md. (gstack)
 
   '
 tools:
@@ -60,8 +59,10 @@ ls src/ app/ pages/ components/ 2>/dev/null | head -30
 Look for office-hours output:
 
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
-[ -f "scratch/$BRANCH.md" ] && echo "Design doc found: scratch/$BRANCH.md" || echo "No design doc found"
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+ls ~/.gstack/projects/$SLUG/*office-hours* 2>/dev/null | head -5
+ls .context/*office-hours* .context/attachments/*office-hours* 2>/dev/null | head -5
 ```
 
 If office-hours output exists, read it — the product context is pre-filled.
@@ -76,7 +77,7 @@ If the codebase is empty and purpose is unclear, say: *"I don't have a clear pic
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 B=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
-[ -z "$B" ] && B=.lf/steps/gstack/browse/dist/browse
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
 if [ -x "$B" ]; then
   echo "READY: $B"
 else
@@ -90,13 +91,112 @@ If `NEEDS_SETUP`:
 3. If `bun` is not installed:
    ```bash
    if ! command -v bun >/dev/null 2>&1; then
-     curl -fsSL https://bun.sh/install | BUN_VERSION=1.3.10 bash
+     BUN_VERSION="1.3.10"
+     BUN_INSTALL_SHA="bab8acfb046aac8c72407bdcce903957665d655d7acaa3e11c7c4616beae68dd"
+     tmpfile=$(mktemp)
+     curl -fsSL "https://bun.sh/install" -o "$tmpfile"
+     actual_sha=$(shasum -a 256 "$tmpfile" | awk '{print $1}')
+     if [ "$actual_sha" != "$BUN_INSTALL_SHA" ]; then
+       echo "ERROR: bun install script checksum mismatch" >&2
+       echo "  expected: $BUN_INSTALL_SHA" >&2
+       echo "  got:      $actual_sha" >&2
+       rm "$tmpfile"; exit 1
+     fi
+     BUN_VERSION="$BUN_VERSION" bash "$tmpfile"
+     rm "$tmpfile"
    fi
    ```
 
 If browse is not available, that's fine — visual research is optional. The skill works without it using WebSearch and your built-in design knowledge.
 
+**Find the gstack designer (optional — enables AI mockup generation):**
+
+## DESIGN SETUP (run this check BEFORE any design mockup command)
+
+```bash
+_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+D=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
+[ -z "$D" ] && D=~/.claude/skills/gstack/design/dist/design
+if [ -x "$D" ]; then
+  echo "DESIGN_READY: $D"
+else
+  echo "DESIGN_NOT_AVAILABLE"
+fi
+B=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
+if [ -x "$B" ]; then
+  echo "BROWSE_READY: $B"
+else
+  echo "BROWSE_NOT_AVAILABLE (will use 'open' to view comparison boards)"
+fi
+```
+
+If `DESIGN_NOT_AVAILABLE`: skip visual mockup generation and fall back to the
+existing HTML wireframe approach (`DESIGN_SKETCH`). Design mockups are a
+progressive enhancement, not a hard requirement.
+
+If `BROWSE_NOT_AVAILABLE`: use `open file://...` instead of `$B goto` to open
+comparison boards. The user just needs to see the HTML file in any browser.
+
+If `DESIGN_READY`: the design binary is available for visual mockup generation.
+Commands:
+- `$D generate --brief "..." --output /path.png` — generate a single mockup
+- `$D variants --brief "..." --count 3 --output-dir /path/` — generate N style variants
+- `$D compare --images "a.png,b.png,c.png" --output /path/board.html --serve` — comparison board + HTTP server
+- `$D serve --html /path/board.html` — serve comparison board and collect feedback via HTTP
+- `$D check --image /path.png --brief "..."` — vision quality gate
+- `$D iterate --session /path/session.json --feedback "..." --output /path.png` — iterate
+
+**CRITICAL PATH RULE:** All design artifacts (mockups, comparison boards, approved.json)
+MUST be saved to `~/.gstack/projects/$SLUG/designs/`, NEVER to `.context/`,
+`docs/designs/`, `/tmp/`, or any project-local directory. Design artifacts are USER
+data, not project files. They persist across branches, conversations, and workspaces.
+
+If `DESIGN_READY`: Phase 5 will generate AI mockups of your proposed design system applied to real screens, instead of just an HTML preview page. Much more powerful — the user sees what their product could actually look like.
+
+If `DESIGN_NOT_AVAILABLE`: Phase 5 falls back to the HTML preview page (still good).
+
 ---
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
 
 ## Phase 1: Product Context
 
@@ -222,7 +322,7 @@ Present subagent output under a `CLAUDE SUBAGENT (design direction):` header.
 
 **Log the result:**
 ```bash
-echo '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}' >> .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 Replace STATUS with "clean" or "issues_found", SOURCE with "codex+subagent", "codex-only", "subagent-only", or "unavailable".
 
@@ -328,7 +428,149 @@ Each drill-down is one focused AskUserQuestion. After the user decides, re-check
 
 ---
 
-## Phase 5: Font & Color Preview Page (default ON)
+## Phase 5: Design System Preview (default ON)
+
+This phase generates visual previews of the proposed design system. Two paths depending on whether the gstack designer is available.
+
+### Path A: AI Mockups (if DESIGN_READY)
+
+Generate AI-rendered mockups showing the proposed design system applied to realistic screens for this product. This is far more powerful than an HTML preview — the user sees what their product could actually look like.
+
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+_DESIGN_DIR=~/.gstack/projects/$SLUG/designs/design-system-$(date +%Y%m%d)
+mkdir -p "$_DESIGN_DIR"
+echo "DESIGN_DIR: $_DESIGN_DIR"
+```
+
+Construct a design brief from the Phase 3 proposal (aesthetic, colors, typography, spacing, layout) and the product context from Phase 1:
+
+```bash
+$D variants --brief "<product name: [name]. Product type: [type]. Aesthetic: [direction]. Colors: primary [hex], secondary [hex], neutrals [range]. Typography: display [font], body [font]. Layout: [approach]. Show a realistic [page type] screen with [specific content for this product].>" --count 3 --output-dir "$_DESIGN_DIR/"
+```
+
+Run quality check on each variant:
+
+```bash
+$D check --image "$_DESIGN_DIR/variant-A.png" --brief "<the original brief>"
+```
+
+Show each variant inline (Read tool on each PNG) for instant preview.
+
+Tell the user: "I've generated 3 visual directions applying your design system to a realistic [product type] screen. Pick your favorite in the comparison board that just opened in your browser. You can also remix elements across variants."
+
+### Comparison Board + Feedback Loop
+
+Create the comparison board and serve it over HTTP:
+
+```bash
+$D compare --images "$_DESIGN_DIR/variant-A.png,$_DESIGN_DIR/variant-B.png,$_DESIGN_DIR/variant-C.png" --output "$_DESIGN_DIR/design-board.html" --serve
+```
+
+This command generates the board HTML, starts an HTTP server on a random port,
+and opens it in the user's default browser. **Run it in the background** with `&`
+because the server needs to stay running while the user interacts with the board.
+
+Parse the port from stderr output: `SERVE_STARTED: port=XXXXX`. You need this
+for the board URL and for reloading during regeneration cycles.
+
+**PRIMARY WAIT: AskUserQuestion with board URL**
+
+After the board is serving, use AskUserQuestion to wait for the user. Include the
+board URL so they can click it if they lost the browser tab:
+
+"I've opened a comparison board with the design variants:
+http://127.0.0.1:<PORT>/ — Rate them, leave comments, remix
+elements you like, and click Submit when you're done. Let me know when you've
+submitted your feedback (or paste your preferences here). If you clicked
+Regenerate or Remix on the board, tell me and I'll generate new variants."
+
+**Do NOT use AskUserQuestion to ask which variant the user prefers.** The comparison
+board IS the chooser. AskUserQuestion is just the blocking wait mechanism.
+
+**After the user responds to AskUserQuestion:**
+
+Check for feedback files next to the board HTML:
+- `$_DESIGN_DIR/feedback.json` — written when user clicks Submit (final choice)
+- `$_DESIGN_DIR/feedback-pending.json` — written when user clicks Regenerate/Remix/More Like This
+
+```bash
+if [ -f "$_DESIGN_DIR/feedback.json" ]; then
+  echo "SUBMIT_RECEIVED"
+  cat "$_DESIGN_DIR/feedback.json"
+elif [ -f "$_DESIGN_DIR/feedback-pending.json" ]; then
+  echo "REGENERATE_RECEIVED"
+  cat "$_DESIGN_DIR/feedback-pending.json"
+  rm "$_DESIGN_DIR/feedback-pending.json"
+else
+  echo "NO_FEEDBACK_FILE"
+fi
+```
+
+The feedback JSON has this shape:
+```json
+{
+  "preferred": "A",
+  "ratings": { "A": 4, "B": 3, "C": 2 },
+  "comments": { "A": "Love the spacing" },
+  "overall": "Go with A, bigger CTA",
+  "regenerated": false
+}
+```
+
+**If `feedback.json` found:** The user clicked Submit on the board.
+Read `preferred`, `ratings`, `comments`, `overall` from the JSON. Proceed with
+the approved variant.
+
+**If `feedback-pending.json` found:** The user clicked Regenerate/Remix on the board.
+1. Read `regenerateAction` from the JSON (`"different"`, `"match"`, `"more_like_B"`,
+   `"remix"`, or custom text)
+2. If `regenerateAction` is `"remix"`, read `remixSpec` (e.g. `{"layout":"A","colors":"B"}`)
+3. Generate new variants with `$D iterate` or `$D variants` using updated brief
+4. Create new board: `$D compare --images "..." --output "$_DESIGN_DIR/design-board.html"`
+5. Reload the board in the user's browser (same tab):
+   `curl -s -X POST http://127.0.0.1:PORT/api/reload -H 'Content-Type: application/json' -d '{"html":"$_DESIGN_DIR/design-board.html"}'`
+6. The board auto-refreshes. **AskUserQuestion again** with the same board URL to
+   wait for the next round of feedback. Repeat until `feedback.json` appears.
+
+**If `NO_FEEDBACK_FILE`:** The user typed their preferences directly in the
+AskUserQuestion response instead of using the board. Use their text response
+as the feedback.
+
+**POLLING FALLBACK:** Only use polling if `$D serve` fails (no port available).
+In that case, show each variant inline using the Read tool (so the user can see them),
+then use AskUserQuestion:
+"The comparison board server failed to start. I've shown the variants above.
+Which do you prefer? Any feedback?"
+
+**After receiving feedback (any path):** Output a clear summary confirming
+what was understood:
+
+"Here's what I understood from your feedback:
+PREFERRED: Variant [X]
+RATINGS: [list]
+YOUR NOTES: [comments]
+DIRECTION: [overall]
+
+Is this right?"
+
+Use AskUserQuestion to verify before proceeding.
+
+**Save the approved choice:**
+```bash
+echo '{"approved_variant":"<V>","feedback":"<FB>","date":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","screen":"<SCREEN>","branch":"'$(git branch --show-current 2>/dev/null)'"}' > "$_DESIGN_DIR/approved.json"
+```
+
+After the user picks a direction:
+
+- Use `$D extract --image "$_DESIGN_DIR/variant-<CHOSEN>.png"` to analyze the approved mockup and extract design tokens (colors, typography, spacing) that will populate DESIGN.md in Phase 6. This grounds the design system in what was actually approved visually, not just what was described in text.
+- If the user wants to iterate further: `$D iterate --feedback "<user's feedback>" --output "$_DESIGN_DIR/refined.png"`
+
+**Plan mode vs. implementation mode:**
+- **If in plan mode:** Add the approved mockup path (the full `$_DESIGN_DIR` path) and extracted tokens to the plan file under an "## Approved Design Direction" section. The design system gets written to DESIGN.md when the plan is implemented.
+- **If NOT in plan mode:** Proceed directly to Phase 6 and write DESIGN.md with the extracted tokens.
+
+### Path B: HTML Preview Page (fallback if DESIGN_NOT_AVAILABLE)
 
 Generate a polished HTML preview page and open it in the user's browser. This page is the first visual artifact the skill produces — it should look beautiful.
 
@@ -342,7 +584,7 @@ Write the preview HTML to `$PREVIEW_FILE`, then open it:
 open "$PREVIEW_FILE"
 ```
 
-### Preview Page Requirements
+### Preview Page Requirements (Path B only)
 
 The agent writes a **single, self-contained HTML file** (no framework dependencies) that:
 
@@ -377,7 +619,11 @@ If the user says skip the preview, go directly to Phase 6.
 
 ## Phase 6: Write DESIGN.md & Confirm
 
-Write `DESIGN.md` to the repo root with this structure:
+If `$D extract` was used in Phase 5 (Path A), use the extracted tokens as the primary source for DESIGN.md values — colors, typography, and spacing grounded in the approved mockup rather than text descriptions alone. Merge extracted tokens with the Phase 3 proposal (the proposal provides rationale and context; the extraction provides exact values).
+
+**If in plan mode:** Write the DESIGN.md content into the plan file as a "## Proposed DESIGN.md" section. Do NOT write the actual file — that happens at implementation time.
+
+**If NOT in plan mode:** Write `DESIGN.md` to the repo root with this structure:
 
 ```markdown
 # Design System — [Project Name]
@@ -450,7 +696,36 @@ List all decisions. Flag any that used agent defaults without explicit user conf
 - B) I want to change something (specify what)
 - C) Start over
 
+After shipping DESIGN.md, if the session produced screen-level mockups or page layouts
+(not just system-level tokens), suggest:
+"Want to see this design system as working Pretext-native HTML? Run /design-html."
+
 ---
+
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"design-consultation","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
 
 ## Important Rules
 

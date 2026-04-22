@@ -1,12 +1,11 @@
 ---
-interactive: true
 description: 'Land and deploy workflow. Merges the PR, waits for CI and deploy,
 
   verifies production health via canary checks. Takes over after gstack:ship
 
   creates the PR. Use when: "merge", "land", "deploy", "merge and verify",
 
-  "land it", "ship it to production".
+  "land it", "ship it to production". (gstack)
 
   '
 tools:
@@ -86,11 +85,12 @@ Check whether this project has been through a successful `gstack:land-and-deploy
 and whether the deploy configuration has changed since then:
 
 ```bash
-if [ ! -f .gstack/land-deploy-confirmed ]; then
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+if [ ! -f ~/.gstack/projects/$SLUG/land-deploy-confirmed ]; then
   echo "FIRST_RUN"
 else
   # Check if deploy config has changed since confirmation
-  SAVED_HASH=$(cat .gstack/land-deploy-confirmed 2>/dev/null)
+  SAVED_HASH=$(cat ~/.gstack/projects/$SLUG/land-deploy-confirmed 2>/dev/null)
   CURRENT_HASH=$(sed -n '/## Deploy Configuration/,/^## /p' CLAUDE.md 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
   # Also hash workflow files that affect deploy behavior
   WORKFLOW_HASH=$(find .github/workflows -maxdepth 1 \( -name '*deploy*' -o -name '*cd*' \) 2>/dev/null | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
@@ -256,7 +256,7 @@ Tell the user: "Before I merge any PR, I run a series of readiness checks — co
 Preview the readiness checks that will run at Step 3.5 (without re-running tests):
 
 ```bash
-cat .gstack/reviews.jsonl 2>/dev/null
+~/.claude/skills/gstack/bin/gstack-review-read 2>/dev/null
 ```
 
 Show a summary of review status: which reviews have been run, how stale they are.
@@ -284,10 +284,10 @@ Present the full dry-run results to the user via AskUserQuestion:
 
 Save the deploy config fingerprint so we can detect future changes:
 ```bash
-mkdir -p .gstack
+mkdir -p ~/.gstack/projects/$SLUG
 CURRENT_HASH=$(sed -n '/## Deploy Configuration/,/^## /p' CLAUDE.md 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
 WORKFLOW_HASH=$(find .github/workflows -maxdepth 1 \( -name '*deploy*' -o -name '*cd*' \) 2>/dev/null | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
-echo "${CURRENT_HASH}-${WORKFLOW_HASH}" > .gstack/land-deploy-confirmed
+echo "${CURRENT_HASH}-${WORKFLOW_HASH}" > ~/.gstack/projects/$SLUG/land-deploy-confirmed
 ```
 Continue to Step 2.
 
@@ -349,7 +349,7 @@ Collect evidence for each check below. Track warnings (yellow) and blockers (red
 ### 3.5a: Review staleness check
 
 ```bash
-cat .gstack/reviews.jsonl 2>/dev/null
+~/.claude/skills/gstack/bin/gstack-review-read 2>/dev/null
 ```
 
 Parse the output. For each review skill (plan-eng-review, plan-ceo-review,
@@ -395,7 +395,7 @@ Use AskUserQuestion:
 
 Read the review checklist:
 ```bash
-cat .lf/steps/gstack/review/checklist.md 2>/dev/null || echo "Checklist not found"
+cat ~/.claude/skills/gstack/review/checklist.md 2>/dev/null || echo "Checklist not found"
 ```
 Apply each checklist item to the current diff. This is the same quick review that `gstack:ship`
 runs in its Step 3.5. Auto-fix trivial issues (whitespace, imports). For critical findings
@@ -429,7 +429,7 @@ If tests fail: **BLOCKER.** Cannot merge with failing tests.
 
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
-ls -t .gstack/evals/*-e2e-*-$(date +%Y-%m-%d)*.json 2>/dev/null | head -20
+ls -t ~/.gstack-dev/evals/*-e2e-*-$(date +%Y-%m-%d)*.json 2>/dev/null | head -20
 ```
 
 For each eval file from today, parse pass/fail counts. Show:
@@ -445,7 +445,7 @@ If E2E results exist but have failures: **WARNING — N tests failed.** List the
 
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
-ls -t .gstack/evals/*-llm-judge-*-$(date +%Y-%m-%d)*.json 2>/dev/null | head -5
+ls -t ~/.gstack-dev/evals/*-llm-judge-*-$(date +%Y-%m-%d)*.json 2>/dev/null | head -5
 ```
 
 If found, parse and show pass/fail. If not found, note "No LLM evals run today."
@@ -666,7 +666,7 @@ If you want to persist deploy settings for future runs, suggest the user run `gs
 Then run `gstack-diff-scope` to classify the changes:
 
 ```bash
-eval $(lf ops diff-scope $(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo main) 2>/dev/null)
+eval $(~/.claude/skills/gstack/bin/gstack-diff-scope $(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo main) 2>/dev/null)
 echo "FRONTEND=$SCOPE_FRONTEND BACKEND=$SCOPE_BACKEND DOCS=$SCOPE_DOCS CONFIG=$SCOPE_CONFIG"
 ```
 

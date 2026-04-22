@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Designer''s eye plan review — interactive, like CEO and Eng review.
 
   Rates each design dimension 0-10, explains what would make it a 10,
@@ -12,7 +11,7 @@ description: 'Designer''s eye plan review — interactive, like CEO and Eng revi
 
   Proactively suggest when the user has a plan with UI/UX components that
 
-  should be reviewed before implementation.
+  should be reviewed before implementation. (gstack)
 
   '
 tools:
@@ -42,6 +41,27 @@ choices.
 
 Do NOT make any code changes. Do NOT start implementation. Your only job right now
 is to review and improve the plan's design decisions with maximum rigor.
+
+### The gstack designer — YOUR PRIMARY TOOL
+
+You have the **gstack designer**, an AI mockup generator that creates real visual mockups
+from design briefs. This is your signature capability. Use it by default, not as an
+afterthought.
+
+**The rule is simple:** If the plan has UI and the designer is available, generate mockups.
+Don't ask permission. Don't write text descriptions of what a homepage "could look like."
+Show it. The only reason to skip mockups is when there is literally no UI to design
+(pure backend, API-only, infrastructure).
+
+Design reviews without visuals are just opinion. Mockups ARE the plan for design work.
+You need to see the design before you code it.
+
+Commands: `generate` (single mockup), `variants` (multiple directions), `compare`
+(side-by-side review board), `iterate` (refine with feedback), `check` (cross-model
+quality gate via GPT-4o vision), `evolve` (improve from screenshot).
+
+Setup is handled by the DESIGN SETUP section below. If `DESIGN_READY` is printed,
+the designer is available and you should use it.
 
 ## Design Principles
 
@@ -78,8 +98,8 @@ When reviewing a plan, empathy as simulation runs automatically. When rating, pr
 
 ## Priority Hierarchy Under Context Pressure
 
-Step 0 > Interaction State Coverage > AI Slop Risk > Information Architecture > User Journey > everything else.
-Never skip Step 0, interaction states, or AI slop assessment. These are the highest-leverage design dimensions.
+Step 0 > Step 0.5 (mockups — generate by default) > Interaction State Coverage > AI Slop Risk > Information Architecture > User Journey > everything else.
+Never skip Step 0 or mockup generation (when the designer is available). Mockups before review passes is non-negotiable. Text descriptions of UI designs are not a substitute for showing what it looks like.
 
 ## PRE-REVIEW SYSTEM AUDIT (before Step 0)
 
@@ -110,6 +130,49 @@ Analyze the plan. If it involves NONE of: new UI screens/pages, changes to exist
 
 Report findings before proceeding to Step 0.
 
+## DESIGN SETUP (run this check BEFORE any design mockup command)
+
+```bash
+_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+D=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
+[ -z "$D" ] && D=~/.claude/skills/gstack/design/dist/design
+if [ -x "$D" ]; then
+  echo "DESIGN_READY: $D"
+else
+  echo "DESIGN_NOT_AVAILABLE"
+fi
+B=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
+if [ -x "$B" ]; then
+  echo "BROWSE_READY: $B"
+else
+  echo "BROWSE_NOT_AVAILABLE (will use 'open' to view comparison boards)"
+fi
+```
+
+If `DESIGN_NOT_AVAILABLE`: skip visual mockup generation and fall back to the
+existing HTML wireframe approach (`DESIGN_SKETCH`). Design mockups are a
+progressive enhancement, not a hard requirement.
+
+If `BROWSE_NOT_AVAILABLE`: use `open file://...` instead of `$B goto` to open
+comparison boards. The user just needs to see the HTML file in any browser.
+
+If `DESIGN_READY`: the design binary is available for visual mockup generation.
+Commands:
+- `$D generate --brief "..." --output /path.png` — generate a single mockup
+- `$D variants --brief "..." --count 3 --output-dir /path/` — generate N style variants
+- `$D compare --images "a.png,b.png,c.png" --output /path/board.html --serve` — comparison board + HTTP server
+- `$D serve --html /path/board.html` — serve comparison board and collect feedback via HTTP
+- `$D check --image /path.png --brief "..."` — vision quality gate
+- `$D iterate --session /path/session.json --feedback "..." --output /path.png` — iterate
+
+**CRITICAL PATH RULE:** All design artifacts (mockups, comparison boards, approved.json)
+MUST be saved to `~/.gstack/projects/$SLUG/designs/`, NEVER to `.context/`,
+`docs/designs/`, `/tmp/`, or any project-local directory. Design artifacts are USER
+data, not project files. They persist across branches, conversations, and workspaces.
+
 ## Step 0: Design Scope Assessment
 
 ### 0A. Initial Design Rating
@@ -127,9 +190,180 @@ Explain what a 10 looks like for THIS plan.
 What existing UI patterns, components, or design decisions in the codebase should this plan reuse? Don't reinvent what already works.
 
 ### 0D. Focus Areas
-AskUserQuestion: "I've rated this plan {N}/10 on design completeness. The biggest gaps are {X, Y, Z}. Want me to review all 7 dimensions, or focus on specific areas?"
+AskUserQuestion: "I've rated this plan {N}/10 on design completeness. The biggest gaps are {X, Y, Z}. I'll generate visual mockups next, then review all 7 dimensions. Want me to focus on specific areas instead of all 7?"
 
 **STOP.** Do NOT proceed until user responds.
+
+## Step 0.5: Visual Mockups (DEFAULT when DESIGN_READY)
+
+If the plan involves any UI — screens, pages, components, visual changes — AND the
+gstack designer is available (`DESIGN_READY` was printed during setup), **generate
+mockups immediately.** Do not ask permission. This is the default behavior.
+
+Tell the user: "Generating visual mockups with the gstack designer. This is how we
+review design — real visuals, not text descriptions."
+
+The ONLY time you skip mockups is when:
+- `DESIGN_NOT_AVAILABLE` was printed (designer binary not found)
+- The plan has zero UI scope (pure backend/API/infrastructure)
+
+If the user explicitly says "skip mockups" or "text only", respect that. Otherwise, generate.
+
+**PLAN MODE EXCEPTION — ALWAYS RUN:** These commands write design artifacts to
+`~/.gstack/projects/$SLUG/designs/` (user config directory, not project files).
+Mockups are design artifacts that inform the plan, not code changes. The gstack
+designer outputs PNGs and HTML comparison boards for human review during the
+planning phase. Generating mockups during planning is the whole point.
+
+Allowed commands under this exception:
+- `mkdir -p ~/.gstack/projects/$SLUG/designs/...`
+- `$D generate`, `$D variants`, `$D compare`, `$D iterate`, `$D evolve`, `$D check`
+- `open` (fallback for viewing boards when `$B` is not available)
+
+First, set up the output directory. Name it after the screen/feature being designed and today's date:
+
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+_DESIGN_DIR=~/.gstack/projects/$SLUG/designs/<screen-name>-$(date +%Y%m%d)
+mkdir -p "$_DESIGN_DIR"
+echo "DESIGN_DIR: $_DESIGN_DIR"
+```
+
+Replace `<screen-name>` with a descriptive kebab-case name (e.g., `homepage-variants`, `settings-page`, `onboarding-flow`).
+
+**Generate mockups ONE AT A TIME in this skill.** The inline review flow generates
+fewer variants and benefits from sequential control. Note: /design-shotgun uses
+parallel Agent subagents for variant generation, which works at Tier 2+ (15+ RPM).
+The sequential constraint here is specific to plan-design-review's inline pattern.
+
+For each UI screen/section in scope, construct a design brief from the plan's description (and DESIGN.md if present) and generate variants:
+
+```bash
+$D variants --brief "<description assembled from plan + DESIGN.md constraints>" --count 3 --output-dir "$_DESIGN_DIR/"
+```
+
+After generation, run a cross-model quality check on each variant:
+
+```bash
+$D check --image "$_DESIGN_DIR/variant-A.png" --brief "<the original brief>"
+```
+
+Flag any variants that fail the quality check. Offer to regenerate failures.
+
+**Do NOT show variants inline via Read tool and ask for preferences.** Proceed
+directly to the Comparison Board + Feedback Loop section below. The comparison board
+IS the chooser — it has rating controls, comments, remix/regenerate, and structured
+feedback output. Showing mockups inline is a degraded experience.
+
+### Comparison Board + Feedback Loop
+
+Create the comparison board and serve it over HTTP:
+
+```bash
+$D compare --images "$_DESIGN_DIR/variant-A.png,$_DESIGN_DIR/variant-B.png,$_DESIGN_DIR/variant-C.png" --output "$_DESIGN_DIR/design-board.html" --serve
+```
+
+This command generates the board HTML, starts an HTTP server on a random port,
+and opens it in the user's default browser. **Run it in the background** with `&`
+because the server needs to stay running while the user interacts with the board.
+
+Parse the port from stderr output: `SERVE_STARTED: port=XXXXX`. You need this
+for the board URL and for reloading during regeneration cycles.
+
+**PRIMARY WAIT: AskUserQuestion with board URL**
+
+After the board is serving, use AskUserQuestion to wait for the user. Include the
+board URL so they can click it if they lost the browser tab:
+
+"I've opened a comparison board with the design variants:
+http://127.0.0.1:<PORT>/ — Rate them, leave comments, remix
+elements you like, and click Submit when you're done. Let me know when you've
+submitted your feedback (or paste your preferences here). If you clicked
+Regenerate or Remix on the board, tell me and I'll generate new variants."
+
+**Do NOT use AskUserQuestion to ask which variant the user prefers.** The comparison
+board IS the chooser. AskUserQuestion is just the blocking wait mechanism.
+
+**After the user responds to AskUserQuestion:**
+
+Check for feedback files next to the board HTML:
+- `$_DESIGN_DIR/feedback.json` — written when user clicks Submit (final choice)
+- `$_DESIGN_DIR/feedback-pending.json` — written when user clicks Regenerate/Remix/More Like This
+
+```bash
+if [ -f "$_DESIGN_DIR/feedback.json" ]; then
+  echo "SUBMIT_RECEIVED"
+  cat "$_DESIGN_DIR/feedback.json"
+elif [ -f "$_DESIGN_DIR/feedback-pending.json" ]; then
+  echo "REGENERATE_RECEIVED"
+  cat "$_DESIGN_DIR/feedback-pending.json"
+  rm "$_DESIGN_DIR/feedback-pending.json"
+else
+  echo "NO_FEEDBACK_FILE"
+fi
+```
+
+The feedback JSON has this shape:
+```json
+{
+  "preferred": "A",
+  "ratings": { "A": 4, "B": 3, "C": 2 },
+  "comments": { "A": "Love the spacing" },
+  "overall": "Go with A, bigger CTA",
+  "regenerated": false
+}
+```
+
+**If `feedback.json` found:** The user clicked Submit on the board.
+Read `preferred`, `ratings`, `comments`, `overall` from the JSON. Proceed with
+the approved variant.
+
+**If `feedback-pending.json` found:** The user clicked Regenerate/Remix on the board.
+1. Read `regenerateAction` from the JSON (`"different"`, `"match"`, `"more_like_B"`,
+   `"remix"`, or custom text)
+2. If `regenerateAction` is `"remix"`, read `remixSpec` (e.g. `{"layout":"A","colors":"B"}`)
+3. Generate new variants with `$D iterate` or `$D variants` using updated brief
+4. Create new board: `$D compare --images "..." --output "$_DESIGN_DIR/design-board.html"`
+5. Reload the board in the user's browser (same tab):
+   `curl -s -X POST http://127.0.0.1:PORT/api/reload -H 'Content-Type: application/json' -d '{"html":"$_DESIGN_DIR/design-board.html"}'`
+6. The board auto-refreshes. **AskUserQuestion again** with the same board URL to
+   wait for the next round of feedback. Repeat until `feedback.json` appears.
+
+**If `NO_FEEDBACK_FILE`:** The user typed their preferences directly in the
+AskUserQuestion response instead of using the board. Use their text response
+as the feedback.
+
+**POLLING FALLBACK:** Only use polling if `$D serve` fails (no port available).
+In that case, show each variant inline using the Read tool (so the user can see them),
+then use AskUserQuestion:
+"The comparison board server failed to start. I've shown the variants above.
+Which do you prefer? Any feedback?"
+
+**After receiving feedback (any path):** Output a clear summary confirming
+what was understood:
+
+"Here's what I understood from your feedback:
+PREFERRED: Variant [X]
+RATINGS: [list]
+YOUR NOTES: [comments]
+DIRECTION: [overall]
+
+Is this right?"
+
+Use AskUserQuestion to verify before proceeding.
+
+**Save the approved choice:**
+```bash
+echo '{"approved_variant":"<V>","feedback":"<FB>","date":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","screen":"<SCREEN>","branch":"'$(git branch --show-current 2>/dev/null)'"}' > "$_DESIGN_DIR/approved.json"
+```
+
+**Do NOT use AskUserQuestion to ask which variant the user picked.** Read `feedback.json` — it already contains their preferred variant, ratings, comments, and overall feedback. Only use AskUserQuestion to confirm you understood the feedback correctly, never to re-ask what they chose.
+
+Note which direction was approved. This becomes the visual reference for all subsequent review passes.
+
+**Multiple variants/screens:** If the user asked for multiple variants (e.g., "5 versions of the homepage"), generate ALL as separate variant sets with their own comparison boards. Each screen/variant set gets its own subdirectory under `designs/`. Complete all mockup generation and user selection before starting review passes.
+
+**If `DESIGN_NOT_AVAILABLE`:** Tell the user: "The gstack designer isn't set up yet. Run `$D setup` to enable visual mockups. Proceeding with text-only review, but you're missing the best part." Then proceed to review passes with text-based review.
 
 ## Design Outside Voices (parallel)
 
@@ -235,8 +469,7 @@ Fill in each cell from the Codex and subagent outputs. CONFIRMED = both agree. D
 
 **Log the result:**
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-echo '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}' >> .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 Replace STATUS with "clean" or "issues_found", SOURCE with "codex+subagent", "codex-only", "subagent-only", or "unavailable".
 
@@ -254,7 +487,62 @@ Pattern:
 
 Re-run loop: invoke gstack:design-review again → re-rate → sections at 8+ get a quick pass, sections below 8 get full treatment.
 
+### "Show me what 10/10 looks like" (requires design binary)
+
+If `DESIGN_READY` was printed during setup AND a dimension rates below 7/10,
+offer to generate a visual mockup showing what the improved version would look like:
+
+```bash
+$D generate --brief "<description of what 10/10 looks like for this dimension>" --output /tmp/gstack-ideal-<dimension>.png
+```
+
+Show the mockup to the user via the Read tool. This makes the gap between
+"what the plan describes" and "what it should look like" visceral, not abstract.
+
+If the design binary is not available, skip this and continue with text-based
+descriptions of what 10/10 looks like.
+
 ## Review Sections (7 passes, after scope is agreed)
+
+**Anti-skip rule:** Never condense, abbreviate, or skip any review pass (1-7) regardless of plan type (strategy, spec, code, infra). Every pass in this skill exists for a reason. "This is a strategy doc so design passes don't apply" is always wrong — design gaps are where implementation breaks down. If a pass genuinely has zero findings, say "No issues found" and move on — but you must evaluate it.
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
 
 ### Pass 1: Information Architecture
 Rate 0-10: Does the plan define what the user sees first, second, third?
@@ -361,6 +649,7 @@ Source: [OpenAI "Designing Delightful Frontends with GPT-5.4"](https://developer
 - "Hero section" → what makes this hero feel like THIS product?
 - "Clean, modern UI" → meaningless. Replace with actual design decisions.
 - "Dashboard with widgets" → what makes this NOT every other dashboard?
+If visual mockups were generated in Step 0.5, evaluate them against the AI slop blacklist above. Read each mockup image using the Read tool. Does the mockup fall into generic patterns (3-column grid, centered hero, stock-photo feel)? If so, flag it and offer to regenerate with more specific direction via `$D iterate --feedback "..."`.
 **STOP.** AskUserQuestion once per issue. Do NOT batch. Recommend + WHY.
 
 ### Pass 5: Design System Alignment
@@ -383,7 +672,16 @@ Surface ambiguities that will haunt implementation:
   Mobile nav pattern?          | Desktop nav hides behind hamburger
   ...
 ```
+If visual mockups were generated in Step 0.5, reference them as evidence when surfacing unresolved decisions. A mockup makes decisions concrete — e.g., "Your approved mockup shows a sidebar nav, but the plan doesn't specify mobile behavior. What happens to this sidebar on 375px?"
 Each decision = one AskUserQuestion with recommendation + WHY + alternatives. Edit the plan with each decision as it's made.
+
+### Post-Pass: Update Mockups (if generated)
+
+If mockups were generated in Step 0.5 and review passes changed significant design decisions (information architecture restructure, new states, layout changes), offer to regenerate (one-shot, not a loop):
+
+AskUserQuestion: "The review passes changed [list major design changes]. Want me to regenerate mockups to reflect the updated plan? This ensures the visual reference matches what we're actually building."
+
+If yes, use `$D iterate` with feedback summarizing the changes, or `$D variants` with an updated brief. Save to the same `$_DESIGN_DIR` directory.
 
 ## CRITICAL RULE — How to ask questions
 Follow the AskUserQuestion format from the Preamble above. Additional rules for plan design reviews:
@@ -393,6 +691,7 @@ Follow the AskUserQuestion format from the Preamble above. Additional rules for 
 * **Map to Design Principles above.** One sentence connecting your recommendation to a specific principle.
 * Label with issue NUMBER + option LETTER (e.g., "3A", "3B").
 * **Escape hatch:** If a section has no issues, say so and move on. If a gap has an obvious fix, state what you'll add and move on — don't waste a question on it. Only use AskUserQuestion when there is a genuine design choice with meaningful tradeoffs.
+* **NEVER use AskUserQuestion to ask which variant the user prefers.** Always create a comparison board first (`$D compare --serve`) and open it in the browser. The board has rating controls, comments, remix/regenerate buttons, and structured feedback output. Use AskUserQuestion ONLY to notify the user the board is open and wait for them to finish — not to present variants inline and ask "which do you prefer?" That is a degraded experience.
 
 ## Required Outputs
 
@@ -433,6 +732,7 @@ Then present options: **A)** Add to TODOS.md **B)** Skip — not valuable enough
   | NOT in scope         | written (___ items)                         |
   | What already exists  | written                                     |
   | TODOS.md updates     | ___ items proposed                          |
+  | Approved Mockups     | ___ generated, ___ approved                  |
   | Decisions made       | ___ added to plan                           |
   | Decisions deferred   | ___ (listed below)                          |
   | Overall design score | ___/10 → ___/10                             |
@@ -445,12 +745,26 @@ If any below 8: note what's unresolved and why (user chose to defer).
 ### Unresolved Decisions
 If any AskUserQuestion goes unanswered, note it here. Never silently default to an option.
 
+### Approved Mockups
+
+If visual mockups were generated during this review, add to the plan file:
+
+```
+## Approved Mockups
+
+| Screen/Section | Mockup Path | Direction | Notes |
+|----------------|-------------|-----------|-------|
+| [screen name]  | ~/.gstack/projects/$SLUG/designs/[folder]/[filename].png | [brief description] | [constraints from review] |
+```
+
+Include the full path to each approved mockup (the variant the user chose), a one-line description of the direction, and any constraints. The implementer reads this to know exactly which visual to build from. These persist across conversations and workspaces. If no mockups were generated, omit this section.
+
 ## Review Readiness Dashboard
 
 After completing the review, read the review log and config to display the dashboard.
 
 ```bash
-cat .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-read
 ```
 
 Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both gstack:ceo-review and gstack:eng-review.
@@ -478,17 +792,17 @@ Display:
 ```
 
 **Review tiers:**
-- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally by setting `skip_eng_review: true` in `.lf/config.yaml` (the "don't bother me" setting).
+- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally with \`gstack-config set skip_eng_review true\` (the "don't bother me" setting).
 - **CEO Review (optional):** Use your judgment. Recommend it for big product/business changes, new user-facing features, or scope decisions. Skip for bug fixes, refactors, infra, and cleanup.
 - **Design Review (optional):** Use your judgment. Recommend it for UI/UX changes. Skip for backend-only, infra, or prompt-only changes.
-- **Adversarial Review (automatic):** Auto-scales by diff size. Small diffs (<50 lines) skip adversarial. Medium diffs (50–199) get cross-model adversarial. Large diffs (200+) get all 4 passes: Claude structured, Codex structured, Claude adversarial subagent, Codex adversarial. No configuration needed.
+- **Adversarial Review (automatic):** Always-on for every review. Every diff gets both Claude adversarial subagent and Codex adversarial challenge. Large diffs (200+ lines) additionally get Codex structured review with P1 gate. No configuration needed.
 - **Outside Voice (optional):** Independent plan review from a different AI model. Offered after all review sections complete in gstack:ceo-review and gstack:eng-review. Falls back to Claude subagent if Codex is unavailable. Never gates shipping.
 
 **Verdict logic:**
-- **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\` in `.lf/config.yaml`)
+- **CLEARED**: Eng Review has >= 1 entry within 7 days from either \`review\` or \`plan-eng-review\` with status "clean" (or \`skip_eng_review\` is \`true\`)
 - **NOT CLEARED**: Eng Review missing, stale (>7 days), or has open issues
 - CEO, Design, and Codex reviews are shown for context but never block shipping
-- If \`skip_eng_review\` is \`true\` in `.lf/config.yaml`, Eng Review shows "SKIPPED (global)" and verdict is CLEARED
+- If \`skip_eng_review\` config is \`true\`, Eng Review shows "SKIPPED (global)" and verdict is CLEARED
 
 **Staleness detection:** After displaying the dashboard, check if any existing reviews may be stale:
 - Parse the \`---HEAD---\` section from the bash output to get the current HEAD commit hash
@@ -519,6 +833,10 @@ Parse each JSONL entry. Each skill logs different fields:
   → Findings: "{issues_found} issues, {critical_gaps} critical gaps"
 - **plan-design-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`unresolved\`, \`decisions_made\`, \`commit\`
   → Findings: "score: {initial_score}/10 → {overall_score}/10, {decisions_made} decisions"
+- **plan-devex-review**: \`status\`, \`initial_score\`, \`overall_score\`, \`product_type\`, \`tthw_current\`, \`tthw_target\`, \`mode\`, \`persona\`, \`competitive_tier\`, \`unresolved\`, \`commit\`
+  → Findings: "score: {initial_score}/10 → {overall_score}/10, TTHW: {tthw_current} → {tthw_target}"
+- **devex-review**: \`status\`, \`overall_score\`, \`product_type\`, \`tthw_measured\`, \`dimensions_tested\`, \`dimensions_inferred\`, \`boomerang\`, \`commit\`
+  → Findings: "score: {overall_score}/10, TTHW: {tthw_measured}, {dimensions_tested} tested/{dimensions_inferred} inferred"
 - **codex-review**: \`status\`, \`gate\`, \`findings\`, \`findings_fixed\`
   → Findings: "{findings} findings, {findings_fixed}/{findings} fixed"
 
@@ -529,20 +847,53 @@ Summary. For prior reviews, use the JSONL fields directly — they contain all r
 Produce this markdown table:
 
 \`\`\`markdown
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"plan-design-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
+
 ## Next Steps — Review Chaining
 
 After displaying the Review Readiness Dashboard, recommend the next review(s) based on what this design review discovered. Read the dashboard output to see which reviews have already been run and whether they are stale.
 
-**Recommend gstack:eng-review if eng review is not skipped globally** — check `.lf/config.yaml` for `skip_eng_review`. If it is `true`, eng review is opted out — do not recommend it. Otherwise, eng review is the required shipping gate. If this design review added significant interaction specifications, new user flows, or changed the information architecture, emphasize that eng review needs to validate the architectural implications. If an eng review already exists but the commit hash shows it predates this design review, note that it may be stale and should be re-run.
+**Recommend gstack:eng-review if eng review is not skipped globally** — check the dashboard output for `skip_eng_review`. If it is `true`, eng review is opted out — do not recommend it. Otherwise, eng review is the required shipping gate. If this design review added significant interaction specifications, new user flows, or changed the information architecture, emphasize that eng review needs to validate the architectural implications. If an eng review already exists but the commit hash shows it predates this design review, note that it may be stale and should be re-run.
 
 **Consider recommending gstack:ceo-review** — but only if this design review revealed fundamental product direction gaps. Specifically: if the overall design score started below 4/10, if the information architecture had major structural problems, or if the review surfaced questions about whether the right problem is being solved. AND no CEO review exists in the dashboard. This is a selective recommendation — most design reviews should NOT trigger a CEO review.
 
 **If both are needed, recommend eng review first** (required gate).
 
+**Recommend design exploration skills when appropriate** — /design-shotgun and /design-html
+produce design artifacts (mockups, HTML previews), not application code. They belong in
+plan mode alongside reviews. If this design review found visual issues that would benefit
+from exploring new directions, recommend /design-shotgun. If approved mockups exist and
+need to be turned into working HTML, recommend /design-html.
+
 Use AskUserQuestion to present the next step. Include only applicable options:
 - **A)** Run gstack:eng-review next (required gate)
 - **B)** Run gstack:ceo-review (only if fundamental product gaps found)
-- **C)** Skip — I'll handle reviews manually
+- **C)** Run /design-shotgun — explore visual design variants for issues found
+- **D)** Run /design-html — generate Pretext-native HTML from approved mockups
+- **E)** Skip — I'll handle next steps manually
 
 ## Formatting Rules
 * NUMBER issues (1, 2, 3...) and LETTERS for options (A, B, C...).

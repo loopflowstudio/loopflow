@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Safety guardrails for destructive commands. Warns before rm -rf, DROP
   TABLE,
 
@@ -9,7 +8,7 @@ description: 'Safety guardrails for destructive commands. Warns before rm -rf, D
 
   or working in a shared environment. Use when asked to "be careful", "safety mode",
 
-  "prod mode", or "careful mode".
+  "prod mode", or "careful mode". (gstack)
 
   '
 tools:

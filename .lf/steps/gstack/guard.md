@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Full safety mode: destructive command warnings + directory-scoped edits.
 
   Combines gstack:careful (warns before rm -rf, DROP TABLE, force-push, etc.) with
@@ -8,7 +7,7 @@ description: 'Full safety mode: destructive command warnings + directory-scoped 
 
   when touching prod or debugging live systems. Use when asked to "guard mode",
 
-  "full safety", "lock it down", or "maximum safety".
+  "full safety", "lock it down", or "maximum safety". (gstack)
 
   '
 tools:

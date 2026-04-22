@@ -1,5 +1,4 @@
 ---
-interactive: false
 description: 'Weekly engineering retrospective. Analyzes commit history, work patterns,
 
   and code quality metrics with persistent history and trend tracking.
@@ -8,7 +7,7 @@ description: 'Weekly engineering retrospective. Analyzes commit history, work pa
 
   Use when asked to "weekly retro", "what did we ship", or "engineering retrospective".
 
-  Proactively suggest at the end of a work week or sprint.
+  Proactively suggest at the end of a work week or sprint. (gstack)
 
   '
 tools:
@@ -57,6 +56,44 @@ Usage: gstack:retro [window | compare | global]
 ```
 
 **If the first argument is `global`:** Skip the normal repo-scoped retro (Steps 1-14). Instead, follow the **Global Retrospective** flow at the end of this document. The optional second argument is the time window (default 7d). This mode does NOT require being inside a git repo.
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
 
 ### Step 1: Gather Raw Data
 
@@ -107,6 +144,7 @@ find . -name '*.test.*' -o -name '*.spec.*' -o -name '*_test.*' -o -name '*_spec
 
 # 11. Regression test commits in window
 git log origin/<default> --since="<window>" --oneline --grep="test(qa):" --grep="test(design):" --grep="test: coverage"
+
 
 # 12. Test files changed in window
 git log origin/<default> --since="<window>" --format="" --name-only | grep -E '\.(test|spec)\.' | sort -u | wc -l
@@ -159,6 +197,8 @@ Include in the metrics table:
 ```
 
 If TODOS.md doesn't exist, skip the Backlog Health row.
+
+
 
 ### Step 3: Commit Time Distribution
 
@@ -252,6 +292,31 @@ For each contributor (including the current user), compute:
 
 **If there are Co-Authored-By trailers:** Parse `Co-Authored-By:` lines in commit messages. Credit those authors for the commit alongside the primary author. Note AI co-authors (e.g., `noreply@anthropic.com`) but do not include them as team members — instead, track "AI-assisted commits" as a separate metric.
 
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"retro","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
+
 ### Step 10: Week-over-Week Trends (if window >= 14d)
 
 If the time window is 14 days or more, split into weekly buckets and show trends:
@@ -283,7 +348,7 @@ Before saving the new snapshot, check for prior retro history:
 
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
-ls -t .gstack/retros/*.json 2>/dev/null
+ls -t .context/retros/*.json 2>/dev/null
 ```
 
 **If prior retros exist:** Load the most recent one using the Read tool. Calculate deltas for key metrics and include a **Trends vs Last Retro** section:
@@ -304,7 +369,7 @@ Deep sessions:      3      →    5           ↑2
 After computing all metrics (including streak) and loading any prior history for comparison, save a JSON snapshot:
 
 ```bash
-mkdir -p .gstack/retros
+mkdir -p .context/retros
 ```
 
 Determine the next sequence number for today (substitute the actual date for `$(date +%Y-%m-%d)`):
@@ -312,9 +377,9 @@ Determine the next sequence number for today (substitute the actual date for `$(
 setopt +o nomatch 2>/dev/null || true  # zsh compat
 # Count existing retros for today to get next sequence number
 today=$(date +%Y-%m-%d)
-existing=$(ls .gstack/retros/${today}-*.json 2>/dev/null | wc -l | tr -d ' ')
+existing=$(ls .context/retros/${today}-*.json 2>/dev/null | wc -l | tr -d ' ')
 next=$((existing + 1))
-# Save as .gstack/retros/${today}-${next}.json
+# Save as .context/retros/${today}-${next}.json
 ```
 
 Use the Write tool to save the JSON file with this schema:
@@ -433,7 +498,9 @@ Narrative covering:
 Check review JSONL logs for plan completion data from gstack:ship runs this period:
 
 ```bash
-cat .gstack/reviews.jsonl 2>/dev/null | grep '"skill":"ship"' | grep '"plan_items_total"' || echo "NO_PLAN_DATA"
+setopt +o nomatch 2>/dev/null || true  # zsh compat
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+cat ~/.gstack/projects/$SLUG/*-reviews.jsonl 2>/dev/null | grep '"skill":"ship"' | grep '"plan_items_total"' || echo "NO_PLAN_DATA"
 ```
 
 If plan completion data exists within the retro time window:
@@ -515,7 +582,7 @@ Locate and run the discovery script using this fallback chain:
 
 ```bash
 DISCOVER_BIN=""
-[ -x .lf/steps/gstack/bin/gstack-global-discover ] && DISCOVER_BIN=.lf/steps/gstack/bin/gstack-global-discover
+[ -x ~/.claude/skills/gstack/bin/gstack-global-discover ] && DISCOVER_BIN=~/.claude/skills/gstack/bin/gstack-global-discover
 [ -z "$DISCOVER_BIN" ] && [ -x .claude/skills/gstack/bin/gstack-global-discover ] && DISCOVER_BIN=.claude/skills/gstack/bin/gstack-global-discover
 [ -z "$DISCOVER_BIN" ] && which gstack-global-discover >/dev/null 2>&1 && DISCOVER_BIN=$(which gstack-global-discover)
 [ -z "$DISCOVER_BIN" ] && [ -f bin/gstack-global-discover.ts ] && DISCOVER_BIN="bun run bin/gstack-global-discover.ts"
@@ -734,7 +801,7 @@ Considering the full cross-project picture.
 
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
-ls -t .gstack/retros/global-*.json 2>/dev/null | head -5
+ls -t ~/.gstack/retros/global-*.json 2>/dev/null | head -5
 ```
 
 **Only compare against a prior retro with the same `window` value** (e.g., 7d vs 7d). If the most recent prior retro has a different window, skip comparison and note: "Prior global retro used a different window — skipping comparison."
@@ -746,18 +813,18 @@ If no prior global retros exist, append: "First global retro recorded — run ag
 ### Global Step 9: Save snapshot
 
 ```bash
-mkdir -p .gstack/retros
+mkdir -p ~/.gstack/retros
 ```
 
 Determine the next sequence number for today:
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
 today=$(date +%Y-%m-%d)
-existing=$(ls .gstack/retros/global-${today}-*.json 2>/dev/null | wc -l | tr -d ' ')
+existing=$(ls ~/.gstack/retros/global-${today}-*.json 2>/dev/null | wc -l | tr -d ' ')
 next=$((existing + 1))
 ```
 
-Use the Write tool to save JSON to `.gstack/retros/global-${today}-${next}.json`:
+Use the Write tool to save JSON to `~/.gstack/retros/global-${today}-${next}.json`:
 
 ```json
 {
@@ -798,7 +865,7 @@ When the user runs `gstack:retro compare` (or `gstack:retro compare 14d`):
 2. Compute metrics for the immediately prior same-length window using both `--since` and `--until` with midnight-aligned dates to avoid overlap (e.g., for a 7d window starting 2026-03-11: prior window is `--since="2026-03-04T00:00:00" --until="2026-03-11T00:00:00"`)
 3. Show a side-by-side comparison table with deltas and arrows
 4. Write a brief narrative highlighting the biggest improvements and regressions
-5. Save only the current-window snapshot to `.gstack/retros/` (same as a normal retro run); do **not** persist the prior-window metrics.
+5. Save only the current-window snapshot to `.context/retros/` (same as a normal retro run); do **not** persist the prior-window metrics.
 
 ## Tone
 
@@ -811,11 +878,11 @@ When the user runs `gstack:retro compare` (or `gstack:retro compare 14d`):
 - Never compare teammates against each other negatively. Each person's section stands on its own.
 - Keep total output around 3000-4500 words (slightly longer to accommodate team sections)
 - Use markdown tables and code blocks for data, prose for narrative
-- Output directly to the conversation — do NOT write to filesystem (except the `.gstack/retros/` JSON snapshot)
+- Output directly to the conversation — do NOT write to filesystem (except the `.context/retros/` JSON snapshot)
 
 ## Important Rules
 
-- ALL narrative output goes directly to the user in the conversation. The ONLY file written is the `.gstack/retros/` JSON snapshot.
+- ALL narrative output goes directly to the user in the conversation. The ONLY file written is the `.context/retros/` JSON snapshot.
 - Use `origin/<default>` for all git queries (not local main which may be stale)
 - Display all timestamps in the user's local timezone (do not override `TZ`)
 - If the window has zero commits, say so and suggest a different window
@@ -823,4 +890,4 @@ When the user runs `gstack:retro compare` (or `gstack:retro compare 14d`):
 - Treat merge commits as PR boundaries
 - Do not read CLAUDE.md or other docs — this skill is self-contained
 - On first run (no prior retros), skip comparison sections gracefully
-- **Global mode:** Does NOT require being inside a git repo. Saves snapshots to `.gstack/retros/` (not `.gstack/retros/`). Gracefully skip AI tools that aren't installed. Only compare against prior global retros with the same window value. If streak hits 365d cap, display as "365+ days".
+- **Global mode:** Does NOT require being inside a git repo. Saves snapshots to `~/.gstack/retros/` (not `.context/retros/`). Gracefully skip AI tools that aren't installed. Only compare against prior global retros with the same window value. If streak hits 365d cap, display as "365+ days".

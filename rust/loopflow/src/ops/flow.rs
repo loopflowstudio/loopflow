@@ -251,8 +251,9 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         | OpsCommand::Doctor
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
-        | OpsCommand::Auth { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/wt/shell/auth commands".to_string(),
+        | OpsCommand::Auth { .. }
+        | OpsCommand::Gstack { .. } => Err(OpsError::Message(
+            "ops item does not support cp/doctor/wt/shell/auth/gstack commands".to_string(),
         )),
     }
 }

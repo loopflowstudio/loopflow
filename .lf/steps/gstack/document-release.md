@@ -1,5 +1,4 @@
 ---
-interactive: false
 description: 'Post-ship documentation update. Reads all project docs, cross-references
   the
 
@@ -9,7 +8,7 @@ description: 'Post-ship documentation update. Reads all project docs, cross-refe
 
   asked to "update the docs", "sync documentation", or "post-ship docs".
 
-  Proactively suggest after a PR is merged or code is shipped.
+  Proactively suggest after a PR is merged or code is shipped. (gstack)
 
   '
 tools:
@@ -109,7 +108,7 @@ Read each documentation file and cross-reference it against the diff. Use these 
 - Walk through the setup instructions as if you are a brand new contributor.
 - Are the listed commands accurate? Would each step succeed?
 - Do test tier descriptions match the current test infrastructure?
-- Are workflow descriptions (dev setup, contributor mode, etc.) current?
+- Are workflow descriptions (dev setup, operational learnings, etc.) current?
 - Flag anything that would fail or confuse a first-time contributor.
 
 **CLAUDE.md / project instructions:**

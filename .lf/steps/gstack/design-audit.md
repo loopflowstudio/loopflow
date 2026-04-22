@@ -1,5 +1,4 @@
 ---
-interactive: true
 description: 'Designer''s eye QA: finds visual inconsistency, spacing issues, hierarchy
   problems,
 
@@ -14,7 +13,7 @@ description: 'Designer''s eye QA: finds visual inconsistency, spacing issues, hi
 
   Proactively suggest when the user mentions visual inconsistencies or
 
-  wants to polish the look of a live site.
+  wants to polish the look of a live site. (gstack)
 
   '
 tools:
@@ -84,7 +83,7 @@ After the user chooses, execute their choice (commit or stash), then continue wi
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 B=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
-[ -z "$B" ] && B=.lf/steps/gstack/browse/dist/browse
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
 if [ -x "$B" ]; then
   echo "READY: $B"
 else
@@ -98,7 +97,19 @@ If `NEEDS_SETUP`:
 3. If `bun` is not installed:
    ```bash
    if ! command -v bun >/dev/null 2>&1; then
-     curl -fsSL https://bun.sh/install | BUN_VERSION=1.3.10 bash
+     BUN_VERSION="1.3.10"
+     BUN_INSTALL_SHA="bab8acfb046aac8c72407bdcce903957665d655d7acaa3e11c7c4616beae68dd"
+     tmpfile=$(mktemp)
+     curl -fsSL "https://bun.sh/install" -o "$tmpfile"
+     actual_sha=$(shasum -a 256 "$tmpfile" | awk '{print $1}')
+     if [ "$actual_sha" != "$BUN_INSTALL_SHA" ]; then
+       echo "ERROR: bun install script checksum mismatch" >&2
+       echo "  expected: $BUN_INSTALL_SHA" >&2
+       echo "  got:      $actual_sha" >&2
+       rm "$tmpfile"; exit 1
+     fi
+     BUN_VERSION="$BUN_VERSION" bash "$tmpfile"
+     rm "$tmpfile"
    fi
    ```
 
@@ -258,14 +269,103 @@ Only commit if there are changes. Stage all bootstrap files (config, test direct
 
 ---
 
+**Find the gstack designer (optional — enables target mockup generation):**
+
+## DESIGN SETUP (run this check BEFORE any design mockup command)
+
+```bash
+_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+D=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
+[ -z "$D" ] && D=~/.claude/skills/gstack/design/dist/design
+if [ -x "$D" ]; then
+  echo "DESIGN_READY: $D"
+else
+  echo "DESIGN_NOT_AVAILABLE"
+fi
+B=""
+[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
+[ -z "$B" ] && B=~/.claude/skills/gstack/browse/dist/browse
+if [ -x "$B" ]; then
+  echo "BROWSE_READY: $B"
+else
+  echo "BROWSE_NOT_AVAILABLE (will use 'open' to view comparison boards)"
+fi
+```
+
+If `DESIGN_NOT_AVAILABLE`: skip visual mockup generation and fall back to the
+existing HTML wireframe approach (`DESIGN_SKETCH`). Design mockups are a
+progressive enhancement, not a hard requirement.
+
+If `BROWSE_NOT_AVAILABLE`: use `open file://...` instead of `$B goto` to open
+comparison boards. The user just needs to see the HTML file in any browser.
+
+If `DESIGN_READY`: the design binary is available for visual mockup generation.
+Commands:
+- `$D generate --brief "..." --output /path.png` — generate a single mockup
+- `$D variants --brief "..." --count 3 --output-dir /path/` — generate N style variants
+- `$D compare --images "a.png,b.png,c.png" --output /path/board.html --serve` — comparison board + HTTP server
+- `$D serve --html /path/board.html` — serve comparison board and collect feedback via HTTP
+- `$D check --image /path.png --brief "..."` — vision quality gate
+- `$D iterate --session /path/session.json --feedback "..." --output /path.png` — iterate
+
+**CRITICAL PATH RULE:** All design artifacts (mockups, comparison boards, approved.json)
+MUST be saved to `~/.gstack/projects/$SLUG/designs/`, NEVER to `.context/`,
+`docs/designs/`, `/tmp/`, or any project-local directory. Design artifacts are USER
+data, not project files. They persist across branches, conversations, and workspaces.
+
+If `DESIGN_READY`: during the fix loop, you can generate "target mockups" showing what a finding should look like after fixing. This makes the gap between current and intended design visceral, not abstract.
+
+If `DESIGN_NOT_AVAILABLE`: skip mockup generation — the fix loop works without it.
+
 **Create output directories:**
 
 ```bash
-REPORT_DIR=".gstack/design-reports"
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
+REPORT_DIR=~/.gstack/projects/$SLUG/designs/design-audit-$(date +%Y%m%d)
 mkdir -p "$REPORT_DIR/screenshots"
+echo "REPORT_DIR: $REPORT_DIR"
 ```
 
 ---
+
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
 
 ## Phases 1-6: Design Audit Baseline
 
@@ -516,7 +616,11 @@ Compare screenshots and observations across pages for:
 
 **Local:** `.gstack/design-reports/design-audit-{domain}-{YYYY-MM-DD}.md`
 
-**Project-scoped:** Also write to `.gstack/design-reports/design-audit-{domain}-{YYYY-MM-DD}.md` (already covered by local path above).
+**Project-scoped:**
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+```
+Write to: `~/.gstack/projects/{slug}/{user}-{branch}-design-audit-{datetime}.md`
 
 **Baseline:** Write `design-baseline.json` for regression mode:
 ```json
@@ -672,8 +776,8 @@ Record baseline design score and AI slop score at end of Phase 6.
 ## Output Structure
 
 ```
-.gstack/design-reports/
-├── design-audit-{domain}-{YYYY-MM-DD}.md    # Structured report
+~/.gstack/projects/$SLUG/designs/design-audit-{YYYYMMDD}/
+├── design-audit-{domain}.md                  # Structured report
 ├── screenshots/
 │   ├── first-impression.png                  # Phase 1
 │   ├── {page}-annotated.png                  # Per-page annotated
@@ -681,6 +785,7 @@ Record baseline design score and AI slop score at end of Phase 6.
 │   ├── {page}-tablet.png
 │   ├── {page}-desktop.png
 │   ├── finding-001-before.png                # Before fix
+│   ├── finding-001-target.png                # Target mockup (if generated)
 │   ├── finding-001-after.png                 # After fix
 │   └── ...
 └── design-baseline.json                      # For regression mode
@@ -766,7 +871,7 @@ Merge findings into the triage with `[codex]` / `[subagent]` / `[cross-model]` t
 
 **Log the result:**
 ```bash
-echo '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}' >> .gstack/reviews.jsonl
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"design-outside-voices","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 Replace STATUS with "clean" or "issues_found", SOURCE with "codex+subagent", "codex-only", "subagent-only", or "unavailable".
 
@@ -797,10 +902,23 @@ For each fixable finding, in impact order:
 - ONLY modify files directly related to the finding
 - Prefer CSS/styling changes over structural component changes
 
+### 8a.5. Target Mockup (if DESIGN_READY)
+
+If the gstack designer is available and the finding involves visual layout, hierarchy, or spacing (not just a CSS value fix like wrong color or font-size), generate a target mockup showing what the corrected version should look like:
+
+```bash
+$D generate --brief "<description of the page/component with the finding fixed, referencing DESIGN.md constraints>" --output "$REPORT_DIR/screenshots/finding-NNN-target.png"
+```
+
+Show the user: "Here's the current state (screenshot) and here's what it should look like (mockup). Now I'll fix the source to match."
+
+This step is optional — skip for trivial CSS fixes (wrong hex color, missing padding value). Use it for findings where the intended design isn't obvious from the description alone.
+
 ### 8b. Fix
 
 - Read the source code, understand the context
 - Make the **minimal fix** — smallest change that resolves the design issue
+- If a target mockup was generated in 8a.5, use it as the visual reference for the fix
 - CSS-only changes are preferred (safer, more reversible)
 - Do NOT refactor surrounding code, add features, or "improve" unrelated things
 
@@ -870,18 +988,23 @@ DESIGN-FIX RISK:
 After all fixes are applied:
 
 1. Re-run the design audit on all affected pages
-2. Compute final design score and AI slop score
-3. **If final scores are WORSE than baseline:** WARN prominently — something regressed
+2. If target mockups were generated during the fix loop AND `DESIGN_READY`: run `$D verify --mockup "$REPORT_DIR/screenshots/finding-NNN-target.png" --screenshot "$REPORT_DIR/screenshots/finding-NNN-after.png"` to compare the fix result against the target. Include pass/fail in the report.
+3. Compute final design score and AI slop score
+4. **If final scores are WORSE than baseline:** WARN prominently — something regressed
 
 ---
 
 ## Phase 10: Report
 
-Write the report to both local and project-scoped locations:
+Write the report to `$REPORT_DIR` (already set up in the setup phase):
 
-**Local:** `.gstack/design-reports/design-audit-{domain}-{YYYY-MM-DD}.md`
+**Primary:** `$REPORT_DIR/design-audit-{domain}.md`
 
-**Project-scoped:** Also write to `.gstack/design-reports/design-audit-{domain}-{YYYY-MM-DD}.md` (already covered by local path above).
+**Also write a summary to the project index:**
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+```
+Write a one-line summary to `~/.gstack/projects/{slug}/{user}-{branch}-design-audit-{datetime}.md` with a pointer to the full report in `$REPORT_DIR`.
 
 **Per-finding additions** (beyond standard design audit report):
 - Fix Status: verified / best-effort / reverted / deferred
@@ -909,6 +1032,31 @@ If the repo has a `TODOS.md`:
 2. **Fixed findings that were in TODOS.md** → annotate with "Fixed by gstack:design-audit on {branch}, {date}"
 
 ---
+
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"design-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
 
 ## Additional Rules (design-review specific)
 

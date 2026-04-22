@@ -1,6 +1,6 @@
 ---
-interactive: true
-description: 'Configure deployment settings for gstack:land-and-deploy. Detects your deploy
+description: 'Configure deployment settings for gstack:land-and-deploy. Detects your
+  deploy
 
   platform (Fly.io, Render, Vercel, Netlify, Heroku, GitHub Actions, custom),
 

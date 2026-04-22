@@ -174,6 +174,7 @@ class Session(BaseModel):
     wave_run_id: Optional[str] = None
     provider_session_id: Optional[str] = None
     config: SessionConfig = Field(default_factory=SessionConfig)
+    input_supported: bool = False
     created_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 

@@ -4,7 +4,7 @@ notion_id: 32af8f99-3d81-818c-af27-c6add76d0279
 ---
 # Wave Lifecycle UI — Remaining
 
-**Needs:** lfd/01-harness-server-mode
+**Needs:** lfd/01-session-input
 
 **Finish line:** Worktree management and step-level run history are first-class in Concerto. The last lifecycle gaps that still require dropping to the terminal.
 

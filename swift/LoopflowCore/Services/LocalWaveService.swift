@@ -1166,7 +1166,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let request = try makeRequest(
             sessionURL(sessionId, components: "input"),
             method: "POST",
-            body: ["content": content],
+            body: ["text": content],
             contentType: "application/json"
         )
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
@@ -1518,7 +1518,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    private static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
+    static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
         guard let id = json["id"] as? String,
               let harness = json["harness"] as? String,
               let status = json["status"] as? String else {
@@ -1547,6 +1547,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             status: status,
             waveRunId: json["wave_run_id"] as? String,
             providerSessionId: json["provider_session_id"] as? String,
+            inputSupported: json["input_supported"] as? Bool ?? false,
             config: config,
             createdAt: parseDate(json["created_at"]),
             endedAt: parseDate(json["ended_at"])

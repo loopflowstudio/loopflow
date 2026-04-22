@@ -208,7 +208,7 @@ def _scenario_sse_streaming(
         input_response = api.request(
             "POST",
             f"/v0/sessions/{session_id}/input",
-            json={"content": "Reply with one short sentence."},
+            json={"text": "Reply with one short sentence."},
         )
         ApiAssertions.expect_status(input_response, 200)
 

@@ -148,6 +148,7 @@ public final class SessionState {
     public var awaitingSessionJoin: Bool = false
     public var suggestedActions: [SuggestedAction] = []
     public var contextSnapshot: ContextSnapshot?
+    public private(set) var inputSupported: Bool
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
@@ -183,6 +184,7 @@ public final class SessionState {
         self.sessionHarness = sessionHarness
         self.sessionWaveRunId = sessionWaveRunId
         self.sessionConfig = sessionConfig
+        self.inputSupported = false
         self.waveService = waveService
         self.userDefaults = userDefaults
     }
@@ -192,7 +194,8 @@ public final class SessionState {
     }
 
     public var canSend: Bool {
-        turnState != .running && streamPhase != .replaying && streamPhase != .ending
+        let inputAllowed = sessionId == nil || inputSupported
+        return inputAllowed && turnState != .running && streamPhase != .replaying && streamPhase != .ending
     }
 
     public var canEndSession: Bool {
@@ -259,6 +262,11 @@ public final class SessionState {
             return
         }
 
+        if sessionId != nil && !inputSupported {
+            appendMessage(role: .system, content: "Input is not supported for this session harness.")
+            return
+        }
+
         guard turnState != .running && streamPhase != .ending else { return }
 
         clearSuggestedActions()
@@ -268,6 +276,11 @@ public final class SessionState {
 
         do {
             let sessionId = try await ensureSession()
+            if !inputSupported {
+                appendMessage(role: .system, content: "Input is not supported for this session harness.")
+                turnState = .idle
+                return
+            }
             if streamTask == nil {
                 startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
             }
@@ -318,6 +331,7 @@ public final class SessionState {
 
         do {
             let session = try await waveService.getSession(storedSessionId)
+            inputSupported = session.inputSupported
             if isSessionTerminalStatus(session.status) {
                 persistSessionId(nil)
                 streamPhase = .idle
@@ -360,6 +374,7 @@ public final class SessionState {
             config: sessionConfig
         )
         sessionId = session.id
+        inputSupported = session.inputSupported
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
         awaitingSessionJoin = false

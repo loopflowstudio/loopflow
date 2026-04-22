@@ -126,16 +126,16 @@ private struct SessionTerminalSurface: View {
               !session.argv.isEmpty else {
             return nil
         }
-        return TerminalAttachCommand(workingDirectory: session.cwd, argv: session.argv)
+        return TerminalAttachCommand(workingDirectory: session.cwd, argv: session.argv, env: session.env)
     }
 
     var body: some View {
         Group {
-            if let command = directAttachCommand ?? connectionInfo.map({ TerminalAttachCommand($0) }) {
+            if let command = directAttachCommand ?? connectionInfo.map(TerminalAttachCommand.init) {
                 GhosttyTerminalView(
                     workingDirectory: command.workingDirectory,
                     argv: command.argv,
-                    env: session.env,
+                    env: command.env,
                     sessionId: session.id,
                     manager: ghosttyManager
                 )
@@ -176,27 +176,38 @@ private struct SessionTerminalSurface: View {
 struct TerminalAttachCommand: Equatable {
     let workingDirectory: String
     let argv: [String]
+    let env: [String: String]
 
-    init(workingDirectory: String, argv: [String]) {
+    init(workingDirectory: String, argv: [String], env: [String: String] = [:]) {
         self.workingDirectory = workingDirectory
         self.argv = argv
+        self.env = env
     }
 
     init(_ connection: TerminalConnectionInfo) {
         if connection.usesLocalTmux {
-            self.workingDirectory = connection.cwd
-            self.argv = ["tmux", "attach-session", "-t", connection.sessionName]
+            self.init(
+                workingDirectory: connection.cwd,
+                argv: ["tmux", "attach-session", "-t", connection.sessionName]
+            )
             return
         }
 
-        self.workingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
-        self.argv = [
-            "ssh",
-            "-t",
-            connection.host,
-            "tmux attach-session -t \(shellEscape(connection.sessionName))",
-        ]
+        self.init(
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            argv: [
+                "ssh",
+                "-t",
+                connection.host,
+                "tmux attach-session -t \(shellEscape(connection.sessionName))",
+            ]
+        )
     }
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
 }
 
 private struct WorkspaceShell {
@@ -238,6 +249,7 @@ private struct WorkspaceShell {
         )
     }
 }
+
 
 private struct TerminalContextSidebar: View {
     let session: TerminalSession

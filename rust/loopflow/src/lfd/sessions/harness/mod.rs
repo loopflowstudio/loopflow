@@ -56,7 +56,7 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
-    fn parse(name: &str) -> Option<Self> {
+    pub fn parse(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
@@ -70,6 +70,14 @@ impl HarnessKind {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
+        }
+    }
+
+    pub fn input_supported(self) -> bool {
+        match self {
+            Self::Codex => true,
+            Self::Claude => false,
+            Self::OpenCode => false,
         }
     }
 
@@ -124,5 +132,12 @@ mod tests {
     fn terminal_harness_error_recognizes_opencode_disconnect() {
         assert!(is_terminal_harness_error("opencode_disconnected"));
         assert!(!is_terminal_harness_error("opencode_error"));
+    }
+
+    #[test]
+    fn input_supported_is_codex_only() {
+        assert!(HarnessKind::Codex.input_supported());
+        assert!(!HarnessKind::Claude.input_supported());
+        assert!(!HarnessKind::OpenCode.input_supported());
     }
 }

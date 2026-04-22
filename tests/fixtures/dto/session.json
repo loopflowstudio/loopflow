@@ -1,0 +1,22 @@
+{
+  "id": "lfdsess_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
+  "object": "session",
+  "harness": "codex",
+  "status": "active",
+  "wave_run_id": "run-abc",
+  "provider_session_id": "provider-xyz",
+  "input_supported": true,
+  "config": {
+    "step": "design",
+    "repo_root": "/tmp/repo",
+    "directions": ["clarity"],
+    "area": "src/",
+    "wave": "redesign",
+    "agent": "claude-sonnet-4-5-20250929",
+    "cwd": "/tmp/repo",
+    "max_turns": 5,
+    "yolo_mode": false
+  },
+  "created_at": "2026-04-22T10:30:00Z",
+  "ended_at": null
+}

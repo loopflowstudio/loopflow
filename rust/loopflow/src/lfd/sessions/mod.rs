@@ -1,4 +1,4 @@
-mod harness;
+pub(crate) mod harness;
 pub(crate) mod opencode_runtime;
 pub mod types;
 pub mod usage;
@@ -52,6 +52,8 @@ pub enum SessionManagerError {
     InvalidRepoRoot(String),
     #[error("turn already in progress")]
     TurnAlreadyInProgress,
+    #[error("input not supported for this harness: {0}")]
+    InputNotSupported(String),
     #[error("harness error: {0}")]
     Harness(String),
 }
@@ -324,6 +326,12 @@ impl SessionManager {
                 expected: "active",
                 actual: session.status,
             });
+        }
+        if !harness::HarnessKind::parse(&session.harness)
+            .map(|kind| kind.input_supported())
+            .unwrap_or(false)
+        {
+            return Err(SessionManagerError::InputNotSupported(session.harness));
         }
 
         let runtime = self
@@ -1416,19 +1424,21 @@ mod tests {
             .expect("create session");
         let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
 
-        manager
-            .send_input(&created.id, "go")
-            .await
-            .expect("send input");
-
-        let events = manager
-            .list_events(&created.id, None)
-            .await
-            .expect("list events");
-        let cost = events.iter().find_map(|event| match &event.event {
-            SessionEvent::TurnUsage { usage, .. } => usage.cost_usd,
-            _ => None,
-        });
+        let mut cost = None;
+        for _ in 0..50 {
+            let events = manager
+                .list_events(&created.id, None)
+                .await
+                .expect("list events");
+            cost = events.iter().find_map(|event| match &event.event {
+                SessionEvent::TurnUsage { usage, .. } => usage.cost_usd,
+                _ => None,
+            });
+            if cost.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         let cost = cost.expect("turn usage event with computed cost");
         assert!((cost - 5.825).abs() < 1e-9);
     }
@@ -1759,7 +1769,7 @@ mod tests {
 
         let created = manager
             .create_session(CreateSessionParams {
-                harness: "claude".to_string(),
+                harness: "codex".to_string(),
                 wave_run_id: None,
                 config: test_session_config(tmp.path()),
             })
@@ -1793,7 +1803,7 @@ mod tests {
 
         let created = manager
             .create_session(CreateSessionParams {
-                harness: "claude".to_string(),
+                harness: "codex".to_string(),
                 wave_run_id: None,
                 config: test_session_config(tmp.path()),
             })

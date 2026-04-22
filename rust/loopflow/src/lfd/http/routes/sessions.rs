@@ -13,6 +13,7 @@ use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
+use crate::lfd::sessions::harness::HarnessKind;
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
 };
@@ -29,7 +30,7 @@ pub struct CreateSessionRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SessionInputRequest {
-    pub content: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +49,7 @@ pub struct SessionDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_session_id: Option<String>,
     pub config: SessionConfig,
+    pub input_supported: bool,
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<String>,
@@ -88,16 +90,13 @@ pub async fn send_session_input_handler(
     Json(payload): Json<SessionInputRequest>,
 ) -> ApiResult<SessionDto> {
     let session_id = parse_session_id(&session_id)?;
-    if payload.content.trim().is_empty() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "content cannot be empty",
-        ));
+    if payload.text.trim().is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "text cannot be empty"));
     }
 
     state
         .sessions
-        .send_input(&session_id, &payload.content)
+        .send_input(&session_id, &payload.text)
         .await
         .map_err(map_session_error)?;
 
@@ -193,6 +192,9 @@ pub async fn delete_session_handler(
 }
 
 fn session_dto(session: Session) -> SessionDto {
+    let input_supported = HarnessKind::parse(&session.harness)
+        .map(HarnessKind::input_supported)
+        .unwrap_or(false);
     SessionDto {
         id: session.id.to_string(),
         object: "session".to_string(),
@@ -200,6 +202,7 @@ fn session_dto(session: Session) -> SessionDto {
         status: session.status.as_str().to_string(),
         wave_run_id: session.wave_run_id,
         provider_session_id: session.provider_session_id,
+        input_supported,
         config: session.config,
         created_at: format_datetime(Some(session.created_at)),
         ended_at: format_datetime(session.ended_at),
@@ -291,6 +294,10 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
         SessionManagerError::TurnAlreadyInProgress => {
             api_error(StatusCode::CONFLICT, "turn already in progress")
         }
+        SessionManagerError::InputNotSupported(harness) => api_error(
+            StatusCode::BAD_REQUEST,
+            ApiMessage::Safe(format!("input not supported for this harness: {harness}")),
+        ),
         SessionManagerError::Harness(message) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(message),
@@ -340,7 +347,79 @@ mod tests {
         assert_eq!(dto.object, "session");
         assert_eq!(dto.harness, "claude");
         assert_eq!(dto.status, "active");
+        assert!(!dto.input_supported);
         assert_eq!(dto.config.step, "design");
+    }
+
+    #[tokio::test]
+    async fn codex_session_dto_supports_input() {
+        let state = test_http_state().await;
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            harness: "codex".to_string(),
+            status: SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "design".to_string(),
+                repo_root: "/tmp/repo".to_string(),
+                ..Default::default()
+            },
+            created_at: time::OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        state
+            .store
+            .create_session(&session)
+            .await
+            .expect("seed session");
+
+        let Json(dto) = get_session_handler(State(state), Path(session_id.to_string()))
+            .await
+            .expect("get session");
+
+        assert!(dto.input_supported);
+    }
+
+    #[tokio::test]
+    async fn send_session_input_rejects_unsupported_harness() {
+        let state = test_http_state().await;
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            harness: "claude".to_string(),
+            status: SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "design".to_string(),
+                repo_root: "/tmp/repo".to_string(),
+                ..Default::default()
+            },
+            created_at: time::OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        state
+            .store
+            .create_session(&session)
+            .await
+            .expect("seed session");
+
+        let result = send_session_input_handler(
+            State(state),
+            Path(session_id.to_string()),
+            Json(SessionInputRequest {
+                text: "hello".to_string(),
+            }),
+        )
+        .await;
+
+        let Err((status, Json(error))) = result else {
+            panic!("unsupported input should fail");
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error.error.message.contains("input not supported"));
     }
 
     #[tokio::test]

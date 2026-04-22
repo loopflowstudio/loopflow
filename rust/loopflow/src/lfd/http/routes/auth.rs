@@ -146,10 +146,7 @@ pub async fn configure_credential_handler(
 ) -> ApiResult<AuthProviderStatusDto> {
     let provider = parse_provider(&provider)?;
     if let Some(message) = provider.api_key_configure_error() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            ApiMessage::Safe(message),
-        ));
+        return Err(api_error(StatusCode::BAD_REQUEST, message));
     }
 
     let token = crate::lfd::store::ProviderToken {

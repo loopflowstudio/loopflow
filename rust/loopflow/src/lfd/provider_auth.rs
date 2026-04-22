@@ -137,13 +137,11 @@ impl Provider {
         matches!(self, Self::Claude | Self::Codex | Self::OpenCodeZen)
     }
 
-    pub fn api_key_configure_error(self) -> Option<String> {
+    pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Asana | Self::Linear | Self::Notion => Some(format!(
-                "{} requires OAuth. Run 'lf op auth {}' to connect.",
-                self.display_name(),
-                self.as_str()
-            )),
+            Self::Asana => Some("Asana requires OAuth. Run 'lf op auth asana' to connect."),
+            Self::Linear => Some("Linear requires OAuth. Run 'lf op auth linear' to connect."),
+            Self::Notion => Some("Notion requires OAuth. Run 'lf op auth notion' to connect."),
             _ => None,
         }
     }
@@ -3435,15 +3433,15 @@ mod tests {
     #[test]
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
-            Provider::Asana.api_key_configure_error().as_deref(),
+            Provider::Asana.api_key_configure_error(),
             Some("Asana requires OAuth. Run 'lf op auth asana' to connect.")
         );
         assert_eq!(
-            Provider::Linear.api_key_configure_error().as_deref(),
+            Provider::Linear.api_key_configure_error(),
             Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
         );
         assert_eq!(
-            Provider::Notion.api_key_configure_error().as_deref(),
+            Provider::Notion.api_key_configure_error(),
             Some("Notion requires OAuth. Run 'lf op auth notion' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);

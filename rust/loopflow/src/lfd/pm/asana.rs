@@ -263,8 +263,7 @@ impl AsanaClient {
         Ok(response
             .data
             .into_iter()
-            .find_map(|setting| AsanaWorkingBranchField::from_metadata(setting.custom_field))
-            .map(|field| field.gid))
+            .find_map(|setting| working_branch_gid_from_metadata(setting.custom_field)))
     }
 
     async fn workspace_working_branch_field(&self, workspace_id: &str) -> PmResult<Option<String>> {
@@ -282,8 +281,7 @@ impl AsanaClient {
         Ok(response
             .data
             .into_iter()
-            .find_map(AsanaWorkingBranchField::from_metadata)
-            .map(|field| field.gid))
+            .find_map(working_branch_gid_from_metadata))
     }
 
     async fn create_workspace_working_branch_field(&self, workspace_id: &str) -> PmResult<String> {
@@ -712,17 +710,11 @@ impl AsanaPriorityField {
     }
 }
 
-#[derive(Debug)]
-struct AsanaWorkingBranchField {
-    gid: String,
-}
-
-impl AsanaWorkingBranchField {
-    fn from_metadata(field: AsanaCustomFieldMetadata) -> Option<Self> {
-        if field.name != WORKING_BRANCH_FIELD_NAME || field.resource_subtype != "text" {
-            return None;
-        }
-        Some(Self { gid: field.gid })
+fn working_branch_gid_from_metadata(field: AsanaCustomFieldMetadata) -> Option<String> {
+    if field.name == WORKING_BRANCH_FIELD_NAME && field.resource_subtype == "text" {
+        Some(field.gid)
+    } else {
+        None
     }
 }
 
@@ -822,12 +814,48 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use serde_json::json;
+    use serde_json::{json, Map, Value};
 
     use super::*;
     use crate::engine::config::AsanaConfig;
     use crate::lfd::pm::test_server::{self, json_response, response};
     use crate::lfd::pm::PmProvider;
+
+    fn working_branch_metadata() -> Value {
+        json!({
+            "gid": "field-branch",
+            "name": "Working branch",
+            "resource_subtype": "text"
+        })
+    }
+
+    fn working_branch_setting() -> Value {
+        json!({ "custom_field": working_branch_metadata() })
+    }
+
+    fn working_branch_field(branch: Option<&str>) -> Value {
+        let mut field = Map::new();
+        field.insert("gid".to_string(), json!("field-branch"));
+        field.insert("name".to_string(), json!("Working branch"));
+        field.insert("resource_subtype".to_string(), json!("text"));
+        if let Some(branch) = branch {
+            field.insert("text_value".to_string(), json!(branch));
+        }
+        Value::Object(field)
+    }
+
+    fn task_with_working_branch(assignee: Option<&str>, branch: Option<&str>) -> Value {
+        let mut task = Map::new();
+        task.insert("gid".to_string(), json!("task-1"));
+        if let Some(assignee) = assignee {
+            task.insert("assignee".to_string(), json!({ "gid": assignee }));
+        }
+        task.insert(
+            "custom_fields".to_string(),
+            json!([working_branch_field(branch)]),
+        );
+        Value::Object(task)
+    }
 
     #[tokio::test]
     async fn create_project_uses_workspace_and_team() {
@@ -1389,26 +1417,12 @@ mod tests {
             json_response(StatusCode::OK, json!({ "data": [] })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": [{
-                        "gid": "field-branch",
-                        "name": "Working branch",
-                        "resource_subtype": "text"
-                    }]
-                }),
+                json!({ "data": [working_branch_metadata()] }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "setting-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": [{
-                        "custom_field": {
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text"
-                        }
-                    }]
-                }),
+                json!({ "data": [working_branch_setting()] }),
             ),
         ])
         .await;
@@ -1455,15 +1469,7 @@ mod tests {
             json_response(StatusCode::OK, json!({ "data": { "gid": "setting-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": [{
-                        "custom_field": {
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text"
-                        }
-                    }]
-                }),
+                json!({ "data": [working_branch_setting()] }),
             ),
         ])
         .await;
@@ -1502,33 +1508,12 @@ mod tests {
             json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": null
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(None, None) }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "assignee": { "gid": "user-42" },
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": "feature/test"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("feature/test")) }),
             ),
             json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
         ])
@@ -1569,32 +1554,12 @@ mod tests {
             json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(None, None) }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "assignee": { "gid": "user-99" },
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": "feature/test"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(Some("user-99"), Some("feature/test")) }),
             ),
         ])
         .await;
@@ -1617,64 +1582,23 @@ mod tests {
             json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(None, None) }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "assignee": { "gid": "user-42" },
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": "worker-a"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("worker-a")) }),
             ),
             json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
             json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": "worker-a"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(None, Some("worker-a")) }),
             ),
             json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
             json_response(
                 StatusCode::OK,
-                json!({
-                    "data": {
-                        "gid": "task-1",
-                        "assignee": { "gid": "user-42" },
-                        "custom_fields": [{
-                            "gid": "field-branch",
-                            "name": "Working branch",
-                            "resource_subtype": "text",
-                            "text_value": "worker-a"
-                        }]
-                    }
-                }),
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("worker-a")) }),
             ),
         ])
         .await;

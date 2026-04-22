@@ -266,10 +266,8 @@ pub fn aggregate_session_events(
                     *aggregate.models.entry(model.clone()).or_insert(0) += 1;
                 }
             }
-            SessionEvent::ContextSnapshot { snapshot } => {
-                if aggregate.context.is_none() {
-                    aggregate.context = Some(snapshot.clone());
-                }
+            SessionEvent::ContextSnapshot { snapshot } if aggregate.context.is_none() => {
+                aggregate.context = Some(snapshot.clone());
             }
             _ => {}
         }

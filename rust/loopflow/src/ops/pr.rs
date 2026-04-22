@@ -460,12 +460,11 @@ fn parse_labeled_copy(raw: &str) -> Option<PrCopy> {
         }
 
         match section {
-            Some(Section::Title) => {
-                if !line.trim().is_empty() {
-                    title = Some(line.trim().to_string());
-                    section = None;
-                }
+            Some(Section::Title) if !line.trim().is_empty() => {
+                title = Some(line.trim().to_string());
+                section = None;
             }
+            Some(Section::Title) => {}
             Some(Section::Body) => body_lines.push(line.to_string()),
             None => {}
         }

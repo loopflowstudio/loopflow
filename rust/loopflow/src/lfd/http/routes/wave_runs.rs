@@ -198,7 +198,7 @@ async fn list_wave_runs(
 
     let mut filtered = runs;
     if wave_id.is_none() && order == RunOrder::OldestFirst {
-        filtered.sort_by(|left, right| left.started_at.cmp(&right.started_at));
+        filtered.sort_by_key(|left| left.started_at);
     }
 
     if let Some(repo) = query.repo.as_deref() {

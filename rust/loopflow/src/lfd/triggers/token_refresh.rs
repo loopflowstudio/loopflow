@@ -494,17 +494,18 @@ mod tests {
         for event in [first, second] {
             match event {
                 Event::AuthRefreshFailed {
-                    provider, reason, ..
+                    provider: Provider::GitHub,
+                    reason,
+                    ..
                 } => {
-                    if provider == Provider::GitHub {
-                        assert_eq!(reason, "refresh failed");
-                        saw_failure = true;
-                    }
+                    assert_eq!(reason, "refresh failed");
+                    saw_failure = true;
                 }
-                Event::AuthTokenRefreshed { provider, .. } => {
-                    if provider == Provider::Claude {
-                        saw_success = true;
-                    }
+                Event::AuthTokenRefreshed {
+                    provider: Provider::Claude,
+                    ..
+                } => {
+                    saw_success = true;
                 }
                 _ => {}
             }

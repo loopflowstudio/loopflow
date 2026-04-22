@@ -184,7 +184,7 @@ public final class SessionState {
         self.sessionHarness = sessionHarness
         self.sessionWaveRunId = sessionWaveRunId
         self.sessionConfig = sessionConfig
-        self.inputSupported = true
+        self.inputSupported = false
         self.waveService = waveService
         self.userDefaults = userDefaults
     }
@@ -194,7 +194,8 @@ public final class SessionState {
     }
 
     public var canSend: Bool {
-        inputSupported && turnState != .running && streamPhase != .replaying && streamPhase != .ending
+        let inputAllowed = sessionId == nil || inputSupported
+        return inputAllowed && turnState != .running && streamPhase != .replaying && streamPhase != .ending
     }
 
     public var canEndSession: Bool {
@@ -261,7 +262,7 @@ public final class SessionState {
             return
         }
 
-        guard inputSupported else {
+        if sessionId != nil && !inputSupported {
             appendMessage(role: .system, content: "Input is not supported for this session harness.")
             return
         }
@@ -275,6 +276,11 @@ public final class SessionState {
 
         do {
             let sessionId = try await ensureSession()
+            if !inputSupported {
+                appendMessage(role: .system, content: "Input is not supported for this session harness.")
+                turnState = .idle
+                return
+            }
             if streamTask == nil {
                 startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
             }

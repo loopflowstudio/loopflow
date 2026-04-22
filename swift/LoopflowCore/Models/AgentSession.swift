@@ -222,7 +222,7 @@ public struct AgentSession: Sendable, Hashable {
         status: String,
         waveRunId: String?,
         providerSessionId: String?,
-        inputSupported: Bool = true,
+        inputSupported: Bool,
         config: AgentSessionConfig,
         createdAt: Date?,
         endedAt: Date?

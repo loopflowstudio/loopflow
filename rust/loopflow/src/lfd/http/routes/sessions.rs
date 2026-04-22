@@ -13,10 +13,11 @@ use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
+use crate::lfd::sessions::harness::HarnessKind;
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
 };
-use crate::lfd::sessions::{session_input_supported, SessionManager, SessionManagerError};
+use crate::lfd::sessions::{SessionManager, SessionManagerError};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
@@ -29,7 +30,6 @@ pub struct CreateSessionRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SessionInputRequest {
-    #[serde(alias = "content")]
     pub text: String,
 }
 
@@ -192,7 +192,9 @@ pub async fn delete_session_handler(
 }
 
 fn session_dto(session: Session) -> SessionDto {
-    let input_supported = session_input_supported(&session.harness);
+    let input_supported = HarnessKind::parse(&session.harness)
+        .map(HarnessKind::input_supported)
+        .unwrap_or(false);
     SessionDto {
         id: session.id.to_string(),
         object: "session".to_string(),

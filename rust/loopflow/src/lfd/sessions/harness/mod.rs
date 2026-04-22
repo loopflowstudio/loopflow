@@ -56,7 +56,7 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
-    fn parse(name: &str) -> Option<Self> {
+    pub fn parse(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
@@ -73,6 +73,14 @@ impl HarnessKind {
         }
     }
 
+    pub fn input_supported(self) -> bool {
+        match self {
+            Self::Codex => true,
+            Self::Claude => false,
+            Self::OpenCode => false,
+        }
+    }
+
     fn create(self, event_tx: mpsc::UnboundedSender<SessionEvent>) -> Box<dyn Harness> {
         match self {
             Self::Codex => Box::new(codex::CodexHarness::new(event_tx)),
@@ -84,10 +92,6 @@ impl HarnessKind {
 
 pub fn canonical_harness(name: &str) -> Option<&'static str> {
     HarnessKind::parse(name).map(HarnessKind::as_str)
-}
-
-pub fn input_supported(name: &str) -> bool {
-    matches!(HarnessKind::parse(name), Some(HarnessKind::Codex))
 }
 
 pub fn default_create_harness(
@@ -132,10 +136,8 @@ mod tests {
 
     #[test]
     fn input_supported_is_codex_only() {
-        assert!(input_supported("codex"));
-        assert!(input_supported(" CODEX "));
-        assert!(!input_supported("claude"));
-        assert!(!input_supported("opencode"));
-        assert!(!input_supported("unknown"));
+        assert!(HarnessKind::Codex.input_supported());
+        assert!(!HarnessKind::Claude.input_supported());
+        assert!(!HarnessKind::OpenCode.input_supported());
     }
 }

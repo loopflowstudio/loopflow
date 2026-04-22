@@ -1518,7 +1518,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    private static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
+    static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
         guard let id = json["id"] as? String,
               let harness = json["harness"] as? String,
               let status = json["status"] as? String else {

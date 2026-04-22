@@ -178,6 +178,21 @@ def get_target(name: str) -> Target:
 
 When in doubt: if you'd write an `assert`, raise an exception instead—it's easier for callers to catch.
 
+## DTOs
+
+Wire types — anything that crosses the `lfd` HTTP boundary and is mirrored in Rust, Python, and Swift — get no defaults. Every field is either required or explicitly Optional.
+
+- No `#[serde(default)]`, no `Default` derive, no `#[serde(default = "...")]` on DTOs.
+- No Pydantic field defaults on wire models (`Field(default=...)`, `= False`, `= []`).
+- No Swift init default parameters on DTO structs. No `?? value` fallbacks in JSON parsing — if the field can be absent, its type is `T?`.
+- No Rust `Option<T>` with `#[serde(default)]` masquerading as "empty is fine"; decide required-or-Optional and surface it in the type.
+
+Why: three hand-maintained mirrors drift when defaults live at different layers. A field that quietly defaults to `true` in one language and `false` in another produces a silent split-brain. The rule kills the drift at the source — if every absent field is either a parse error or an explicit `None`/`nil`, the three models stay in lockstep without ceremony.
+
+Round-trip fixture tests under `tests/fixtures/dto/` cover the wire shape. Adding a DTO field means adding it to the fixture and to each language's fixture test.
+
+UI state types that *carry* DTO values (e.g. Swift `SessionState`) aren't DTOs. Defaults there are a UX choice, not a drift bug.
+
 # Documentation
 
 The best documentation is simple code. Descriptive names, type hints, and clear APIs often suffice.

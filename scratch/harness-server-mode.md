@@ -12,8 +12,8 @@ Tool approvals are explicitly **not** part of this story. All tools auto-approve
 
 One new endpoint. Read uses what's already there.
 
-- **Read: existing SSE event stream.** `GET /v1/sessions/{id}/events` already streams `SessionEvent`s with `after_seq` replay. Mobile renders these as a conversation — `TextDelta`, `ItemStarted/Completed`, `TurnStarted/Completed`. Zero changes.
-- **Write: `POST /v1/sessions/{id}/input` with `{"text": "..."}`.** Routes to the harness's existing `send_input(content)`. The Codex harness already picks `turn/steer` when a turn is active and starts a new turn when idle (`harness/codex.rs:138-164`). Just expose it.
+- **Read: existing SSE event stream.** `GET /v0/sessions/{id}/events` already streams `SessionEvent`s with `after_seq` replay. Mobile renders these as a conversation — `TextDelta`, `ItemStarted/Completed`, `TurnStarted/Completed`. Zero changes.
+- **Write: `POST /v0/sessions/{id}/input` with `{"text": "..."}`.** Routes to the harness's existing `send_input(content)`. The Codex harness already picks `turn/steer` when a turn is active and starts a new turn when idle (`harness/codex.rs:138-164`). Just expose it.
 - **Codex only in v1.** The Claude harness spawns a fresh subprocess per turn (`harness/claude.rs:114-118`), so mid-turn steering is structurally impossible without switching to the undocumented `stream-json` control protocol. Between-turn input would work, but partial support produces a confusing UX (interrupt button silently no-ops). Defer Claude entirely until we adopt `claude-agent-sdk`.
 - **Capability flag on session DTO.** `input_supported: bool`. Codex sessions: `true`. Claude/OpenCode: `false`. UI uses this to enable/disable the input field.
 - **Auto-approve stays as-is.** No changes to `harness/codex.rs:277-285`. No approval API, no pending-prompts table, no TTL.
@@ -49,7 +49,7 @@ One new endpoint. Read uses what's already there.
 ## Scope
 
 **In:**
-- `POST /v1/sessions/{id}/input` route. Body: `{"text": "..."}`. Routes to `Harness::send_input`.
+- `POST /v0/sessions/{id}/input` route. Body: `{"text": "..."}`. Routes to `Harness::send_input`.
 - `input_supported: bool` field on the session DTO. `true` for Codex sessions, `false` for Claude/OpenCode.
 - Integration test: spawn Codex session, observe SSE, send input mid-turn (assert steered into the running turn), send input between turns (assert new turn starts), disconnect SSE 10s and reconnect with `after_seq` (assert no events lost).
 - Short README under `rust/loopflow/src/lfd/sessions/` covering the input endpoint and capability flag.
@@ -70,9 +70,9 @@ cargo test -p loopflow --test session_input_round_trip
 ```
 
 1. Spawn a Codex-backed session via lfd's HTTP API.
-2. Send an initial turn; observe `TextDelta` events on `GET /v1/sessions/{id}/events?after_seq=N`.
-3. While the turn is in progress, `POST /v1/sessions/{id}/input` with `{"text":"also check the tests"}` returns 200; assert the steered content appears in the running turn (Codex `turn/steer`).
-4. After `TurnCompleted`, `POST /v1/sessions/{id}/input` again; assert a new `TurnStarted` event with the posted text.
+2. Send an initial turn; observe `TextDelta` events on `GET /v0/sessions/{id}/events?after_seq=N`.
+3. While the turn is in progress, `POST /v0/sessions/{id}/input` with `{"text":"also check the tests"}` returns 200; assert the steered content appears in the running turn (Codex `turn/steer`).
+4. After `TurnCompleted`, `POST /v0/sessions/{id}/input` again; assert a new `TurnStarted` event with the posted text.
 5. Disconnect the SSE subscriber for 10s mid-flow, reconnect with `after_seq`, receive every missed event.
 6. Spawn a Claude-backed session; assert the session DTO shows `input_supported: false`; `POST /input` returns 4xx with a clear "input not supported for this harness" error.
 

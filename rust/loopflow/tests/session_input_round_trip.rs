@@ -159,7 +159,7 @@ async fn start_server(state: HttpState) -> (String, JoinHandle<()>) {
 
 async fn create_session(client: &Client, base_url: &str, harness: &str, repo: &Path) -> Value {
     let response = client
-        .post(format!("{base_url}/v1/sessions"))
+        .post(format!("{base_url}/v0/sessions"))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({
             "harness": harness,
@@ -175,7 +175,7 @@ async fn create_session(client: &Client, base_url: &str, harness: &str, repo: &P
 
 async fn get_session(client: &Client, base_url: &str, session_id: &str) -> Value {
     let response = client
-        .get(format!("{base_url}/v1/sessions/{session_id}"))
+        .get(format!("{base_url}/v0/sessions/{session_id}"))
         .bearer_auth(TEST_TOKEN)
         .send()
         .await
@@ -202,7 +202,7 @@ async fn wait_for_http_status(
 
 async fn send_input(client: &Client, base_url: &str, session_id: &str, text: &str) -> Value {
     let response = client
-        .post(format!("{base_url}/v1/sessions/{session_id}/input"))
+        .post(format!("{base_url}/v0/sessions/{session_id}/input"))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({ "text": text }))
         .send()
@@ -219,7 +219,7 @@ async fn collect_sse_until(
     after_seq: Option<i64>,
     matches_event: impl Fn(&SessionEvent) -> bool,
 ) -> Vec<(i64, SessionEvent)> {
-    let mut url = format!("{base_url}/v1/sessions/{session_id}/events");
+    let mut url = format!("{base_url}/v0/sessions/{session_id}/events");
     if let Some(seq) = after_seq {
         url.push_str(&format!("?after_seq={seq}"));
     }
@@ -348,7 +348,7 @@ async fn http_session_input_steers_running_turn_starts_idle_turn_and_replays_eve
     let claude = wait_for_http_status(&client, &base_url, claude_id, SessionStatus::Active).await;
     assert_eq!(claude["input_supported"], false);
     let response = client
-        .post(format!("{base_url}/v1/sessions/{claude_id}/input"))
+        .post(format!("{base_url}/v0/sessions/{claude_id}/input"))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({ "text": "hello" }))
         .send()

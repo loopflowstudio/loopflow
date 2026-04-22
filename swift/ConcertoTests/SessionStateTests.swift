@@ -795,10 +795,11 @@ private func endedSession(id: String) -> AgentSession {
 private func session(id: String, status: String, endedAt: Date? = nil) -> AgentSession {
     AgentSession(
         id: id,
-        harness: "claude",
+        harness: "codex",
         status: status,
         waveRunId: nil,
         providerSessionId: nil,
+        inputSupported: true,
         config: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
         createdAt: nil,
         endedAt: endedAt

@@ -15,14 +15,14 @@ Read uses the existing per-session SSE event stream (`SessionEvent`). Write is o
 
 ## Scope
 
-- `POST /v1/sessions/{id}/input` — body `{"text": "..."}`, routes to `Harness::send_input`.
+- `POST /v0/sessions/{id}/input` — body `{"text": "..."}`, routes to `Harness::send_input`.
 - Capability flag `input_supported: bool` on the session DTO.
 - Codex sessions only in v1. The Codex harness already handles steer-vs-new-turn.
 - Claude and OpenCode return `input_supported: false`. Claude support is deferred to the `claude-agent-sdk` follow-up — partial mid-turn support requires the undocumented stream-json control protocol, which we're choosing not to reverse-engineer.
 
 ## Auth
 
-OAuth / tokens. Same auth model as the existing WebSocket connection and `lfd` API endpoints. Bearer token middleware on `/v1/sessions/*` already covers this.
+OAuth / tokens. Same auth model as the existing WebSocket connection and `lfd` API endpoints. Bearer token middleware on `/v0/sessions/*` already covers this.
 
 ## Alternatives rejected
 

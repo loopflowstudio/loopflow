@@ -1,11 +1,7 @@
-mod harness;
+pub(crate) mod harness;
 pub(crate) mod opencode_runtime;
 pub mod types;
 pub mod usage;
-
-pub(crate) fn session_input_supported(harness: &str) -> bool {
-    harness::input_supported(harness)
-}
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -331,7 +327,10 @@ impl SessionManager {
                 actual: session.status,
             });
         }
-        if !harness::input_supported(&session.harness) {
+        if !harness::HarnessKind::parse(&session.harness)
+            .map(|kind| kind.input_supported())
+            .unwrap_or(false)
+        {
             return Err(SessionManagerError::InputNotSupported(session.harness));
         }
 

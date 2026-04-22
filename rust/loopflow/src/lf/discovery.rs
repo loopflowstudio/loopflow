@@ -50,11 +50,25 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
     ("Setup", &["init"]),
     (
         "Planning & Design",
-        &["design", "explore", "refine", "kickoff", "5whys"],
+        &[
+            "design",
+            "explore",
+            "refine",
+            "review-design",
+            "kickoff",
+            "5whys",
+        ],
     ),
     (
         "Implementation",
-        &["implement", "iterate", "expand", "reduce", "compress"],
+        &[
+            "implement",
+            "iterate",
+            "expand",
+            "reduce",
+            "compress",
+            "integrate-upstream",
+        ],
     ),
     (
         "Quality",
@@ -66,6 +80,8 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "lint",
             "debug",
             "ci-fix",
+            "qa",
+            "triage",
             "gate",
         ],
     ),
@@ -79,6 +95,25 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "synthesize",
             "validate",
             "release",
+            "release-notes",
+        ],
+    ),
+    (
+        "Garden",
+        &["garden/scan", "garden/assess", "garden/wave-report"],
+    ),
+    ("Wave", &["wave/mutate", "wave/review"]),
+    (
+        "VSM",
+        &[
+            "vsm/s2-scan",
+            "vsm/s2-assess",
+            "vsm/s3-scan",
+            "vsm/s3-assess",
+            "vsm/s4-scan",
+            "vsm/s4-assess",
+            "vsm/s5-scan",
+            "vsm/s5-assess",
         ],
     ),
 ];
@@ -117,6 +152,54 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
         ("release", "Run one-shot release workflow"),
+        ("release-notes", "Write narrative release notes"),
+        (
+            "review-design",
+            "Reshape AI-elaborated design into user intent",
+        ),
+        (
+            "integrate-upstream",
+            "Adapt wave code after rebasing onto main",
+        ),
+        ("qa", "Test, fix, verify"),
+        (
+            "triage",
+            "Assess QA findings, separate blocking from polish",
+        ),
+        ("garden/scan", "Read member wave state"),
+        (
+            "garden/assess",
+            "Judge wave health and identify pressure points",
+        ),
+        ("garden/wave-report", "Read health signals across all waves"),
+        ("wave/mutate", "Compose and apply coordinated mutations"),
+        ("wave/review", "Review mutations, amend or revert"),
+        ("vsm/s2-scan", "Scan backlogs, PR overlap, conflict history"),
+        (
+            "vsm/s2-assess",
+            "Assess coordination risk and safe ordering",
+        ),
+        (
+            "vsm/s3-scan",
+            "Scan live health, velocity, CI, usage signals",
+        ),
+        (
+            "vsm/s3-assess",
+            "Assess control health and mechanical blocks",
+        ),
+        (
+            "vsm/s4-scan",
+            "Scan dependencies, advisories, upstream APIs",
+        ),
+        (
+            "vsm/s4-assess",
+            "Assess environmental changes and implications",
+        ),
+        ("vsm/s5-scan", "Scan chord identity, roster, policy"),
+        (
+            "vsm/s5-assess",
+            "Assess identity, boundary, and autonomy drift",
+        ),
     ])
 }
 
@@ -156,6 +239,8 @@ pub enum SkillSourceKind {
     SingleFile,
     /// Agent Skills cache sourced by `npx skills`
     Npx,
+    /// Namespaced step directory at .lf/steps/<name>/
+    Namespaced,
 }
 
 /// Discover external skill sources (config, npx cache, superpowers, rams).
@@ -186,7 +271,43 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 2. npx skill cache in repo-local .agents/skills
+    // 2. Namespaced step directories (.lf/steps/<name>/)
+    if let Some(repo_root) = repo {
+        let steps_dir = repo_root.join(".lf/steps");
+        if let Ok(entries) = std::fs::read_dir(&steps_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let Some(prefix) = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                else {
+                    continue;
+                };
+                if seen_prefixes.contains(&prefix) {
+                    continue;
+                }
+
+                let skills = discover_namespaced_skills(&path);
+                if skills.is_empty() {
+                    continue;
+                }
+
+                sources.push(SkillSource {
+                    name: prefix.clone(),
+                    prefix: prefix.clone(),
+                    path: Some(path),
+                    skills,
+                    kind: SkillSourceKind::Namespaced,
+                });
+                seen_prefixes.insert(prefix);
+            }
+        }
+    }
+
+    // 3. npx skill cache in repo-local .agents/skills
     if !seen_prefixes.contains("npx") {
         if let Some(repo_root) = repo {
             let cache_dir = repo_root.join(".agents/skills");
@@ -201,7 +322,7 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 3. Auto-detect superpowers
+    // 4. Auto-detect superpowers
     let sp_paths = [
         repo.map(|r| r.join("superpowers")),
         dirs::home_dir().map(|h| h.join(".superpowers")),
@@ -227,7 +348,7 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 4. Auto-detect rams
+    // 5. Auto-detect rams
     // Check for rams at ~/.claude/commands/rams.md
     if !seen_prefixes.contains("rams") {
         if let Some(home) = dirs::home_dir() {
@@ -245,6 +366,10 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     }
 
     sources
+}
+
+fn discover_namespaced_skills(dir: &Path) -> Vec<String> {
+    list_md_stems(std::slice::from_ref(&dir.to_path_buf()))
 }
 
 fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
@@ -373,6 +498,9 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
         }
 
         let prompt_path = find_skill_prompt_path(source, skill_name)?;
+        if source.kind == SkillSourceKind::Namespaced {
+            return load_namespaced_from_path(name, &prompt_path);
+        }
         return load_skill_from_path(name, &prompt_path);
     }
 
@@ -477,6 +605,10 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
         interactive: Some(true),
         fast_path: None,
     })
+}
+
+fn load_namespaced_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
+    crate::engine::flow::load_step_from_path(name, prompt_path).ok()
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
@@ -636,7 +768,7 @@ fn has_loopflow_marker(skill_path: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(skill_path) else {
         return false;
     };
-    let Some((frontmatter, _body)) = split_frontmatter(&content) else {
+    let Some((frontmatter, _body)) = crate::engine::flow::split_frontmatter(&content) else {
         return false;
     };
     let Ok(value) = serde_yaml_ng::from_str::<Value>(&frontmatter) else {
@@ -650,24 +782,12 @@ fn has_loopflow_marker(skill_path: &Path) -> bool {
         == Some(true)
 }
 
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
-    if !content.starts_with("---") {
-        return None;
-    }
-    let mut parts = content.splitn(3, "---");
-    let _ = parts.next();
-    let frontmatter = parts.next()?;
-    let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
-    Some((frontmatter.to_string(), body))
-}
-
 /// Find the prompt file for a skill within a source.
 fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<PathBuf> {
     let source_path = source.path.as_ref()?;
 
     match source.kind {
-        SkillSourceKind::SingleFile => {
+        SkillSourceKind::SingleFile | SkillSourceKind::Namespaced => {
             let candidate = source_path.join(format!("{skill_name}.md"));
             candidate.is_file().then_some(candidate)
         }
@@ -914,17 +1034,18 @@ pub struct FlowInfo {
 /// List user-defined flows with their step names for display.
 pub fn list_user_flows(repo: &Path) -> Vec<FlowInfo> {
     let mut flows = Vec::new();
-    let flows_dir = repo.join(".lf/flows");
 
-    if let Ok(entries) = std::fs::read_dir(flows_dir) {
+    // 1. Repo-local flows (.lf/flows/*.yaml)
+    let flows_dir = repo.join(".lf/flows");
+    collect_flows_from_dir(&flows_dir, None, &mut flows);
+
+    // 2. Namespaced flows (.lf/flows/<prefix>/*.yaml → "prefix-name")
+    if let Ok(entries) = std::fs::read_dir(&flows_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if let Some(name) = path.file_stem() {
-                let ext = path.extension().map(|e| e.to_string_lossy().to_string());
-                if matches!(ext.as_deref(), Some("yaml") | Some("yml") | Some("json")) {
-                    let name = name.to_string_lossy().to_string();
-                    let step_names = extract_flow_step_names(&path);
-                    flows.push(FlowInfo { name, step_names });
+            if path.is_dir() {
+                if let Some(prefix) = path.file_name().and_then(|n| n.to_str()) {
+                    collect_flows_from_dir(&path, Some(prefix), &mut flows);
                 }
             }
         }
@@ -932,6 +1053,26 @@ pub fn list_user_flows(repo: &Path) -> Vec<FlowInfo> {
 
     flows.sort_by(|a, b| a.name.cmp(&b.name));
     flows
+}
+
+fn collect_flows_from_dir(dir: &Path, prefix: Option<&str>, flows: &mut Vec<FlowInfo>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(stem) = path.file_stem() {
+                let ext = path.extension().map(|e| e.to_string_lossy().to_string());
+                if matches!(ext.as_deref(), Some("yaml") | Some("yml") | Some("json")) {
+                    let stem = stem.to_string_lossy().to_string();
+                    let name = match prefix {
+                        Some(p) => format!("{p}-{stem}"),
+                        None => stem,
+                    };
+                    let step_names = extract_flow_step_names(&path);
+                    flows.push(FlowInfo { name, step_names });
+                }
+            }
+        }
+    }
 }
 
 /// Extract step names from a flow file for display in the chain.
@@ -972,6 +1113,7 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
             }
         }
         serde_yaml_ng::Value::Mapping(map) => {
+            let initial_len = names.len();
             // Check for "steps" key first (common flow structure)
             if let Some(steps) = map.get(serde_yaml_ng::Value::String("steps".to_string())) {
                 return extract_step_names_from_value(steps);
@@ -988,19 +1130,35 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                     }
                 }
             }
-            // Check for fork structures
-            if let Some(fork) = map.get(serde_yaml_ng::Value::String("fork".to_string())) {
-                names.push("[fork]".to_string());
-                if let serde_yaml_ng::Value::Mapping(fork_map) = fork {
-                    if let Some(branches) =
-                        fork_map.get(serde_yaml_ng::Value::String("branches".to_string()))
-                    {
-                        let branch_names = extract_step_names_from_value(branches);
-                        if !branch_names.is_empty() {
-                            // Just show first step of fork for simplicity
-                            names.push(format!("{}…", branch_names[0]));
-                        }
-                    }
+            if let Some(serde_yaml_ng::Value::String(name)) =
+                map.get(serde_yaml_ng::Value::String("flow".to_string()))
+            {
+                names.push(name.clone());
+            }
+            if let Some(serde_yaml_ng::Value::String(command)) =
+                map.get(serde_yaml_ng::Value::String("op".to_string()))
+            {
+                names.push(format!("op: {command}"));
+            }
+            if let Some(and) = map.get(serde_yaml_ng::Value::String("and".to_string())) {
+                names.push("[and]".to_string());
+                names.extend(extract_and_preview(and));
+            }
+            if let Some(xor) = map.get(serde_yaml_ng::Value::String("xor".to_string())) {
+                names.push("[xor]".to_string());
+                names.extend(extract_branch_preview(xor));
+            }
+            if let Some(or) = map.get(serde_yaml_ng::Value::String("or".to_string())) {
+                names.push("[or]".to_string());
+                names.extend(extract_branch_preview(or));
+            }
+            if let Some(loop_value) = map.get(serde_yaml_ng::Value::String("loop".to_string())) {
+                names.push("loop".to_string());
+                names.extend(extract_branch_preview(loop_value));
+            }
+            if names.len() == initial_len {
+                for value in map.values() {
+                    names.extend(extract_step_names_from_value(value));
                 }
             }
         }
@@ -1008,4 +1166,144 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
     }
 
     names
+}
+
+fn extract_and_preview(value: &serde_yaml_ng::Value) -> Vec<String> {
+    let mut names = extract_branch_preview(value);
+    let serde_yaml_ng::Value::Mapping(map) = value else {
+        return names;
+    };
+
+    if let Some(serde_yaml_ng::Value::String(step)) =
+        map.get(serde_yaml_ng::Value::String("synthesize".to_string()))
+    {
+        names.push(step.clone());
+    }
+
+    names
+}
+
+fn extract_branch_preview(value: &serde_yaml_ng::Value) -> Vec<String> {
+    let serde_yaml_ng::Value::Mapping(map) = value else {
+        return Vec::new();
+    };
+
+    for key in ["branches", "steps", "paths", "exit"] {
+        if let Some(nested) = map.get(serde_yaml_ng::Value::String(key.to_string())) {
+            let extracted = extract_step_names_from_value(nested);
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn discover_skill_sources_includes_namespaced_steps() {
+        let tmp = TempDir::new().expect("tempdir");
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\n---\nDo the work.\n",
+        )
+        .expect("write step");
+
+        let sources = discover_skill_sources(Some(tmp.path()));
+        let gstack = sources
+            .iter()
+            .find(|source| source.prefix == "gstack")
+            .expect("gstack source");
+
+        assert_eq!(gstack.kind, SkillSourceKind::Namespaced);
+        assert_eq!(gstack.skills, vec!["office-hours".to_string()]);
+    }
+
+    #[test]
+    fn discover_step_loads_namespaced_frontmatter() {
+        let tmp = TempDir::new().expect("tempdir");
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\ndirections: [gstack]\n---\n# /office-hours\nShip it.\n",
+        )
+        .expect("write step");
+
+        let step = discover_step(tmp.path(), "gstack:office-hours").expect("discover step");
+
+        assert_eq!(step.name, "gstack:office-hours");
+        assert_eq!(step.interactive, Some(false));
+        assert_eq!(step.directions, vec!["gstack".to_string()]);
+        assert!(step
+            .content
+            .as_deref()
+            .expect("content")
+            .contains("# /office-hours"));
+    }
+
+    #[test]
+    fn list_all_steps_includes_namespaced_steps_as_external_skills() {
+        let tmp = TempDir::new().expect("tempdir");
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
+        fs::write(steps_dir.join("office-hours.md"), "Ship it.\n").expect("write step");
+
+        let (_user, _global, _builtin, external) = list_all_steps(Some(tmp.path()));
+
+        assert!(external.contains(&("gstack:office-hours".to_string(), "gstack".to_string())));
+    }
+
+    #[test]
+    fn builtin_categories_covers_all_builtin_steps() {
+        let category_steps = builtin_steps();
+        let all_steps: HashSet<String> = crate::engine::builtins::builtin_step_names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let missing_from_categories: Vec<_> = all_steps.difference(&category_steps).collect();
+        let phantom_in_categories: Vec<_> = category_steps.difference(&all_steps).collect();
+
+        assert!(
+            missing_from_categories.is_empty(),
+            "Steps on disk but not in BUILTIN_CATEGORIES: {missing_from_categories:?}"
+        );
+        assert!(
+            phantom_in_categories.is_empty(),
+            "Steps in BUILTIN_CATEGORIES but not on disk: {phantom_in_categories:?}"
+        );
+    }
+
+    #[test]
+    fn builtin_descriptions_covers_all_builtin_steps() {
+        let descriptions = builtin_descriptions();
+        let category_steps = builtin_steps();
+
+        let missing: Vec<_> = category_steps
+            .iter()
+            .filter(|s| !descriptions.contains_key(s.as_str()))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "Steps in BUILTIN_CATEGORIES missing a description: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn list_directions_includes_imported_builtin_directions() {
+        let directions = list_directions(None);
+
+        assert!(directions.contains(&"gstack".to_string()));
+        assert!(directions.contains(&"openclaw".to_string()));
+    }
 }

@@ -111,6 +111,7 @@ fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>>
         ConcreteItem::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
         ConcreteItem::And(and) => {
             let mut lines = vec!["[and]".to_string()];
+            let total_lines = and.branches.len() + 1;
             for (index, branch) in and.branches.iter().enumerate() {
                 let branch_chain = branch
                     .steps
@@ -118,9 +119,12 @@ fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>>
                     .map(|step| step.step.name.as_str())
                     .collect::<Vec<_>>()
                     .join(" → ");
-                let branch_prefix = tree_prefix(index, and.branches.len());
+                let branch_prefix = tree_prefix(index, total_lines);
                 lines.push(format!("{branch_prefix} {} → {branch_chain}", branch.label));
             }
+            let synth_step = and.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
+            let synth_prefix = tree_prefix(and.branches.len(), total_lines);
+            lines.push(format!("{synth_prefix} synthesize → {synth_step}"));
             Ok(lines)
         }
         ConcreteItem::Xor(branch) => {
@@ -535,7 +539,8 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         return Err(err);
     }
 
-    let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
+    let synth_step = fork.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
+    let synthesize_result = crate::lf::commands::run::run(Some(synth_step), message, cli);
     cleanup_fork_artifacts(repo, &worktrees);
 
     synthesize_result?;
@@ -771,5 +776,41 @@ mod tests {
         );
 
         assert!(matches!(items[1], ConcreteItem::Xor(_)));
+    }
+
+    #[test]
+    fn render_pipeline_lines_shows_and_synthesize_step() {
+        let temp = tempdir().unwrap();
+        let flow = Flow {
+            name: "gstack-review".to_string(),
+            items: vec![crate::engine::flow::FlowItem::And {
+                branches: vec![
+                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                        "gstack:review",
+                    )),
+                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                        "gstack:cso",
+                    )),
+                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                        "gstack:codex",
+                    )),
+                ],
+                synthesize: Some("gstack:review-synthesize".to_string()),
+            }],
+        };
+
+        let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
+        let lines = render_pipeline_lines(&items, temp.path()).unwrap();
+
+        assert_eq!(
+            lines,
+            vec![
+                "[and]".to_string(),
+                "├─ gstack:review → gstack:review".to_string(),
+                "├─ gstack:cso → gstack:cso".to_string(),
+                "├─ gstack:codex → gstack:codex".to_string(),
+                "└─ synthesize → gstack:review-synthesize".to_string(),
+            ]
+        );
     }
 }

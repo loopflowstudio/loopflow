@@ -9,7 +9,7 @@ use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptI
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
-use crate::lf::{OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand};
+use crate::lf::{GstackCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
@@ -91,6 +91,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
+        OpsCommand::Gstack { cmd } => gstack_cmd(cmd, &progress),
     }
 }
 
@@ -1434,4 +1435,24 @@ fn check_codex_available() -> bool {
 fn check_gemini_available() -> bool {
     // Check for gemini CLI
     which("gemini")
+}
+
+// ---------------------------------------------------------------------------
+// Gstack
+// ---------------------------------------------------------------------------
+
+fn gstack_cmd(cmd: &GstackCommand, progress: &dyn Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    match cmd {
+        GstackCommand::Sync => {
+            crate::ops::gstack::sync(&repo_root, progress)?;
+        }
+        GstackCommand::Diff => {
+            crate::ops::gstack::diff(&repo_root, progress)?;
+        }
+        GstackCommand::List => {
+            crate::ops::gstack::list(&repo_root, progress)?;
+        }
+    }
+    Ok(())
 }

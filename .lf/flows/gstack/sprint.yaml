@@ -1,0 +1,19 @@
+# gstack-sprint: full lifecycle from idea to production
+- gstack:office-hours
+- xor:
+    router: gstack:office-hours
+    paths:
+      autoplan:
+        step: gstack:autoplan
+        description: "Auto-plan with minimal interaction"
+      manual:
+        flow: gstack-plan-manual
+        description: "Interactive planning — CEO, design, eng reviews"
+- implement
+- flow: gstack-review
+- gstack:qa
+- gstack:ship
+- gstack:document-release
+- gstack:land-and-deploy
+- gstack:canary
+- gstack:retro

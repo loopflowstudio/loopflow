@@ -46,7 +46,11 @@ impl Step {
 pub enum FlowItem {
     Step(Step),
     Op(Op),
-    And { branches: Vec<FlowItem> },
+    And {
+        branches: Vec<FlowItem>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        synthesize: Option<String>,
+    },
     FlowRef(String),
     Xor(XorDef),
     Or(OrDef),
@@ -160,6 +164,7 @@ pub struct ConcreteAndBranch {
 pub struct ConcreteAnd {
     pub branches: Vec<ConcreteAndBranch>,
     pub flow_parents: Vec<String>,
+    pub synthesize: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,10 +257,13 @@ pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadEr
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
+    // Normalize colon to slash: "gstack:office-hours" → "gstack/office-hours"
+    let canonical = name.replace(':', "/");
+    let name = canonical.as_str();
+
     // Try file-based lookup first (repo-local, then global)
     if let Ok(step_path) = find_step_path(name, repo) {
-        let content = fs::read_to_string(&step_path)?;
-        return step_from_content(name, &content);
+        return load_step_from_path(name, &step_path);
     }
 
     // Fall back to built-in steps
@@ -269,6 +277,11 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
     }
 
     Err(LoadError::StepNotFound(name.to_string()))
+}
+
+pub(crate) fn load_step_from_path(name: &str, step_path: &Path) -> Result<Step, LoadError> {
+    let content = fs::read_to_string(step_path)?;
+    step_from_content(name, &content)
 }
 
 #[derive(Debug, Default)]
@@ -305,7 +318,7 @@ fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
     })
 }
 
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
+pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     if !content.starts_with("---") {
         return None;
     }
@@ -429,42 +442,76 @@ fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
     stems
 }
 
+fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths.into_iter().find(|path| path.exists())
+}
+
+fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<PathBuf> {
+    extensions
+        .iter()
+        .map(|extension| dir.join(format!("{name}.{extension}")))
+        .collect()
+}
+
+fn markdown_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}.md"))
+}
+
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let candidates = [
-        repo.join(".lf/flows").join(format!("{name}.yaml")),
-        repo.join(".lf/flows").join(format!("{name}.yml")),
-        repo.join(".lf/flows").join(format!("{name}.json")),
-    ];
-    for path in candidates {
-        if path.exists() {
+    // 1. Repo-local flows
+    if let Some(path) = first_existing_path(paths_with_extensions(
+        &repo.join(".lf/flows"),
+        name,
+        &["yaml", "yml", "json"],
+    )) {
+        return Ok(path);
+    }
+
+    // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
+    // Accept both "gstack/sprint" and "gstack-sprint"
+    let splits: Vec<(&str, &str)> = name
+        .split_once('/')
+        .into_iter()
+        .chain(name.split_once('-'))
+        .collect();
+    for (prefix, flow_name) in splits {
+        if let Some(path) = first_existing_path(paths_with_extensions(
+            &repo.join(".lf/flows").join(prefix),
+            flow_name,
+            &["yaml", "yml"],
+        )) {
             return Ok(path);
         }
     }
+
     Err(LoadError::FlowNotFound(name.to_string()))
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // 1. Check repo-local paths
-    let repo_candidates = [
-        repo.join(".lf/steps").join(format!("{name}.md")),
-        repo.join(".claude/commands").join(format!("{name}.md")),
-    ];
-    for path in repo_candidates {
-        if path.exists() {
-            return Ok(path);
+    // Namespaced steps: "gstack/office-hours" → .lf/steps/gstack/office-hours.md
+    // (colon form is already normalized to slash by load_step)
+    if let Some((prefix, step_name)) = name.split_once('/') {
+        let namespaced_path = markdown_path(&repo.join(".lf/steps").join(prefix), step_name);
+        if namespaced_path.exists() {
+            return Ok(namespaced_path);
         }
+    }
+
+    // 1. Check repo-local paths
+    if let Some(path) = first_existing_path([
+        markdown_path(&repo.join(".lf/steps"), name),
+        markdown_path(&repo.join(".claude/commands"), name),
+    ]) {
+        return Ok(path);
     }
 
     // 2. Check global paths
     if let Some(home) = home_dir() {
-        let global_candidates = [
-            home.join(".lf/steps").join(format!("{name}.md")),
-            home.join(".claude/commands").join(format!("{name}.md")),
-        ];
-        for path in global_candidates {
-            if path.exists() {
-                return Ok(path);
-            }
+        if let Some(path) = first_existing_path([
+            markdown_path(&home.join(".lf/steps"), name),
+            markdown_path(&home.join(".claude/commands"), name),
+        ]) {
+            return Ok(path);
         }
     }
 
@@ -679,7 +726,15 @@ fn parse_and_value(value: &Value) -> Result<FlowItem, LoadError> {
             "and prompts are not supported; and always runs all branches".to_string(),
         ));
     }
-    Ok(FlowItem::And { branches })
+    let synthesize = map
+        .get(key("synthesize"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(FlowItem::And {
+        branches,
+        synthesize,
+    })
 }
 
 /// Parse and-drafts for the step/flow shorthand format.
@@ -1085,8 +1140,11 @@ fn expand_with_chain(
                     flow_parents: chain.clone(),
                 }));
             }
-            FlowItem::And { branches } => {
-                let fork = expand_and(branches, repo, &chain, depth)?;
+            FlowItem::And {
+                branches,
+                synthesize,
+            } => {
+                let fork = expand_and(branches, synthesize.clone(), repo, &chain, depth)?;
                 items.push(ConcreteItem::And(fork));
             }
             FlowItem::Xor(branch_def) => {
@@ -1126,6 +1184,7 @@ fn expand_items_with_chain(
 
 fn expand_and(
     branches: &[FlowItem],
+    synthesize: Option<String>,
     repo: &Path,
     chain: &[String],
     depth: usize,
@@ -1137,6 +1196,7 @@ fn expand_and(
     Ok(ConcreteAnd {
         branches,
         flow_parents: chain.to_vec(),
+        synthesize,
     })
 }
 
@@ -1316,6 +1376,41 @@ mod tests {
 
         let step = load_step("mystep", tmp.path()).unwrap();
         assert_eq!(step.name, "mystep");
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_namespaced_step_with_colon() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
+        )
+        .unwrap();
+
+        // Colon form normalizes to slash
+        let step = load_step("gstack:office-hours", tmp.path()).unwrap();
+        assert_eq!(step.name, "gstack/office-hours");
+        assert_eq!(step.interactive, Some(false));
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_namespaced_step_with_slash() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps/gstack");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("office-hours.md"),
+            "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
+        )
+        .unwrap();
+
+        let step = load_step("gstack/office-hours", tmp.path()).unwrap();
+        assert_eq!(step.name, "gstack/office-hours");
+        assert_eq!(step.interactive, Some(false));
         assert!(step.content.unwrap().contains("Do the thing"));
     }
 
@@ -1919,6 +2014,50 @@ Be careful.
     }
 
     #[test]
+    fn parse_and_with_custom_synthesize() {
+        let yaml = r#"
+- and:
+    branches:
+      - step: gstack:review
+      - step: gstack:cso
+      - step: gstack:codex
+    synthesize: gstack:review-synthesize
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::And {
+                branches,
+                synthesize,
+            } => {
+                assert_eq!(branches.len(), 3);
+                assert_eq!(synthesize.as_deref(), Some("gstack:review-synthesize"));
+            }
+            _ => panic!("expected And item"),
+        }
+    }
+
+    #[test]
+    fn parse_and_without_synthesize_defaults_to_none() {
+        let yaml = r#"
+- and:
+    branches:
+      - step: review
+      - step: cso
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        match &items[0] {
+            FlowItem::And { synthesize, .. } => {
+                assert!(synthesize.is_none());
+            }
+            _ => panic!("expected And item"),
+        }
+    }
+
+    #[test]
     fn parse_and_explicit_branches_with_flow_and_step() {
         let yaml = r#"
 - and:
@@ -1989,6 +2128,7 @@ Be careful.
                         ..Step::named("multi")
                     }),
                 ],
+                synthesize: None,
             }],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
@@ -2034,6 +2174,7 @@ Be careful.
                         ..Step::named("reduce")
                     }),
                 ],
+                synthesize: None,
             }],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
@@ -2084,6 +2225,7 @@ Be careful.
                     directions: vec!["infra".to_string()],
                     ..Step::named("has-and")
                 })],
+                synthesize: None,
             }],
         };
         let result = expand_flow(&flow, tmp.path());

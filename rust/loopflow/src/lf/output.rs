@@ -145,11 +145,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     // Separator + total
     lines.push(format!("  {}", "\u{2500}".repeat(35)));
     let total = breakdown.total();
-    let pct = if budget > 0 {
-        (total * 100) / budget
-    } else {
-        0
-    };
+    let pct = (total * 100).checked_div(budget).unwrap_or(0);
     lines.push(format!(
         "  {:<12} {:>6}  {}% of {}k",
         "total",

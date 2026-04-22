@@ -122,6 +122,58 @@ fn discover_repo_flows() {
 }
 
 #[test]
+fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let flows_dir = repo.path().join(".lf/flows/gstack");
+    std::fs::create_dir_all(&flows_dir).expect("create namespaced flows dir");
+    std::fs::write(
+        flows_dir.join("sprint.yaml"),
+        r#"
+- gstack:office-hours
+- xor:
+    router: gstack:office-hours
+    paths:
+      autoplan:
+        step: gstack:autoplan
+        description: "Auto-plan with minimal interaction"
+      manual:
+        flow: gstack-plan-manual
+        description: "Interactive planning"
+- implement
+- and:
+    branches:
+      - step: gstack:review
+      - step: gstack:cso
+      - step: gstack:codex
+    synthesize: gstack:review-synthesize
+"#,
+    )
+    .expect("write flow");
+
+    let flows = list_user_flows(repo.path());
+    let flow = flows
+        .iter()
+        .find(|f| f.name == "gstack-sprint")
+        .expect("flow");
+    assert_eq!(
+        flow.step_names,
+        vec![
+            "gstack:office-hours",
+            "[xor]",
+            "gstack:autoplan",
+            "gstack-plan-manual",
+            "implement",
+            "[and]",
+            "gstack:review",
+            "gstack:cso",
+            "gstack:codex",
+            "gstack:review-synthesize",
+        ]
+    );
+}
+
+#[test]
 fn repo_step_shadows_builtin() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");

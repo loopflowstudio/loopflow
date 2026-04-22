@@ -317,13 +317,14 @@ def _write_workstyle(
     manifest: WorkstyleManifest,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    steps_dir = output_dir.joinpath("steps")
-    if steps_dir.exists():
-        shutil.rmtree(steps_dir)
-    steps_dir.mkdir(parents=True, exist_ok=True)
+    stale_steps_dir = output_dir.joinpath("steps")
+    if stale_steps_dir.exists():
+        shutil.rmtree(stale_steps_dir)
+    for path in output_dir.glob("*.md"):
+        path.unlink()
 
     for step_name, skill in converted_steps:
-        _write_step(steps_dir.joinpath(f"{step_name}.md"), step_name, skill)
+        _write_step(output_dir.joinpath(f"{step_name}.md"), step_name, skill)
 
     manifest_data = {
         "name": manifest.name,

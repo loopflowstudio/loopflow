@@ -190,25 +190,25 @@ Keep the actual retro.
     assert workstyle["source"]["repo"] == "garrytan/gstack"
     assert workstyle["source"]["last_commit"] == manifest.last_commit
 
-    office_hours = output_dir.joinpath("steps/office-hours.md").read_text(encoding="utf-8")
+    office_hours = output_dir.joinpath("office-hours.md").read_text(encoding="utf-8")
     assert "## Preamble" not in office_hours
     assert "## Voice" not in office_hours
     assert "skill-usage.jsonl" not in office_hours
     assert "spec-review.jsonl" not in office_hours
     assert "Do the work." in office_hours
 
-    ceo_review_text = output_dir.joinpath("steps/ceo-review.md").read_text(encoding="utf-8")
+    ceo_review_text = output_dir.joinpath("ceo-review.md").read_text(encoding="utf-8")
     ceo_review = yaml.safe_load(ceo_review_text.split("---", 2)[1])
     assert ceo_review["after"] == ["office-hours"]
     assert "## Review Log" not in ceo_review_text
 
     browse = yaml.safe_load(
-        output_dir.joinpath("steps/browse.md").read_text(encoding="utf-8").split("---", 2)[1]
+        output_dir.joinpath("browse.md").read_text(encoding="utf-8").split("---", 2)[1]
     )
     assert browse["requires"] == ["browser"]
-    assert "## SETUP" in output_dir.joinpath("steps/browse.md").read_text(encoding="utf-8")
+    assert "## SETUP" in output_dir.joinpath("browse.md").read_text(encoding="utf-8")
 
-    retro = output_dir.joinpath("steps/retro.md").read_text(encoding="utf-8")
+    retro = output_dir.joinpath("retro.md").read_text(encoding="utf-8")
     assert "skill-usage.jsonl" not in retro
     assert "eureka.jsonl" not in retro
     assert "Keep the actual retro." in retro
@@ -289,7 +289,7 @@ Then load:
 
     convert_gstack_repo(source_repo, output_dir)
 
-    review = output_dir.joinpath("steps/eng-review.md").read_text(encoding="utf-8")
+    review = output_dir.joinpath("eng-review.md").read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(review.split("---", 2)[1])
     assert "gstack:office-hours" in review
     assert "gstack:design-review" in review

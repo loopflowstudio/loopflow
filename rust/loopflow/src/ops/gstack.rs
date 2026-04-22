@@ -15,14 +15,7 @@ pub fn sync(repo_root: &Path, progress: &dyn Progress) -> OpsResult<SyncResult> 
     // Snapshot current steps for diffing
     let before = snapshot_steps(&output_dir);
 
-    // Clone or fetch
-    if cache_dir.join(".git").exists() {
-        progress.status("Fetching garrytan/gstack...");
-        git_fetch(&cache_dir)?;
-    } else {
-        progress.status("Cloning garrytan/gstack...");
-        git_clone(&cache_dir)?;
-    }
+    update_cache(&cache_dir, progress)?;
 
     let upstream_head = git_head(&cache_dir)?;
     let last_commit = read_last_commit(&manifest_path);
@@ -44,7 +37,6 @@ pub fn sync(repo_root: &Path, progress: &dyn Progress) -> OpsResult<SyncResult> 
         short_sha(&upstream_head),
     ));
     run_converter(&cache_dir, &output_dir, &direction_output)?;
-    flatten_converter_output(&output_dir)?;
 
     // Diff
     let after = snapshot_steps(&output_dir);
@@ -79,13 +71,7 @@ pub fn diff(repo_root: &Path, progress: &dyn Progress) -> OpsResult<DiffResult> 
     let cache_dir = cache_dir()?;
     let manifest_path = repo_root.join(".lf/steps/gstack/workstyle.yaml");
 
-    if !cache_dir.join(".git").exists() {
-        progress.status("Cloning garrytan/gstack...");
-        git_clone(&cache_dir)?;
-    } else {
-        progress.status("Fetching garrytan/gstack...");
-        git_fetch(&cache_dir)?;
-    }
+    update_cache(&cache_dir, progress)?;
 
     let upstream_head = git_head(&cache_dir)?;
     let last_commit = read_last_commit(&manifest_path);
@@ -276,6 +262,16 @@ fn git_fetch(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
+fn update_cache(cache_dir: &Path, progress: &dyn Progress) -> OpsResult<()> {
+    if cache_dir.join(".git").exists() {
+        progress.status("Fetching garrytan/gstack...");
+        git_fetch(cache_dir)
+    } else {
+        progress.status("Cloning garrytan/gstack...");
+        git_clone(cache_dir)
+    }
+}
+
 fn git_head(repo: &Path) -> OpsResult<String> {
     let output = Command::new("git")
         .args(["-C"])
@@ -363,40 +359,6 @@ fn run_converter(source: &Path, output_dir: &Path, direction_output: &Path) -> O
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(OpsError::Message(format!("Converter failed:\n{stderr}")));
     }
-    Ok(())
-}
-
-/// The converter writes steps to `output_dir/steps/*.md`. Move them up to
-/// `output_dir/*.md` so the flat layout matches what loopflow expects, then
-/// remove the now-empty `steps/` subdirectory.
-fn flatten_converter_output(output_dir: &Path) -> OpsResult<()> {
-    let steps_subdir = output_dir.join("steps");
-    if !steps_subdir.exists() {
-        return Ok(());
-    }
-
-    // Remove old .md files in the output dir (will be replaced by converter output)
-    for entry in std::fs::read_dir(output_dir)
-        .map_err(|e| OpsError::Message(format!("Failed to read output dir: {e}")))?
-        .flatten()
-    {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".md") {
-            std::fs::remove_file(entry.path()).ok();
-        }
-    }
-
-    // Move steps/*.md up
-    for entry in std::fs::read_dir(&steps_subdir)
-        .map_err(|e| OpsError::Message(format!("Failed to read steps subdir: {e}")))?
-        .flatten()
-    {
-        let dest = output_dir.join(entry.file_name());
-        std::fs::rename(entry.path(), dest)
-            .map_err(|e| OpsError::Message(format!("Failed to move step file: {e}")))?;
-    }
-
-    std::fs::remove_dir(&steps_subdir).ok();
     Ok(())
 }
 

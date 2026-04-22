@@ -49,11 +49,11 @@ Serialization remains useful, but only as explicit policy.
 
 ### Three access planes
 
-`lfd` participates differently in each plane. The terminal plane connection contract is shipped; the structured plane is next.
+`lfd` participates differently in each plane. The terminal plane connection contract is shipped. The structured plane is underway: session input round-trip is shipped for Codex (`POST /v0/sessions/{id}/input` + per-session SSE read), with `input_supported` capability flagging Claude and OpenCode out until their harness protocols catch up. Activity normalization is the next structural piece.
 
 **Terminal plane.** Full interactive terminal access. Ghostty connects to tmux directly — locally via `tmux attach-session -t <name>`, remotely via SSH. `lfd` owns session lifecycle (create, track, destroy) and returns transport-agnostic connection metadata (`session_name`, `host`, `cwd`, `status`). Concerto decides whether to attach locally or over SSH. `lfd` never touches terminal bytes.
 
-**Structured plane.** Non-terminal interaction with agent sessions. `lfd` runs the agent harness in server mode and exposes a higher-level API — tool calls, questions, approvals, structured output. This is the interface for clients that can't be terminal participants (iPhone, web). Not terminal bytes in a web view.
+**Structured plane.** Non-terminal interaction with agent sessions. `lfd` runs the agent harness in server mode and exposes a higher-level API — tool calls, questions, approvals, structured output. This is the interface for clients that can't be terminal participants (iPhone, web). Not terminal bytes in a web view. Tool approvals are explicitly out for v1 — auto-approve is the policy until at least Claude can speak the protocol.
 
 **Event plane.** Metadata stream over WebSocket. Already exists. The `connected` event carries a full state snapshot; every mutation emits an event. Both terminal and non-terminal clients consume this.
 

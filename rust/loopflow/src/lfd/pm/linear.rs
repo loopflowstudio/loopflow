@@ -88,7 +88,17 @@ const CLAIM_ITEM_MUTATION: &str = r#"mutation ClaimIssue($id: String!, $assignee
       assignee {
         id
       }
+      branchName
     }
+  }
+}"#;
+
+const CLAIM_ITEM_STATE_QUERY: &str = r#"query ClaimIssueState($id: String!) {
+  issue(id: $id) {
+    assignee {
+      id
+    }
+    branchName
   }
 }"#;
 
@@ -392,6 +402,26 @@ impl PmProvider for LinearClient {
             .and_then(|v| v.as_str())
             .ok_or_else(|| PmError::Message("failed to resolve viewer ID".to_string()))?
             .to_string();
+
+        let current: Value = self
+            .graphql(CLAIM_ITEM_STATE_QUERY, json!({ "id": item_id }))
+            .await?;
+        let current_assignee = current
+            .pointer("/issue/assignee/id")
+            .and_then(|v| v.as_str());
+        if current_assignee.is_some_and(|assignee| assignee != viewer_id) {
+            return Err(PmError::Message(format!(
+                "item claimed by another assignee (expected {viewer_id}, got {current_assignee:?})"
+            )));
+        }
+        let current_branch = current
+            .pointer("/issue/branchName")
+            .and_then(|v| v.as_str());
+        if current_branch.is_some_and(|actual| !actual.is_empty() && actual != branch) {
+            return Err(PmError::Message(format!(
+                "item claimed by another worker (expected branch {branch}, got {current_branch:?})"
+            )));
+        }
 
         let response: Value = self
             .graphql(
@@ -1302,6 +1332,18 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "viewer": { "id": "user-42" } } }),
             ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issue": {
+                            "id": "issue-1",
+                            "assignee": null,
+                            "branchName": null
+                        }
+                    }
+                }),
+            ),
             // claim mutation — response confirms our assignee
             json_response(
                 StatusCode::OK,
@@ -1331,8 +1373,9 @@ mod tests {
             .expect("claim should succeed when branch matches");
 
         let requests = requests.lock().await;
-        assert_eq!(requests.len(), 2);
-        assert!(requests[1].body.contains("ClaimIssue"));
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].body.contains("ClaimIssueState"));
+        assert!(requests[2].body.contains("ClaimIssue"));
     }
 
     #[tokio::test]
@@ -1342,6 +1385,18 @@ mod tests {
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "viewer": { "id": "user-42" } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issue": {
+                            "id": "issue-1",
+                            "assignee": null,
+                            "branchName": null
+                        }
+                    }
+                }),
             ),
             // claim mutation — response shows a different assignee won
             json_response(
@@ -1384,6 +1439,18 @@ mod tests {
                 StatusCode::OK,
                 json!({
                     "data": {
+                        "issue": {
+                            "id": "issue-1",
+                            "assignee": null,
+                            "branchName": null
+                        }
+                    }
+                }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
                         "issueUpdate": {
                             "issue": {
                                 "id": "issue-1",
@@ -1402,12 +1469,10 @@ mod tests {
                 StatusCode::OK,
                 json!({
                     "data": {
-                        "issueUpdate": {
-                            "issue": {
-                                "id": "issue-1",
-                                "assignee": { "id": "user-42" },
-                                "branchName": "worker-a"
-                            }
+                        "issue": {
+                            "id": "issue-1",
+                            "assignee": { "id": "user-42" },
+                            "branchName": "worker-a"
                         }
                     }
                 }),

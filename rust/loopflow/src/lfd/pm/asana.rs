@@ -492,6 +492,12 @@ impl PmProvider for AsanaClient {
                     .to_string(),
             )
         })?;
+        let current_branch = working_branch_value(&task.data, &field_id);
+        if current_branch.is_some_and(|actual| !actual.is_empty() && actual != branch) {
+            return Err(PmError::Message(format!(
+                "item claimed by another worker (expected branch {branch}, got {current_branch:?})"
+            )));
+        }
 
         let mut custom_fields = Map::new();
         custom_fields.insert(field_id.clone(), json!(branch));

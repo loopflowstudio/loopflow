@@ -415,6 +415,15 @@ impl PmProvider for LinearClient {
             )));
         }
 
+        let actual_branch = response
+            .pointer("/issueUpdate/issue/branchName")
+            .and_then(|v| v.as_str());
+        if actual_branch != Some(branch) {
+            return Err(PmError::Message(format!(
+                "item claimed by another worker (expected branch {branch}, got {actual_branch:?})"
+            )));
+        }
+
         Ok(())
     }
 }
@@ -1286,7 +1295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_item_verifies_assignee_matches_viewer() {
+    async fn claim_item_verifies_branch_matches() {
         let (base_url, requests) = test_server::spawn(vec![
             // viewer query
             json_response(
@@ -1301,7 +1310,8 @@ mod tests {
                         "issueUpdate": {
                             "issue": {
                                 "id": "issue-1",
-                                "assignee": { "id": "user-42" }
+                                "assignee": { "id": "user-42" },
+                                "branchName": "feature/test"
                             }
                         }
                     }
@@ -1318,7 +1328,7 @@ mod tests {
         client
             .claim_item("issue-1", "feature/test")
             .await
-            .expect("claim should succeed when assignee matches");
+            .expect("claim should succeed when branch matches");
 
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 2);
@@ -1341,7 +1351,8 @@ mod tests {
                         "issueUpdate": {
                             "issue": {
                                 "id": "issue-1",
-                                "assignee": { "id": "user-99" }
+                                "assignee": { "id": "user-99" },
+                                "branchName": "feature/test"
                             }
                         }
                     }
@@ -1360,6 +1371,64 @@ mod tests {
             .await
             .expect_err("claim should fail when another assignee wins");
         assert!(error.to_string().contains("another assignee"));
+    }
+
+    #[tokio::test]
+    async fn claim_item_fails_same_account_concurrent() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "viewer": { "id": "user-42" } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issueUpdate": {
+                            "issue": {
+                                "id": "issue-1",
+                                "assignee": { "id": "user-42" },
+                                "branchName": "worker-a"
+                            }
+                        }
+                    }
+                }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "viewer": { "id": "user-42" } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "issueUpdate": {
+                            "issue": {
+                                "id": "issue-1",
+                                "assignee": { "id": "user-42" },
+                                "branchName": "worker-a"
+                            }
+                        }
+                    }
+                }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .claim_item("issue-1", "worker-a")
+            .await
+            .expect("first branch should win");
+        let error = client
+            .claim_item("issue-1", "worker-b")
+            .await
+            .expect_err("second branch should lose even with the same account");
+        assert!(error.to_string().contains("another worker"));
     }
 
     #[test]

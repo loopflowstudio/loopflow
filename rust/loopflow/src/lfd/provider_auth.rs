@@ -129,14 +129,23 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::Asana => Some("ASANA_ACCESS_TOKEN"),
-            Self::Linear => Some("LINEAR_API_KEY"),
-            Self::GitHub | Self::Notion | Self::Doppler => None,
+            Self::GitHub | Self::Asana | Self::Linear | Self::Notion | Self::Doppler => None,
         }
     }
 
     pub fn api_key_bills_per_token(self) -> bool {
         matches!(self, Self::Claude | Self::Codex | Self::OpenCodeZen)
+    }
+
+    pub fn api_key_configure_error(self) -> Option<String> {
+        match self {
+            Self::Asana | Self::Linear | Self::Notion => Some(format!(
+                "{} requires OAuth. Run 'lf op auth {}' to connect.",
+                self.display_name(),
+                self.as_str()
+            )),
+            _ => None,
+        }
     }
 
     /// Whether this provider supports CLI-based token refresh.
@@ -3414,6 +3423,30 @@ mod tests {
             updated_at: now_unix(),
             credential_type,
         }
+    }
+
+    #[test]
+    fn pm_providers_do_not_support_api_key_env_auth() {
+        for provider in [Provider::Asana, Provider::Linear, Provider::Notion] {
+            assert_eq!(provider.api_key_env_name(), None);
+        }
+    }
+
+    #[test]
+    fn pm_provider_configure_errors_point_to_oauth() {
+        assert_eq!(
+            Provider::Asana.api_key_configure_error().as_deref(),
+            Some("Asana requires OAuth. Run 'lf op auth asana' to connect.")
+        );
+        assert_eq!(
+            Provider::Linear.api_key_configure_error().as_deref(),
+            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
+        );
+        assert_eq!(
+            Provider::Notion.api_key_configure_error().as_deref(),
+            Some("Notion requires OAuth. Run 'lf op auth notion' to connect.")
+        );
+        assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }
 
     #[test]

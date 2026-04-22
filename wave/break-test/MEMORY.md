@@ -2,9 +2,12 @@
 
 ## Learnings
 
-- 2026-04-22: `lf debug` invoked headlessly on this branch with no
-  clipboard content and no explicit error target. Step's documented
-  behavior ("ask what error to debug") is incompatible with headless
-  mode. Logged to `scratch/questions.md` and exited without changes.
-  If this recurs, consider patching `.lf/steps/debug.md` to detect
-  headless + empty input and exit cleanly with a one-line message.
+- 2026-04-22: `lf debug` headless + empty input happened twice
+  (branches `...20260422_1307` and `...20260422_1308`). First run
+  logged the issue to `scratch/questions.md` and exited. Second run
+  added `.lf/steps/debug.md` override that short-circuits on headless +
+  empty input with a one-line message. Interactive flow unchanged.
+  If this recurs with the override in place, the issue is the
+  short-circuit isn't firing — check how the harness surfaces
+  "headless" to the step and whether clipboard emptiness is detectable
+  from within the step prompt.

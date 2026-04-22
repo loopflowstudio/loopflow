@@ -311,14 +311,14 @@ lfq providers        # list providers with auth status and models
 lf op auth status   # local provider auth for lf steps and ops
 lf op auth asana    # connect Asana locally for `lf op` / step integrations
 lf op auth notion   # connect Notion locally for `lf op` / step integrations
-lf op auth configure linear  # store Linear API key locally for `lf op` / step integrations
+lf op auth linear  # connect Linear locally for `lf op` / step integrations
 lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # store Linear API key
+lfq auth linear      # connect Linear with OAuth
 lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 lfq token revoke abc123   # revoke connection tokens by hash prefix

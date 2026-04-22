@@ -25,6 +25,8 @@ from loopflow.cli import (
     _format_cost,
     _format_tokens,
     _infer_group_by,
+    _pm_oauth_configure_error,
+    _provider_api_key_config,
     _providers_table,
     _repo_table,
     _split_repo_slug,
@@ -151,6 +153,15 @@ def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
 
     assert "Asana" in rendered
     assert "pay-per-token" not in rendered
+
+
+def test_pm_providers_do_not_support_api_key_configure() -> None:
+    assert _provider_api_key_config("asana") is None
+    assert _provider_api_key_config("linear") is None
+    assert _provider_api_key_config("notion") is None
+    assert _pm_oauth_configure_error("linear") == (
+        "Linear requires OAuth. Run 'lf op auth linear' to connect."
+    )
 
 
 def test_auth_poll_timeout_uses_provider_expiry_when_present() -> None:

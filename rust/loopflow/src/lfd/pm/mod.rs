@@ -168,6 +168,9 @@ pub type PmResult<T> = Result<T, PmError>;
 pub trait PmProvider: Send + Sync {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
+    async fn init_project(&self, _project_id: &str) -> PmResult<()> {
+        Ok(())
+    }
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;

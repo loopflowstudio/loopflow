@@ -202,13 +202,13 @@ Auth connects your providers:
 
 ```bash
 lf op auth asana    # connect Asana for local `lf` commands like `lf op export`
-lf op auth configure linear  # store Linear API key for local `lf` PM commands
+lf op auth linear   # connect Linear for local `lf` PM commands
 lf op auth status   # check local lf credentials
 
 lfq auth github      # connect GitHub
 lfq auth claude      # connect Claude
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # store Linear API key
+lfq auth linear      # connect Linear with OAuth
 lfq auth status      # check connections
 ```
 

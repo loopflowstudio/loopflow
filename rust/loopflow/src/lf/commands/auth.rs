@@ -95,6 +95,9 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
 
 async fn configure(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
+    if let Some(message) = provider.api_key_configure_error() {
+        return Err(anyhow!(message));
+    }
     let env_name = provider
         .api_key_env_name()
         .ok_or_else(|| anyhow!("{} does not support API key auth", provider.display_name()))?;

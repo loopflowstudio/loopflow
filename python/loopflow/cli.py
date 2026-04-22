@@ -48,11 +48,15 @@ _PROVIDER_API_KEY_CONFIG = {
     "claude": ("ANTHROPIC_API_KEY", "Claude API key"),
     "codex": ("OPENAI_API_KEY", "Codex API key"),
     "opencodezen": ("OPENCODE_API_KEY", "OpenCode API key"),
-    "asana": ("ASANA_ACCESS_TOKEN", "Asana personal access token"),
-    "linear": ("LINEAR_API_KEY", "Linear API key"),
 }
 
 _METERED_API_KEY_PROVIDERS = {"claude", "codex", "opencodezen"}
+
+_PM_OAUTH_CONFIGURE_ERRORS = {
+    "asana": "Asana requires OAuth. Run 'lf op auth asana' to connect.",
+    "linear": "Linear requires OAuth. Run 'lf op auth linear' to connect.",
+    "notion": "Notion requires OAuth. Run 'lf op auth notion' to connect.",
+}
 
 
 def _wave_table(waves: list[Wave]) -> Table:
@@ -113,11 +117,8 @@ def _provider_api_key_config(provider: str) -> Optional[tuple[str, str]]:
     return _PROVIDER_API_KEY_CONFIG.get(provider.lower())
 
 
-def _require_provider_api_key_config(provider: str) -> tuple[str, str]:
-    config = _provider_api_key_config(provider)
-    if config is None:
-        raise ValueError(f"provider does not support API key auth: {provider}")
-    return config
+def _pm_oauth_configure_error(provider: str) -> Optional[str]:
+    return _PM_OAUTH_CONFIGURE_ERRORS.get(provider.lower())
 
 
 def _provider_api_key_bills_per_token(provider: str) -> bool:
@@ -694,10 +695,9 @@ def auth_asana() -> None:
     _connect_provider("asana")
 
 
-@auth_app.command("linear", help="Store a Linear API key.")
+@auth_app.command("linear", help="Start Linear OAuth authentication.")
 def auth_linear() -> None:
-    env_name, prompt_label = _require_provider_api_key_config("linear")
-    _configure_provider_token("linear", env_name, prompt_label)
+    _connect_provider("linear")
 
 
 @auth_app.command("notion", help="Start Notion OAuth authentication.")
@@ -721,6 +721,11 @@ def auth_disconnect(provider: str) -> None:
 def auth_configure(
     provider: str,
 ) -> None:
+    message = _pm_oauth_configure_error(provider)
+    if message is not None:
+        typer.echo(f"Error: {message}", err=True)
+        raise typer.Exit(1)
+
     config = _provider_api_key_config(provider)
     if config is None:
         typer.echo(f"Error: {provider} does not support API key auth", err=True)

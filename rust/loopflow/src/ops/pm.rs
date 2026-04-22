@@ -163,25 +163,15 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dy
     let config = load_config_or_default(Some(repo));
     let client: Box<dyn PmProvider> = match provider {
         PmProviderKind::Asana => {
-            let token = resolve_provider_token(
-                "asana",
-                Some("ASANA_ACCESS_TOKEN"),
-                "lf ops auth configure asana",
-            )
-            .await?;
+            let token = resolve_provider_token("asana").await?;
             Box::new(AsanaClient::new(token, config.asana.clone()))
         }
         PmProviderKind::Linear => {
-            let token = resolve_provider_token(
-                "linear",
-                Some("LINEAR_API_KEY"),
-                "lf ops auth configure linear",
-            )
-            .await?;
+            let token = resolve_provider_token("linear").await?;
             Box::new(LinearClient::new(token, config.linear.team.clone()))
         }
         PmProviderKind::Notion => {
-            let token = resolve_provider_token("notion", None, "lf ops auth notion").await?;
+            let token = resolve_provider_token("notion").await?;
             Box::new(NotionClient::new(token, config.notion.clone()))
         }
     };
@@ -230,20 +220,7 @@ fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     Ok(())
 }
 
-async fn resolve_provider_token(
-    provider: &str,
-    env_name: Option<&str>,
-    auth_hint: &str,
-) -> OpsResult<String> {
-    if let Some(env_name) = env_name {
-        if let Ok(token) = std::env::var(env_name) {
-            let trimmed = token.trim();
-            if !trimmed.is_empty() {
-                return Ok(trimmed.to_string());
-            }
-        }
-    }
-
+async fn resolve_provider_token(provider: &str) -> OpsResult<String> {
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
@@ -253,7 +230,7 @@ async fn resolve_provider_token(
         .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "No {provider} credential found. Run `{auth_hint}`."
+                "No {provider} credential found. Run `lf op auth {provider}`."
             ))
         })?;
 
@@ -554,6 +531,10 @@ async fn bootstrap_read_write_provider(
         args.progress,
     )
     .await?;
+    ctx.client
+        .init_project(&project_id)
+        .await
+        .map_err(pm_to_ops)?;
     let remote_items = ctx
         .client
         .list_items(&project_id)

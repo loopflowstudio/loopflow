@@ -14,11 +14,16 @@ use crate::lfd::pm::{
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const TASK_FIELDS: &str = "name,notes,html_notes,completed,assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
+const TASK_FIELDS: &str = "name,notes,html_notes,completed,assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.text_value,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.enum_options.gid,custom_fields.enum_options.name";
 const PROJECT_PRIORITY_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name";
+const PROJECT_TEXT_FIELD_FIELDS: &str =
+    "custom_field.gid,custom_field.name,custom_field.resource_subtype";
+const WORKSPACE_TEXT_FIELD_FIELDS: &str = "gid,name,resource_subtype";
+const CLAIM_TASK_FIELDS: &str = "assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.text_value";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
 const PRIORITY_FIELD_NAME: &str = "Priority";
+const WORKING_BRANCH_FIELD_NAME: &str = "Working branch";
 
 #[derive(Debug, Clone)]
 pub struct AsanaClient {
@@ -242,6 +247,97 @@ impl AsanaClient {
                 ))
             })
     }
+
+    async fn working_branch_field_for_project(&self, project_id: &str) -> PmResult<Option<String>> {
+        let path = format!("/projects/{project_id}/custom_field_settings");
+        let response: AsanaResponse<Vec<AsanaCustomFieldSetting>> = self
+            .send_json(|| {
+                self.request(
+                    Method::GET,
+                    &path,
+                    &[("opt_fields", PROJECT_TEXT_FIELD_FIELDS)],
+                )
+            })
+            .await?;
+
+        Ok(response
+            .data
+            .into_iter()
+            .find_map(|setting| working_branch_gid_from_metadata(setting.custom_field)))
+    }
+
+    async fn workspace_working_branch_field(&self, workspace_id: &str) -> PmResult<Option<String>> {
+        let path = format!("/workspaces/{workspace_id}/custom_fields");
+        let response: AsanaResponse<Vec<AsanaCustomFieldMetadata>> = self
+            .send_json(|| {
+                self.request(
+                    Method::GET,
+                    &path,
+                    &[("opt_fields", WORKSPACE_TEXT_FIELD_FIELDS)],
+                )
+            })
+            .await?;
+
+        Ok(response
+            .data
+            .into_iter()
+            .find_map(working_branch_gid_from_metadata))
+    }
+
+    async fn create_workspace_working_branch_field(&self, workspace_id: &str) -> PmResult<String> {
+        let body = json!({
+            "data": {
+                "name": WORKING_BRANCH_FIELD_NAME,
+                "resource_subtype": "text",
+                "workspace": workspace_id
+            }
+        });
+        let response: AsanaResponse<AsanaGid> = self
+            .send_json(|| {
+                self.request(Method::POST, "/custom_fields", &[])
+                    .json(&body)
+            })
+            .await?;
+        Ok(response.data.gid)
+    }
+
+    async fn attach_working_branch_field_to_project(
+        &self,
+        project_id: &str,
+        field_id: &str,
+    ) -> PmResult<()> {
+        let body = json!({ "data": { "custom_field": field_id } });
+        let path = format!("/projects/{project_id}/addCustomFieldSetting");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::POST, &path, &[]).json(&body))
+            .await?;
+        Ok(())
+    }
+
+    async fn ensure_working_branch_field_for_project(&self, project_id: &str) -> PmResult<String> {
+        if let Some(field_id) = self.working_branch_field_for_project(project_id).await? {
+            return Ok(field_id);
+        }
+
+        let workspace_id = self.resolve_workspace().await?;
+        let field_id = match self.workspace_working_branch_field(&workspace_id).await? {
+            Some(field_id) => field_id,
+            None => {
+                self.create_workspace_working_branch_field(&workspace_id)
+                    .await?
+            }
+        };
+        self.attach_working_branch_field_to_project(project_id, &field_id)
+            .await?;
+
+        self.working_branch_field_for_project(project_id)
+            .await?
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "asana project {project_id} is missing a Working branch custom field after setup"
+                ))
+            })
+    }
 }
 
 #[async_trait]
@@ -265,6 +361,12 @@ impl PmProvider for AsanaClient {
                 name: p.name,
             })
             .collect())
+    }
+
+    async fn init_project(&self, project_id: &str) -> PmResult<()> {
+        self.ensure_working_branch_field_for_project(project_id)
+            .await
+            .map(|_| ())
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -375,25 +477,42 @@ impl PmProvider for AsanaClient {
     }
 
     async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
-        // Resolve our own user GID so we can verify the claim.
         let me: AsanaResponse<AsanaGid> = self
             .send_json(|| self.request(Method::GET, "/users/me", &[("opt_fields", "gid")]))
             .await?;
         let my_gid = me.data.gid;
 
-        // Assign to "me" (the API token owner).
         let path = format!("/tasks/{item_id}");
+        let task: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", CLAIM_TASK_FIELDS)]))
+            .await?;
+        let field_id = working_branch_field_from_task(&task.data).ok_or_else(|| {
+            PmError::Message(
+                "asana task is missing a Working branch custom field; run `lf op pm init` for this wave"
+                    .to_string(),
+            )
+        })?;
+        let current_branch = working_branch_value(&task.data, &field_id);
+        if current_branch.is_some_and(|actual| !actual.is_empty() && actual != branch) {
+            return Err(PmError::Message(format!(
+                "item claimed by another worker (expected branch {branch}, got {current_branch:?})"
+            )));
+        }
+
+        let mut custom_fields = Map::new();
+        custom_fields.insert(field_id.clone(), json!(branch));
+        let body = json!({
+            "data": {
+                "assignee": "me",
+                "custom_fields": custom_fields
+            }
+        });
         let _: AsanaResponse<Value> = self
-            .send_json(|| {
-                self.request(Method::PUT, &path, &[])
-                    .json(&json!({ "data": { "assignee": "me" } }))
-            })
+            .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
             .await?;
 
-        // Optimistic verify: re-read the task and check we're still the assignee.
-        // Another worker may have assigned themselves between our write and this read.
         let task: AsanaResponse<Value> = self
-            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", "assignee.gid")]))
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", CLAIM_TASK_FIELDS)]))
             .await?;
         let actual_assignee = task.data.pointer("/assignee/gid").and_then(|v| v.as_str());
         if actual_assignee != Some(&my_gid) {
@@ -402,7 +521,13 @@ impl PmProvider for AsanaClient {
             )));
         }
 
-        // Record the branch as a comment since Asana has no native branch field.
+        let actual_branch = working_branch_value(&task.data, &field_id);
+        if actual_branch != Some(branch) {
+            return Err(PmError::Message(format!(
+                "item claimed by another worker (expected branch {branch}, got {actual_branch:?})"
+            )));
+        }
+
         self.comment(item_id, &format!("Working branch: `{branch}`"))
             .await?;
         Ok(())
@@ -524,6 +649,8 @@ struct AsanaCustomFieldSetting {
 struct AsanaCustomFieldMetadata {
     gid: String,
     #[serde(default)]
+    name: String,
+    #[serde(default)]
     resource_subtype: String,
     #[serde(default)]
     enum_options: Vec<AsanaEnumOption>,
@@ -587,6 +714,36 @@ impl AsanaPriorityField {
     fn option_gid(&self, priority: PriorityBucket) -> &str {
         &self.options[usize::from(priority.order())]
     }
+}
+
+fn working_branch_gid_from_metadata(field: AsanaCustomFieldMetadata) -> Option<String> {
+    if field.name == WORKING_BRANCH_FIELD_NAME && field.resource_subtype == "text" {
+        Some(field.gid)
+    } else {
+        None
+    }
+}
+
+fn working_branch_field_from_task(task: &Value) -> Option<String> {
+    task.pointer("/custom_fields")?
+        .as_array()?
+        .iter()
+        .find(|field| {
+            field.pointer("/name").and_then(|v| v.as_str()) == Some(WORKING_BRANCH_FIELD_NAME)
+                && field.pointer("/resource_subtype").and_then(|v| v.as_str()) == Some("text")
+        })
+        .and_then(|field| field.pointer("/gid"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn working_branch_value<'a>(task: &'a Value, field_id: &str) -> Option<&'a str> {
+    task.pointer("/custom_fields")?
+        .as_array()?
+        .iter()
+        .find(|field| field.pointer("/gid").and_then(|v| v.as_str()) == Some(field_id))
+        .and_then(|field| field.pointer("/text_value"))
+        .and_then(|value| value.as_str())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -663,12 +820,48 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use serde_json::json;
+    use serde_json::{json, Map, Value};
 
     use super::*;
     use crate::engine::config::AsanaConfig;
     use crate::lfd::pm::test_server::{self, json_response, response};
     use crate::lfd::pm::PmProvider;
+
+    fn working_branch_metadata() -> Value {
+        json!({
+            "gid": "field-branch",
+            "name": "Working branch",
+            "resource_subtype": "text"
+        })
+    }
+
+    fn working_branch_setting() -> Value {
+        json!({ "custom_field": working_branch_metadata() })
+    }
+
+    fn working_branch_field(branch: Option<&str>) -> Value {
+        let mut field = Map::new();
+        field.insert("gid".to_string(), json!("field-branch"));
+        field.insert("name".to_string(), json!("Working branch"));
+        field.insert("resource_subtype".to_string(), json!("text"));
+        if let Some(branch) = branch {
+            field.insert("text_value".to_string(), json!(branch));
+        }
+        Value::Object(field)
+    }
+
+    fn task_with_working_branch(assignee: Option<&str>, branch: Option<&str>) -> Value {
+        let mut task = Map::new();
+        task.insert("gid".to_string(), json!("task-1"));
+        if let Some(assignee) = assignee {
+            task.insert("assignee".to_string(), json!({ "gid": assignee }));
+        }
+        task.insert(
+            "custom_fields".to_string(),
+            json!([working_branch_field(branch)]),
+        );
+        Value::Object(task)
+    }
 
     #[tokio::test]
     async fn create_project_uses_workspace_and_team() {
@@ -1225,18 +1418,109 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_item_verifies_assignee_after_assignment() {
+    async fn init_project_attaches_workspace_working_branch_field() {
         let (base_url, requests) = test_server::spawn(vec![
-            // GET /users/me
-            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
-            // PUT /tasks/task-1 (assign)
-            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
-            // GET /tasks/task-1 (verify)
+            json_response(StatusCode::OK, json!({ "data": [] })),
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "gid": "task-1", "assignee": { "gid": "user-42" } } }),
+                json!({ "data": [working_branch_metadata()] }),
             ),
-            // POST /tasks/task-1/stories (comment)
+            json_response(StatusCode::OK, json!({ "data": { "gid": "setting-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": [working_branch_setting()] }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            base_url,
+        );
+
+        client
+            .init_project("project-123")
+            .await
+            .expect("init should attach the shared field");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 4);
+        assert_eq!(
+            requests[0].path,
+            "/projects/project-123/custom_field_settings"
+        );
+        assert_eq!(requests[1].path, "/workspaces/workspace-1/custom_fields");
+        assert_eq!(
+            requests[2].path,
+            "/projects/project-123/addCustomFieldSetting"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
+            json!({ "data": { "custom_field": "field-branch" } })
+        );
+    }
+
+    #[tokio::test]
+    async fn init_project_creates_workspace_working_branch_field_when_missing() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(StatusCode::OK, json!({ "data": [] })),
+            json_response(StatusCode::OK, json!({ "data": [] })),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "field-branch" } }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "setting-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": [working_branch_setting()] }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            base_url,
+        );
+
+        client
+            .init_project("project-123")
+            .await
+            .expect("init should create and attach the shared field");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 5);
+        assert_eq!(requests[2].path, "/custom_fields");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
+            json!({
+                "data": {
+                    "name": "Working branch",
+                    "resource_subtype": "text",
+                    "workspace": "workspace-1"
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_item_verifies_working_branch_matches() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(None, None) }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("feature/test")) }),
+            ),
             json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
         ])
         .await;
@@ -1249,27 +1533,39 @@ mod tests {
         client
             .claim_item("task-1", "feature/test")
             .await
-            .expect("claim should succeed when assignee matches");
+            .expect("claim should succeed when branch matches");
 
         let requests = requests.lock().await;
+        assert_eq!(requests.len(), 5);
         assert_eq!(requests[0].method, "GET");
         assert!(requests[0].path.contains("/users/me"));
-        assert_eq!(requests[1].method, "PUT");
-        assert_eq!(requests[2].method, "GET");
-        assert_eq!(requests[3].method, "POST");
+        assert_eq!(requests[1].method, "GET");
+        assert_eq!(requests[2].method, "PUT");
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
+            json!({
+                "data": {
+                    "assignee": "me",
+                    "custom_fields": { "field-branch": "feature/test" }
+                }
+            })
+        );
+        assert_eq!(requests[3].method, "GET");
+        assert_eq!(requests[4].method, "POST");
     }
 
     #[tokio::test]
     async fn claim_item_fails_when_another_assignee_wins() {
         let (base_url, _requests) = test_server::spawn(vec![
-            // GET /users/me
             json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
-            // PUT /tasks/task-1 (assign)
-            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
-            // GET /tasks/task-1 (verify — different assignee)
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "gid": "task-1", "assignee": { "gid": "user-99" } } }),
+                json!({ "data": task_with_working_branch(None, None) }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(Some("user-99"), Some("feature/test")) }),
             ),
         ])
         .await;
@@ -1284,5 +1580,48 @@ mod tests {
             .await
             .expect_err("claim should fail when another assignee wins");
         assert!(error.to_string().contains("another assignee"));
+    }
+
+    #[tokio::test]
+    async fn claim_item_fails_same_account_concurrent() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(None, None) }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("worker-a")) }),
+            ),
+            json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "user-42" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(None, Some("worker-a")) }),
+            ),
+            json_response(StatusCode::OK, json!({ "data": { "gid": "task-1" } })),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": task_with_working_branch(Some("user-42"), Some("worker-a")) }),
+            ),
+        ])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        client
+            .claim_item("task-1", "worker-a")
+            .await
+            .expect("first branch should win");
+        let error = client
+            .claim_item("task-1", "worker-b")
+            .await
+            .expect_err("second branch should lose even with the same account");
+        assert!(error.to_string().contains("another worker"));
     }
 }

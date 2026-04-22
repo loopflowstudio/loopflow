@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 import yaml
@@ -89,7 +89,8 @@ _CLEANUP_PATTERNS = (
             r"\n3\. Append metrics:\n```bash\n"
             r"mkdir -p ~/.gstack/analytics\n"
             r'.*?spec-review\.jsonl.*?\n```\n'
-            r"Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review\.\n",
+            r"Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values "
+            r"from the review\.\n",
             re.DOTALL,
         ),
         "\n",
@@ -132,9 +133,11 @@ _CLEANUP_PATTERNS = (
 )
 _CLEANUP_REPLACEMENTS = (
     (
-        "Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments). "
-        "The preamble's Search Before Building section has the ETHOS.md path.",
-        "Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments).",
+        "Read ETHOS.md for the full Search Before Building framework "
+        "(three layers, eureka moments). The preamble's Search Before Building section "
+        "has the ETHOS.md path.",
+        "Read ETHOS.md for the full Search Before Building framework "
+        "(three layers, eureka moments).",
     ),
     (
         "Read ETHOS.md for the Search Before Building framework "
@@ -210,7 +213,8 @@ def convert_gstack_repo(
 
     if direction_output is not None:
         direction_output.parent.mkdir(parents=True, exist_ok=True)
-        direction_output.write_text(extracted_voice.rstrip() + "\n", encoding="utf-8")
+        direction = _cleanup_direction_voice(extracted_voice)
+        direction_output.write_text(direction.rstrip() + "\n", encoding="utf-8")
 
     return manifest
 
@@ -427,6 +431,23 @@ def _rewrite_imported_references(text: str) -> str:
     return rewritten
 
 
+def _cleanup_direction_voice(text: str) -> str:
+    replacements = (
+        (
+            "You are GStack, an open source AI builder framework shaped by Garry Tan's "
+            "product, startup, and engineering judgment. Encode how he thinks, "
+            "not his biography.",
+            "Use GStack voice: open source AI builder judgment shaped by Garry Tan's "
+            "product, startup, and engineering taste. Encode how he thinks, not his biography.",
+        ),
+        ("You are GStack.", "Use GStack voice."),
+    )
+    cleaned = text
+    for old, new in replacements:
+        cleaned = cleaned.replace(old, new, 1)
+    return cleaned
+
+
 def _cleanup_loopflow_integration_artifacts(text: str) -> str:
     cleaned = re.sub(
         r"\nFollow it inline, \*\*skipping these sections\*\* "
@@ -436,7 +457,8 @@ def _cleanup_loopflow_integration_artifacts(text: str) -> str:
     )
     cleaned = re.sub(
         r"\nFollow it inline, skipping these sections "
-        r"\(already handled by (?:the )?parent skill\):\n(?:[^\n]*\n)+?(?=\n(?:Note current Step|After completion))",
+        r"\(already handled by (?:the )?parent skill\):\n"
+        r"(?:[^\n]*\n)+?(?=\n(?:Note current Step|After completion))",
         "\nFollow the imported loopflow step content directly.\n\n",
         cleaned,
     )

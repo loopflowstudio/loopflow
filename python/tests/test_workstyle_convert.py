@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 
 import yaml
-
 from loopflow.workstyle.convert import convert_gstack_repo, extract_openclaw_direction
 
 
@@ -60,7 +59,7 @@ Builders ship.
 
 ```bash
 mkdir -p ~/.gstack/analytics
-echo '{"skill":"office-hours","ts":"2026-01-01T00:00:00Z"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
+echo '{"skill":"office-hours","ts":"2026-01-01T00:00:00Z"}' >> ~/.gstack/analytics/skill-usage.jsonl
 ```
 
 Do the work.
@@ -68,7 +67,7 @@ Do the work.
 3. Append metrics:
 ```bash
 mkdir -p ~/.gstack/analytics
-echo '{"skill":"office-hours","ts":"2026-01-01T00:00:00Z","iterations":3}' >> ~/.gstack/analytics/spec-review.jsonl 2>/dev/null || true
+echo '{"skill":"office-hours","iterations":3}' >> ~/.gstack/analytics/spec-review.jsonl
 ```
 Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review.
 
@@ -144,7 +143,9 @@ allowed-tools:
 # 12. gstack skill usage telemetry (if available)
 cat ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
 
-**Skill Usage (if analytics exist):** Read `~/.gstack/analytics/skill-usage.jsonl` if it exists. Filter entries within the retro time window by `ts` field. Separate skill activations from hook fires.
+**Skill Usage (if analytics exist):** Read `~/.gstack/analytics/skill-usage.jsonl` if it exists.
+Filter entries within the retro time window by `ts` field.
+Separate skill activations from hook fires.
 
 ```
 | Skill Usage | /ship(12) /qa(8) |
@@ -152,7 +153,8 @@ cat ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
 
 If the JSONL file doesn't exist or has no entries in the window, skip the Skill Usage row.
 
-**Eureka Moments (if logged):** Read `~/.gstack/analytics/eureka.jsonl` if it exists. Filter entries within the retro time window by `ts` field.
+**Eureka Moments (if logged):** Read `~/.gstack/analytics/eureka.jsonl` if it exists.
+Filter entries within the retro time window by `ts` field.
 
 ```
 | Eureka Moments | 2 this period |
@@ -214,7 +216,7 @@ Keep the actual retro.
     assert "Keep the actual retro." in retro
 
     direction = direction_output.read_text(encoding="utf-8")
-    assert "You are GStack." in direction
+    assert "Use GStack voice." in direction
     assert "Builders ship." in direction
 
 

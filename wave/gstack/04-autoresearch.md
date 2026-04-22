@@ -1,5 +1,7 @@
 # Stage 4: Autoresearch flow
 
+**Finish line:** `lf autoresearch:experiment` works as a step and a `flow: autoresearch, mode: loop` wave runs Karpathy's experiment loop autonomously against his `train.py`/`prepare.py` setup.
+
 Import Karpathy's autoresearch loop as a loopflow flow. Single prompt, autonomous loop, git as experiment infrastructure.
 
 ## What to build
@@ -40,17 +42,25 @@ The user provides:
 - `prepare.py` (the fixed evaluation harness)
 - A `program.md` equivalent as the step content or in scratch/
 
+## Sync approach
+
+Stage 3 shipped sync as a gstack-specific subcommand (`lf op gstack sync/diff/list` in `rust/loopflow/src/ops/gstack.rs`), not the generic `lf op workstyle sync <name>` originally designed. Two paths forward for autoresearch:
+
+1. **Bespoke `lf op autoresearch sync`** — mirror the gstack implementation. Fastest path to working, follows the precedent on disk.
+2. **Generalize first** — refactor `lf op gstack` into `lf op workstyle sync gstack` + `lf op workstyle sync autoresearch`, with per-workstyle config in `workstyle.yaml`. Pays the generalization cost once; removes a second bespoke subcommand.
+
+Recommend option 1 for the first cut — validate that autoresearch works as a synced flow before investing in the abstraction. Generalize when a third workstyle appears.
+
+### Converter reuse
+
+The Python converter (`python/loopflow/workstyle/convert.py`) is gstack-specific today — step rename tables, browser-skill set, telemetry-stripping rules are hardcoded for gstack's SKILL.md format. Autoresearch is a single `program.md`, not a SKILL.md tree, so the converter needs:
+
+- A separate entry point (e.g. `convert_autoresearch`) that reads one `program.md` and writes three step files plus a flow YAML, or
+- An abstraction over "source format → step/flow outputs" that both gstack and autoresearch call into.
+
+Either way, the direction-extraction plumbing (writing to `rust/loopflow/src/engine/builtins/directions/`) already works generically and can be reused.
+
 ### Writing the steps
-
-Synced from `karpathy/autoresearch`, converted by the same tooling as gstack. The converter reads one `program.md` and decomposes it into three steps + a flow YAML. Setup/infrastructure portions are stripped — loopflow already provides those:
-
-| Karpathy's program.md | Already in loopflow |
-|---|---|
-| "NEVER STOP", "don't ask the human" | Headless surface mode |
-| Branch creation, run tagging | `lf ops` / wave config |
-| Results logging | scratch/ or wave state |
-| "Only edit train.py" | Wave `area` config |
-| Fixed time budget | Step/wave config |
 
 What the converter extracts into steps:
 - **experiment** — how to form a hypothesis from prior results, what kind of edits to try
@@ -69,6 +79,16 @@ The sync tool writes directly to loopflow's native locations:
 ```
 
 No workstyle directory, no wrapper. Just steps and a flow.
+
+What's stripped (loopflow already provides):
+
+| Karpathy's program.md | Already in loopflow |
+|---|---|
+| "NEVER STOP", "don't ask the human" | Headless surface mode |
+| Branch creation, run tagging | `lf ops` / wave config |
+| Results logging | scratch/ or wave state |
+| "Only edit train.py" | Wave `area` config |
+| Fixed time budget | Step/wave config |
 
 ### What makes this general
 

@@ -21,7 +21,7 @@ Three launch workstyles: **lfjack** (loopflow native), **vsm** (governance), **g
 
 - Run any gstack prompt as a loopflow step: `lf gstack:office-hours`
 - Run the gstack sprint as a loopflow flow: `lf gstack-sprint`
-- Sync from garrytan/gstack with one command: `lf ops workstyle sync gstack`
+- Sync from garrytan/gstack with one command: `lf op gstack sync`
 - Preserve gstack's style as a reusable direction
 - Make OpenClaw's `SOUL.md` available as a reusable direction too
 - Existing loopflow steps (implement, gate) compose cleanly inside gstack flows

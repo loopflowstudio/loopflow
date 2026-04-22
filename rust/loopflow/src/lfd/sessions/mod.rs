@@ -3,7 +3,7 @@ pub(crate) mod opencode_runtime;
 pub mod types;
 pub mod usage;
 
-pub fn session_input_supported(harness: &str) -> bool {
+pub(crate) fn session_input_supported(harness: &str) -> bool {
     harness::input_supported(harness)
 }
 

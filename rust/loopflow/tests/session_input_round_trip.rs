@@ -145,9 +145,6 @@ async fn codex_input_steers_running_turn_starts_idle_turn_and_replays_events() {
         })
         .await
         .expect("create codex session");
-    assert!(loopflow::lfd::sessions::session_input_supported(
-        &created.harness
-    ));
     let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
 
     manager
@@ -248,5 +245,4 @@ async fn non_codex_session_input_is_rejected_before_runtime_lookup() {
     assert!(
         matches!(err, SessionManagerError::InputNotSupported(ref harness) if harness == "claude")
     );
-    assert!(!loopflow::lfd::sessions::session_input_supported("claude"));
 }

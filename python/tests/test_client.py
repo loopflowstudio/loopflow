@@ -440,7 +440,7 @@ class TestClientResponses:
 
         client = _mock_client(handler)
         client.send_session_input("session-1", "hello")
-        assert received["content"] == "hello"
+        assert received["text"] == "hello"
         client.close()
 
     def test_stream_session_events_parses_sse(self):

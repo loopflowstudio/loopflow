@@ -1,6 +1,6 @@
 # Flows View (shipped)
 
-Static catalog for the Concerto Flows tab. Two panes: catalog (left, grouped by build/govern/ops) and "used by" (right, upward walk from the selected flow or step). Backed by a new `GET /catalog` endpoint on `lfd`. Full design captured in `wave/flows/README.md` and the session-state follow-on item.
+Static catalog for the Concerto Flows tab. Two panes: catalog (left, grouped by build/govern/ops) and "used by" (right, upward walk from the selected flow or step). Backed by a new `GET /v0/catalog` endpoint on `lfd`. Full design captured in `wave/flows/README.md` and the session-state follow-on item.
 
 ## Try it
 
@@ -14,8 +14,8 @@ Static catalog for the Concerto Flows tab. Two panes: catalog (left, grouped by 
 
 ```bash
 # Catalog endpoint responds with resolved builtin + repo content
-curl -s localhost:PORT/catalog | jq '.result.flows | map(.name)'
-curl -s localhost:PORT/catalog | jq '.result.steps | length'
+curl -s localhost:PORT/v0/catalog | jq '.result.flows | map(.name)'
+curl -s localhost:PORT/v0/catalog | jq '.result.steps | length'
 
 # Swift DTO round-trips
 swift test --package-path swift --filter CatalogTests

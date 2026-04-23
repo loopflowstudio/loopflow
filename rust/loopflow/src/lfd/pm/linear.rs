@@ -7,8 +7,8 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
-    RATE_LIMIT_RETRIES,
+    sort_pm_items, PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    PriorityBucket, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -48,6 +48,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         title
         description
+        priority
         prioritySortOrder
         sortOrder
         assignee {
@@ -316,16 +317,11 @@ impl PmProvider for LinearClient {
             issues.extend(page.nodes);
 
             if !page.page_info.has_next_page {
-                issues.sort_by(|left, right| {
-                    left.priority_sort_order
-                        .total_cmp(&right.priority_sort_order)
-                        .then_with(|| left.sort_order.total_cmp(&right.sort_order))
-                });
-                return Ok(issues
-                    .into_iter()
-                    .enumerate()
-                    .map(|(rank, issue)| issue.into_pm_item(rank as u32))
-                    .collect());
+                issues.sort_by(|left, right| left.sort_order.total_cmp(&right.sort_order));
+                let mut items: Vec<PmItem> =
+                    issues.into_iter().map(IssueNode::into_pm_item).collect();
+                items.sort_by(sort_pm_items);
+                return Ok(items);
             }
 
             after = page.page_info.end_cursor;
@@ -530,6 +526,8 @@ struct IssueNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    priority: f64,
     #[serde(rename = "prioritySortOrder", default)]
     priority_sort_order: f64,
     #[serde(rename = "sortOrder", default)]
@@ -541,20 +539,35 @@ struct IssueNode {
 }
 
 impl IssueNode {
-    fn into_pm_item(self, rank: u32) -> PmItem {
+    fn into_pm_item(self) -> PmItem {
         let completed = self
             .state
             .as_ref()
             .is_some_and(|state| state.r#type.eq_ignore_ascii_case(COMPLETED_STATE_TYPE));
+        let priority = linear_priority_bucket(self.priority);
+        let rank = Some(self.priority_sort_order);
 
         PmItem {
             id: self.id,
             name: self.title,
             description: self.description.unwrap_or_default(),
+            priority,
             rank,
             completed,
             assignee: self.assignee.map(|a| a.id),
         }
+    }
+}
+
+/// Linear's `priority` is a float where 0 = No priority, 1 = Urgent,
+/// 2 = High, 3 = Medium, 4 = Low. Items without a priority land in Low so
+/// they sort after prioritized work.
+fn linear_priority_bucket(priority: f64) -> PriorityBucket {
+    match priority.round() as i32 {
+        1 => PriorityBucket::Urgent,
+        2 => PriorityBucket::High,
+        3 => PriorityBucket::Medium,
+        _ => PriorityBucket::Low,
     }
 }
 
@@ -844,7 +857,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_items_paginates_and_assigns_rank_by_priority_sort_order() {
+    async fn list_items_paginates_and_preserves_priority_sort_order() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
@@ -924,7 +937,8 @@ mod tests {
                     id: "issue-2".to_string(),
                     name: "Second".to_string(),
                     description: "two".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::Low,
+                    rank: Some(10.0),
                     completed: true,
                     assignee: None,
                 },
@@ -932,7 +946,8 @@ mod tests {
                     id: "issue-3".to_string(),
                     name: "Third".to_string(),
                     description: "".to_string(),
-                    rank: 1,
+                    priority: PriorityBucket::Low,
+                    rank: Some(20.0),
                     completed: false,
                     assignee: None,
                 },
@@ -940,7 +955,8 @@ mod tests {
                     id: "issue-1".to_string(),
                     name: "First".to_string(),
                     description: "one".to_string(),
-                    rank: 2,
+                    priority: PriorityBucket::Low,
+                    rank: Some(30.0),
                     completed: false,
                     assignee: None,
                 },
@@ -971,6 +987,81 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn linear_priority_bucket_maps_linear_priority_values() {
+        assert_eq!(linear_priority_bucket(1.0), PriorityBucket::Urgent);
+        assert_eq!(linear_priority_bucket(2.0), PriorityBucket::High);
+        assert_eq!(linear_priority_bucket(3.0), PriorityBucket::Medium);
+        assert_eq!(linear_priority_bucket(4.0), PriorityBucket::Low);
+        assert_eq!(linear_priority_bucket(0.0), PriorityBucket::Low);
+    }
+
+    #[tokio::test]
+    async fn list_items_extracts_priority_field_per_issue() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({
+                "data": {
+                    "project": {
+                        "issues": {
+                            "nodes": [
+                                {
+                                    "id": "urgent",
+                                    "title": "Urgent",
+                                    "description": "",
+                                    "priority": 1.0,
+                                    "prioritySortOrder": 10.0,
+                                    "sortOrder": 10.0,
+                                    "state": { "type": "unstarted" }
+                                },
+                                {
+                                    "id": "low",
+                                    "title": "Low",
+                                    "description": "",
+                                    "priority": 4.0,
+                                    "prioritySortOrder": 20.0,
+                                    "sortOrder": 20.0,
+                                    "state": { "type": "unstarted" }
+                                },
+                                {
+                                    "id": "medium",
+                                    "title": "Medium",
+                                    "description": "",
+                                    "priority": 3.0,
+                                    "prioritySortOrder": 15.0,
+                                    "sortOrder": 15.0,
+                                    "state": { "type": "unstarted" }
+                                }
+                            ],
+                            "pageInfo": { "hasNextPage": false, "endCursor": null }
+                        }
+                    }
+                }
+            }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        let items = client
+            .list_items("project-123")
+            .await
+            .expect("list items should succeed");
+
+        // Sorted by bucket (Urgent, Medium, Low), rank preserves prioritySortOrder.
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, vec!["urgent", "medium", "low"]);
+        assert_eq!(items[0].priority, PriorityBucket::Urgent);
+        assert_eq!(items[0].rank, Some(10.0));
+        assert_eq!(items[1].priority, PriorityBucket::Medium);
+        assert_eq!(items[1].rank, Some(15.0));
+        assert_eq!(items[2].priority, PriorityBucket::Low);
+        assert_eq!(items[2].rank, Some(20.0));
     }
 
     #[tokio::test]

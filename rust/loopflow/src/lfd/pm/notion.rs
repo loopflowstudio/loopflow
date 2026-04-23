@@ -7,8 +7,8 @@ use tracing::warn;
 use crate::engine::config::NotionConfig;
 use crate::lfd::pm::notion_blocks::{blocks_to_markdown, markdown_to_blocks};
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
-    RATE_LIMIT_RETRIES,
+    sort_pm_items, PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    PriorityBucket, RATE_LIMIT_RETRIES,
 };
 
 const NOTION_BASE_URL: &str = "https://api.notion.com/v1";
@@ -410,7 +410,7 @@ impl PmProvider for NotionClient {
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         let pages = self.query_database_pages(project_id).await?;
         let mut items = Vec::new();
-        for page in pages {
+        for (index, page) in pages.into_iter().enumerate() {
             let id = value_string(&page, "id")?;
             let description = self.fetch_page_body_markdown(&id).await?;
             let status = property_select_name(
@@ -420,7 +420,8 @@ impl PmProvider for NotionClient {
                 id,
                 name: page_item_name(&page, self.title_property_name())?,
                 description,
-                rank: page_item_rank(&page, self.priority_property_name()),
+                priority: page_item_priority(&page, self.priority_property_name()),
+                rank: Some(index as f64),
                 completed: page_item_completed(
                     &page,
                     self.status_property_name(),
@@ -432,11 +433,7 @@ impl PmProvider for NotionClient {
                     .map(str::to_string),
             });
         }
-        items.sort_by(|left, right| {
-            left.rank
-                .cmp(&right.rank)
-                .then_with(|| left.name.cmp(&right.name))
-        });
+        items.sort_by(sort_pm_items);
         Ok(items)
     }
 
@@ -640,15 +637,14 @@ fn page_item_completed(page: &Value, status_property: &str, done_value: &str) ->
     property_select_name(property).is_some_and(|name| name.eq_ignore_ascii_case(done_value))
 }
 
-fn page_item_rank(page: &Value, priority_property: &str) -> u32 {
+fn page_item_priority(page: &Value, priority_property: &str) -> PriorityBucket {
     let Some(property) = item_property(page, priority_property) else {
-        return 0;
+        return PriorityBucket::Urgent;
     };
 
     property_select_name(property)
         .and_then(|name| PriorityBucket::from_semantic_label(&name))
-        .map(PriorityBucket::rank)
-        .unwrap_or(0)
+        .unwrap_or(PriorityBucket::Urgent)
 }
 
 fn property_select_name(property: &Value) -> Option<String> {
@@ -891,7 +887,8 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "page-1");
         assert_eq!(items[0].name, "Build it");
-        assert_eq!(items[0].rank, 1);
+        assert_eq!(items[0].priority, PriorityBucket::High);
+        assert_eq!(items[0].rank, Some(0.0));
         assert!(items[0].completed);
         assert_eq!(items[0].description, "First paragraph");
 

@@ -19,7 +19,8 @@
 Remaining items (by filename prefix; lower = earlier tier):
 
 - 2-concurrent-ingest — claim coordination (partial: PM claim via Linear/Asana
-  shipped per recent commits; Notion + ordering normalization outstanding)
+  shipped; ordering normalization shipped this wave; Notion verified claimant
+  identity outstanding)
 - 2-planning-flow — chord-tree up/down traversal primitive still missing
 - 3-vsm-flow — top-level `vsm` flow chaining the 8 shipped s-level steps
 - 3-wave-discovery-and-root-chord — disk scanner + root chord auto-create
@@ -41,3 +42,14 @@ Remaining items (by filename prefix; lower = earlier tier):
 - 2026-04-23: Headless fire with no user prompt — stopped rather than auto-picking
   an item. Ingest is destructive toward Asana claim state, so a misfire should
   not silently grab an item.
+- 2026-04-23 (later): Fresh headless fire inherited two already-claimed items
+  (planning-flow + concurrent-ingest) from earlier stopped runs. Released
+  planning-flow by deleting its scratch file and shipped ordering normalization
+  against concurrent-ingest. Takeaway: when claims exist but no work has been
+  committed, release duplicates and pick the more contained item rather than
+  stopping again — two stops in a row don't serve the wave.
+- PM ordering semantics — `PmItem` now carries `priority: PriorityBucket` plus
+  `rank: Option<f64>` (within-bucket sort). Providers populate both; the shared
+  `sort_pm_items` helper is the canonical ordering. `PmItemCreate.rank: u32`
+  still means "which bucket to put a new item in" (0=Urgent..3=Low) — don't
+  confuse the two.

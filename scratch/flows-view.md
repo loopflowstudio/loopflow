@@ -10,7 +10,7 @@ The flow catalog has grown past what fits in one head — even the author's. Rea
 
 Two trees, one selection.
 
-**Left — Catalog.** Grouped by category (code, build, garden, vsm, algedonic, ops). Each flow expands into its steps. Steps that are themselves flows keep expanding. `xor` renders as sibling sub-trees under a diamond node. `loop` renders as a labeled container with the body indented.
+**Left — Catalog.** Grouped by agency category (Build, Govern, Ops). Each flow expands into its steps. Steps that are themselves flows keep expanding. `xor` renders as sibling sub-trees under a diamond node. `loop` renders as a labeled container with the body indented.
 
 **Right — Used by.** Recursive upward walk from the selection. Direct parents shown flat; each parent expandable into *its* parents, all the way up. Breadcrumb label on each path. Click any breadcrumb to re-select in the left pane.
 
@@ -18,35 +18,44 @@ Both panes live in a new top-level Concerto tab: **Flows**.
 
 ## Data
 
-One `lfd` endpoint: `GET /flows`. Returns the resolved catalog as JSON.
+One `lfd` endpoint: `GET /catalog`. Returns the resolved catalog as JSON.
 
 ```json
 {
-  "flows": {
-    "build": {
-      "category": "build",
-      "source": "builtin",      // or "repo" for .lf/flows overrides
-      "body": [
-        { "kind": "step", "name": "kickoff" },
-        { "kind": "step", "name": "review-design" },
-        { "kind": "loop", "steps": [...], "exit": {...} },
-        { "kind": "flow", "name": "deploy" }
-      ]
-    }
-  },
-  "steps": {
-    "gate": { "category": "code", "source": "builtin" }
+  "ok": true,
+  "result": {
+    "flows": [
+      {
+        "name": "build",
+        "category": "Build",
+        "source": "builtin",
+        "items": [
+          { "kind": "step", "data": { "name": "kickoff" } },
+          { "kind": "step", "data": { "name": "review-design", "interactive": true } },
+          { "kind": "loop", "data": { "steps": [...], "exit": {...} } },
+          { "kind": "flow", "data": { "name": "deploy" } }
+        ]
+      }
+    ],
+    "steps": [
+      {
+        "name": "gate",
+        "category": "Build",
+        "source": "builtin",
+        "description": "Ship-ready check with reviewer docs"
+      }
+    ]
   }
 }
 ```
 
-The Rust engine already parses flows into a resolved model — reuse it, don't re-parse YAML on the Swift side.
+The Rust engine already parses flows into a structured model — reuse it, don't re-parse YAML on the Swift side.
 
 "Used by" is derived client-side by walking the catalog once. Direct + transitive, both lazy: the right pane only expands a parent chain when the user drills in.
 
 ## Overrides
 
-`.lf/flows/*.yaml` wins over builtins. When a flow exists in both, show the repo version with a subtle "override" badge so it's visible without being loud.
+`.lf/flows/*.yaml` wins over builtins. When a flow exists in both, show the repo version with a subtle override accent so it's visible without being loud.
 
 ## Scope
 
@@ -61,7 +70,7 @@ The Rust engine already parses flows into a resolved model — reuse it, don't r
 
 ## From use
 
-Catalog view helps — seeing `build` expand into its steps, and seeing what `gate` is used by, is the "can I hold this in my head" answer the README couldn't give. But using it surfaced two gaps that are the real next work.
+Static catalog view is in. Seeing `build` expand into its steps, and seeing what `gate` is used by, gives the "can I hold this in my head?" answer the README couldn't give. Using it surfaced two gaps that are the real next work.
 
 **Are these the right built-in flows?** Placement is still shifting as we live with them (`s1-build` → govern, `sync` → ops). The catalog makes it easier to ask this question, but doesn't answer it. Expect continued tuning as flows get invoked in anger.
 
@@ -73,7 +82,7 @@ Catalog view helps — seeing `build` expand into its steps, and seeing what `ga
 
 The right shape for the next piece is a **session-state overlay** — same catalog tree, but rendered with current position, router decisions, and per-step status (built / in-flight / pending / deferred). CLI breadcrumbs (`[flow:build 3/6] maybe:demo ran`) as a down payment.
 
-Scope for this PR stays at the static catalog. Session-state is a follow-up; capturing it here so it doesn't evaporate.
+Static catalog is shipped. Session-state is the follow-up; capturing it here so it doesn't evaporate.
 
 ## `maybe` as a primitive
 

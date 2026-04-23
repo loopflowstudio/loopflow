@@ -50,7 +50,7 @@ Estimate: ~60 file moves, ~6 Rust files modified, ~15 flow YAMLs updated, ~10 te
 
 ## Out of scope
 
-- Concerto Flows view (next PR, consumes the new layout via `lfd /flows`)
+- Concerto Flows view follow-up work (consumes the new layout via `lfd /catalog`)
 - Splitting `wave/mutate` into vsm-focused + garden-focused versions — no longer needed once categories merge
 - `ops/` subdivision (git/release/wave) — defer; 12 items flat is readable
 - `ingest` cross-reference (build-or-silent uses it, home is govern) — live with the one cross-cut

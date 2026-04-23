@@ -2,10 +2,11 @@
 
 ## debug invocation with no error input (recurring)
 
-`lf debug` has now been invoked headlessly **twice** with no error input:
+`lf debug` has now been invoked headlessly **three times** with no error input:
 
 - 2026-04-23 on branch `jack-heart.break-test.20260423_1312`
-- 2026-04-23 on branch `jack-heart.break-test.20260423_1451` (current)
+- 2026-04-23 on branch `jack-heart.break-test.20260423_1451`
+- 2026-04-23 on branch `jack-heart.break-test.20260423_1604` (current)
 
 Each run: no clipboard content, no `-c` output in the prompt, no inline error, clean git tree.
 
@@ -30,4 +31,4 @@ The current wording conflates interactive and headless paths, which forces the a
 
 ### Signal strength
 
-Because this is now the second occurrence on a fresh break-test branch, the fix is probably worth scheduling rather than continuing to re-surface the same question each run.
+Three occurrences on fresh break-test branches within a single day. The probe is now reliable enough that the pattern is clear — the fix (an explicit headless branch in `code/debug.md`) should be scheduled rather than continuing to re-surface the same question each run.

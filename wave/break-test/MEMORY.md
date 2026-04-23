@@ -8,6 +8,7 @@ The break-test wave keeps invoking `lf debug` headlessly with no clipboard and n
 
 - branch `jack-heart.break-test.20260423_1312`
 - branch `jack-heart.break-test.20260423_1451`
+- branch `jack-heart.break-test.20260423_1604`
 
 The step spec (`code/debug.md`) tells the agent to *ask* when clipboard is empty — but headless mode forbids questions. Correct response is documented in `scratch/questions.md`: write a "no input" note, exit cleanly, do **not** fabricate an error to debug.
 

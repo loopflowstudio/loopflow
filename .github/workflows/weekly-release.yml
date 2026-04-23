@@ -1,0 +1,84 @@
+name: Regression (weekly auto-release)
+
+on:
+  schedule:
+    # Sundays 12:00 UTC — runs the regression suite against main and, if
+    # everything is green and new commits have landed since the last tag,
+    # bumps the patch version. `auto-tag.yml` then picks up the commit and
+    # cuts the release.
+    - cron: "0 12 * * 0"
+  workflow_dispatch:
+
+jobs:
+  regression:
+    uses: ./.github/workflows/regression-daily.yml
+
+  release:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Skip if no commits since last tag
+        id: tag_check
+        run: |
+          set -euo pipefail
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$last_tag" ]; then
+            echo "no previous tag — proceeding with first auto-release"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "last_tag=" >> "$GITHUB_OUTPUT"
+            echo "commit_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          commit_count=$(git rev-list "$last_tag..HEAD" --count)
+          echo "last_tag=$last_tag commit_count=$commit_count"
+          if [ "$commit_count" -eq 0 ]; then
+            echo "no new commits since $last_tag — skipping release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+            echo "commit_count=$commit_count" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bump patch version and append release notes
+        if: steps.tag_check.outputs.skip != 'true'
+        id: bump
+        run: |
+          set -euo pipefail
+          ./scripts/bump_patch_version.sh \
+            "${{ steps.tag_check.outputs.last_tag }}" \
+            "${{ steps.tag_check.outputs.commit_count }}" \
+            | tee bump.out
+          # bump_patch_version.sh prints `next=<version>` on its last line.
+          next=$(grep '^next=' bump.out | cut -d= -f2)
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+      - name: Refresh Cargo.lock
+        if: steps.tag_check.outputs.skip != 'true'
+        run: cargo update -p loopflow
+      - name: Commit, tag, and dispatch release
+        if: steps.tag_check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="v${{ steps.bump.outputs.next }}"
+          git config user.name "loopflow-bot"
+          git config user.email "bot@loopflow.studio"
+          git add Cargo.toml Cargo.lock pyproject.toml RELEASE_NOTES.md
+          git commit -m "release: ${version} (weekly auto-release)"
+          git push origin HEAD:main
+
+          # Pushes made with GITHUB_TOKEN don't trigger other workflows, so
+          # cut the tag and dispatch release.yml explicitly — mirrors what
+          # auto-tag.yml would have done for a human-driven release.
+          git tag "$version"
+          git push origin "$version"
+          gh workflow run release.yml --ref "$version" -f tag="$version"

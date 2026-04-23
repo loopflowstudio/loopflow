@@ -49,6 +49,7 @@ pythonpath = ["."]
 markers = [
     "e2e: end-to-end tests requiring lfd",
     "docker: tests requiring Docker and Claude credentials",
+    "regression: expensive regression tests — run nightly in CI, not on every PR",
 ]
 
 [tool.ruff]

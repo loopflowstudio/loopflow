@@ -1578,7 +1578,7 @@ impl PostgresStore {
 
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
         self.with_client(|client| async move {
-            let statuses = [
+            let run_statuses = [
                 WaveRunStatus::Pending.as_i32(),
                 WaveRunStatus::Running.as_i32(),
                 WaveRunStatus::Waiting.as_i32(),
@@ -1590,8 +1590,19 @@ impl PostgresStore {
                         &WaveRunStatus::Failed.as_i32(),
                         &"orphaned: lfd restarted".to_string(),
                         &now_unix(),
-                        &&statuses[..],
+                        &&run_statuses[..],
                     ],
+                )
+                .await?;
+            // Runs that were in flight are now Failed; the waves that owned
+            // them would otherwise stay stuck in Running/Waiting and the UI
+            // would keep their action buttons disabled. Reset them back to
+            // Idle.
+            let stale_wave_statuses = [WaveStatus::Running.as_i32(), WaveStatus::Waiting.as_i32()];
+            client
+                .execute(
+                    Self::sql(Query::ResetStaleActiveWaves),
+                    &[&WaveStatus::Idle.as_i32(), &&stale_wave_statuses[..]],
                 )
                 .await?;
             Ok(updated as u32)

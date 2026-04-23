@@ -545,6 +545,14 @@ public final class RepoState {
             return
         }
 
+        let currentRepoPath = repoTarget?.path.normalizedFilePath
+
+        if let currentRepoPath,
+           let wave = event.wave,
+           wave.repo.normalizedFilePath != currentRepoPath {
+            return
+        }
+
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
             let previousStatus = waveStore.wave(for: event.waveId)?.status
@@ -553,6 +561,10 @@ public final class RepoState {
                 waveStore.set(makeWaveViewModel(api: wave))
                 refreshedWave = wave
             } else if let wave = try? await waveService.getWave(event.waveId) {
+                if let currentRepoPath,
+                   wave.repo.normalizedFilePath != currentRepoPath {
+                    return
+                }
                 waveStore.set(makeWaveViewModel(api: wave))
                 refreshedWave = wave
             }
@@ -643,12 +655,31 @@ public final class RepoState {
                 loadWaveContent(for: wave.id)
                 loadRuns(for: wave.id)
             }
+            // Auto-attach the wave's terminal pane to the run's live tmux
+            // session so "Ingest & build" (and any other run start) lands the
+            // user on the running flow instead of leaving the pane hooked to
+            // the empty default `lf-<waveId>-<paneId>` session.
+            if session.waveRunId != nil, !session.status.isTerminal {
+                attachTerminalPane(to: session)
+            }
             if session.status.isTerminal {
                 await refreshTerminalSessions()
             }
         } else {
             await refreshTerminalSessions()
         }
+    }
+
+    func attachTerminalPane(to session: TerminalSession) {
+        guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
+            return
+        }
+        if pane.config.terminalSessionName != session.tmuxName {
+            var config = pane.config
+            config.terminalSessionName = session.tmuxName
+            multiplexerStore.updatePaneConfig(pane.id, config: config, for: session.waveId)
+        }
+        markAutoPresentTerminal(for: session.waveId)
     }
 
     private func didRunComplete(oldStatus: WaveStatus?, newStatus: WaveStatus?) -> Bool {

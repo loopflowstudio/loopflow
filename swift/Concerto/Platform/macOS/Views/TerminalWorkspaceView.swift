@@ -241,6 +241,7 @@ private struct WorkspaceShell {
             argv: attachArguments,
             env: existingSession?.env ?? [:],
             source: "user_shell",
+            tmuxName: existingSession?.tmuxName ?? tmuxSessionName,
             status: .attached,
             createdAt: existingSession?.createdAt ?? Date(),
             attachedAt: Date(),

@@ -205,6 +205,9 @@ private struct TerminalPaneView: View {
                         sessionId: pane.id,
                         manager: ghosttyManager
                     )
+                    // Rebuild the Ghostty surface when the pane is repointed
+                    // at a different tmux session (e.g. a new run starts).
+                    .id(pane.config.terminalSessionName ?? pane.id)
                 } else {
                     ProgressView("Starting tmux…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -218,8 +221,9 @@ private struct TerminalPaneView: View {
                 )
             }
         }
-        .task(id: pane.id) {
+        .task(id: pane.config.terminalSessionName ?? pane.id) {
             guard let worktreePath else { return }
+            tmuxReady = false
             do {
                 try await tmuxSession(for: worktreePath).ensureBaseSession(launchCommand: pane.config.launchCommand)
                 clearLaunchCommandIfNeeded()
@@ -1271,7 +1275,7 @@ private func runShellCommand(_ argv: [String]) async throws -> String {
     process.arguments = argv
     process.standardOutput = stdout
     process.standardError = stderr
-    process.environment = ProcessInfo.processInfo.environment
+    process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
 
     try process.run()
     process.waitUntilExit()

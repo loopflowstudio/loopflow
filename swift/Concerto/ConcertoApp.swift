@@ -115,6 +115,12 @@ private enum LaunchArguments {
 
 private func bootstrapConcertoApp() {
     AppFontRegistration.registerBundledFonts()
+    #if os(macOS)
+    // Enrich our own process PATH before any children spawn, so tools launched
+    // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
+    // git, and agent CLIs that live in Homebrew or ~/.local/bin.
+    enrichProcessPathForGUILaunch()
+    #endif
     guard !AppRuntime.isAutomatedTest else { return }
     Task {
         try? await NotificationService.shared.requestAuthorization()
@@ -128,6 +134,15 @@ private func bootstrapConcertoApp() {
     }
     #endif
 }
+
+#if os(macOS)
+private func enrichProcessPathForGUILaunch() {
+    let existing = ProcessInfo.processInfo.environment["PATH"]
+    let enriched = GUIProcessEnvironment.enrichedPath(from: existing)
+    guard enriched != existing else { return }
+    setenv("PATH", enriched, 1)
+}
+#endif
 
 #if os(macOS)
 @MainActor

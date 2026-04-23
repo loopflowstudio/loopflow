@@ -28,6 +28,7 @@ public struct TerminalSession: Sendable, Identifiable, Codable, Equatable {
     public let argv: [String]
     public let env: [String: String]
     public let source: String
+    public let tmuxName: String
     public let status: TerminalSessionStatus
     public let createdAt: Date
     public let attachedAt: Date?
@@ -44,6 +45,7 @@ public struct TerminalSession: Sendable, Identifiable, Codable, Equatable {
         argv: [String] = [],
         env: [String: String] = [:],
         source: String = "wave_step",
+        tmuxName: String,
         status: TerminalSessionStatus,
         createdAt: Date,
         attachedAt: Date? = nil,
@@ -59,6 +61,7 @@ public struct TerminalSession: Sendable, Identifiable, Codable, Equatable {
         self.argv = argv
         self.env = env
         self.source = source
+        self.tmuxName = tmuxName
         self.status = status
         self.createdAt = createdAt
         self.attachedAt = attachedAt

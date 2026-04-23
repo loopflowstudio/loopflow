@@ -1,1 +1,0 @@
-install: bundle lf and lfd in Concerto.app

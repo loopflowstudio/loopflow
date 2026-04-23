@@ -1059,11 +1059,35 @@ async fn pm_push_diff_async(
     progress: &impl Progress,
 ) -> OpsResult<PmPushDiffResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
-    let ctx = build_wave_provider(repo, &options.wave).await?;
-    require_project(&ctx, &options.wave)?;
-
     let baseline = find_push_diff_baseline(repo)?;
     let wave_path = format!("wave/{}/", options.wave);
+
+    let changed_files = diff_names_under(repo, &baseline, "HEAD", &wave_path)
+        .map_err(|err| OpsError::Message(format!("git diff failed: {err}")))?;
+
+    // Nothing under wave/<name>/ changed on this branch — skip the provider
+    // build (and the auth call that goes with it) and return a zero result.
+    if changed_files.is_empty() {
+        progress.status(&format!(
+            "push-diff wave/{}: no changes under wave/{}/, skipping",
+            options.wave, options.wave,
+        ));
+        let provider = resolve_provider(repo, &options.wave)?;
+        let project_id = read_wave_pm_config(repo, &options.wave)
+            .and_then(|pm| pm.project_for(provider).map(str::to_string))
+            .unwrap_or_default();
+        return Ok(PmPushDiffResult {
+            wave: options.wave.clone(),
+            provider,
+            project_id,
+            created: 0,
+            updated: 0,
+            unchanged: 0,
+        });
+    }
+
+    let ctx = build_wave_provider(repo, &options.wave).await?;
+    require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
         "push-diff wave/{} from baseline {} to {:?} project {}",
@@ -1072,9 +1096,6 @@ async fn pm_push_diff_async(
         ctx.provider,
         ctx.project,
     ));
-
-    let changed_files = diff_names_under(repo, &baseline, "HEAD", &wave_path)
-        .map_err(|err| OpsError::Message(format!("git diff failed: {err}")))?;
 
     let mut created = 0usize;
     let mut updated = 0usize;

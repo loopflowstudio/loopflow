@@ -16,6 +16,11 @@ use crate::ops::{
 
 /// Resolve which PM-enabled waves to operate on within a flow context.
 /// If no wave is specified and no --all flag, auto-detect from the repo.
+///
+/// Returns an empty vec (no-op) when the current branch has no resolvable
+/// wave or resolves to a wave without PM configured. Flows chain many ops;
+/// a CI-only or non-PM branch shouldn't fail the queue just because one
+/// step has nothing to do.
 fn resolve_pm_waves_for_flow(
     repo: &Path,
     wave: &Option<String>,
@@ -25,11 +30,16 @@ fn resolve_pm_waves_for_flow(
     if all {
         return crate::ops::pm::list_pm_waves(repo);
     }
-    let name = wave
+    let Some(name) = wave
         .clone()
         .or_else(|| wave_flag.clone())
         .or_else(|| crate::ops::util::resolve_wave_name(repo, None))
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    else {
+        return Ok(Vec::new());
+    };
+    if !crate::ops::pm::wave_pm_is_enabled(repo, &name) {
+        return Ok(Vec::new());
+    }
     Ok(vec![name])
 }
 
@@ -218,6 +228,9 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                     all,
                 } => {
                     let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
+                    if waves.is_empty() {
+                        progress.status("pm pull: no PM-enabled wave for current branch, skipping");
+                    }
                     for w in waves {
                         crate::ops::pm::pm_pull(
                             repo,
@@ -233,6 +246,11 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                     all,
                 } => {
                     let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
+                    if waves.is_empty() {
+                        progress.status(
+                            "pm push-diff: no PM-enabled wave for current branch, skipping",
+                        );
+                    }
                     for w in waves {
                         crate::ops::pm::pm_push_diff(
                             repo,

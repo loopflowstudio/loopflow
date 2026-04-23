@@ -106,7 +106,7 @@ flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
+  - flow: sync
     schedule: "0 0 * * 1"
 ```
 
@@ -123,22 +123,23 @@ crons:
 A markdown file that tells the coding agent what to do.
 
 ```markdown
-# .lf/steps/review.md
+# .lf/steps/audit.md
 
-Review the code on this branch. Check for:
-- Correctness
-- Test coverage
-- Style guide compliance
+Audit auth changes on this branch.
+Check for:
+- Missing validation
+- Confusing errors
+- Gaps in tests
 
 Fix any issues you find.
 ```
 
 ```bash
-lf review                     # run the step
-lf review: focus on auth      # pass arguments
+lf audit                      # run the step
+lf audit: focus on auth       # pass arguments
 ```
 
-Steps run to completion. Built-ins: `debug`, `design`, `implement`, `polish`, `review`, `lint`.
+Steps run to completion. Built-ins: `debug`, `design`, `implement`, `gate`, `qa`, `lint`.
 
 **Where to put steps:** `.lf/steps/` is canonical. Symlink for Claude Code compatibility:
 
@@ -153,22 +154,21 @@ ln -s ../.lf/steps .claude/commands
 Chains steps together with commits between them.
 
 ```yaml
-# .lf/flows/build.yaml
+# .lf/flows/ship-api.yaml
 - implement
 - compress
 - lint
 - gate
-- update-wave
 ```
 
 ```bash
-lf build
+lf ship-api
 ```
 
 Or chain manually:
 
 ```bash
-lf design: add auth && lf implement && lf polish
+lf design: add auth && lf implement && lf gate
 ```
 
 ---
@@ -188,8 +188,8 @@ A design doc in scratch/ that another engineer could implement from.
 ```
 
 ```bash
-lf review --direction ux
-lf review --direction ux,clarity    # stack multiple
+lf gate --direction ux
+lf gate --direction ux,clarity    # stack multiple
 ```
 
 Directions compose. A `ux` direction sets user-facing intent. A `clarity`

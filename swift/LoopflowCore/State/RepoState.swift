@@ -113,11 +113,21 @@ public final class RepoState {
     // Selection — ID-based, derived from store
     public var selectedWaveId: String? {
         didSet {
-            if selectedWaveId != nil { showingAnalytics = false }
+            if selectedWaveId != nil {
+                showingAnalytics = false
+                showingFlows = false
+            }
         }
     }
 
     public var showingAnalytics = false
+    public var showingFlows = false
+
+    /// Fetch the flow + step catalog for the currently selected repo.
+    public func fetchCatalog() async throws -> Catalog {
+        let repo = currentRepo?.path
+        return try await waveService.fetchCatalog(repo: repo)
+    }
 
     public var selectedWave: WaveViewModel? {
         get { selectedWaveId.flatMap { waveStore.wave(for: $0) } }

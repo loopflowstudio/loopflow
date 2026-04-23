@@ -47,9 +47,7 @@ flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
-    schedule: "0 0 * * 1"
-  - flow: wave-reduce
+  - flow: sync
     schedule: "0 0 1 * *"
 ```
 
@@ -105,7 +103,7 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 loopflow.create_wave("ux", repo=".", flow="build", area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="grind", area=["rust/"])
+loopflow.create_wave("infra", repo=".", flow="govern-control", area=["rust/"])
 loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 PY

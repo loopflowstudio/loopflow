@@ -29,14 +29,14 @@ Run in foreground to debug:
 lfd serve
 ```
 
-## Task hangs in auto mode
+## Task hangs in batch mode
 
 **Symptom:** Task starts but never completes.
 
 The task may be waiting for input. Use interactive mode:
 
 ```bash
-lf review -i    # interactive mode
+lf gate -i    # interactive mode
 ```
 
 Check if the coding agent is stuck on a permission prompt or clarifying question.
@@ -49,7 +49,7 @@ Claude, Codex, Gemini, and OpenCode have usage limits. Options:
 
 - Wait and retry
 - Reduce parallel waves
-- Switch to a different model: `lf review -m codex`
+- Switch to a different model: `lf gate -m codex`
 
 ## Worktree issues
 
@@ -90,9 +90,9 @@ The loop hit its PR limit. Options:
 Reduce context:
 
 ```bash
-lf review --no-diff-files       # skip branch files
-lf review --area src/small/     # scope to specific area
-lf review --no-lfdocs           # skip wave/, scratch/, root .md files
+lf qa --no-diff-files       # skip branch files
+lf qa --area src/small/     # scope to specific area
+lf qa --no-lfdocs           # skip wave/, scratch/, root .md files
 ```
 
 For a persistent default, set `lfdocs: false` in `.lf/config.yaml`.

@@ -1,7 +1,7 @@
-- garden/scan
-- garden/assess
+- scan
+- assess
 - xor:
-    router: garden/assess
+    router: assess
     paths:
       act:
         flow: garden-act

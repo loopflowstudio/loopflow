@@ -58,7 +58,7 @@ struct AttentionQueueViewTests {
             summary: "Rebalance the PM wave.",
             context: .interactive(
                 InteractiveAttentionContext(
-                    step: "wave/review",
+                    step: "review",
                     terminalSessionId: "terminal-1",
                     designPath: nil,
                     mutationSummary: "- Rebalance the PM wave.\n- Close stale roadmap items."

@@ -47,9 +47,7 @@ flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
-    schedule: "0 0 * * 1"
-  - flow: wave-reduce
+  - flow: sync
     schedule: "0 0 1 * *"
 
 # root wave — no workers, all work comes from crons
@@ -79,7 +77,7 @@ Every new wave ships with two default triggers: `repo` (whole repo → integrate
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf ops ingest --item 2-daemon-integrity.md   # move one roadmap item to scratch/
+lf op ingest --item 2-daemon-integrity.md    # move one roadmap item to scratch/
 lf design      # interactive design session
 lf gstack:office-hours   # run an imported gstack workstyle step
 lf npx:explain-code   # fetch from npx skills ecosystem and run
@@ -87,37 +85,30 @@ lf npx:explain-code   # fetch from npx skills ecosystem and run
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-### Planning steps (`plan/`)
+Steps and flows are organized into three categories by agency: **build** (manual work you drive), **govern** (autonomous coordination the system drives), **ops** (side-channel utilities).
+
+### Build steps (`build/`)
+
+Manual work — you invoke these, often interactively.
 
 | Step | What it does |
 |------|--------------|
+| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
+| `iterate` | Read research, write design to address it |
+| `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
 | `reduce` | Find simplification opportunities |
 | `polish` | Find polish priorities |
 | `expand` | Find expansion opportunities |
-| `iterate` | Read research, write design to address it |
-| `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
-| `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
-| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `5whys` | Root cause analysis on a bug fix |
-
-### Code steps (`code/`)
-
-| Step | What it does |
-|------|--------------|
-| `debug` | Fix an error |
-| `ci-fix` | Fix failing CI checks for the current PR |
-| `integrate-upstream` | Adapt wave code after rebasing onto main |
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
 | `gate` | Ship-ready code and reviewer-friendly docs |
+| `debug` | Fix an error |
+| `ci-fix` | Fix failing CI checks for the current PR |
+| `integrate-upstream` | Adapt wave code after rebasing onto main |
 | `qa` | Thorough quality assessment of the current branch |
 | `triage` | Assess QA findings, separate blocking from polish |
-
-### Interactive steps (`interactive/`)
-
-| Step | What it does |
-|------|--------------|
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `demo` | Experience-first walkthrough of observable changes |
@@ -126,51 +117,45 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `refine` | Refine existing work |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 
-### Garden steps (`garden/`)
+### Govern steps (`govern/`)
+
+Autonomous coordination — crons, triggers, and waves-watching-waves drive these.
 
 | Step | What it does |
 |------|--------------|
-| `garden/scan` | Read member wave state — PRs, blocks, progress, git activity |
-| `garden/assess` | Judge wave health and identify pressure points |
-
-### Wave steps (`wave/`)
-
-| Step | What it does |
-|------|--------------|
-| `wave/mutate` | Compose and apply coordinated mutations across member waves |
-| `wave/review` | Review what already changed, then amend or revert if needed |
-
-### VSM steps (`vsm/`)
-
-| Step | What it does |
-|------|--------------|
-| `vsm/s5-scan` | Scan chord identity, roster, policy, and recent structural change |
-| `vsm/s5-assess` | Assess identity, boundary, roster, and autonomy drift |
-| `vsm/s4-scan` | Scan dependencies, advisories, upstream APIs, and other external signals |
-| `vsm/s4-assess` | Assess which environmental changes matter and what they imply |
-| `vsm/s3-scan` | Scan live health, velocity, CI, retries, and usage signals |
-| `vsm/s3-assess` | Assess control health, mechanical blocks, and worker-pool size |
-| `vsm/s2-scan` | Scan backlogs, PR overlap, area overlap, and conflict history |
-| `vsm/s2-assess` | Assess coordination risk, conflict map, and safe ordering |
-
-### Scan steps (`scan/`)
-
-| Step | What it does |
-|------|--------------|
-| `scan/scan-report` | Scan deps and APIs for vulnerabilities, staleness, breaking changes |
-| `scan/scan-plan` | Turn scan report into actionable design doc |
+| `scan` | Read member wave state — PRs, blocks, progress, git activity |
+| `assess` | Judge wave health and identify pressure points |
+| `wave-report` | Read health signals across all waves |
+| `mutate` | Compose and apply coordinated mutations across member waves |
+| `review` | Review mutations, amend or revert if needed |
+| `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
+| `s5-scan` | Scan chord identity, roster, policy, and recent structural change |
+| `s5-assess` | Assess identity, boundary, roster, and autonomy drift |
+| `s4-scan` | Scan dependencies, advisories, upstream APIs, and other external signals |
+| `s4-assess` | Assess which environmental changes matter and what they imply |
+| `s3-scan` | Scan live health, velocity, CI, retries, and usage signals |
+| `s3-assess` | Assess control health, mechanical blocks, and worker-pool size |
+| `s2-scan` | Scan backlogs, PR overlap, area overlap, and conflict history |
+| `s2-assess` | Assess coordination risk, conflict map, and safe ordering |
 
 ### Ops steps (`ops/`)
 
+Side-channel utilities — wrappers around git, PR, release, and wave state.
+
 | Step | What it does |
 |------|--------------|
+| `init` | Set up loopflow in this repo |
+| `commit` | Commit with generated message |
+| `rebase` | Rebase onto main |
+| `pr` | Generate PR title/body and call `lf op pr --title --body` |
+| `land` | Land PR, rotate worktree |
+| `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
 | `split-wave` | Split a wave into smaller independent waves |
-| `synthesize` | Combine multiple perspectives into one |
-| `validate` | Validate flows, steps, and directions |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
-| `pr` | Generate PR title/body and call `lf op pr --title --body` |
+| `synthesize` | Combine multiple perspectives into one |
+| `validate` | Validate flows, steps, and directions |
 
 ## Flows
 
@@ -189,48 +174,48 @@ Flows can include mechanical ops items directly:
 - op: land --create-pr
 ```
 
-### Code flows (`code/`)
-
-| Flow | Steps |
-|------|-------|
-| `code` | implement → compress → lint → gate |
-| `pair` | design → code |
-| `deploy` | gate → op: land → op: pm push-diff |
-| `sync` | rebase → integrate-upstream → op: pm pull |
-| `ship` | refresh-plan → implement → gate → op: pr → op: land |
-
 ### Build flows (`build/`)
 
 | Flow | Steps |
 |------|-------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
-| `build-or-silent` | ingest → xor(build, silence) |
-| `s1-build` | kickoff → code → deploy |
+| `build-or-silent` | op: pm pull → ingest → xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | gate → update-wave → deploy |
-
-### Garden flows (`garden/`)
-
-| Flow | Steps |
-|------|-------|
-| `garden` | garden/scan → garden/assess → xor(garden-act, silence) |
-| `garden-act` | wave/mutate → wave/review |
-
-### Algedonic flows (`algedonic/`)
-
-| Flow | Steps |
-|------|-------|
+| `code` | implement → compress → lint → gate |
+| `pair` | design → code |
+| `deploy` | gate → op: land --create-pr → op: pm push-diff |
+| `ship` | refresh-plan → implement → gate → op: pr → op: land |
 | `incident` | debug → 5whys → code → deploy |
 
-### VSM flows (`vsm/`)
+### Govern flows (`govern/`)
 
 | Flow | Steps |
 |------|-------|
+| `garden` | scan → assess → xor(garden-act, silence) |
+| `garden-act` | mutate → review |
 | `govern-operations` | ingest → xor(s1-build, silence) |
-| `govern-coordination` | s2-scan → s2-assess → wave/mutate |
-| `govern-control` | s3-scan → s3-assess → wave/mutate |
-| `govern-intelligence` | s4-scan → s4-assess → wave/mutate |
-| `govern-identity` | s5-scan → s5-assess → wave/mutate |
+| `govern-coordination` | s2-scan → s2-assess → mutate |
+| `govern-control` | s3-scan → s3-assess → mutate |
+| `govern-intelligence` | s4-scan → s4-assess → mutate |
+| `govern-identity` | s5-scan → s5-assess → mutate |
+| `s1-build` | kickoff → code → deploy |
+
+### Ops flows (`ops/`)
+
+| Flow | Steps |
+|------|-------|
+| `release` | op: release run patch |
+| `sync` | rebase → integrate-upstream → op: pm pull |
+
+### Browse the catalog
+
+```bash
+lfd serve
+curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
+```
+
+Open **Flows** in Concerto to browse the same catalog visually. The left pane groups flows and steps by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or step.
 
 ### Branches (xor)
 
@@ -238,10 +223,10 @@ Branches route a flow based on an agent's assessment of the current state. Exact
 
 ```yaml
 # flow: garden
-- garden/scan
-- garden/assess
+- scan
+- assess
 - xor:
-    router: garden/assess
+    router: assess
     paths:
       act:
         flow: garden-act
@@ -358,7 +343,7 @@ lf op pm status            # show linked waves and local/remote counts
 
 Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
 
-PM-backed `lf ops ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
+PM-backed `lf op ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.
@@ -375,7 +360,7 @@ import loopflow.api as loopflow
 loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
 loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
+loopflow.create_wave("infra", repo=".", flow="govern-control", direction=["infra"], area=["rust/"])
 loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 ```

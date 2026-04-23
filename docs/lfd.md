@@ -255,6 +255,15 @@ curl -s "$LFD_ADDR/v0/waves/redesign"
 
 The `wave/redesign/redesign.yaml` file is the source of truth for member waves.
 
+## Browse the flow catalog
+
+```bash
+curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
+curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=="gate")'
+```
+
+`/v0/catalog` returns the resolved flow + step catalog that Concerto uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
+
 ## Agent sessions API
 
 Create a session:

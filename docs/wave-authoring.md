@@ -92,8 +92,8 @@ Priority meanings:
 - **`4-*`** — Low: speculative work
 
 `ingest` picks from the highest-priority non-empty level first. Within a level, the default fast path uses filename order.
-For PM-backed waves, `lf ops ingest` refreshes the local wave mirror from the provider before it picks. If that pull fails, ingest warns and falls back to the existing local files.
-Use `lf ops ingest --item <filename-or-slug>` when you want to target a specific item instead of auto-picking.
+For PM-backed waves, `lf op ingest` refreshes the local wave mirror from the provider before it picks. If that pull fails, ingest warns and falls back to the existing local files.
+Use `lf op ingest --item <filename-or-slug>` when you want to target a specific item instead of auto-picking.
 
 Each item needs:
 
@@ -125,11 +125,11 @@ Optional. Mirrors the wave's fields in lfd:
 
 ```yaml
 # wave/infra/infra.yaml
-flow: ship-wave
+flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
+  - flow: sync
     schedule: "0 0 * * 1"
 area:
   - rust/loopflow/src/lfd/
@@ -145,7 +145,7 @@ triggers:
 
 | Field | What it does |
 |-------|-------------|
-| `flow` | Which flow to run (`build`, `ship-wave`, `grind`, etc.) |
+| `flow` | Which flow to run (`build`, `garden`, `sync`, etc.) |
 | `workers` | Parallelism for the primary flow. `0` means "don't auto-dispatch the primary flow" |
 | `mode` | Primary execution pattern: `manual` or `loop` |
 | `crons` | Scheduled supplementary flows. Each entry has a `flow` and cron `schedule` |
@@ -185,7 +185,7 @@ ingest → kickoff → build → update-wave → [loop]
 
 **kickoff** elaborates the item into an actionable design — alternatives considered, research done, success and failure imagined.
 
-**build** implements the design: implement → compress → lint → gate. Each sub-step commits. The result is a PR.
+**build** turns the design into a PR: review-design → loop(code → demo/code-review, exit: gate) → deploy. The `code` subflow runs implement → compress → lint → gate.
 
 **update-wave** removes shipped items from `wave/<name>/` and folds context from completed work into remaining items. This is the only step that writes to the wave directory.
 
@@ -240,7 +240,7 @@ flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
+  - flow: sync
     schedule: "0 0 * * 1"
 ```
 
@@ -269,7 +269,7 @@ loopflow.create_wave("mywave", repo=".", flow="build", area=["src/"])
 loopflow.update_wave(
     "mywave",
     flow="build",
-    crons=[{"flow": "wave-polish", "schedule": "0 0 * * 1"}],
+    crons=[{"flow": "sync", "schedule": "0 0 * * 1"}],
     area=["src/"],
 )
 

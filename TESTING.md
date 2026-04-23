@@ -33,6 +33,7 @@ Tests for the Swift package (models, protocols, shared logic).
 
 ```bash
 swift test --package-path swift        # All Swift tests
+swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 

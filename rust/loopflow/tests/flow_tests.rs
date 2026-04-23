@@ -298,10 +298,10 @@ fn builtin_garden_flow_structure() {
 
     let items = expand_named_flow(repo, "garden");
 
-    // garden: garden/scan, garden/assess, xor(act, silence)
+    // garden: scan, assess, xor(act, silence)
     assert_eq!(items.len(), 3);
-    assert_step_name(&items[0], "garden/scan");
-    assert_step_name(&items[1], "garden/assess");
+    assert_step_name(&items[0], "scan");
+    assert_step_name(&items[1], "assess");
     match &items[2] {
         ConcreteItem::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
@@ -318,22 +318,10 @@ fn builtin_governance_flows_structure() {
     let repo = temp.path();
 
     let cases = [
-        (
-            "govern-identity",
-            ["vsm/s5-scan", "vsm/s5-assess", "wave/mutate"],
-        ),
-        (
-            "govern-intelligence",
-            ["vsm/s4-scan", "vsm/s4-assess", "wave/mutate"],
-        ),
-        (
-            "govern-control",
-            ["vsm/s3-scan", "vsm/s3-assess", "wave/mutate"],
-        ),
-        (
-            "govern-coordination",
-            ["vsm/s2-scan", "vsm/s2-assess", "wave/mutate"],
-        ),
+        ("govern-identity", ["s5-scan", "s5-assess", "mutate"]),
+        ("govern-intelligence", ["s4-scan", "s4-assess", "mutate"]),
+        ("govern-control", ["s3-scan", "s3-assess", "mutate"]),
+        ("govern-coordination", ["s2-scan", "s2-assess", "mutate"]),
     ];
 
     for (flow_name, expected) in cases {

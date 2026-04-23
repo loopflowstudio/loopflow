@@ -20,7 +20,7 @@ lf --list                    # show all available steps
 ## Examples
 
 ```bash
-lf review                    # run the review step
+lf gate                      # run the gate step
 lf implement: add auth       # pass arguments after colon
 lf npx:explain-code          # fetch from npx skills and run
 lf sp:brainstorm             # run superpowers brainstorm skill
@@ -36,7 +36,7 @@ Steps are markdown files in these locations (searched in order):
 1. External skills — `<prefix>:<skill>` format (e.g., `npx:explain-code`, `sr:gog`)
 2. `.lf/steps/<step>.md` — repo steps
 3. `.claude/commands/<step>.md` — Claude Code compatible
-4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `review`, `implement`)
+4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `gate`, `implement`)
 5. `.agents/skills/<step>/SKILL.md` — user-installed agent skills (e.g., via `npx skills add`)
 
 ### Step Arguments
@@ -143,7 +143,7 @@ lf debug -c
 ### Review with area scope
 
 ```bash
-lf review --area src/api/
+lf qa --area src/api/
 ```
 
 ### Use a different model
@@ -155,7 +155,7 @@ lf implement: add caching -m codex
 ### Apply a direction
 
 ```bash
-lf review -d ux
+lf gate -d ux
 lf implement -d ux,clarity
 ```
 
@@ -168,7 +168,7 @@ lf debug -c    # include current clipboard text in the prompt
 ### Use web client instead of CLI
 
 ```bash
-lf review --web    # copies to clipboard, opens claude.ai (or chatgpt.com for codex)
+lf gate --web      # copies to clipboard, opens claude.ai (or chatgpt.com for codex)
 lf : "fix the bug" --web -m codex    # opens chatgpt.com
 ```
 

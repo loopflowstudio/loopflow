@@ -891,7 +891,7 @@ fn interactive_attention_details(
                 summary_source,
             }
         }
-        "wave/review" => {
+        "review" => {
             let mutation_summary = read_context_file(worktree, "scratch/wave-mutate.md");
             InteractiveAttentionDetails {
                 design_path: None,
@@ -1630,13 +1630,13 @@ mod tests {
         );
 
         let wave_review_step = ConcreteStep {
-            step: Step::named("wave/review"),
+            step: Step::named("review"),
             flow_parents: vec![],
         };
         let wave_review_details = interactive_attention_details(&wave_review_step, &run);
         let wave_review_context =
             build_interactive_context(&wave_review_step, &session, &wave_review_details);
-        assert_eq!(wave_review_context["step"], "wave/review");
+        assert_eq!(wave_review_context["step"], "review");
         assert!(wave_review_context["mutation_summary"]
             .as_str()
             .expect("mutation summary")

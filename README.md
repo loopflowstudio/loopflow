@@ -225,7 +225,7 @@ find release -maxdepth 2 -type f | sort
 | `release/vX.Y.Z/NOTES.md` | Snapshot of the release notes generated for that shipped version |
 | `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
 
-Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. `lf op release run` promotes `release/unreleased/` to `release/v<version>/` and uses the decisions ledger to shape the narrative release notes.
+Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf op release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
 
 ### Browse the catalog
 

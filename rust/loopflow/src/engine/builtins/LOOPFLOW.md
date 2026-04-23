@@ -42,7 +42,7 @@ When running interactively, if this session produces a decision a contributor wo
 
 Not every change is a decision. "Fixed a bug", "renamed a function", "added a test" are not decisions. "We stopped supporting X because Y", "we chose append-only over editable because Z" are. When in doubt, ask the user rather than write speculatively. Headless runs do *not* write to this file — too much noise from autonomous work.
 
-At tag time, `lf op release` renames `release/unreleased/` to `release/v<version>/` and feeds DECISIONS.md into the release-notes step.
+If `release/unreleased/` exists, `lf op release run` promotes it to `release/v<version>/` during the release workflow and feeds DECISIONS.md into the release-notes step. If the ledger is absent, release notes fall back to merged PR history.
 
 **Code**: The actual work. Tests, implementation, fixes.
 

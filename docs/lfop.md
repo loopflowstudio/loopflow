@@ -93,7 +93,7 @@ lf op release tag 1.2.3          # create + push git tag
 lf op release status             # workflow + GitHub Release status
 ```
 
-Keep release-cycle rationale in `release/unreleased/DECISIONS.md`. The full release workflow promotes that directory to `release/v<version>/`, uses `DECISIONS.md` as the primary narrative source for release notes, and archives the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`.
+Keep release-cycle rationale in `release/unreleased/DECISIONS.md` when you want narrative-first notes. If that directory exists, the full release workflow promotes it to `release/v<version>/`, uses `DECISIONS.md` as the primary narrative source, and archives the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`. If it does not exist, Loopflow falls back to merged PR history.
 
 ---
 

@@ -61,31 +61,39 @@ Commits and pushes current changes, optionally rebases, then creates and pushes 
 
 ## lf op commit
 
-Commit staged changes.
+Commit changes.
 
 ```bash
-lf op commit -m "message"
+lf op commit                     # stage all changes, generate a message, commit
+lf op commit -m "message"       # override the generated message
+lf op commit -p                  # commit and push
+lf op commit --no-add            # commit only what is already staged
 ```
 
-Stages changes and commits with the explicit message. If you want generated messaging, run the `lf commit` step.
+Stages changes by default. If `-m` is omitted, Loopflow generates a commit message from the staged diff.
 
 Options:
 
 | Flag | Description |
 |------|-------------|
+| `-m, --message` | Commit message override |
 | `-p, --push` | Push after committing |
+| `--no-add` | Skip `git add -A`; commit only staged changes |
 
 ## lf op release
 
-Mechanical release subcommands. Use `lf release` for the full agent-orchestrated workflow.
+Mechanical release subcommands. Use `lf release` or `lf op release run` for the full release workflow.
 
 ```bash
+lf op release run patch          # full release workflow
 lf op release check              # PRs merged since last tag?
 lf op release notes 1.2.3        # generate RELEASE_NOTES.md
 lf op release bump 1.2.3         # bump manifests
 lf op release tag 1.2.3          # create + push git tag
-lf op release status              # workflow + GitHub Release status
+lf op release status             # workflow + GitHub Release status
 ```
+
+Keep release-cycle rationale in `release/unreleased/DECISIONS.md`. The full release workflow promotes that directory to `release/v<version>/`, uses `DECISIONS.md` as the primary narrative source for release notes, and archives the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`.
 
 ---
 

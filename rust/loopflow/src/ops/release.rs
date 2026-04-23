@@ -434,6 +434,7 @@ struct ReleaseNotesContext {
     area_scope: Vec<String>,
     merged_prs: Vec<MergedPr>,
     previous_release_notes: Option<String>,
+    decisions: Option<String>,
 }
 
 fn run_release_notes_step(
@@ -444,6 +445,9 @@ fn run_release_notes_step(
     target: &ReleaseTarget,
 ) -> OpsResult<()> {
     let previous_notes = fs::read_to_string(repo.join("RELEASE_NOTES.md")).ok();
+    let decisions = load_unreleased_decisions(repo);
+    promote_unreleased_dir(repo, version)?;
+
     let context = ReleaseNotesContext {
         version: version.to_string(),
         prev_tag: prev_tag.to_string(),
@@ -452,6 +456,7 @@ fn run_release_notes_step(
         area_scope: target.area.clone(),
         merged_prs: merged_prs.to_vec(),
         previous_release_notes: previous_notes,
+        decisions,
     };
 
     let mut context_file = tempfile::NamedTempFile::new_in(repo)?;
@@ -475,6 +480,59 @@ fn run_release_notes_step(
         ));
     }
 
+    archive_release_notes(repo, version)?;
+    Ok(())
+}
+
+/// Read `release/unreleased/DECISIONS.md` if it exists.
+fn load_unreleased_decisions(repo: &Path) -> Option<String> {
+    let path = repo.join("release").join("unreleased").join("DECISIONS.md");
+    fs::read_to_string(path)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// Rename `release/unreleased/` to `release/v<version>/` at tag time.
+///
+/// Idempotent: if `release/unreleased/` doesn't exist, does nothing.
+/// If `release/v<version>/` already exists (e.g. from a retried release
+/// or a backfilled NOTES.md), merges unreleased contents into it instead
+/// of failing.
+fn promote_unreleased_dir(repo: &Path, version: &str) -> OpsResult<()> {
+    let unreleased = repo.join("release").join("unreleased");
+    if !unreleased.exists() {
+        return Ok(());
+    }
+
+    let target = repo.join("release").join(format!("v{version}"));
+    if !target.exists() {
+        fs::rename(&unreleased, &target)?;
+        return Ok(());
+    }
+
+    // Target already exists — move each entry from unreleased into target.
+    for entry in fs::read_dir(&unreleased)? {
+        let entry = entry?;
+        let dest = target.join(entry.file_name());
+        if dest.exists() {
+            return Err(OpsError::Message(format!(
+                "cannot promote {}: {} already exists",
+                entry.path().display(),
+                dest.display()
+            )));
+        }
+        fs::rename(entry.path(), dest)?;
+    }
+    fs::remove_dir(&unreleased)?;
+    Ok(())
+}
+
+/// Copy `RELEASE_NOTES.md` into `release/v<version>/NOTES.md` for archival.
+fn archive_release_notes(repo: &Path, version: &str) -> OpsResult<()> {
+    let src = repo.join("RELEASE_NOTES.md");
+    let dir = repo.join("release").join(format!("v{version}"));
+    fs::create_dir_all(&dir)?;
+    fs::copy(&src, dir.join("NOTES.md"))?;
     Ok(())
 }
 
@@ -1838,5 +1896,112 @@ version = "2.0.0"
             workflow: None,
         };
         assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
+    }
+
+    // ======================================================================
+    // release/unreleased → release/v<version> promotion + NOTES archival
+    // ======================================================================
+
+    #[test]
+    fn load_unreleased_decisions_returns_none_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(load_unreleased_decisions(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn load_unreleased_decisions_ignores_blank_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("DECISIONS.md"), "   \n\n").unwrap();
+        assert!(load_unreleased_decisions(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn load_unreleased_decisions_returns_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("DECISIONS.md"), "# Decisions\n\nentry").unwrap();
+        assert_eq!(
+            load_unreleased_decisions(tmp.path()).as_deref(),
+            Some("# Decisions\n\nentry"),
+        );
+    }
+
+    #[test]
+    fn promote_unreleased_is_noop_without_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
+        assert!(!tmp.path().join("release").join("v0.9.10").exists());
+    }
+
+    #[test]
+    fn promote_unreleased_renames_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreleased = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::write(unreleased.join("DECISIONS.md"), "ledger").unwrap();
+
+        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
+
+        assert!(!unreleased.exists());
+        let promoted = tmp.path().join("release").join("v0.9.10");
+        assert_eq!(
+            fs::read_to_string(promoted.join("DECISIONS.md")).unwrap(),
+            "ledger",
+        );
+    }
+
+    #[test]
+    fn promote_unreleased_merges_into_existing_version_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreleased = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::write(unreleased.join("DECISIONS.md"), "ledger").unwrap();
+
+        let version_dir = tmp.path().join("release").join("v0.9.10");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(version_dir.join("NOTES.md"), "backfilled notes").unwrap();
+
+        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
+
+        assert!(!unreleased.exists());
+        assert_eq!(
+            fs::read_to_string(version_dir.join("DECISIONS.md")).unwrap(),
+            "ledger",
+        );
+        assert_eq!(
+            fs::read_to_string(version_dir.join("NOTES.md")).unwrap(),
+            "backfilled notes",
+        );
+    }
+
+    #[test]
+    fn promote_unreleased_errors_on_file_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreleased = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::write(unreleased.join("DECISIONS.md"), "new").unwrap();
+
+        let version_dir = tmp.path().join("release").join("v0.9.10");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(version_dir.join("DECISIONS.md"), "old").unwrap();
+
+        assert!(promote_unreleased_dir(tmp.path(), "0.9.10").is_err());
+    }
+
+    #[test]
+    fn archive_release_notes_copies_root_to_version_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("RELEASE_NOTES.md"), "# v0.9.10\n\nnotes").unwrap();
+
+        archive_release_notes(tmp.path(), "0.9.10").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("release").join("v0.9.10").join("NOTES.md"))
+                .unwrap(),
+            "# v0.9.10\n\nnotes",
+        );
     }
 }

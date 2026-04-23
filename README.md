@@ -208,6 +208,8 @@ Flows can include mechanical ops items directly:
 | `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream → op: pm pull |
 
+`deploy` lands the branch, then syncs PM state when there is PM work to do. `sync` rebases and pulls PM state for the current branch's wave. On branches with no PM-enabled wave, or no `wave/<name>/` changes, the PM step in either flow exits cleanly.
+
 ### Browse the catalog
 
 ```bash
@@ -336,7 +338,7 @@ lf op pm pull pm           # rewrite one wave from PM; remote changes win
 lf op pm pull --all        # rewrite every wave from PM; remote changes win
 lf op pm export pm         # push one wave to PM; local changes win
 lf op pm export --all      # push every PM-enabled wave
-lf op pm push-diff pm      # push only branch-changed items to PM
+lf op pm push-diff pm      # push only branch-changed items to PM; no-op if wave/<name>/ is unchanged
 lf op pm push-diff --all   # push-diff every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
 ```
@@ -344,6 +346,9 @@ lf op pm status            # show linked waves and local/remote counts
 Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
 
 PM-backed `lf op ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
+
+Flow-driven `pm pull` and `pm push-diff` also skip cleanly when the current branch doesn't resolve to a PM-enabled wave. CI-only and non-PM branches can reuse the same flows without extra flags.
+Explicit `lf op pm pull <wave>` and `lf op pm push-diff <wave>` still target the named wave. Only the flow-driven variants auto-skip.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.

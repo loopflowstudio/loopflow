@@ -55,6 +55,8 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "explore",
             "refine",
             "review-design",
+            "review-open-work",
+            "refresh-plan",
             "kickoff",
             "5whys",
         ],
@@ -156,6 +158,14 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         (
             "review-design",
             "Reshape AI-elaborated design into user intent",
+        ),
+        (
+            "review-open-work",
+            "Survey branches, PRs, worktrees, and waves for inbox-zero triage",
+        ),
+        (
+            "refresh-plan",
+            "Reconcile scratch/ with the branch after rebasing",
         ),
         (
             "integrate-upstream",

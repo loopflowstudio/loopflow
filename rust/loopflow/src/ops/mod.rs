@@ -18,7 +18,8 @@ pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub use branches::{
-    list_branch_candidates, prune_branches, BranchCandidate, BranchListOptions, BranchPruneOptions,
+    list_branch_candidates, prune_branches, BranchCandidate, BranchFilterOptions,
+    BranchListOptions, BranchPruneOptions,
 };
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};

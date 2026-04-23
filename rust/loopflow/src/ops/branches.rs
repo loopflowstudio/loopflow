@@ -15,25 +15,25 @@ use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
 pub struct BranchListOptions {
-    pub user: Option<String>,
-    pub wave: Option<String>,
-    pub stale: Option<String>,
-    pub created_before: Option<String>,
-    pub merged: bool,
-    pub include_open_prs: bool,
+    pub filters: BranchFilterOptions,
     pub default_user_if_empty: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct BranchPruneOptions {
+    pub filters: BranchFilterOptions,
+    pub dry_run: bool,
+    pub yes: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BranchFilterOptions {
     pub user: Option<String>,
     pub wave: Option<String>,
     pub stale: Option<String>,
     pub created_before: Option<String>,
     pub merged: bool,
     pub include_open_prs: bool,
-    pub dry_run: bool,
-    pub yes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -70,7 +70,8 @@ pub fn list_branch_candidates(
     repo: &Path,
     options: &BranchListOptions,
 ) -> OpsResult<Vec<BranchCandidate>> {
-    let filters = BranchFilters::from_list_options(repo, options)?;
+    let filters =
+        BranchFilters::from_options(repo, &options.filters, options.default_user_if_empty)?;
     collect_branch_candidates(repo, &filters)
 }
 
@@ -85,7 +86,7 @@ pub fn prune_branches(
         ));
     }
 
-    let filters = BranchFilters::from_prune_options(repo, options)?;
+    let filters = BranchFilters::from_options(repo, &options.filters, false)?;
     let candidates = collect_branch_candidates(repo, &filters)?;
     let targets = candidates
         .into_iter()
@@ -120,6 +121,12 @@ pub fn prune_branches(
 
 impl BranchPruneOptions {
     fn has_filter(&self) -> bool {
+        self.filters.has_filter()
+    }
+}
+
+impl BranchFilterOptions {
+    fn has_filter(&self) -> bool {
         self.user.is_some()
             || self.wave.is_some()
             || self.stale.is_some()
@@ -129,13 +136,12 @@ impl BranchPruneOptions {
 }
 
 impl BranchFilters {
-    fn from_list_options(repo: &Path, options: &BranchListOptions) -> OpsResult<Self> {
-        let no_filters = options.user.is_none()
-            && options.wave.is_none()
-            && options.stale.is_none()
-            && options.created_before.is_none()
-            && !options.merged;
-        let user = if no_filters && options.default_user_if_empty {
+    fn from_options(
+        repo: &Path,
+        options: &BranchFilterOptions,
+        default_user_if_empty: bool,
+    ) -> OpsResult<Self> {
+        let user = if !options.has_filter() && default_user_if_empty {
             Some(resolve_user(repo, "@me")?)
         } else {
             options
@@ -144,22 +150,6 @@ impl BranchFilters {
                 .map(|user| resolve_user(repo, user))
                 .transpose()?
         };
-        Self::new(
-            user,
-            options.wave.clone(),
-            options.stale.as_deref(),
-            options.created_before.as_deref(),
-            options.merged,
-            options.include_open_prs,
-        )
-    }
-
-    fn from_prune_options(repo: &Path, options: &BranchPruneOptions) -> OpsResult<Self> {
-        let user = options
-            .user
-            .as_deref()
-            .map(|user| resolve_user(repo, user))
-            .transpose()?;
         Self::new(
             user,
             options.wave.clone(),
@@ -196,11 +186,7 @@ fn collect_branch_candidates(
     let default_branch = get_default_branch(repo)?;
     let _ = fetch_origin_prune(repo);
     let refs = remote_branch_refs(repo)?;
-    let open_prs = if filters.include_open_prs {
-        HashSet::new()
-    } else {
-        open_pr_branches(repo)
-    };
+    let open_prs = open_pr_branches(repo);
     let current = current_branch(repo)?.unwrap_or_default();
     let branch_config = load_config(Some(repo))
         .ok()
@@ -252,7 +238,8 @@ fn collect_branch_candidates(
         }
 
         let open_pr = open_prs.contains(&item.branch);
-        let (protected, protect_reason) = protected_reason(&item.branch, &current, open_pr);
+        let (protected, protect_reason) =
+            protected_reason(&item.branch, &current, open_pr, filters.include_open_prs);
         candidates.push(BranchCandidate {
             branch: item.branch,
             author: item.author,
@@ -393,12 +380,17 @@ fn first_unique_commit_date(repo: &Path, branch: &str) -> OpsResult<Option<i64>>
         .transpose()
 }
 
-fn protected_reason(branch: &str, current: &str, open_pr: bool) -> (bool, Option<String>) {
+fn protected_reason(
+    branch: &str,
+    current: &str,
+    open_pr: bool,
+    include_open_prs: bool,
+) -> (bool, Option<String>) {
     let reason = if branch == "main" || branch == "master" {
         Some("base branch".to_string())
     } else if !current.is_empty() && branch == current {
         Some("current branch".to_string())
-    } else if open_pr {
+    } else if open_pr && !include_open_prs {
         Some("open PR".to_string())
     } else {
         None

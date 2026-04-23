@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 pub mod commands;
@@ -272,45 +272,13 @@ pub enum OpsCommand {
 pub enum BranchesCommand {
     /// Preview remote branches by filter
     List {
-        /// Branches authored by user (`@me` for current git user)
-        #[arg(long = "user")]
-        user: Option<String>,
-        /// Branches whose name includes this wave segment
-        #[arg(long = "wave")]
-        wave: Option<String>,
-        /// No commits in the last duration (for example 30d, 2w)
-        #[arg(long = "stale")]
-        stale: Option<String>,
-        /// First unique commit before YYYY-MM-DD
-        #[arg(long = "created-before")]
-        created_before: Option<String>,
-        /// Only branches already merged into main
-        #[arg(long = "merged")]
-        merged: bool,
-        /// Include branches with open PRs
-        #[arg(long = "include-open-prs")]
-        include_open_prs: bool,
+        #[command(flatten)]
+        filters: BranchFilterArgs,
     },
     /// Delete remote branches by filter
     Prune {
-        /// Branches authored by user (`@me` for current git user)
-        #[arg(long = "user")]
-        user: Option<String>,
-        /// Branches whose name includes this wave segment
-        #[arg(long = "wave")]
-        wave: Option<String>,
-        /// No commits in the last duration (for example 30d, 2w)
-        #[arg(long = "stale")]
-        stale: Option<String>,
-        /// First unique commit before YYYY-MM-DD
-        #[arg(long = "created-before")]
-        created_before: Option<String>,
-        /// Only branches already merged into main
-        #[arg(long = "merged")]
-        merged: bool,
-        /// Include branches with open PRs
-        #[arg(long = "include-open-prs")]
-        include_open_prs: bool,
+        #[command(flatten)]
+        filters: BranchFilterArgs,
         /// Show what would be pruned without deleting anything
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -318,6 +286,28 @@ pub enum BranchesCommand {
         #[arg(short = 'y', long = "yes")]
         yes: bool,
     },
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BranchFilterArgs {
+    /// Branches authored by user (`@me` for current git user)
+    #[arg(long = "user")]
+    pub user: Option<String>,
+    /// Branches whose name includes this wave segment
+    #[arg(long = "wave")]
+    pub wave: Option<String>,
+    /// No commits in the last duration (for example 30d, 2w)
+    #[arg(long = "stale")]
+    pub stale: Option<String>,
+    /// First unique commit before YYYY-MM-DD
+    #[arg(long = "created-before")]
+    pub created_before: Option<String>,
+    /// Only branches already merged into main
+    #[arg(long = "merged")]
+    pub merged: bool,
+    /// Include branches with open PRs
+    #[arg(long = "include-open-prs")]
+    pub include_open_prs: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -690,10 +680,13 @@ mod tests {
                 OpsCommand::Branches {
                     cmd:
                         BranchesCommand::List {
-                            user,
-                            stale,
-                            merged,
-                            ..
+                            filters:
+                                BranchFilterArgs {
+                                    user,
+                                    stale,
+                                    merged,
+                                    ..
+                                },
                         },
                 },
         }) = cli.command
@@ -724,7 +717,9 @@ mod tests {
                 OpsCommand::Branches {
                     cmd:
                         BranchesCommand::Prune {
-                            wave, dry_run, yes, ..
+                            filters: BranchFilterArgs { wave, .. },
+                            dry_run,
+                            yes,
                         },
                 },
         }) = cli.command

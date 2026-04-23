@@ -10,15 +10,16 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchesCommand, GstackCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand,
+    BranchFilterArgs, BranchesCommand, GstackCommand, OpsCommand, PmCommand, ReleaseCommand,
+    ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, list_branch_candidates,
     next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
-    release_run, release_status, release_tag, AbandonOptions, BranchListOptions,
-    BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
-    Progress, RebaseOptions, RotationResult,
+    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
+    BranchListOptions, BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions,
+    PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -625,50 +626,19 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     match cmd {
-        BranchesCommand::List {
-            user,
-            wave,
-            stale,
-            created_before,
-            merged,
-            include_open_prs,
-        } => {
-            let candidates = list_branch_candidates(
-                &repo_root,
-                &BranchListOptions {
-                    user: user.clone(),
-                    wave: wave.clone(),
-                    stale: stale.clone(),
-                    created_before: created_before.clone(),
-                    merged: *merged,
-                    include_open_prs: *include_open_prs,
-                    default_user_if_empty: true,
-                },
-            )?;
+        BranchesCommand::List { filters } => {
+            let candidates =
+                list_branch_candidates(&repo_root, &branch_list_options(filters, true))?;
             print_branch_candidates(&candidates);
         }
         BranchesCommand::Prune {
-            user,
-            wave,
-            stale,
-            created_before,
-            merged,
-            include_open_prs,
+            filters,
             dry_run,
             yes,
         } => {
             let candidates = prune_branches(
                 &repo_root,
-                &BranchPruneOptions {
-                    user: user.clone(),
-                    wave: wave.clone(),
-                    stale: stale.clone(),
-                    created_before: created_before.clone(),
-                    merged: *merged,
-                    include_open_prs: *include_open_prs,
-                    dry_run: *dry_run,
-                    yes: *yes,
-                },
+                &branch_prune_options(filters, *dry_run, *yes),
                 progress,
             )?;
             if *dry_run {
@@ -679,6 +649,39 @@ fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn branch_list_options(
+    filters: &BranchFilterArgs,
+    default_user_if_empty: bool,
+) -> BranchListOptions {
+    BranchListOptions {
+        filters: branch_filter_options(filters),
+        default_user_if_empty,
+    }
+}
+
+fn branch_prune_options(
+    filters: &BranchFilterArgs,
+    dry_run: bool,
+    yes: bool,
+) -> BranchPruneOptions {
+    BranchPruneOptions {
+        filters: branch_filter_options(filters),
+        dry_run,
+        yes,
+    }
+}
+
+fn branch_filter_options(filters: &BranchFilterArgs) -> BranchFilterOptions {
+    BranchFilterOptions {
+        user: filters.user.clone(),
+        wave: filters.wave.clone(),
+        stale: filters.stale.clone(),
+        created_before: filters.created_before.clone(),
+        merged: filters.merged,
+        include_open_prs: filters.include_open_prs,
+    }
 }
 
 fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
@@ -698,6 +701,8 @@ fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
                 "protected: {}",
                 candidate.protect_reason.as_deref().unwrap_or("safety")
             )
+        } else if candidate.open_pr {
+            "open PR".to_string()
         } else if candidate.merged {
             "merged".to_string()
         } else {

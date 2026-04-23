@@ -1,7 +1,8 @@
 use std::process::Command;
 
 use loopflow::ops::{
-    list_branch_candidates, prune_branches, BranchListOptions, BranchPruneOptions, NullProgress,
+    list_branch_candidates, prune_branches, BranchFilterOptions, BranchListOptions,
+    BranchPruneOptions, NullProgress,
 };
 use loopflow_test_support::TestRepo;
 
@@ -51,12 +52,7 @@ fn list_branch_candidates_defaults_to_current_git_user() {
     let candidates = list_branch_candidates(
         repo.path(),
         &BranchListOptions {
-            user: None,
-            wave: None,
-            stale: None,
-            created_before: None,
-            merged: false,
-            include_open_prs: false,
+            filters: BranchFilterOptions::default(),
             default_user_if_empty: true,
         },
     )
@@ -79,12 +75,11 @@ fn list_branch_candidates_filters_by_wave_segment() {
     let candidates = list_branch_candidates(
         repo.path(),
         &BranchListOptions {
-            user: Some("@me".to_string()),
-            wave: Some("redesign".to_string()),
-            stale: None,
-            created_before: None,
-            merged: false,
-            include_open_prs: false,
+            filters: BranchFilterOptions {
+                user: Some("@me".to_string()),
+                wave: Some("redesign".to_string()),
+                ..BranchFilterOptions::default()
+            },
             default_user_if_empty: false,
         },
     )
@@ -105,12 +100,11 @@ fn prune_branches_dry_run_leaves_remote_branch() {
     let candidates = prune_branches(
         repo.path(),
         &BranchPruneOptions {
-            user: Some("@me".to_string()),
-            wave: Some("cleanup".to_string()),
-            stale: None,
-            created_before: None,
-            merged: false,
-            include_open_prs: false,
+            filters: BranchFilterOptions {
+                user: Some("@me".to_string()),
+                wave: Some("cleanup".to_string()),
+                ..BranchFilterOptions::default()
+            },
             dry_run: true,
             yes: true,
         },
@@ -137,12 +131,11 @@ fn prune_branches_deletes_remote_branch_only() {
     let candidates = prune_branches(
         repo.path(),
         &BranchPruneOptions {
-            user: Some("@me".to_string()),
-            wave: Some("stale".to_string()),
-            stale: None,
-            created_before: None,
-            merged: false,
-            include_open_prs: false,
+            filters: BranchFilterOptions {
+                user: Some("@me".to_string()),
+                wave: Some("stale".to_string()),
+                ..BranchFilterOptions::default()
+            },
             dry_run: false,
             yes: true,
         },
@@ -169,12 +162,7 @@ fn prune_branches_requires_filter() {
     let err = prune_branches(
         repo.path(),
         &BranchPruneOptions {
-            user: None,
-            wave: None,
-            stale: None,
-            created_before: None,
-            merged: false,
-            include_open_prs: false,
+            filters: BranchFilterOptions::default(),
             dry_run: true,
             yes: true,
         },

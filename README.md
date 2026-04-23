@@ -47,9 +47,7 @@ flow: build
 workers: 2
 mode: loop
 crons:
-  - flow: wave-polish
-    schedule: "0 0 * * 1"
-  - flow: wave-reduce
+  - flow: sync
     schedule: "0 0 1 * *"
 
 # root wave — no workers, all work comes from crons
@@ -79,7 +77,7 @@ Every new wave ships with two default triggers: `repo` (whole repo → integrate
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf ops ingest --item 2-daemon-integrity.md   # move one roadmap item to scratch/
+lf op ingest --item 2-daemon-integrity.md    # move one roadmap item to scratch/
 lf design      # interactive design session
 lf gstack:office-hours   # run an imported gstack workstyle step
 lf npx:explain-code   # fetch from npx skills ecosystem and run
@@ -181,12 +179,12 @@ Flows can include mechanical ops items directly:
 | Flow | Steps |
 |------|-------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
-| `build-or-silent` | ingest → xor(build, silence) |
+| `build-or-silent` | op: pm pull → ingest → xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | gate → update-wave → deploy |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land → op: pm push-diff |
+| `deploy` | gate → op: land --create-pr → op: pm push-diff |
 | `ship` | refresh-plan → implement → gate → op: pr → op: land |
 | `incident` | debug → 5whys → code → deploy |
 
@@ -216,10 +214,10 @@ Branches route a flow based on an agent's assessment of the current state. Exact
 
 ```yaml
 # flow: garden
-- garden/scan
-- garden/assess
+- scan
+- assess
 - xor:
-    router: garden/assess
+    router: assess
     paths:
       act:
         flow: garden-act
@@ -336,7 +334,7 @@ lf op pm status            # show linked waves and local/remote counts
 
 Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
 
-PM-backed `lf ops ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
+PM-backed `lf op ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.
@@ -353,7 +351,7 @@ import loopflow.api as loopflow
 loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
 loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
+loopflow.create_wave("infra", repo=".", flow="govern-control", direction=["infra"], area=["rust/"])
 loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 ```

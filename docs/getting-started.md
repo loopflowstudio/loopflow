@@ -80,7 +80,8 @@ lf : "add type hints to utils.py"
 | `-c` | Clipboard content |
 | `--area PATH` | Scope to specific area |
 | `--diff` | Raw `git diff` output |
-| `-a` | Auto mode (no interaction) |
+| `-i` | Interactive mode |
+| `-b` | Batch/headless mode |
 
 ---
 
@@ -103,7 +104,7 @@ lf op pr                           # open PR
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `gate` | Ship-ready check: tests, quality, PR description |
-| `review` | Assess quality, fix issues |
+| `qa` | Thorough quality assessment of the current branch |
 | `lint` | Run ruff, fix issues |
 
 ### How steps chain
@@ -113,7 +114,7 @@ lf op pr                           # open PR
 | design | — | `scratch/<branch>.md` |
 | implement | `scratch/<branch>.md` | code |
 | gate | code, tests | code, PR description |
-| review | code | `scratch/review.md` |
+| qa | code | findings and fixes on branch |
 
 ### Named flows
 
@@ -121,10 +122,10 @@ Chain steps manually, or use a named flow:
 
 ```bash
 lf design && lf implement && lf gate    # manual chain
-lf build                                # same thing, named flow
+lf build                                # full design → code → demo/review → deploy loop
 ```
 
-Flows automate the handoffs. `build` runs implement → compress → lint → gate → update-wave.
+Flows automate the handoffs. `build` runs kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy.
 
 ### Custom steps
 

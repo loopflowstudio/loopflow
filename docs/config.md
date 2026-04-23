@@ -92,11 +92,10 @@ branch_names:
 Flows are YAML files in `.lf/flows/`:
 
 ```yaml
-# .lf/flows/build.yaml
+# .lf/flows/ship-api.yaml
 - implement
 - compress
 - gate
-- update-wave
 ```
 
 ---
@@ -196,7 +195,7 @@ Default model for all steps.
 
 | | |
 |---|---|
-| **CLI** | `lf review -m codex:o3` |
+| **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
 | **Default** | unset (resolution falls back to step defaults, then `claude:opus`) |
 
@@ -227,12 +226,12 @@ This list is additive across global and repo config.
 
 ### Run Mode
 
-Auto mode runs to completion. Interactive mode allows interruption and chat.
+Batch mode runs to completion. Interactive mode allows interruption and chat.
 
 | | |
 |---|---|
-| **CLI** | `-i` (interactive), `-a` (auto) |
-| **Default** | auto for all steps |
+| **CLI** | `-i` (interactive), `-b` (batch/headless) |
+| **Default** | batch for all steps |
 
 Set a step's default mode in its frontmatter:
 

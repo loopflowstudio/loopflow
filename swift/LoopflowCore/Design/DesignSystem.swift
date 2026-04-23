@@ -71,6 +71,10 @@ public enum DesignAnimation {
     public static func spring(_ reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7)
     }
+
+    public static func pulse(_ reduceMotion: Bool, duration: Double = 1.2) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: duration).repeatForever(autoreverses: true)
+    }
 }
 
 public extension View {

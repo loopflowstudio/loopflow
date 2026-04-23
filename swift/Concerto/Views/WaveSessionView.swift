@@ -48,6 +48,7 @@ struct WaveSessionView: View {
                                 awaitingSessionJoin: state.awaitingSessionJoin
                             )
                             .padding(.top, Spacing.sm)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
 
                         Color.clear
@@ -58,6 +59,7 @@ struct WaveSessionView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Spacing.lg)
+                    .animation(DesignAnimation.standard(reduceMotion), value: state.isLoading)
                 }
                 .background(palette.background)
                 .overlay {
@@ -387,7 +389,7 @@ private struct SessionThinkingIndicator: View {
                     .onAppear {
                         guard !reduceMotion else { return }
                         isPulsing = false
-                        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                        withAnimation(DesignAnimation.pulse(reduceMotion, duration: 1.2)) {
                             isPulsing = true
                         }
                     }
@@ -447,7 +449,7 @@ struct StreamingCursorView: View {
                     return
                 }
                 isVisible = false
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                withAnimation(DesignAnimation.pulse(reduceMotion, duration: 0.6)) {
                     isVisible = true
                 }
             }
@@ -555,6 +557,7 @@ private struct CopyButton: View {
 private struct TranscriptItemCardView: View {
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let item: TranscriptItem
     let isExpanded: Bool
@@ -591,7 +594,9 @@ private struct TranscriptItemCardView: View {
 
                 if card.detail != nil {
                     Button {
-                        onToggleExpanded()
+                        withAnimation(DesignAnimation.standard(reduceMotion)) {
+                            onToggleExpanded()
+                        }
                     } label: {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(Typography.caption())
@@ -606,6 +611,7 @@ private struct TranscriptItemCardView: View {
                 if card.type == .file {
                     DiffLinesView(diff: detail)
                         .hoverTracking { hovering in isHoveringDetail = hovering }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 } else {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         HStack {
@@ -633,6 +639,7 @@ private struct TranscriptItemCardView: View {
                     .hoverTracking { hovering in
                         isHoveringDetail = hovering
                     }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -644,6 +651,7 @@ private struct TranscriptItemCardView: View {
 
 private struct ToolRunView: View {
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let items: [TranscriptItem]
     let isExpanded: Bool
@@ -653,7 +661,9 @@ private struct ToolRunView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                onToggleRun()
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
+                    onToggleRun()
+                }
             } label: {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -683,6 +693,7 @@ private struct ToolRunView: View {
                         )
                     }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }

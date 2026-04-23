@@ -1,14 +1,33 @@
 # Open questions — break-test
 
-## debug invocation with no error input
+## debug invocation with no error input (recurring)
 
-The `debug` step was invoked headlessly with:
-- No clipboard content (no `-c` output in prompt)
-- No user-provided error text
-- Clean git status on branch `jack-heart.break-test.20260423_1312`
+`lf debug` has now been invoked headlessly **twice** with no error input:
 
-The step instructs "If clipboard is empty or no -c flag, ask what error to debug" — but headless mode forbids questions.
+- 2026-04-23 on branch `jack-heart.break-test.20260423_1312`
+- 2026-04-23 on branch `jack-heart.break-test.20260423_1451` (current)
 
-**Assumption:** This is an intentional break-test probe. The correct behavior is to exit cleanly and surface the missing-input condition here rather than fabricate an error to debug.
+Each run: no clipboard content, no `-c` output in the prompt, no inline error, clean git tree.
 
-**Recommendation for the step itself:** `code/debug.md` should have an explicit headless branch — when neither clipboard nor an inline error is provided, emit a structured "no input" signal and exit 0 rather than rely on a question that cannot be asked. Current wording conflates interactive and headless paths.
+The step (`code/debug.md`) says: *"If clipboard is empty or no -c flag, ask what error to debug."* Headless mode forbids questions — the two paths are incompatible.
+
+### Assumption
+
+This is an intentional break-test probe. Correct behavior in headless mode is to exit cleanly and surface the missing-input condition here rather than fabricate an error to debug.
+
+### Recommendation
+
+`code/debug.md` needs an explicit headless branch. Proposed shape:
+
+```
+If invoked headlessly with no clipboard and no inline error:
+  - Write a short note to scratch/questions.md explaining that debug
+    needs an error input (clipboard via -c, or a user-provided message).
+  - Exit 0. Do not fabricate an error to debug.
+```
+
+The current wording conflates interactive and headless paths, which forces the agent to either (a) invent an error, (b) stall, or (c) freelance a reply like this one. A structured "no input" signal is the only well-defined answer.
+
+### Signal strength
+
+Because this is now the second occurrence on a fresh break-test branch, the fix is probably worth scheduling rather than continuing to re-surface the same question each run.

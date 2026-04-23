@@ -386,7 +386,7 @@ func attentionDesignPreviewText(
 }
 
 func attentionMutationSummary(_ context: InteractiveAttentionContext) -> String? {
-    guard context.step == "wave/review",
+    guard context.step == "review",
           let summary = context.mutationSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
           !summary.isEmpty
     else {

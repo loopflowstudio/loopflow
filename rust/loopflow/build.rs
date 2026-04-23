@@ -12,23 +12,37 @@ fn main() {
     let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    generate_map(
-        &builtins_dir.join("steps"),
+    // Builtins are organized as `<category>/<kind>/*.ext` where category is
+    // one of build/govern/ops and kind is flow/step/prompt.
+    generate_kind_map(
+        &builtins_dir,
+        "step",
         "md",
         "BUILTIN_STEPS",
         &out_dir.join("builtin_steps.rs"),
     );
 
-    generate_map(
-        &builtins_dir.join("flows"),
+    generate_kind_map(
+        &builtins_dir,
+        "flow",
         "yaml",
         "BUILTIN_FLOWS",
         &out_dir.join("builtin_flows.rs"),
     );
 
-    generate_flow_categories(
-        &builtins_dir.join("flows"),
+    generate_category_map(
+        &builtins_dir,
+        "flow",
+        "yaml",
+        "BUILTIN_FLOW_CATEGORIES",
         &out_dir.join("builtin_flow_categories.rs"),
+    );
+    generate_category_map(
+        &builtins_dir,
+        "step",
+        "md",
+        "BUILTIN_STEP_CATEGORIES",
+        &out_dir.join("builtin_step_categories.rs"),
     );
 
     generate_map(
@@ -44,7 +58,7 @@ fn main() {
     );
 
     generate_map(
-        &builtins_dir.join("ops"),
+        &builtins_dir.join("ops/prompt"),
         "md",
         "BUILTIN_OPS_PROMPTS",
         &out_dir.join("builtin_ops_prompts.rs"),
@@ -60,6 +74,32 @@ fn main() {
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     collect_files(dir, extension, &mut entries);
+    emit_map(&mut entries, map_name, out_path);
+}
+
+/// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
+/// for each top-level category directory. Duplicate file stems across
+/// categories panic — step and flow names are one flat namespace.
+fn generate_kind_map(
+    builtins_dir: &Path,
+    kind: &str,
+    extension: &str,
+    map_name: &str,
+    out_path: &Path,
+) {
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    if let Ok(cats) = fs::read_dir(builtins_dir) {
+        for cat in cats.flatten() {
+            let kind_dir = cat.path().join(kind);
+            if kind_dir.is_dir() {
+                collect_files(&kind_dir, extension, &mut entries);
+            }
+        }
+    }
+    emit_map(&mut entries, map_name, out_path);
+}
+
+fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) {
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     for pair in entries.windows(2) {
@@ -81,9 +121,7 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
     .expect("write to String");
     writeln!(code, "    let mut m = std::collections::HashMap::new();").expect("write to String");
 
-    for (name, path) in &entries {
-        // include_str! needs absolute paths — generated code lives in OUT_DIR,
-        // not the source tree.
+    for (name, path) in entries.iter() {
         let abs = path
             .canonicalize()
             .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
@@ -101,65 +139,74 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
-/// Generate `BUILTIN_FLOW_CATEGORIES` from the flows directory structure.
-/// Each subdirectory becomes a category (title-cased), containing its flow names.
-fn generate_flow_categories(flows_dir: &Path, out_path: &Path) {
+/// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
+/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased.
+fn generate_category_map(
+    builtins_dir: &Path,
+    kind: &str,
+    extension: &str,
+    map_name: &str,
+    out_path: &Path,
+) {
     let mut categories: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
 
-    let Ok(entries) = fs::read_dir(flows_dir) else {
+    let Ok(entries) = fs::read_dir(builtins_dir) else {
         fs::write(
             out_path,
-            "pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &[];\n",
+            format!("pub const {map_name}: &[(&str, &[&str])] = &[];\n"),
         )
-        .expect("write empty flow categories");
+        .expect("write empty category map");
         return;
     };
 
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+        let cat_path = entry.path();
+        if !cat_path.is_dir() {
             continue;
         }
-        let dir_name = path
+        let kind_dir = cat_path.join(kind);
+        if !kind_dir.is_dir() {
+            continue;
+        }
+        let cat_name = cat_path
             .file_name()
             .expect("dir has no name")
             .to_string_lossy()
             .to_string();
-        let category = title_case(&dir_name);
+        let category = title_case(&cat_name);
 
-        let mut flows = Vec::new();
-        if let Ok(files) = fs::read_dir(&path) {
+        let mut names = Vec::new();
+        if let Ok(files) = fs::read_dir(&kind_dir) {
             for file in files.flatten() {
                 let file_path = file.path();
-                if file_path
-                    .extension()
-                    .is_some_and(|e| e == "yaml" || e == "yml")
-                {
+                let matches_ext = match extension {
+                    "yaml" => file_path
+                        .extension()
+                        .is_some_and(|e| e == "yaml" || e == "yml"),
+                    other => file_path.extension().is_some_and(|e| e == other),
+                };
+                if matches_ext {
                     let name = file_path
                         .file_stem()
                         .expect("file has no stem")
                         .to_string_lossy()
                         .to_string();
-                    flows.push(name);
+                    names.push(name);
                 }
             }
         }
-        flows.sort();
-        if !flows.is_empty() {
-            categories.insert(category, flows);
+        names.sort();
+        if !names.is_empty() {
+            categories.insert(category, names);
         }
     }
 
     let mut code = String::new();
-    writeln!(
-        code,
-        "pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &["
-    )
-    .expect("write to String");
-    for (category, flows) in &categories {
-        let flow_list: Vec<String> = flows.iter().map(|f| format!("\"{f}\"")).collect();
-        writeln!(code, "    (\"{category}\", &[{}]),", flow_list.join(", "))
+    writeln!(code, "pub const {map_name}: &[(&str, &[&str])] = &[").expect("write to String");
+    for (category, names) in &categories {
+        let item_list: Vec<String> = names.iter().map(|f| format!("\"{f}\"")).collect();
+        writeln!(code, "    (\"{category}\", &[{}]),", item_list.join(", "))
             .expect("write to String");
     }
     writeln!(code, "];").expect("write to String");

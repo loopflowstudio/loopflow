@@ -58,6 +58,7 @@ struct WaveSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             analyticsRow
+            flowsRow
 
             if repoState.isActivelyConnecting {
                 connectingState
@@ -180,6 +181,7 @@ struct WaveSidebar: View {
     private var analyticsRow: some View {
         Button {
             repoState.selectedWaveId = nil
+            repoState.showingFlows = false
             repoState.showingAnalytics = true
         } label: {
             HStack(spacing: Spacing.sm) {
@@ -201,6 +203,33 @@ struct WaveSidebar: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("sidebar-analytics")
+    }
+
+    private var flowsRow: some View {
+        Button {
+            repoState.selectedWaveId = nil
+            repoState.showingAnalytics = false
+            repoState.showingFlows = true
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(Typography.caption())
+                Text("Flows")
+                    .font(Typography.caption())
+                Spacer()
+            }
+            .foregroundStyle(repoState.showingFlows ? .white : .white.opacity(0.8))
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(repoState.showingFlows ? .white.opacity(0.14) : .clear)
+            )
+            .padding(.horizontal, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar-flows")
     }
 
     private var createButtonLabel: some View {
@@ -389,6 +418,7 @@ struct WaveSidebar: View {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
         repoState.showingAnalytics = false
+        repoState.showingFlows = false
     }
 
     private func openDesignEntry() {

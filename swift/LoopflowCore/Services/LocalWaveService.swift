@@ -341,6 +341,24 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - Catalog
+
+    /// Fetch the flow + step catalog. Used by the Flows view to render the
+    /// builtin catalog and compute "used by" parents.
+    public func fetchCatalog(repo: String? = nil) async throws -> Catalog {
+        var components = URLComponents(
+            url: apiBaseURL.appendingPathComponent("catalog"),
+            resolvingAgainstBaseURL: false
+        )!
+        if let repo, !repo.isEmpty {
+            components.queryItems = [URLQueryItem(name: "repo", value: repo)]
+        }
+        let (data, response) = try await performGet(components.url!)
+        try requireOKStatus(response, data: data)
+        let envelope = try decodeResponse(CatalogResponse.self, from: data)
+        return envelope.result
+    }
+
     // MARK: - Provider auth
 
     public func listAuthProviders() async throws -> [AuthProviderStatus] {

@@ -208,6 +208,15 @@ Flows can include mechanical ops items directly:
 | `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream → op: pm pull |
 
+### Browse the catalog
+
+```bash
+lfd serve
+curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
+```
+
+Open **Flows** in Concerto to browse the same catalog visually. The left pane groups flows and steps by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or step.
+
 ### Branches (xor)
 
 Branches route a flow based on an agent's assessment of the current state. Exactly one path runs.

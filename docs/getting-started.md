@@ -169,7 +169,7 @@ loopflow.run_wave("shipper")
 
 A wave is **area × direction × flow**. The wave picks a task, runs the flow, opens a PR, and loops. Triggers fire flows in response to signals (repo changes, other waves completing, CI failures).
 
-**Concerto** (macOS) is the native wave experience — create waves, monitor progress, review PRs. Requires `lfd`.
+**Concerto** (macOS) is the native wave experience — create waves, monitor progress, browse flows, review PRs. Requires `lfd`.
 
 **lfq** is the CLI equivalent — same `lfd` backend, terminal interface.
 
@@ -178,6 +178,14 @@ lfq list             # list waves
 lfq logs shipper     # tail agent output
 lfq stop shipper     # stop a wave
 ```
+
+### Browse flows
+
+1. Open **Flows** in Concerto.
+2. Expand `build` → `build`.
+3. Click `gate` to see every parent flow that reaches it.
+
+`lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/steps/*.md` overrides in the repo.
 
 You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, Concerto and lfq pick them up and run them.
 

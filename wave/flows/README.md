@@ -20,7 +20,7 @@ Not the individual steps (they live in their owning waves), not the daemon execu
 
 **Tune placement in anger.** The reorg moved files; whether each flow lives in the right bucket only becomes clear once flows get invoked in real work. Expect placement adjustments as a continuing concern, not a one-time act.
 
-**One source of truth.** The Rust engine parses flows into a structured model. `lfd` exposes it via `GET /catalog`. Swift consumes the DTO. No parallel YAML parsers. No client-side structural inference beyond the "used by" upward walk.
+**One source of truth.** The Rust engine parses flows into a structured model. `lfd` exposes it via `GET /v0/catalog`. Swift consumes the DTO. No parallel YAML parsers. No client-side structural inference beyond the "used by" upward walk.
 
 ## Goals
 

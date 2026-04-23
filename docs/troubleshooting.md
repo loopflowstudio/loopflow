@@ -29,7 +29,7 @@ Run in foreground to debug:
 lfd serve
 ```
 
-## Task hangs in auto mode
+## Task hangs in batch mode
 
 **Symptom:** Task starts but never completes.
 

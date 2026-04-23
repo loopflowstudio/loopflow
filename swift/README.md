@@ -166,6 +166,16 @@ Selected waves now open into a multiplexer workspace:
 - Waves without worktrees still keep roadmap/readme/detail panes available; only terminal-style panes show a worktree placeholder
 - Interactive sessions still take over the workspace when a flow needs input
 
+## Flow Catalog
+
+Repo windows also have a **Flows** tab:
+
+- Left pane groups flows and steps into **Build**, **Govern**, and **Ops**
+- Expand a flow inline to see nested flows, xor branches, and loops
+- Click any flow or step to see every parent flow that uses it
+- Repo `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides replace builtins in place and get repo-source styling
+- `LoopflowCore/Models/Catalog.swift` mirrors `GET /v0/catalog`; Concerto does not parse flow YAML on the client
+
 ## Session quote replies (macOS)
 
 - Select text in an assistant bubble to open the reply popover

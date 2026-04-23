@@ -97,6 +97,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `expand` | Find expansion opportunities |
 | `iterate` | Read research, write design to address it |
 | `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
+| `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `5whys` | Root cause analysis on a bug fix |
 
@@ -123,6 +124,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `code-review` | Walk through structural and architectural decisions |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
+| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 
 ### Garden steps (`garden/`)
 
@@ -195,6 +197,7 @@ Flows can include mechanical ops items directly:
 | `pair` | design → code |
 | `deploy` | gate → op: land → op: pm push-diff |
 | `sync` | rebase → integrate-upstream → op: pm pull |
+| `ship` | refresh-plan → implement → gate → op: pr → op: land |
 
 ### Build flows (`build/`)
 
@@ -340,6 +343,8 @@ notion:
 ```
 
 ```bash
+lf op branches list --user @me --stale 60d   # preview stale remote branches
+lf op branches prune --user @me --stale 60d  # delete after confirmation
 lf op pm init pm           # connect/create one wave project, link items, write IDs
 lf op pm init --all        # bootstrap every wave/ project on the shared PM team
 lf op pm pull pm           # rewrite one wave from PM; remote changes win

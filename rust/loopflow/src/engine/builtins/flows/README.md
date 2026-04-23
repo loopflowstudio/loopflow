@@ -12,6 +12,7 @@ Inner loops — composable building blocks that don't land.
 | `pair` | design → code | Interactive design then build |
 | `deploy` | gate → op: land → op: pm push-diff | Gate, land PR, push PM changes |
 | `sync` | rebase → integrate-upstream → op: pm pull | Rebase and pull fresh PM state |
+| `ship` | refresh-plan → implement → gate → op: pr → op: land | Finish the current branch and land it |
 
 ## Build flows (`build/`)
 

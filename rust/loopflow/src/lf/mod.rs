@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 pub mod commands;
@@ -222,6 +222,11 @@ pub enum OpsCommand {
         #[arg(short = 'f', long)]
         force: bool,
     },
+    /// Remote branch operations
+    Branches {
+        #[command(subcommand)]
+        cmd: BranchesCommand,
+    },
     /// Worktree operations
     Wt {
         #[command(subcommand)]
@@ -261,6 +266,48 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: GstackCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BranchesCommand {
+    /// Preview remote branches by filter
+    List {
+        #[command(flatten)]
+        filters: BranchFilterArgs,
+    },
+    /// Delete remote branches by filter
+    Prune {
+        #[command(flatten)]
+        filters: BranchFilterArgs,
+        /// Show what would be pruned without deleting anything
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Skip confirmation
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BranchFilterArgs {
+    /// Branches authored by user (`@me` for current git user)
+    #[arg(long = "user")]
+    pub user: Option<String>,
+    /// Branches whose name includes this wave segment
+    #[arg(long = "wave")]
+    pub wave: Option<String>,
+    /// No commits in the last duration (for example 30d, 2w)
+    #[arg(long = "stale")]
+    pub stale: Option<String>,
+    /// First unique commit before YYYY-MM-DD
+    #[arg(long = "created-before")]
+    pub created_before: Option<String>,
+    /// Only branches already merged into main
+    #[arg(long = "merged")]
+    pub merged: bool,
+    /// Include branches with open PRs
+    #[arg(long = "include-open-prs")]
+    pub include_open_prs: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -620,5 +667,68 @@ mod tests {
         assert_eq!(wave, None);
         assert_eq!(wave_flag, None);
         assert!(all);
+    }
+
+    #[test]
+    fn branches_list_accepts_filters() {
+        let cli = Cli::try_parse_from([
+            "lf", "op", "branches", "list", "--user", "@me", "--stale", "60d",
+        ])
+        .expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Branches {
+                    cmd:
+                        BranchesCommand::List {
+                            filters:
+                                BranchFilterArgs {
+                                    user,
+                                    stale,
+                                    merged,
+                                    ..
+                                },
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected branches list command");
+        };
+
+        assert_eq!(user.as_deref(), Some("@me"));
+        assert_eq!(stale.as_deref(), Some("60d"));
+        assert!(!merged);
+    }
+
+    #[test]
+    fn branches_prune_accepts_yes_and_dry_run() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "op",
+            "branches",
+            "prune",
+            "--wave",
+            "redesign",
+            "--dry-run",
+            "-y",
+        ])
+        .expect("parse");
+        let Some(Commands::Op {
+            op:
+                OpsCommand::Branches {
+                    cmd:
+                        BranchesCommand::Prune {
+                            filters: BranchFilterArgs { wave, .. },
+                            dry_run,
+                            yes,
+                        },
+                },
+        }) = cli.command
+        else {
+            panic!("expected branches prune command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("redesign"));
+        assert!(dry_run);
+        assert!(yes);
     }
 }

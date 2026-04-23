@@ -249,11 +249,13 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
+        | OpsCommand::Branches { .. }
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
         | OpsCommand::Auth { .. }
         | OpsCommand::Gstack { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/wt/shell/auth/gstack commands".to_string(),
+            "ops item does not support cp/doctor/branches/wt/shell/auth/gstack commands"
+                .to_string(),
         )),
     }
 }

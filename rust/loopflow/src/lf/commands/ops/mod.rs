@@ -9,13 +9,17 @@ use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptI
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
-use crate::lf::{GstackCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand, WtCommand};
+use crate::lf::{
+    BranchFilterArgs, BranchesCommand, GstackCommand, OpsCommand, PmCommand, ReleaseCommand,
+    ShellCommand, WtCommand,
+};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
-    Progress, RebaseOptions, RotationResult,
+    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, list_branch_candidates,
+    next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
+    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
+    BranchListOptions, BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions,
+    PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -68,6 +72,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         OpsCommand::Abandon { force, branch } => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
+        OpsCommand::Branches { cmd } => run_branches(cmd, &progress),
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
         OpsCommand::Release { cmd } => match cmd {
@@ -616,6 +621,104 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
         if status.release_exists { "yes" } else { "no" }
     );
     Ok(())
+}
+
+fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    match cmd {
+        BranchesCommand::List { filters } => {
+            let candidates =
+                list_branch_candidates(&repo_root, &branch_list_options(filters, true))?;
+            print_branch_candidates(&candidates);
+        }
+        BranchesCommand::Prune {
+            filters,
+            dry_run,
+            yes,
+        } => {
+            let candidates = prune_branches(
+                &repo_root,
+                &branch_prune_options(filters, *dry_run, *yes),
+                progress,
+            )?;
+            if *dry_run {
+                print_branch_candidates(&candidates);
+            } else if !candidates.is_empty() {
+                println!("Deleted {} remote branch(es).", candidates.len());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn branch_list_options(
+    filters: &BranchFilterArgs,
+    default_user_if_empty: bool,
+) -> BranchListOptions {
+    BranchListOptions {
+        filters: branch_filter_options(filters),
+        default_user_if_empty,
+    }
+}
+
+fn branch_prune_options(
+    filters: &BranchFilterArgs,
+    dry_run: bool,
+    yes: bool,
+) -> BranchPruneOptions {
+    BranchPruneOptions {
+        filters: branch_filter_options(filters),
+        dry_run,
+        yes,
+    }
+}
+
+fn branch_filter_options(filters: &BranchFilterArgs) -> BranchFilterOptions {
+    BranchFilterOptions {
+        user: filters.user.clone(),
+        wave: filters.wave.clone(),
+        stale: filters.stale.clone(),
+        created_before: filters.created_before.clone(),
+        merged: filters.merged,
+        include_open_prs: filters.include_open_prs,
+    }
+}
+
+fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
+    if candidates.is_empty() {
+        println!("No remote branches match.");
+        return;
+    }
+
+    let max_branch = candidates
+        .iter()
+        .map(|candidate| candidate.branch.len())
+        .max()
+        .unwrap_or(0);
+    for candidate in candidates {
+        let status = if candidate.protected {
+            format!(
+                "protected: {}",
+                candidate.protect_reason.as_deref().unwrap_or("safety")
+            )
+        } else if candidate.open_pr {
+            "open PR".to_string()
+        } else if candidate.merged {
+            "merged".to_string()
+        } else {
+            "active".to_string()
+        };
+        let wave = candidate.wave.as_deref().unwrap_or("-");
+        println!(
+            "{:<width$}  {:>4}d  {}  {:<12}  {}",
+            candidate.branch,
+            candidate.age_days,
+            candidate.last_commit_date,
+            status,
+            wave,
+            width = max_branch,
+        );
+    }
 }
 
 fn run_worktree(cmd: &WtCommand) -> Result<()> {

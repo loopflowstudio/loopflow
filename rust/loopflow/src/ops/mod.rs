@@ -1,4 +1,5 @@
 mod abandon;
+mod branches;
 mod combine;
 mod commit;
 mod error;
@@ -16,6 +17,10 @@ pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
+pub use branches::{
+    list_branch_candidates, prune_branches, BranchCandidate, BranchFilterOptions,
+    BranchListOptions, BranchPruneOptions,
+};
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};

@@ -9,8 +9,8 @@ use tracing::warn;
 use crate::engine::config::AsanaConfig;
 use crate::lfd::pm::asana_html::{asana_html_to_markdown, markdown_to_asana_html};
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
-    RATE_LIMIT_RETRIES,
+    sort_pm_items, PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult,
+    PriorityBucket, RATE_LIMIT_RETRIES,
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
@@ -372,8 +372,7 @@ impl PmProvider for AsanaClient {
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         let path = format!("/projects/{project_id}/tasks");
         let mut offset = None;
-        let mut items = Vec::new();
-        let mut response_index = 0usize;
+        let mut items: Vec<PmItem> = Vec::new();
 
         loop {
             let page_offset = offset.clone();
@@ -388,19 +387,15 @@ impl PmProvider for AsanaClient {
                 .await?;
 
             for task in response.data {
-                items.push((response_index, task.into_pm_item()));
-                response_index += 1;
+                let mut item = task.into_pm_item();
+                item.rank = Some(items.len() as f64);
+                items.push(item);
             }
 
             offset = response.next_page.and_then(|page| page.offset);
             if offset.is_none() {
-                items.sort_by(|left, right| {
-                    left.1
-                        .rank
-                        .cmp(&right.1.rank)
-                        .then_with(|| left.0.cmp(&right.0))
-                });
-                return Ok(items.into_iter().map(|(_, item)| item).collect());
+                items.sort_by(sort_pm_items);
+                return Ok(items);
             }
         }
     }
@@ -604,7 +599,7 @@ struct AsanaGid {
 
 impl AsanaTask {
     fn into_pm_item(self) -> PmItem {
-        let rank = self.priority_bucket().rank();
+        let priority = self.priority_bucket();
         let assignee = self.assignee.map(|a| a.gid);
         let description = if self.html_notes.is_empty() {
             self.notes
@@ -616,7 +611,8 @@ impl AsanaTask {
             id: self.gid,
             name: self.name,
             description,
-            rank,
+            priority,
+            rank: None,
             completed: self.completed,
             assignee,
         }
@@ -1123,7 +1119,8 @@ mod tests {
                     id: "task-2".to_string(),
                     name: "Second".to_string(),
                     description: "**two**".to_string(),
-                    rank: 0,
+                    priority: PriorityBucket::Urgent,
+                    rank: Some(1.0),
                     completed: true,
                     assignee: None,
                 },
@@ -1131,7 +1128,8 @@ mod tests {
                     id: "task-3".to_string(),
                     name: "Third".to_string(),
                     description: "three".to_string(),
-                    rank: 1,
+                    priority: PriorityBucket::High,
+                    rank: Some(2.0),
                     completed: false,
                     assignee: None,
                 },
@@ -1139,7 +1137,8 @@ mod tests {
                     id: "task-1".to_string(),
                     name: "First".to_string(),
                     description: "one".to_string(),
-                    rank: 2,
+                    priority: PriorityBucket::Medium,
+                    rank: Some(0.0),
                     completed: false,
                     assignee: None,
                 },

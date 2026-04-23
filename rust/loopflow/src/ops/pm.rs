@@ -11,6 +11,8 @@ use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::notion::NotionClient;
+#[cfg(test)]
+use crate::lfd::pm::PriorityBucket;
 use crate::lfd::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
     RoadmapItemFrontmatter,
@@ -589,7 +591,11 @@ async fn bootstrap_read_write_provider(
         if matched_remote_ids.contains(&remote_item.id) {
             continue;
         }
-        let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
+        let filename = next_remote_filename(
+            args.wave_dir,
+            remote_item.priority.rank(),
+            &remote_item.name,
+        );
         write_remote_item(&args.wave_dir.join(&filename), remote_item, ctx.provider)?;
         created_local.push(filename);
     }
@@ -844,7 +850,8 @@ async fn pm_import_async(
             if existing_ids.contains(&remote_item.id) {
                 continue; // additive only — skip existing
             }
-            let filename = next_remote_filename(&wave_dir, remote_item.rank, &remote_item.name);
+            let filename =
+                next_remote_filename(&wave_dir, remote_item.priority.rank(), &remote_item.name);
             write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
             items_created += 1;
         }
@@ -1343,7 +1350,7 @@ async fn pm_sync_async(
             (None, None, Some(remote_item)) => {
                 let filename = format!(
                     "{:02}-{}.md",
-                    remote_item.rank + 1,
+                    remote_item.priority.rank() + 1,
                     slugify(&remote_item.name)
                 );
                 write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
@@ -1459,7 +1466,7 @@ fn read_local_items(
 
 fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapItemDocument {
     let mut frontmatter = RoadmapItemFrontmatter::default();
-    frontmatter.set_priority_rank(item.rank);
+    frontmatter.set_priority_rank(item.priority, item.rank);
     frontmatter.set_id(provider, item.id.clone());
 
     RoadmapItemDocument {
@@ -1779,7 +1786,8 @@ mod tests {
                 id: id.clone(),
                 name: item.name.clone(),
                 description: item.description.clone(),
-                rank: item.rank,
+                priority: PriorityBucket::from_rank(item.rank),
+                rank: None,
                 completed: false,
                 assignee: None,
             });
@@ -1835,7 +1843,8 @@ mod tests {
             id: "item-42".to_string(),
             name: "Build the thing".to_string(),
             description: "Some details here.".to_string(),
-            rank: 0,
+            priority: PriorityBucket::Urgent,
+            rank: Some(1.5),
             completed: false,
             assignee: None,
         };
@@ -1844,6 +1853,8 @@ mod tests {
         assert_eq!(doc.frontmatter.linear_id.as_deref(), Some("item-42"));
         assert_eq!(doc.frontmatter.asana_id, None);
         assert_eq!(doc.frontmatter.notion_id, None);
+        assert_eq!(doc.frontmatter.priority, Some(PriorityBucket::Urgent));
+        assert_eq!(doc.frontmatter.rank, Some(1.5));
         assert!(doc.body.starts_with("# Build the thing\n"));
         assert!(doc.body.contains("Some details here."));
     }
@@ -1854,7 +1865,8 @@ mod tests {
             id: "item-1".to_string(),
             name: "Empty".to_string(),
             description: String::new(),
-            rank: 0,
+            priority: PriorityBucket::Urgent,
+            rank: None,
             completed: false,
             assignee: None,
         };
@@ -1964,7 +1976,8 @@ mod tests {
                         id: "lin-1".to_string(),
                         name: "Existing task".to_string(),
                         description: "Remote body should not replace local.".to_string(),
-                        rank: 0,
+                        priority: PriorityBucket::Urgent,
+                        rank: None,
                         completed: false,
                         assignee: None,
                     },
@@ -1972,7 +1985,8 @@ mod tests {
                         id: "lin-2".to_string(),
                         name: "Second task".to_string(),
                         description: "Imported from remote.".to_string(),
-                        rank: 1,
+                        priority: PriorityBucket::High,
+                        rank: None,
                         completed: false,
                         assignee: None,
                     },
@@ -2121,7 +2135,8 @@ mod tests {
                 id: "lin-2".to_string(),
                 name: "Unchanged".to_string(),
                 description: "Same remote text.".to_string(),
-                rank: 1,
+                priority: PriorityBucket::High,
+                rank: None,
                 completed: false,
                 assignee: None,
             },
@@ -2129,7 +2144,8 @@ mod tests {
                 id: "lin-3".to_string(),
                 name: "Old title".to_string(),
                 description: "Old remote text.".to_string(),
-                rank: 2,
+                priority: PriorityBucket::Medium,
+                rank: None,
                 completed: false,
                 assignee: None,
             },
@@ -2165,7 +2181,7 @@ mod tests {
             item.id == "lin-100"
                 && item.name == "New item"
                 && item.description == "Fresh local details."
-                && item.rank == 0
+                && item.priority == PriorityBucket::Urgent
         }));
         assert!(items.iter().any(|item| {
             item.id == "lin-3"
@@ -2181,7 +2197,8 @@ mod tests {
             id: "lin-1".to_string(),
             name: "Existing".to_string(),
             description: "Remote body.".to_string(),
-            rank: 0,
+            priority: PriorityBucket::Urgent,
+            rank: None,
             completed: false,
             assignee: None,
         };
@@ -2209,7 +2226,8 @@ mod tests {
                 id: "lin-2".to_string(),
                 name: "Remote second".to_string(),
                 description: "Pulled from PM.".to_string(),
-                rank: 1,
+                priority: PriorityBucket::High,
+                rank: Some(20.0),
                 completed: false,
                 assignee: None,
             },
@@ -2217,7 +2235,8 @@ mod tests {
                 id: "lin-1".to_string(),
                 name: "Remote first".to_string(),
                 description: "Higher priority.".to_string(),
-                rank: 0,
+                priority: PriorityBucket::Urgent,
+                rank: Some(10.0),
                 completed: false,
                 assignee: None,
             },

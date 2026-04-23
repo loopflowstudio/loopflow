@@ -109,12 +109,16 @@ impl PmConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PmItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub rank: u32,
+    /// Priority bucket (Urgent/High/Medium/Low) extracted from the provider.
+    pub priority: PriorityBucket,
+    /// Within-bucket sort key: smaller values sort earlier. `None` when the
+    /// provider has no native ordering signal to preserve.
+    pub rank: Option<f64>,
     pub completed: bool,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
@@ -163,6 +167,21 @@ pub enum PmError {
 }
 
 pub type PmResult<T> = Result<T, PmError>;
+
+/// Sort items by priority bucket, then by the provider's fractional rank,
+/// then by name for deterministic ties. Items without a rank sort after
+/// items with a rank in the same bucket.
+pub(crate) fn sort_pm_items(left: &PmItem, right: &PmItem) -> std::cmp::Ordering {
+    left.priority
+        .order()
+        .cmp(&right.priority.order())
+        .then_with(|| {
+            left.rank
+                .unwrap_or(f64::INFINITY)
+                .total_cmp(&right.rank.unwrap_or(f64::INFINITY))
+        })
+        .then_with(|| left.name.cmp(&right.name))
+}
 
 #[async_trait]
 pub trait PmProvider: Send + Sync {
@@ -241,9 +260,9 @@ impl RoadmapItemFrontmatter {
         }
     }
 
-    pub fn set_priority_rank(&mut self, rank: u32) {
-        self.priority = Some(PriorityBucket::from_rank(rank));
-        self.rank = None;
+    pub fn set_priority_rank(&mut self, priority: PriorityBucket, rank: Option<f64>) {
+        self.priority = Some(priority);
+        self.rank = rank.filter(|value| value.is_finite());
     }
 
     pub fn mark_in_progress(&mut self, claimed_by: String, claimed_at: String) {

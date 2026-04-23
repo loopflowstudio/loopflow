@@ -1561,6 +1561,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
               let agent = json["agent"] as? String,
               let cwd = json["cwd"] as? String,
               let source = json["source"] as? String,
+              let tmuxName = json["tmux_name"] as? String,
               let statusRaw = json["status"] as? String,
               let status = TerminalSessionStatus(rawValue: statusRaw),
               let createdAt = parseDate(json["created_at"]) else {
@@ -1577,6 +1578,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             argv: json["argv"] as? [String] ?? [],
             env: json["env"] as? [String: String] ?? [:],
             source: source,
+            tmuxName: tmuxName,
             status: status,
             createdAt: createdAt,
             attachedAt: parseDate(json["attached_at"]),

@@ -100,6 +100,7 @@ struct TerminalWorkspaceStoreTests {
             step: "implement",
             agent: "claude",
             cwd: "/tmp/repo",
+            tmuxName: "lf-test-\(id)",
             status: status,
             createdAt: Date(timeIntervalSince1970: createdAt)
         )

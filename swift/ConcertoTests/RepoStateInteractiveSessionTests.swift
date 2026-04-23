@@ -108,8 +108,61 @@ struct RepoStateInteractiveSessionTests {
             step: "implement",
             agent: "claude",
             cwd: "/tmp/repo",
+            tmuxName: "lf-test-\(id)",
             status: .pending,
             createdAt: .now
+        )
+    }
+
+    // Covers the "click Ingest & build → terminal pane shows the live run"
+    // path: when lfd emits a TerminalSession for a new wave run, the wave's
+    // terminal pane must be repointed at that session's tmux name and armed
+    // for auto-present, so the user lands on the running flow instead of the
+    // empty default `lf-<waveId>-<paneId>` pane.
+    @Test("new run terminal session repoints the wave's terminal pane and arms auto-present")
+    func runTerminalSessionRepointsPaneAndArmsAutoPresent() {
+        let state = RepoState()
+        state.waveStore.onStatusChange = nil
+        let wave = makeWave(id: "wave-for-run", status: .idle)
+        state.waveStore.set(wave)
+
+        // Seed the default terminal pane (happens when the wave is first opened).
+        let seededPane = state.multiplexerStore.pane(ofType: .terminal, for: wave.id)
+        ?? {
+            _ = state.multiplexerStore.layout(for: wave.id)
+            return state.multiplexerStore.pane(ofType: .terminal, for: wave.id)
+        }()
+        #expect(seededPane != nil, "wave layout should seed a terminal pane")
+        let paneId = seededPane?.id ?? ""
+        let defaultSessionName = seededPane?.config.terminalSessionName
+        #expect(defaultSessionName != nil)
+        #expect(defaultSessionName?.hasPrefix("lf-\(wave.id)") == true)
+
+        let runSession = TerminalSession(
+            id: "ts-run-1",
+            waveId: wave.id,
+            waveRunId: "run-1",
+            step: "build",
+            agent: "lf",
+            cwd: "/tmp/repo",
+            tmuxName: "lf-jack-heart-model-20260423_1303",
+            status: .running,
+            createdAt: .now
+        )
+
+        #expect(state.consumeAutoPresentTerminal(for: wave.id) == false)
+
+        state.attachTerminalPane(to: runSession)
+
+        let updatedPane = state.multiplexerStore.pane(ofType: .terminal, for: wave.id)
+        #expect(updatedPane?.id == paneId, "the same pane should be updated, not replaced")
+        #expect(
+            updatedPane?.config.terminalSessionName == runSession.tmuxName,
+            "pane must attach to the run's tmux session, not the default"
+        )
+        #expect(
+            state.consumeAutoPresentTerminal(for: wave.id),
+            "auto-present should be armed so focus shifts to the terminal pane"
         )
     }
 }

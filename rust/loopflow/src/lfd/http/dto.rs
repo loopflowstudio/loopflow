@@ -254,6 +254,7 @@ pub struct TerminalSessionDto {
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub source: String,
+    pub tmux_name: String,
     pub status: String,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -276,6 +277,7 @@ pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
         argv: session.argv,
         env: session.env,
         source: session.source,
+        tmux_name: session.tmux_name,
         status: session.status.as_str().to_string(),
         created_at: format_datetime(Some(session.created_at)).unwrap_or_default(),
         attached_at: format_datetime(session.attached_at),

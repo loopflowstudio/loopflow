@@ -28,6 +28,7 @@ pub(crate) enum Query {
     UpdateWaveRun,
     ListStackRuns,
     FailOrphanedRuns,
+    ResetStaleActiveWaves,
     GetLivePrState,
     UpsertLivePrState,
     ListTriggers,
@@ -99,6 +100,7 @@ impl Query {
         Self::UpdateWaveRun,
         Self::ListStackRuns,
         Self::FailOrphanedRuns,
+        Self::ResetStaleActiveWaves,
         Self::GetLivePrState,
         Self::UpsertLivePrState,
         Self::ListTriggers,
@@ -260,6 +262,15 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
         postgres_override: Some(
             "UPDATE wave_runs SET status = {p1}, error = {p2}, ended_at = {p3}\n             WHERE status = ANY({p4})",
+        ),
+    },
+    QueryDef {
+        // Reset waves whose runs were just orphaned back to Idle so the UI
+        // doesn't leave them stuck in Running/Waiting after an lfd restart.
+        template: "UPDATE waves SET status = {p1}\n             WHERE status IN ({p2}, {p3})",
+        sqlite_override: None,
+        postgres_override: Some(
+            "UPDATE waves SET status = {p1}\n             WHERE status = ANY({p2})",
         ),
     },
     QueryDef {

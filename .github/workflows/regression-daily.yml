@@ -1,0 +1,29 @@
+name: Regression (daily)
+
+on:
+  schedule:
+    # 06:00 UTC daily — late enough to not conflict with common release hours.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v4
+      - name: Build lfd
+        run: cargo build --bin lfd
+      - name: Run regression suite
+        run: uv run pytest tests/regression/ -v
+      - name: Upload lfd logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lfd-regression-logs
+          path: /tmp/lfd-*
+          if-no-files-found: ignore

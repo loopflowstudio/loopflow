@@ -360,11 +360,24 @@ pub async fn spawn_immediate_activation(
         run.snapshot.flow = flow_override;
     }
     if let Some(item) = roadmap_item {
-        if let Err(err) = ingest_roadmap_item_for_run(wave, &run, &item) {
+        // `ingest` is sync and, when PM is enabled, calls `block_on_pm` which
+        // tries to spin up a fresh Tokio runtime. Running it directly on the
+        // axum handler's async worker thread panics with "Cannot start a
+        // runtime from within a runtime" and leaves the HTTP response dangling.
+        // Punt to the blocking pool where `block_on` is legal.
+        let wave_for_ingest = wave.clone();
+        let run_for_ingest = run.clone();
+        let item_for_log = item.clone();
+        let ingest_result = tokio::task::spawn_blocking(move || {
+            ingest_roadmap_item_for_run(&wave_for_ingest, &run_for_ingest, &item)
+        })
+        .await
+        .unwrap_or_else(|join_err| Err(anyhow!("ingest task panicked: {join_err}")));
+        if let Err(err) = ingest_result {
             tracing::error!(
                 wave_id = %wave.id(),
                 run_id = %run.id,
-                item = %item,
+                item = %item_for_log,
                 error = %err,
                 "failed targeted ingest before immediate activation"
             );

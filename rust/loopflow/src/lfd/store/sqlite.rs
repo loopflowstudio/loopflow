@@ -1520,6 +1520,17 @@ impl SqliteStore {
                 WaveRunStatus::Waiting.as_i32() as i64,
             ],
         )?;
+        // Runs that were in flight are now Failed; the waves that owned them
+        // would otherwise stay stuck in Running/Waiting and the UI would keep
+        // their action buttons disabled. Reset them back to Idle.
+        conn.execute(
+            Self::sql(Query::ResetStaleActiveWaves),
+            params![
+                WaveStatus::Idle.as_i32() as i64,
+                WaveStatus::Running.as_i32() as i64,
+                WaveStatus::Waiting.as_i32() as i64,
+            ],
+        )?;
         Ok(updated as u32)
     }
 

@@ -2772,6 +2772,94 @@ mod tests {
         run_store_basic_suite(&store).await;
     }
 
+    // When lfd restarts, `fail_orphaned_runs` marks in-flight runs as Failed.
+    // Without also resetting the wave's own status, the wave stays visually
+    // "running" — the Concerto sidebar and buttons stay disabled forever even
+    // though no executor is attached. Cover the reset here.
+    #[tokio::test]
+    async fn fail_orphaned_runs_resets_stuck_wave_status() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        // Wave that was actively running when lfd died.
+        let mut running_wave = make_wave("/repo-stuck-running");
+        running_wave.status = WaveStatus::Running;
+        store.create_wave(&running_wave).await.expect("create wave");
+        let mut running_run = make_run(&running_wave, WaveRunStatus::Running);
+        store
+            .create_wave_run(&running_run)
+            .await
+            .expect("create run");
+
+        // Wave that was at an interactive waitpoint.
+        let mut waiting_wave = make_wave("/repo-stuck-waiting");
+        waiting_wave.status = WaveStatus::Waiting;
+        store
+            .create_wave(&waiting_wave)
+            .await
+            .expect("create waiting wave");
+        let mut waiting_run = make_run(&waiting_wave, WaveRunStatus::Waiting);
+        store
+            .create_wave_run(&waiting_run)
+            .await
+            .expect("create waiting run");
+
+        // Paused wave with no active run — must be left alone.
+        let mut paused_wave = make_wave("/repo-paused");
+        paused_wave.status = WaveStatus::Paused;
+        store
+            .create_wave(&paused_wave)
+            .await
+            .expect("create paused wave");
+
+        let _ = store.fail_orphaned_runs().await.expect("fail orphans");
+
+        running_run = store
+            .get_wave_run(&running_run.id)
+            .await
+            .expect("get run")
+            .expect("run exists");
+        assert_eq!(running_run.status, WaveRunStatus::Failed);
+        waiting_run = store
+            .get_wave_run(&waiting_run.id)
+            .await
+            .expect("get waiting run")
+            .expect("run exists");
+        assert_eq!(waiting_run.status, WaveRunStatus::Failed);
+
+        let running_after = store
+            .get_wave(running_wave.id())
+            .await
+            .expect("get wave")
+            .expect("wave exists");
+        assert_eq!(
+            running_after.status,
+            WaveStatus::Idle,
+            "wave whose run was orphaned should be reset to Idle"
+        );
+        let waiting_after = store
+            .get_wave(waiting_wave.id())
+            .await
+            .expect("get waiting wave")
+            .expect("wave exists");
+        assert_eq!(
+            waiting_after.status,
+            WaveStatus::Idle,
+            "waiting-state wave should also be reset to Idle"
+        );
+        let paused_after = store
+            .get_wave(paused_wave.id())
+            .await
+            .expect("get paused wave")
+            .expect("wave exists");
+        assert_eq!(
+            paused_after.status,
+            WaveStatus::Paused,
+            "paused wave must keep its status across orphan cleanup"
+        );
+    }
+
     #[tokio::test]
     #[ignore] // requires DATABASE_URL
     async fn postgres_store_parity() {

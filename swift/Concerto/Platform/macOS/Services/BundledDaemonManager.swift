@@ -235,7 +235,7 @@ final class BundledDaemonManager {
             ? ["serve", Self.bundledMarkerArgument, "--allow-insecure-bind"]
             : ["serve", Self.bundledMarkerArgument]
 
-        var env = ProcessInfo.processInfo.environment
+        var env = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
         env["LFD_AUTH_MODE"] = connectWithPhone ? "studio" : "local"
@@ -563,6 +563,7 @@ final class BundledDaemonManager {
         token = nil
         runningSettings = nil
     }
+
 }
 
 private struct ProcessResult {

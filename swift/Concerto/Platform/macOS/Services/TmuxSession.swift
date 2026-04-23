@@ -73,7 +73,7 @@ final class TmuxSession {
         process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = ProcessInfo.processInfo.environment
+        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
 
         try process.run()
         process.waitUntilExit()

@@ -4,7 +4,7 @@
 
 - `op: pm pull` and `op: pm push-diff` now no-op inside flows when the current branch does not resolve to a PM-enabled wave.
 - `lf op pm push-diff <wave>` now checks for `wave/<name>/` changes before building the remote PM provider. If the branch never touched roadmap files, it returns a zero-result skip instead of making auth or network calls.
-- README and built-in flow docs now describe the safe no-op behavior, and release notes call out the change.
+- README and built-in flow docs now describe the safe no-op behavior, clarify that explicit `lf op pm pull <wave>` / `lf op pm push-diff <wave>` still target a named wave, and release notes call out the change.
 
 ## Key choices
 

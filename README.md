@@ -348,6 +348,7 @@ Asana task descriptions preserve basic markdown formatting on sync. Loopflow wri
 PM-backed `lf op ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
 
 Flow-driven `pm pull` and `pm push-diff` also skip cleanly when the current branch doesn't resolve to a PM-enabled wave. CI-only and non-PM branches can reuse the same flows without extra flags.
+Explicit `lf op pm pull <wave>` and `lf op pm push-diff <wave>` still target the named wave. Only the flow-driven variants auto-skip.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.

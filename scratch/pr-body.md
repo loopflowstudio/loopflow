@@ -29,3 +29,4 @@ Make PM flow ops reusable across more branches. `deploy` and `sync` should work 
 - New test coverage for the exact no-op branches.
 - Any change to `pm export` behavior.
 - Any change to `push-diff --all` beyond the per-wave empty-diff fast path.
+- Any change to explicit `lf op pm pull <wave>` / `lf op pm push-diff <wave>` semantics.

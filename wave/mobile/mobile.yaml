@@ -4,4 +4,3 @@ direction:
 - clarity
 pm:
   provider: asana
-  asana_project: '1214269991016089'

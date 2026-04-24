@@ -4,4 +4,3 @@ direction:
 - care
 pm:
   provider: asana
-  asana_project: '1214270016716909'

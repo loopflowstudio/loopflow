@@ -1,3 +1,6 @@
+---
+asana_id: '1214270016756416'
+---
 # Daily garden cycle
 
 **Finish line:** The root chord runs a scheduled garden pass that observes its member waves (`garden/scan` → `garden/assess`) and proposes mutations via `wave/mutate`, producing a reviewable PR each cycle. Runs autonomously on cron; also available on demand via `lf garden`.

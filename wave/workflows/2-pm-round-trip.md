@@ -1,3 +1,6 @@
+---
+asana_id: '1214270114479362'
+---
 # PM round-trip
 
 **Finish line:** PM state (Asana / Linear / Notion) is always a mirror of wave/PR reality. `needs:` declarations round-trip as provider dependencies; PR events auto-update PM items; a scripted delete-team + re-init rebuilds PM cleanly after reorgs.

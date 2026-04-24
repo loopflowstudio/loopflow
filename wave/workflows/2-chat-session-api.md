@@ -1,3 +1,6 @@
+---
+asana_id: '1214270114528718'
+---
 # Chat session API
 
 **Finish line:** lfd exposes a complete native-chat backend: typed activity events (content), bidi input path (write), resumable WebSocket stream (resilience). Desktop and mobile chat UIs consume this one surface. A conversation started on one device continues seamlessly on another, survives network drops, and renders typed activity (edits, shell, search) differently from plain text.

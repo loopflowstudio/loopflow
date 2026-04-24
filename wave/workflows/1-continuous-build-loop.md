@@ -1,3 +1,6 @@
+---
+asana_id: '1214270016757867'
+---
 # Continuous build loop
 
 **Finish line:** A wave in `loops:` mode pulls items from its configured PM provider, spawns workers, ships PRs, and reports lifecycle back to PM. Runs overnight without human attention; conductor wakes up to shipped work.

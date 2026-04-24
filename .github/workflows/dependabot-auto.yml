@@ -1,0 +1,46 @@
+name: Dependabot zero-touch
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_run:
+    workflows: ["CI"] # Keep in sync with .github/workflows/ci.yml.
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  close-on-red:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close the dependabot PR
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # workflow_run doesn't give us the PR number; match the open PR by head SHA.
+          PR=$(gh pr list --repo "$REPO" --state open --author "app/dependabot" \
+            --json number,headRefOid \
+            --jq ".[] | select(.headRefOid == \"$HEAD_SHA\") | .number")
+          if [ -z "$PR" ]; then
+            echo "No open dependabot PR at $HEAD_SHA."
+            exit 0
+          fi
+          gh pr comment "$PR" --repo "$REPO" \
+            --body "CI red — abandoning. Dependabot will open a new PR on the next version bump."
+          gh pr close "$PR" --repo "$REPO"

@@ -62,6 +62,21 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 
 All six must pass for PRs to merge.
 
+## Dependabot workflow
+
+```bash
+gh pr list --author app/dependabot
+gh run list --workflow CI
+```
+
+Weekly dependency PRs come from `.github/dependabot.yml` for `uv`, `cargo`, `swift`, and `github-actions`.
+
+`.github/workflows/dependabot-auto.yml` keeps those PRs zero-touch:
+- enable squash auto-merge when a Dependabot PR opens or reopens
+- when the `CI` workflow fails on a pull-request run, comment and close the matching PR
+
+Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. Renaming the CI workflow without updating the Dependabot workflow disables the close-on-red path.
+
 ## Rust Tests
 
 Prompt parity and golden prompt tests live in Rust.

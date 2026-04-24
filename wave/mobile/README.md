@@ -1,27 +1,27 @@
 # Mobile
 
-Remote view of loopflow from iOS. Check on waves, browse roadmap, chat with agents — without opening a laptop.
+Remote read surface for loopflow from iOS.
 
 ## Vision
 
-The phone is a read surface first. Conductors check what's happening across waves while walking, in meetings, between things. Mobile chat comes second — start a conversation from the phone, and later share that session across devices. Build work stays on the laptop.
+The phone is for checking on work, not doing build work. Open the app, connect to a remote lfd, see your waves, inspect the roadmap, and understand what needs attention without opening a laptop.
+
+This wave stays view-only on purpose. Chat can come later once the read path is solid.
 
 ### Not here
 
 - Running build work from the phone
-- Editing code, rebasing, landing
-- Anything that requires a full keyboard
+- Editing code, rebasing, landing, or any keyboard-heavy workflow
+- Native chat sessions for this phase
 
 ## Tasks
 
-1. **`remote-lfd-connection`** (p1) — auth to a remote lfd host, TLS, reconnect. Demo: scan QR, app syncs
-2. **`see-your-waves`** (p1) — wave list with live status. Demo: morning train, know what's happening
-3. **`see-wave-tasks`** (p1) — drill into a wave's roadmap. Demo: check what's on the plate for a wave
-4. **`start-a-chat-on-mobile`** (p2) — start a new agent session from the phone. Demo: design thought on a walk, agent responds
-5. **`shared-chat-with-desktop`** (p3) — sessions cross devices. Demo: start at desk, continue on phone, finish at desk
+1. **`remote-lfd-connection`** (p1) — connect to a remote host cleanly and stay connected
+2. **`see-your-waves`** (p1) — list waves with live status and obvious health
+3. **`see-wave-tasks`** (p1) — drill into a wave's roadmap and read full item context
 
 ## Risks
 
-- TestFlight / distribution overhead — the app has to actually ship to be useful
-- Auth for remote lfd — tokens, provisioning, discovery all need a clean story
-- Scope creep — "just one more thing" pulls toward build work. Line: if it requires a keyboard, it's not mobile
+- Remote auth and host discovery need to feel simple or the whole surface collapses
+- Read-only scope will get pressure from “just let me do one more thing”; hold the line
+- Mobile only earns its place if reconnect, caching, and empty states feel calm under bad network conditions

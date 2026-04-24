@@ -18,11 +18,11 @@ What's missing:
 
 ## Daily experience
 
-Morning: open Concerto. One new PR from the chord-wave overnight, proposing 2-3 mutations to member waves ("promote `workflows/looping` to p1 because related items are blocking others," "split `desktop/conductor-surfaces` — it's grown to 4 items"). Read, approve or adjust, land. The chord observed itself and proposed; you reviewed and decided.
+Morning: open Concerto. One new PR from the chord-wave overnight, proposing 2–3 mutations to member waves ("promote `pm-round-trip` because it is blocking the build loop," "split `governance-surfaces` if the scope keeps sprawling"). Read, approve or adjust, land. The chord observed, proposed, and stayed reviewable.
 
 ## Done when
 
 - `lf garden` runs end-to-end on this repo and produces a reviewable mutation PR against `main`
-- Same flow runs on cron without manual trigger
+- The same flow runs on cron without manual trigger
 - Each mutation is logged with rationale, structured before/after, and one-command revert
 - Nested chords work — a chord of chords traverses children too

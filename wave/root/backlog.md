@@ -1,23 +1,23 @@
 # Backlog
 
-Ideas worth revisiting after the redesign waves stabilize. Not prioritized, not scheduled.
+Ideas worth revisiting after the four-wave layout settles.
 
-## scale/01 — FlowRun Container
+## scale/01 — FlowRun container
 
-WaveRun/FlowRun split: iterations own branches/PRs, flows execute within them. Real architectural need but the shape gets clearer after chord-model ships and garden cycles run. Revisit when the pain is concrete.
+Separate iteration identity from flow execution more cleanly: iterations own branches and PRs; flows execute within them. Real architectural need, but the right shape will be clearer after root has run enough garden cycles to expose the pressure.
 
-## scale/04 — Chords UI
+## desktop/04 — Wave grouping UI
 
-Chord sections in sidebar, visual grouping, listen indicators, CRUD from UI. Needs the chord model to stabilize first. Natural follow-on to agent-embedding once there's something to render.
+Visual grouping and higher-level wave collections in Concerto. Worth doing once the root/workflows split for governance surfaces is stable and there's something real to group.
 
-## concerto/04 — Auto-Send
+## concerto/04 — Auto-send
 
-Auto-send on VAD silence with confidence-based behavior and continuous conversation toggle. Polished interaction pattern, but a refinement on top of voice features that aren't the priority.
+Auto-send on VAD silence with confidence-based behavior and continuous conversation toggle. Interesting interaction polish, but downstream of the current desktop priorities.
 
-## concerto/03 — Release UI
+## workflows/04 — Release controls
 
-Per-repo release config (cron toggle) and "Release Now" button with version picker. Nice quality-of-life, but `lf op release` from CLI works. Save until Concerto has more fundamental workflows.
+Per-repo release controls and a first-class "release now" surface in Concerto. Useful, but the CLI path is already good enough while higher-leverage workflow work is still open.
 
-## context/01 — Direction Aliases
+## context/01 — Direction aliases
 
-User-defined direction aliases (`designer` → `[ux, craft, aesthetics]`) stored in lfd sqlite. Clean ergonomic win, small scope. Worth doing eventually but doesn't unlock anything.
+User-defined direction aliases (`designer` → `[ux, craft, aesthetics]`) stored in lfd sqlite. Nice ergonomic win. Not a blocker for the current wave map.

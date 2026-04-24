@@ -11,7 +11,7 @@ Waves have roadmaps. The conductor's second habit: "what's on the plate for this
 
 ## Daily experience
 
-You saw `workflows` is blocked. Tap it. Roadmap shows 4 items: `daily-garden-cycle`, `continuous-build-loop`, `chat-session-api`, `pm-round-trip`. Tap `continuous-build-loop` to see the finish line and context. You now know what's at stake; you plan your afternoon accordingly.
+You saw `workflows` is blocked. Tap it. Roadmap shows the active work: `daily-garden-cycle`, `continuous-build-loop`, `pm-round-trip`, `chat-session-api`, `governance-surfaces`. Tap `continuous-build-loop` to see the finish line and context. You now know what's at stake; you plan your afternoon accordingly.
 
 ## Done when
 

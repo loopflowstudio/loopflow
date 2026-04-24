@@ -2,7 +2,7 @@
 
 ## What was implemented
 
-Bundled the imported gstack catalog into loopflow's built-in step/flow system, simplified external-skill discovery down to `npx/` (plus `rams`), and documented slash-style namespaced invocation across the repo's user-facing docs.
+Bundled the imported gstack catalog into loopflow's built-in step/flow system, simplified third-party skill discovery around namespaced builtins plus `npx/` (while retaining the legacy `rams/` shim), and documented slash-style invocation across the repo's user-facing docs.
 
 Concretely, the branch:
 - moved the generated gstack steps from repo-local `.lf/steps/gstack/` into `rust/loopflow/src/engine/builtins/gstack/`
@@ -15,7 +15,7 @@ Concretely, the branch:
 
 - **Bundle gstack in Rust builtins, not `.lf/steps/`.** That makes `gstack/*` part of the shipped catalog, so `lf --list`, catalog APIs, tests, and releases all see the same source of truth.
 - **Use slash namespaces everywhere.** The branch moves user-facing examples to `gstack/office-hours` and `npx/vercel-labs/deep-research`, matching the current discovery/listing behavior and keeping namespaced steps/flows visually distinct from `step: args` syntax.
-- **Keep `npx` as the only general external skill channel.** The old configurable skill-source surface added config drift and duplicate discovery paths. The new model is: local overrides in `.lf/steps/`, builtins in the binary, everything else through `npx`.
+- **Keep `npx` as the only general third-party skill channel.** The old configurable skill-source surface added config drift and duplicate discovery paths. The new model is: local overrides in `.lf/steps/`, builtins in the binary, everything else through `npx`, with `rams/rams` retained only as a compatibility shim.
 - **Auto-generate builtin descriptions from prompt content.** `lf --list` and the HTTP catalog now stay in sync with the bundled prompt files instead of depending on a separate hand-maintained description table.
 
 ## How it fits together

@@ -338,14 +338,16 @@ summaries:
 
 ### External Skills
 
-Loopflow ships two skill channels, both on by default — no config needed.
+Loopflow has two primary skill channels plus one compatibility shim. No config needed.
 
-- **`gstack/<step>`** — bundled in the binary. Upstream is [garrytan/gstack](https://github.com/garrytan/gstack). Runs the `refresh-gstack` maintainer step inside the loopflow repo to pick up upstream changes; users just get the version their `lf` was built with.
-- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills). The first run runs `npx skills add` and caches the skill at `.agents/skills/<name>/`; later runs use the cache. Covers any Claude Skill package — curated sets like `vercel-labs/*` and one-offs alike.
+- **`gstack/<step>`** — bundled in the binary. Upstream is [garrytan/gstack](https://github.com/garrytan/gstack). Maintainers run the `refresh-gstack` step inside the loopflow repo to resync the bundled catalog; users just get the version their `lf` was built with.
+- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
+- **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
 lf gstack/office-hours                # bundled
 lf npx/vercel-labs/deep-research      # live fetch, cached on first run
+lf rams/rams                          # legacy compatibility alias, if installed
 ```
 
 The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/steps/<namespace>/<step>.md` (repo-local) or `~/.lf/steps/<namespace>/<step>.md` (user-global) and invoke them as `lf <namespace>/<step>`. Namespaced steps use `/`, not `:`.

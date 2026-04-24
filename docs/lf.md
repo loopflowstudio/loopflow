@@ -39,7 +39,7 @@ Names resolve in this order:
 3. `~/.lf/steps/<step>.md`, `~/.lf/steps/<ns>/<step>.md`, or `~/.claude/commands/<step>.md` — user-global
 4. Core built-in steps — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
 5. Namespaced built-in steps — e.g. `gstack/<step>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
-6. `npx/<owner>/<repo>` — fetched live via `npx skills`, cached at `.agents/skills/`
+6. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced steps and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
 
@@ -183,7 +183,7 @@ lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
 lf npx/explain-code                # already-cached skill (no network)
 ```
 
-`npx/` uses `.agents/skills/` in the current repo as a cache. On a cache miss, `npx skills add <name>` runs to fetch the skill. For everything else, the bundled `gstack/` namespace and the core `build/` / `govern/` / `ops/` catalogs are always available — no setup needed.
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The bundled `gstack/` namespace and core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
 ## See Also
 

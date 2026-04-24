@@ -10,8 +10,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, GstackCommand, OpsCommand, PmCommand, ReleaseCommand,
-    ShellCommand, WtCommand,
+    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand,
+    WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -96,7 +96,6 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
-        OpsCommand::Gstack { cmd } => gstack_cmd(cmd, &progress),
     }
 }
 
@@ -1434,8 +1433,6 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 // ==========================================================================
 
 fn doctor() -> Result<()> {
-    use std::path::Path;
-
     let repo_root = find_repo_root().ok();
 
     // Repo status
@@ -1495,16 +1492,6 @@ fn doctor() -> Result<()> {
         }
     }
 
-    // Optional: superpowers
-    let superpowers_path = dirs::home_dir()
-        .map(|h| h.join(".superpowers"))
-        .unwrap_or_else(|| Path::new("~/.superpowers").to_path_buf());
-    if superpowers_path.exists() {
-        println!("✓ superpowers");
-    } else {
-        println!("- superpowers: git clone https://github.com/obra/superpowers ~/.superpowers");
-    }
-
     // Optional: gh for PR creation
     if which("gh") {
         println!("✓ gh");
@@ -1538,24 +1525,4 @@ fn check_codex_available() -> bool {
 fn check_gemini_available() -> bool {
     // Check for gemini CLI
     which("gemini")
-}
-
-// ---------------------------------------------------------------------------
-// Gstack
-// ---------------------------------------------------------------------------
-
-fn gstack_cmd(cmd: &GstackCommand, progress: &dyn Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match cmd {
-        GstackCommand::Sync => {
-            crate::ops::gstack::sync(&repo_root, progress)?;
-        }
-        GstackCommand::Diff => {
-            crate::ops::gstack::diff(&repo_root, progress)?;
-        }
-        GstackCommand::List => {
-            crate::ops::gstack::list(&repo_root, progress)?;
-        }
-    }
-    Ok(())
 }

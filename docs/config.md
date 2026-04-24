@@ -55,7 +55,7 @@ Defaults work well for most repos. Summaries require configuration.
 
 **Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
 
-For most settings, repo overrides global. For additive settings (`context`, `exclude`, `skill_sources`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, repo overrides global. For additive settings (`context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -336,52 +336,21 @@ summaries:
     tokens: 5000
 ```
 
-### SkillRegistry
+### External Skills
 
-Enable the SkillRegistry directory as a remote skill source.
+Loopflow has two primary skill channels plus one compatibility shim. No config needed.
 
-```yaml
-skill_registry:
-  enabled: true
-  prefix: sr
-  cache_ttl_seconds: 86400
-```
-
-Run registry skills by prefix:
+- **`gstack/<step>`** — bundled in the binary. Upstream is [garrytan/gstack](https://github.com/garrytan/gstack). Maintainers run the `refresh-gstack` step inside the loopflow repo to resync the bundled catalog; users just get the version their `lf` was built with.
+- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
+- **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
-lf sr:gog
+lf gstack/office-hours                # bundled
+lf npx/vercel-labs/deep-research      # live fetch, cached on first run
+lf rams/rams                          # legacy compatibility alias, if installed
 ```
 
-Registry skills are cached under `~/.lf/skills/skillregistry/` with a `registry.json` index.
-
-### Skill Sources
-
-External skill libraries that extend loopflow with additional steps.
-
-```yaml
-skill_sources:
-  - name: superpowers
-    prefix: sp
-    path: ~/.superpowers
-```
-
-| Field | Description |
-|-------|-------------|
-| `name` | Display name for the source |
-| `prefix` | Prefix for invoking skills (e.g., `sp:brainstorm`) |
-| `path` | Path to skill library (supports `~` expansion) |
-
-After configuring, run skills with their prefix:
-
-```bash
-lf sp:brainstorm              # run superpowers brainstorm skill
-lf sp:write-plan -m codex     # with a different model
-```
-
-**Auto-detection:** If `~/.superpowers` exists, it's automatically registered with prefix `sp` even without explicit config.
-
-See [superpowers](https://github.com/obra/superpowers) for an example skill library.
+The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/steps/<namespace>/<step>.md` (repo-local) or `~/.lf/steps/<namespace>/<step>.md` (user-global) and invoke them as `lf <namespace>/<step>`. Namespaced steps use `/`, not `:`.
 
 ### RLM (Recursive Language Model)
 

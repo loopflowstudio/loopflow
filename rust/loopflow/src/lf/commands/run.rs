@@ -358,7 +358,6 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
     if let Some(stripped) = step.strip_suffix(':') {
         step = stripped.to_string();
     }
-    // Inline colons are skill source prefixes: `npx:explain-code` stays intact.
 
     if step.is_empty() {
         return Err(anyhow!("no step specified"));
@@ -384,18 +383,18 @@ mod tests {
     }
 
     #[test]
-    fn split_step_args_preserves_skill_prefix() {
-        let args = vec!["npx:explain-code".to_string()];
+    fn split_step_args_preserves_namespaced_step() {
+        let args = vec!["npx/explain-code".to_string()];
         let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "npx:explain-code");
+        assert_eq!(step, "npx/explain-code");
         assert!(rest.is_empty());
     }
 
     #[test]
-    fn split_step_args_preserves_skill_prefix_with_args() {
-        let args = vec!["sp:brainstorm".to_string(), "auth flow".to_string()];
+    fn split_step_args_preserves_namespaced_step_with_args() {
+        let args = vec!["gstack/office-hours".to_string(), "auth flow".to_string()];
         let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "sp:brainstorm");
+        assert_eq!(step, "gstack/office-hours");
         assert_eq!(rest, vec!["auth flow".to_string()]);
     }
 }

@@ -805,21 +805,23 @@ mod tests {
     #[test]
     fn render_pipeline_lines_shows_and_synthesize_step() {
         let temp = tempdir().unwrap();
+        // Use synthetic step names that don't collide with builtin flows or
+        // steps so expansion stays under test control.
         let flow = Flow {
-            name: "gstack-review".to_string(),
+            name: "demo-and".to_string(),
             items: vec![crate::engine::flow::FlowItem::And {
                 branches: vec![
                     crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
-                        "gstack:review",
+                        "demo-branch-a",
                     )),
                     crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
-                        "gstack:cso",
+                        "demo-branch-b",
                     )),
                     crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
-                        "gstack:codex",
+                        "demo-branch-c",
                     )),
                 ],
-                synthesize: Some("gstack:review-synthesize".to_string()),
+                synthesize: Some("demo-synthesize".to_string()),
             }],
         };
 
@@ -830,10 +832,10 @@ mod tests {
             lines,
             vec![
                 "[and]".to_string(),
-                "├─ gstack:review → gstack:review".to_string(),
-                "├─ gstack:cso → gstack:cso".to_string(),
-                "├─ gstack:codex → gstack:codex".to_string(),
-                "└─ synthesize → gstack:review-synthesize".to_string(),
+                "├─ demo-branch-a → demo-branch-a".to_string(),
+                "├─ demo-branch-b → demo-branch-b".to_string(),
+                "├─ demo-branch-c → demo-branch-c".to_string(),
+                "└─ synthesize → demo-synthesize".to_string(),
             ]
         );
     }

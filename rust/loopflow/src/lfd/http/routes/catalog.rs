@@ -127,7 +127,6 @@ fn collect_steps(repo: &Path) -> Vec<StepEntry> {
             .flat_map(|(cat, names)| names.iter().map(move |name| (*name, cat.to_string())))
             .collect();
 
-    let descriptions = crate::lf::discovery::builtin_descriptions();
     let repo_overrides = list_repo_md_stems(&repo.join(".lf/steps"));
 
     let mut entries: Vec<StepEntry> = Vec::new();
@@ -141,13 +140,7 @@ fn collect_steps(repo: &Path) -> Vec<StepEntry> {
             } else {
                 EntrySource::Builtin
             };
-            entries.push(build_step_entry(
-                &name,
-                repo,
-                source,
-                &builtin_categories,
-                &descriptions,
-            ));
+            entries.push(build_step_entry(&name, repo, source, &builtin_categories));
         }
     }
 
@@ -158,7 +151,6 @@ fn collect_steps(repo: &Path) -> Vec<StepEntry> {
                 repo,
                 EntrySource::Repo,
                 &builtin_categories,
-                &descriptions,
             ));
         }
     }
@@ -172,13 +164,19 @@ fn build_step_entry(
     repo: &Path,
     source: EntrySource,
     builtin_categories: &HashMap<&str, String>,
-    descriptions: &HashMap<&'static str, &'static str>,
 ) -> StepEntry {
     let category = builtin_categories
         .get(name)
         .cloned()
         .unwrap_or_else(|| "Repo".to_string());
-    let description = descriptions.get(name).map(|s| s.to_string());
+    let description = {
+        let d = crate::lf::discovery::builtin_step_description(name);
+        if d.is_empty() {
+            None
+        } else {
+            Some(d)
+        }
+    };
     let interactive = crate::engine::flow::load_step(name, repo)
         .ok()
         .and_then(|step| step.interactive);
@@ -276,9 +274,15 @@ mod tests {
             .expect("scan step present");
         assert_eq!(scan_step.category, "Govern");
         assert_eq!(scan_step.source, EntrySource::Builtin);
-        assert_eq!(
-            scan_step.description.as_deref(),
-            Some("Read member wave state")
+        // Description comes from scan.md's first prose line (after frontmatter).
+        assert!(
+            scan_step
+                .description
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("Read the territory"),
+            "unexpected description: {:?}",
+            scan_step.description
         );
 
         let implement_step = catalog

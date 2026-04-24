@@ -10,34 +10,38 @@ title: lf Command Reference
 ## Basic Usage
 
 ```bash
-lf <step>                    # run a step file
-lf <step>: args              # run with arguments
-lf <prefix>:<skill>          # run external skill
-lf : "inline prompt"         # no step file, just prompt
-lf --list                    # show all available steps
+lf <step>                        # run a step file
+lf <step>: args                  # run with arguments
+lf <namespace>/<step>            # run a namespaced step (e.g. gstack/office-hours)
+lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
+lf : "inline prompt"             # no step file, just prompt
+lf --list                        # show all available steps
 ```
 
 ## Examples
 
 ```bash
-lf gate                      # run the gate step
-lf implement: add auth       # pass arguments after colon
-lf npx:explain-code          # fetch from npx skills and run
-lf sp:brainstorm             # run superpowers brainstorm skill
-lf sr:gog                    # run SkillRegistry skill
-lf : "fix the typo"          # inline prompt
-lf debug -c                  # paste clipboard, fix the bug
+lf gate                           # run the gate step
+lf implement: add auth            # pass arguments after colon
+lf gstack/office-hours            # run a built-in gstack step
+lf office-hours                   # bare name works when unambiguous
+lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
+lf : "fix the typo"               # inline prompt
+lf debug -c                       # paste clipboard, fix the bug
 ```
 
 ## Steps
 
-Steps are markdown files in these locations (searched in order):
+Names resolve in this order:
 
-1. External skills — `<prefix>:<skill>` format (e.g., `npx:explain-code`, `sr:gog`)
-2. `.lf/steps/<step>.md` — repo steps
-3. `.claude/commands/<step>.md` — Claude Code compatible
-4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `gate`, `implement`)
-5. `.agents/skills/<step>/SKILL.md` — user-installed agent skills (e.g., via `npx skills add`)
+1. `.lf/steps/<step>.md` or `.lf/steps/<ns>/<step>.md` — repo-local (also overrides builtins)
+2. `.claude/commands/<step>.md` — Claude Code compatible
+3. `~/.lf/steps/<step>.md`, `~/.lf/steps/<ns>/<step>.md`, or `~/.claude/commands/<step>.md` — user-global
+4. Core built-in steps — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
+5. Namespaced built-in steps — e.g. `gstack/<step>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
+6. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
+
+Namespaced steps and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
 
 ### Step Arguments
 
@@ -175,12 +179,11 @@ lf : "fix the bug" --web -m codex    # opens chatgpt.com
 ### External skills
 
 ```bash
-lf npx:explain-code # fetch + run from npx skills ecosystem
-lf sp:brainstorm    # run skill from superpowers
-lf sr:gog           # run SkillRegistry skill
+lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
+lf npx/explain-code                # already-cached skill (no network)
 ```
 
-`npx:` uses `.agents/skills/` as a cache. If `~/.superpowers` exists, it's auto-detected with prefix `sp`. SkillRegistry is opt-in via config. See [Configuration](config.md) for setup.
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The bundled `gstack/` namespace and core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
 ## See Also
 

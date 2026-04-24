@@ -482,9 +482,9 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("npx:skill-creator".to_string()),
+                step: Some("npx/skill-creator".to_string()),
                 resolved_step: Some(Step {
-                    name: "npx:skill-creator".to_string(),
+                    name: "npx/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
                     directions: vec!["thorough".to_string()],
@@ -505,7 +505,7 @@ Test step body.
                 .step
                 .as_ref()
                 .map(|step| step.name.as_str()),
-            Some("npx:skill-creator")
+            Some("npx/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
         assert!(prepared

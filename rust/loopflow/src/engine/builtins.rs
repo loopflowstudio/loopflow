@@ -23,9 +23,130 @@ pub fn get_builtin_step(name: &str) -> Option<&'static str> {
     BUILTIN_STEPS.get(name).copied()
 }
 
+/// One-line description for a built-in step. Prefers the `description:` frontmatter
+/// field, falling back to the first prose line after the closing `---`.
+/// Returns an empty string if neither is present.
+pub fn builtin_step_description(name: &str) -> String {
+    let Some(content) = get_builtin_step(name) else {
+        return String::new();
+    };
+    step_description_from_content(content)
+}
+
+/// One-line description for a built-in flow, drawn from the first non-blank,
+/// non-YAML-sequence comment line in the YAML. Returns an empty string if
+/// nothing descriptive is found.
+pub fn builtin_flow_description(name: &str) -> String {
+    let Some(content) = get_builtin_flow(name) else {
+        return String::new();
+    };
+    flow_description_from_content(content)
+}
+
+fn step_description_from_content(content: &str) -> String {
+    // 1. Try `description:` in the frontmatter block.
+    if let Some(desc) = frontmatter_description(content) {
+        return first_line(&desc);
+    }
+
+    // 2. Fall back to first prose line after frontmatter.
+    let body = strip_frontmatter(content);
+    first_prose_line(body)
+}
+
+fn frontmatter_description(content: &str) -> Option<String> {
+    let stripped = content.strip_prefix("---")?;
+    let end = stripped.find("\n---")?;
+    let frontmatter = &stripped[..end];
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(frontmatter).ok()?;
+    let desc = value
+        .as_mapping()?
+        .get(serde_yaml_ng::Value::String("description".to_string()))?;
+    Some(desc.as_str()?.trim().to_string())
+}
+
+fn flow_description_from_content(content: &str) -> String {
+    for raw in content.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with("# ") {
+            return trimmed.trim_start_matches('#').trim().to_string();
+        }
+        if !trimmed.is_empty() {
+            break;
+        }
+    }
+    String::new()
+}
+
+fn strip_frontmatter(content: &str) -> &str {
+    let Some(stripped) = content.strip_prefix("---") else {
+        return content;
+    };
+    let Some(end) = stripped.find("\n---") else {
+        return content;
+    };
+    stripped[end + 4..].trim_start_matches('\n')
+}
+
+fn first_prose_line(body: &str) -> String {
+    for raw in body.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Skip section headings and code fences.
+        if line.starts_with('#') || line.starts_with("```") {
+            continue;
+        }
+        return line.to_string();
+    }
+    String::new()
+}
+
+fn first_line(s: &str) -> String {
+    s.lines().next().unwrap_or("").trim().to_string()
+}
+
 /// Returns the content of a built-in flow, if it exists.
 pub fn get_builtin_flow(name: &str) -> Option<&'static str> {
     BUILTIN_FLOWS.get(name).copied()
+}
+
+/// Resolve a bare name to its builtin step key. Returns the exact match if one
+/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
+/// that key. Returns `None` for no match or ambiguous matches.
+pub fn resolve_builtin_step(name: &str) -> Option<&'static str> {
+    if let Some((key, _)) = BUILTIN_STEPS.get_key_value(name) {
+        return Some(key);
+    }
+    resolve_bare_in_map(name, &BUILTIN_STEPS)
+}
+
+/// Resolve a bare name to its builtin flow key. Returns the exact match if one
+/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
+/// that key. Returns `None` for no match or ambiguous matches.
+pub fn resolve_builtin_flow(name: &str) -> Option<&'static str> {
+    if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(name) {
+        return Some(key);
+    }
+    resolve_bare_in_map(name, &BUILTIN_FLOWS)
+}
+
+fn resolve_bare_in_map(
+    bare: &str,
+    map: &std::collections::HashMap<&'static str, &'static str>,
+) -> Option<&'static str> {
+    if bare.contains('/') {
+        return None;
+    }
+    let suffix = format!("/{bare}");
+    let mut matches = map.keys().filter(|key| key.ends_with(&suffix)).copied();
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 /// Returns the content of a built-in direction, if it exists.

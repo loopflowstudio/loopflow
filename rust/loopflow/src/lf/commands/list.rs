@@ -1,13 +1,15 @@
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
-    builtin_descriptions, builtin_flow_descriptions, builtin_flows, builtin_steps,
-    is_step_interactive, list_all_steps, list_user_flows, BUILTIN_CATEGORIES,
-    BUILTIN_FLOW_CATEGORIES,
+    builtin_flow_descriptions, builtin_flows, builtin_step_description, builtin_steps,
+    is_step_interactive, list_all_steps, list_user_flows, BUILTIN_FLOW_CATEGORIES,
+    BUILTIN_STEP_CATEGORIES,
 };
 
 use crate::lf::output::Colors;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
+
+const DESC_WIDTH: usize = 48;
 
 pub fn show_all() -> Result<()> {
     let repo_root = find_repo_root().ok();
@@ -23,7 +25,6 @@ pub fn show_all() -> Result<()> {
         .cloned()
         .collect();
 
-    let descriptions = builtin_descriptions();
     let builtins = builtin_steps();
 
     // =========================================================================
@@ -32,7 +33,6 @@ pub fn show_all() -> Result<()> {
     let flow_descriptions = builtin_flow_descriptions();
     let builtin_flow_set = builtin_flows();
 
-    // Collect user-defined flows (may override builtins)
     let user_flows: Vec<_> = repo_root
         .as_ref()
         .map(|r| list_user_flows(r))
@@ -47,7 +47,6 @@ pub fn show_all() -> Result<()> {
     );
     println!();
 
-    // Builtin flows by category
     for (category, flow_names) in BUILTIN_FLOW_CATEGORIES {
         println!(
             "{dim}{category}{reset}",
@@ -71,7 +70,7 @@ pub fn show_all() -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<16}{reset} {dim}{desc}{reset}{custom_tag}",
+                "  {bold}{name:<20}{reset} {dim}{desc}{reset}{custom_tag}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
@@ -91,8 +90,9 @@ pub fn show_all() -> Result<()> {
 
     if !custom_flows.is_empty() {
         println!(
-            "{green}Custom{reset}",
+            "{green}{bold}User{reset}",
             green = colors.green,
+            bold = colors.bold,
             reset = colors.reset
         );
         for flow in custom_flows {
@@ -107,7 +107,7 @@ pub fn show_all() -> Result<()> {
                     reset = colors.reset
                 ));
             println!(
-                "  {bold}{name:<16}{reset} {dim}{chain}{reset}",
+                "  {bold}{name:<20}{reset} {dim}{chain}{reset}",
                 bold = colors.bold,
                 name = flow.name,
                 reset = colors.reset,
@@ -129,8 +129,7 @@ pub fn show_all() -> Result<()> {
     );
     println!();
 
-    // Built-ins by category
-    for (category, step_names) in BUILTIN_CATEGORIES {
+    for (category, step_names) in BUILTIN_STEP_CATEGORIES {
         let category_steps: Vec<_> = step_names
             .iter()
             .filter(|t| all_known_steps.contains(**t))
@@ -147,7 +146,7 @@ pub fn show_all() -> Result<()> {
         );
 
         for name in category_steps {
-            let desc = descriptions.get(name).copied().unwrap_or("");
+            let desc = truncate(&builtin_step_description(name), DESC_WIDTH);
             let is_interactive = repo_root
                 .as_ref()
                 .is_some_and(|r| is_step_interactive(r, name));
@@ -170,12 +169,13 @@ pub fn show_all() -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}{custom_tag}",
+                "  {bold}{name:<26}{reset} {dim}{desc:<width$}{reset}{badge}{custom_tag}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
                 dim = colors.dim,
                 desc = desc,
+                width = DESC_WIDTH,
                 badge = badge,
                 custom_tag = custom_tag
             );
@@ -184,7 +184,7 @@ pub fn show_all() -> Result<()> {
     }
 
     // =========================================================================
-    // Custom steps (user-defined, not overriding builtins)
+    // User steps (repo-local, not overriding builtins)
     // =========================================================================
     let custom: Vec<_> = user_steps
         .iter()
@@ -192,8 +192,9 @@ pub fn show_all() -> Result<()> {
         .collect();
     if !custom.is_empty() {
         println!(
-            "{green}Custom{reset}",
+            "{green}{bold}User{reset}",
             green = colors.green,
+            bold = colors.bold,
             reset = colors.reset
         );
         for name in custom {
@@ -210,7 +211,7 @@ pub fn show_all() -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<14}{reset}{badge}",
+                "  {bold}{name:<26}{reset}{badge}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
@@ -225,8 +226,9 @@ pub fn show_all() -> Result<()> {
     // =========================================================================
     if !global_steps.is_empty() {
         println!(
-            "{green}Global{reset}",
+            "{green}{bold}Global{reset}",
             green = colors.green,
+            bold = colors.bold,
             reset = colors.reset
         );
         for name in &global_steps {
@@ -243,7 +245,7 @@ pub fn show_all() -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<14}{reset}{badge}",
+                "  {bold}{name:<26}{reset}{badge}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
@@ -257,7 +259,6 @@ pub fn show_all() -> Result<()> {
     // EXTERNAL SKILLS section
     // =========================================================================
     if !external_skills.is_empty() {
-        // Group by source
         let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
         for (prefixed_name, source_name) in external_skills {
             by_source
@@ -286,7 +287,7 @@ pub fn show_all() -> Result<()> {
             );
             for name in skill_names {
                 println!(
-                    "  {bold}{name:<20}{reset}",
+                    "  {bold}{name}{reset}",
                     bold = colors.bold,
                     name = name,
                     reset = colors.reset
@@ -300,10 +301,19 @@ pub fn show_all() -> Result<()> {
     // Footer
     // =========================================================================
     println!(
-        "{dim}Run lf <step>, lf <flow>, or lf <step>: args{reset}",
+        "{dim}Run lf <step>, lf <flow>, or lf <namespace>/<step> [args]{reset}",
         dim = colors.dim,
         reset = colors.reset
     );
 
     Ok(())
+}
+
+/// Truncate `s` to fit within `width` graphemes (simple char-based approximation).
+fn truncate(s: &str, width: usize) -> String {
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(width.saturating_sub(1)).collect();
+    format!("{truncated}…")
 }

@@ -80,6 +80,7 @@ lf op sync
 ```
 
 Loopflow updates the checked-out default-branch worktree, not just the ref, and restores any dirty local edits afterward.
+If restoring those edits conflicts, the stash is left in place for manual recovery.
 
 ## Loop stuck in WAITING
 

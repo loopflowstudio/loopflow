@@ -38,6 +38,7 @@ lf op pr --title "area: short title" --body "## Summary ..."
 ```
 
 `--title` and `--body` are always required. Use `lf pr` to generate them with agent judgment.
+
 Before opening or updating the PR, Loopflow syncs the default branch in the main repo so the PR is based on current upstream state even when you run `lf op pr` from a sibling worktree.
 
 ## lf op land
@@ -129,6 +130,8 @@ lf op sync
 Fetches `origin/<default-branch>` and updates your local default branch. Safe to run from any worktree.
 
 If the default branch is checked out in another worktree, Loopflow resets that checked-out worktree to `origin/<default-branch>` instead of only moving the ref behind its back. Dirty changes in that worktree are auto-stashed and restored after the reset, including untracked files.
+
+If restoring the stash conflicts, Loopflow keeps the stash so you can recover the work manually.
 
 ## lf op wt
 

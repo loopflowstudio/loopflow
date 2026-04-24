@@ -132,23 +132,23 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
     std::fs::write(
         flows_dir.join("sprint.yaml"),
         r#"
-- gstack:office-hours
+- gstack/office-hours
 - xor:
-    router: gstack:office-hours
+    router: gstack/office-hours
     paths:
       autoplan:
-        step: gstack:autoplan
+        step: gstack/autoplan
         description: "Auto-plan with minimal interaction"
       manual:
-        flow: gstack-plan-manual
+        flow: gstack/plan-manual
         description: "Interactive planning"
 - implement
 - and:
     branches:
-      - step: gstack:review
-      - step: gstack:cso
-      - step: gstack:codex
-    synthesize: gstack:review-synthesize
+      - step: gstack/pr-review
+      - step: gstack/cso
+      - step: gstack/codex
+    synthesize: gstack/review-synthesize
 "#,
     )
     .expect("write flow");
@@ -161,16 +161,16 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
     assert_eq!(
         flow.step_names,
         vec![
-            "gstack:office-hours",
+            "gstack/office-hours",
             "[xor]",
-            "gstack:autoplan",
-            "gstack-plan-manual",
+            "gstack/autoplan",
+            "gstack/plan-manual",
             "implement",
             "[and]",
-            "gstack:review",
-            "gstack:cso",
-            "gstack:codex",
-            "gstack:review-synthesize",
+            "gstack/pr-review",
+            "gstack/cso",
+            "gstack/codex",
+            "gstack/review-synthesize",
         ]
     );
 }

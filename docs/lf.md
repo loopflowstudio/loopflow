@@ -36,12 +36,12 @@ Names resolve in this order:
 
 1. `.lf/steps/<step>.md` or `.lf/steps/<ns>/<step>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<step>.md` — Claude Code compatible
-3. `~/.lf/steps/<step>.md` or `~/.lf/steps/<ns>/<step>.md` — user-global
+3. `~/.lf/steps/<step>.md`, `~/.lf/steps/<ns>/<step>.md`, or `~/.claude/commands/<step>.md` — user-global
 4. Core built-in steps — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
 5. Namespaced built-in steps — e.g. `gstack/<step>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
 6. `npx/<owner>/<repo>` — fetched live via `npx skills`, cached at `.agents/skills/`
 
-The colon form `gstack:office-hours` is still accepted and normalized to `gstack/office-hours`; prefer the slash form in new code.
+Namespaced steps and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
 
 ### Step Arguments
 

@@ -86,7 +86,7 @@ lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-Names resolve in this order: your repo (`.lf/steps/<name>.md` or `.lf/steps/<ns>/<name>.md`) → your global dir (`~/.lf/steps/`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …). A bare name resolves to a namespaced builtin only when exactly one namespace has that name. For anything not shipped in the binary, use `lf npx/<owner>/<repo>` — fetched live via `npx skills`.
+Names resolve in this order: your repo (`.lf/steps/<name>.md`, `.lf/steps/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/steps/<name>.md`, `~/.lf/steps/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …). A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced steps and flows use `/`, not `:`. For anything not shipped in the binary, use `lf npx/<owner>/<repo>` — fetched live via `npx skills`.
 
 Steps and flows are organized into three categories by agency: **build** (manual work you drive), **govern** (autonomous coordination the system drives), **ops** (side-channel utilities).
 

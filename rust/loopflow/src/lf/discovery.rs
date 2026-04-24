@@ -189,19 +189,17 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 // Step discovery (user, global, builtin, external skills)
 // =============================================================================
 
-/// Discover a step by name. Normalizes `:` to `/`, tries the engine first
-/// (user paths → core builtins → namespaced builtins → bare-name fallback),
-/// then falls back to `npx/<name>` live fetch.
+/// Discover a step by name. Tries the engine first (user paths → core builtins
+/// → namespaced builtins → bare-name fallback), then falls back to `npx/<name>`
+/// live fetch.
 pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
-    let canonical = name.replace(':', "/");
-
-    match crate::engine::load_step(&canonical, repo) {
+    match crate::engine::load_step(name, repo) {
         Ok(step) => Ok(step),
         Err(LoadError::StepNotFound(_)) => {
-            if let Some(step) = find_external_skill(&canonical, Some(repo)) {
+            if let Some(step) = find_external_skill(name, Some(repo)) {
                 Ok(step)
             } else {
-                Err(LoadError::StepNotFound(canonical).into())
+                Err(LoadError::StepNotFound(name.to_string()).into())
             }
         }
         Err(err) => Err(err.into()),
@@ -944,10 +942,10 @@ mod tests {
     }
 
     #[test]
-    fn discover_step_normalizes_colon_to_slash() {
+    fn discover_step_rejects_legacy_colon_form() {
         let tmp = TempDir::new().expect("tempdir");
-        let step = discover_step(tmp.path(), "gstack:office-hours").expect("discover step");
-        assert_eq!(step.name, "gstack/office-hours");
+        let err = discover_step(tmp.path(), "gstack:office-hours").unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 
     #[test]

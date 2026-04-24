@@ -238,10 +238,6 @@ pub fn load_flow_strict(name: &str, repo: &Path) -> Result<Flow, LoadError> {
 }
 
 fn load_flow_inner(name: &str, repo: &Path, allow_bare_fallback: bool) -> Result<Flow, LoadError> {
-    // Normalize colon to slash: "gstack:sprint" → "gstack/sprint"
-    let canonical = name.replace(':', "/");
-    let name = canonical.as_str();
-
     let (resolved_name, content) = match find_flow_path(name, repo) {
         Ok(flow_path) => (name.to_string(), fs::read_to_string(&flow_path)?),
         Err(LoadError::FlowNotFound(_)) => {
@@ -293,10 +289,6 @@ pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadEr
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
-    // Normalize colon to slash: "gstack:office-hours" → "gstack/office-hours"
-    let canonical = name.replace(':', "/");
-    let name = canonical.as_str();
-
     // Try file-based lookup first (repo-local, then global)
     if let Ok(step_path) = find_step_path(name, repo) {
         return load_step_from_path(name, &step_path);
@@ -1304,17 +1296,7 @@ fn is_multi_step_flow(flow: &Flow, step_name: &str) -> bool {
 }
 
 fn try_load_multi_step_flow(step: &Step, repo: &Path, chain: &[String]) -> Option<Flow> {
-    if step.content.is_some() {
-        return None;
-    }
-    // Normalize for recursion check: `gstack:review` and `gstack/review` are the
-    // same flow, and the chain may hold either form depending on where the entry
-    // was added.
-    let canonical = step.name.replace(':', "/");
-    if chain
-        .iter()
-        .any(|entry| entry.replace(':', "/") == canonical)
-    {
+    if step.content.is_some() || chain.contains(&step.name) {
         return None;
     }
 
@@ -1438,7 +1420,7 @@ mod tests {
     }
 
     #[test]
-    fn load_step_finds_namespaced_step_with_colon() {
+    fn load_step_rejects_legacy_colon_form() {
         let tmp = TempDir::new().unwrap();
         let steps_dir = tmp.path().join(".lf/steps/gstack");
         fs::create_dir_all(&steps_dir).unwrap();
@@ -1448,11 +1430,9 @@ mod tests {
         )
         .unwrap();
 
-        // Colon form normalizes to slash
-        let step = load_step("gstack:office-hours", tmp.path()).unwrap();
-        assert_eq!(step.name, "gstack/office-hours");
-        assert_eq!(step.interactive, Some(false));
-        assert!(step.content.unwrap().contains("Do the thing"));
+        // The colon form is no longer accepted; users must use `/`.
+        let err = load_step("gstack:office-hours", tmp.path()).unwrap_err();
+        assert!(matches!(err, LoadError::StepNotFound(_)));
     }
 
     #[test]
@@ -2076,10 +2056,10 @@ Be careful.
         let yaml = r#"
 - and:
     branches:
-      - step: gstack:review
-      - step: gstack:cso
-      - step: gstack:codex
-    synthesize: gstack:review-synthesize
+      - step: gstack/pr-review
+      - step: gstack/cso
+      - step: gstack/codex
+    synthesize: gstack/review-synthesize
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -2091,7 +2071,7 @@ Be careful.
                 synthesize,
             } => {
                 assert_eq!(branches.len(), 3);
-                assert_eq!(synthesize.as_deref(), Some("gstack:review-synthesize"));
+                assert_eq!(synthesize.as_deref(), Some("gstack/review-synthesize"));
             }
             _ => panic!("expected And item"),
         }

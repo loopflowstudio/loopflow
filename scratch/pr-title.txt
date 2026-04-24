@@ -1,1 +1,0 @@
-release: archive decisions and notes with each version

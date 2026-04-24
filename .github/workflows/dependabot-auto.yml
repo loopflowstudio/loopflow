@@ -2,7 +2,7 @@ name: Dependabot zero-touch
 
 on:
   pull_request_target:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
   workflow_run:
     workflows: ["CI"] # Keep in sync with .github/workflows/ci.yml.
     types: [completed]

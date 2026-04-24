@@ -62,7 +62,7 @@ pub fn create_or_update_pr(
     let main_repo = resolve_main_repo(repo);
     let base_branch = get_default_branch(&main_repo)?;
 
-    // Commit before sync — sync_main checks is_clean() and fails on dirty trees
+    // Commit the feature branch before syncing so PR context reflects pushed state.
     let commit_options = CommitOptions {
         add: true,
         push: true,

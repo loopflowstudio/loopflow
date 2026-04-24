@@ -73,6 +73,15 @@ Remove merged worktrees:
 lf op wt prune
 ```
 
+If the default branch looks dirty after a sync or PR operation you ran from a sibling worktree, resync it explicitly:
+
+```bash
+lf op sync
+```
+
+Loopflow updates the checked-out default-branch worktree, not just the ref, and restores any dirty local edits afterward.
+If restoring those edits conflicts, the stash is left in place for manual recovery.
+
 ## Loop stuck in WAITING
 
 **Symptom:** `lfq list` shows a wave in WAITING state.

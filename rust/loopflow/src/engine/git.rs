@@ -340,9 +340,15 @@ pub fn pr_merge_squash_auto(repo: &Path) -> Result<(), GitError> {
 }
 
 /// Fetch origin/main_branch and fast-forward the local tracking branch.
-/// When on a different branch, uses update-ref to advance the local ref.
-/// When main_branch is checked out, stashes dirty state, resets, then pops.
-/// Returns true if up-to-date or updated, false if local branch can't be synced.
+///
+/// If `main_branch` is checked out in any worktree, that worktree is reset to
+/// `origin/main_branch` (dirty state is stashed first and popped afterward).
+/// Resetting via `git update-ref` alone would advance the ref while leaving
+/// the main worktree's index and working tree at the old commit, which
+/// produces a phantom-dirty `git status` until the next checkout.
+///
+/// Returns true if up-to-date or updated, false if the local branch can't be
+/// synced.
 pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
     let output = run_git(repo, &["fetch", "origin", main_branch])?;
     if !output.status.success() {
@@ -355,35 +361,69 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
     let origin_ref = format!("origin/{}", main_branch);
     let local_ref = format!("refs/heads/{}", main_branch);
 
-    if current_branch(repo)? != Some(main_branch.to_string()) {
-        // Not on main — fast-forward the local ref to match origin.
-        let output = run_git(repo, &["update-ref", &local_ref, &origin_ref])?;
-        if !output.status.success() {
-            tracing::warn!(
-                "Failed to update local {} to match {}",
-                main_branch,
-                origin_ref
-            );
-        }
-        return Ok(output.status.success());
+    // Prefer resetting inside whichever worktree has the branch checked out,
+    // so HEAD, index, and working tree stay in lockstep.
+    let target = if current_branch(repo)? == Some(main_branch.to_string()) {
+        Some(repo.to_path_buf())
+    } else {
+        find_worktree_for_branch(repo, main_branch)?
+    };
+
+    if let Some(main_worktree) = target {
+        return reset_worktree_to(&main_worktree, &origin_ref);
     }
 
-    // On main — stash if dirty, reset, then pop.
-    let status = run_git(repo, &["status", "--porcelain", "-uno"])?;
+    // Branch isn't checked out anywhere — safe to move the ref directly.
+    let output = run_git(repo, &["update-ref", &local_ref, &origin_ref])?;
+    if !output.status.success() {
+        tracing::warn!(
+            "Failed to update local {} to match {}",
+            main_branch,
+            origin_ref
+        );
+    }
+    Ok(output.status.success())
+}
+
+/// Reset `worktree` to `target_ref`, stashing and popping any dirty state so
+/// local-only work is preserved rather than silently overwritten.
+fn reset_worktree_to(worktree: &Path, target_ref: &str) -> Result<bool, GitError> {
+    let status = run_git(worktree, &["status", "--porcelain"])?;
     let dirty =
         status.status.success() && !String::from_utf8_lossy(&status.stdout).trim().is_empty();
 
     if dirty {
-        let _ = run_git(repo, &["stash", "push", "-m", "sync_main: auto-stash"]);
+        let stash = run_git(
+            worktree,
+            &[
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                "sync_main: auto-stash",
+            ],
+        )?;
+        if !stash.status.success() {
+            // Stash can fail during a conflicted merge or with odd index state.
+            // Log and continue — the reset will clear the bad state.
+            tracing::warn!(
+                "sync_main: stash failed in {}: {}",
+                worktree.display(),
+                String::from_utf8_lossy(&stash.stderr).trim()
+            );
+        }
     }
 
-    let output = run_git(repo, &["reset", "--hard", &origin_ref])?;
-    let ok = output.status.success();
+    let reset = run_git(worktree, &["reset", "--hard", target_ref])?;
+    let ok = reset.status.success();
 
     if dirty {
-        let pop = run_git(repo, &["stash", "pop"])?;
+        let pop = run_git(worktree, &["stash", "pop"])?;
         if !pop.status.success() {
-            tracing::warn!("stash pop failed after sync_main reset; stash preserved");
+            tracing::warn!(
+                "sync_main: stash pop failed in {}; stash preserved",
+                worktree.display()
+            );
         }
     }
 

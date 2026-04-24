@@ -2,8 +2,26 @@ use std::process::Command;
 
 use loopflow::engine::git::{
     commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, rebase,
+    sync_main,
 };
 use loopflow_test_support::TestRepo;
+
+fn git(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {:?} failed in {:?}: {}",
+        args,
+        dir,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
 
 // =============================================================================
 // Branch operations
@@ -168,4 +186,81 @@ fn sync_would_fail_on_dirty_tree() {
 
     // sync_main checks is_clean first - verify the check would fail
     assert!(!is_clean(repo.path()).unwrap());
+}
+
+/// Calling sync_main from a feature worktree must not leave the sibling main
+/// worktree with a stale working tree. Before the fix, sync_main advanced
+/// refs/heads/main via update-ref while the main worktree's HEAD file and
+/// working tree stayed at the old commit — `git status` on main then reported
+/// the merged commits as uncommitted deletions.
+#[test]
+fn sync_main_from_feature_worktree_keeps_sibling_main_clean() {
+    let repo = TestRepo::new();
+    let bare = repo.bare_path().to_path_buf();
+
+    // Advance origin/main via a second clone so the main worktree doesn't
+    // already hold the new commit.
+    let pusher = tempfile::TempDir::new().unwrap();
+    git(pusher.path(), &["clone", bare.to_str().unwrap(), "."]);
+    git(pusher.path(), &["config", "user.email", "t@t"]);
+    git(pusher.path(), &["config", "user.name", "t"]);
+    std::fs::write(pusher.path().join("upstream.txt"), "from upstream").unwrap();
+    git(pusher.path(), &["add", "."]);
+    git(pusher.path(), &["commit", "-m", "upstream change"]);
+    git(pusher.path(), &["push", "origin", "main"]);
+    let upstream_sha = git(pusher.path(), &["rev-parse", "HEAD"]);
+
+    // Create a feature worktree off the (now stale) main worktree.
+    let feature = repo.create_wave_worktree("myfeature");
+
+    // Feature worktree calls sync_main to fast-forward local main.
+    sync_main(&feature, "main").unwrap();
+
+    // Invariant: the main worktree must remain clean and match origin/main.
+    let status = git(repo.path(), &["status", "--porcelain"]);
+    assert!(
+        status.is_empty(),
+        "main worktree should be clean after sync_main from feature worktree, got:\n{status}"
+    );
+    let main_head = git(repo.path(), &["rev-parse", "HEAD"]);
+    assert_eq!(
+        main_head, upstream_sha,
+        "main worktree HEAD should match origin/main after sync"
+    );
+}
+
+/// Dirty local edits on the main worktree must survive a sync_main call from
+/// a sibling worktree.
+#[test]
+fn sync_main_from_feature_preserves_dirty_work_on_main() {
+    let repo = TestRepo::new();
+    let bare = repo.bare_path().to_path_buf();
+
+    // Advance origin/main via a second clone.
+    let pusher = tempfile::TempDir::new().unwrap();
+    git(pusher.path(), &["clone", bare.to_str().unwrap(), "."]);
+    git(pusher.path(), &["config", "user.email", "t@t"]);
+    git(pusher.path(), &["config", "user.name", "t"]);
+    std::fs::write(pusher.path().join("upstream.txt"), "upstream").unwrap();
+    git(pusher.path(), &["add", "."]);
+    git(pusher.path(), &["commit", "-m", "upstream"]);
+    git(pusher.path(), &["push", "origin", "main"]);
+
+    // Leave uncommitted work in the main worktree.
+    std::fs::write(repo.path().join("scratch_note.txt"), "wip").unwrap();
+
+    let feature = repo.create_wave_worktree("myfeature");
+    sync_main(&feature, "main").unwrap();
+
+    // Uncommitted file must be back after stash pop.
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch_note.txt")).unwrap(),
+        "wip",
+        "uncommitted file on main should be preserved across sync_main"
+    );
+    // And the pulled commit's file must be present too.
+    assert!(
+        repo.path().join("upstream.txt").exists(),
+        "main worktree should have fast-forwarded to origin/main"
+    );
 }

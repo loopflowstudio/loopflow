@@ -2,3 +2,5 @@ flow: build
 direction:
 - ux
 - clarity
+pm:
+  provider: asana

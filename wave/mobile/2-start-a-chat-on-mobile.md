@@ -1,3 +1,6 @@
+---
+asana_id: '1214269990650300'
+---
 # Start a chat on mobile
 
 **Finish line:** From the iOS app, start a new chat session with an agent — pick provider, optionally pick a wave for context, type a question, get streaming responses. Full native chat UX: markdown, code blocks, tool call cards, voice input.

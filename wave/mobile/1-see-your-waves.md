@@ -1,3 +1,6 @@
+---
+asana_id: '1214269990862022'
+---
 # See your waves
 
 **Finish line:** The iOS home tab shows a scrollable list of waves with live status: name, current step (if running), last activity, open PR count, attention count. Pulls down to refresh, updates real-time via WebSocket.

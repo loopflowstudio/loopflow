@@ -1,3 +1,6 @@
+---
+asana_id: '1214270114144936'
+---
 # See wave tasks
 
 **Finish line:** Tap a wave to drill into its roadmap: scrollable list of items with priority badge + title. Tap any item to see its full content — markdown, code blocks, frontmatter. Read-only but rich.

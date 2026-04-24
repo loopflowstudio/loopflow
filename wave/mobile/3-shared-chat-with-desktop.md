@@ -1,3 +1,6 @@
+---
+asana_id: '1214269990746869'
+---
 # Shared chat with desktop
 
 **Finish line:** A session started on desktop can be picked up on mobile mid-conversation and vice versa. The session is the unit — both devices are clients; lfd owns state.

@@ -1460,6 +1460,7 @@ fn tag_and_push_ref(
     let ref_name = target_ref.unwrap_or("HEAD");
     let target_sha = run_stdout(repo, "git", &["rev-parse", ref_name])?;
     let target_sha = target_sha.trim().to_string();
+    ensure_commit_local(repo, &target_sha)?;
 
     if let Some(remote_sha) = remote_tag_sha(repo, &tag)? {
         if remote_sha == target_sha {
@@ -1516,6 +1517,33 @@ fn local_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
     } else {
         Ok(Some(sha))
     }
+}
+
+/// Ensure `sha` exists in `repo`'s local object database, fetching from
+/// origin if it doesn't.
+///
+/// `git rev-parse <40-char-hex>` echoes the input without verifying the
+/// object is actually present. When the SHA originates from `gh pr view`
+/// (a merge commit landed on origin via the merge queue), the local repo
+/// may not have fetched it yet — and `git tag <name> <sha>` then fails
+/// with `trying to write ref ... with nonexistent object`.
+fn ensure_commit_local(repo: &Path, sha: &str) -> OpsResult<()> {
+    if commit_exists_locally(repo, sha) {
+        return Ok(());
+    }
+    let _ = run_output(repo, "git", &["fetch", "origin"]);
+    if commit_exists_locally(repo, sha) {
+        return Ok(());
+    }
+    Err(OpsError::Message(format!(
+        "commit {sha} is not present locally even after fetching origin"
+    )))
+}
+
+fn commit_exists_locally(repo: &Path, sha: &str) -> bool {
+    run_output(repo, "git", &["cat-file", "-e", sha])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn remote_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
@@ -2003,5 +2031,80 @@ version = "2.0.0"
                 .unwrap(),
             "# v0.9.10\n\nnotes",
         );
+    }
+
+    // ======================================================================
+    // ensure_commit_local
+    // ======================================================================
+
+    #[test]
+    fn ensure_commit_local_fetches_object_pushed_by_another_clone() {
+        use loopflow_test_support::TestRepo;
+        use std::process::Command;
+
+        let repo = TestRepo::new();
+
+        // A second clone simulates a contributor who pushed a commit the
+        // local repo hasn't fetched yet — exactly the merge-queue race
+        // that wedged tag creation in v0.9.10.
+        let other = tempfile::tempdir().unwrap();
+        run_or_panic(Command::new("git").args([
+            "clone",
+            repo.bare_path().to_str().unwrap(),
+            other.path().to_str().unwrap(),
+        ]));
+        run_or_panic(Command::new("git").current_dir(other.path()).args([
+            "config",
+            "user.email",
+            "remote@example.com",
+        ]));
+        run_or_panic(Command::new("git").current_dir(other.path()).args([
+            "config",
+            "user.name",
+            "Remote",
+        ]));
+        std::fs::write(other.path().join("remote.txt"), "remote-only").unwrap();
+        run_or_panic(
+            Command::new("git")
+                .current_dir(other.path())
+                .args(["add", "."]),
+        );
+        run_or_panic(Command::new("git").current_dir(other.path()).args([
+            "commit",
+            "-m",
+            "remote commit",
+        ]));
+        let new_sha = String::from_utf8(
+            Command::new("git")
+                .current_dir(other.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        run_or_panic(Command::new("git").current_dir(other.path()).args(["push"]));
+
+        assert!(
+            !commit_exists_locally(repo.path(), &new_sha),
+            "precondition: object should not exist locally before fetch",
+        );
+
+        ensure_commit_local(repo.path(), &new_sha).expect("fetch + verify should succeed");
+
+        assert!(commit_exists_locally(repo.path(), &new_sha));
+    }
+
+    fn run_or_panic(cmd: &mut std::process::Command) {
+        let output = cmd.output().expect("run git");
+        if !output.status.success() {
+            panic!(
+                "git {:?} failed: {}",
+                cmd,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

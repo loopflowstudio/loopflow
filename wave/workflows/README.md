@@ -1,32 +1,22 @@
 # Workflows
 
-The engine. Flows, providers, daemon, chord model, governance UX, runboard.
+The engine. Everything below the Concerto UI layer — the CLI, the daemon, the providers, the flow system, the chord model — composes into one engine that defines how loopflow actually runs.
 
-## Vision
+## Tasks
 
-Everything below the Concerto UI layer. The CLI, the daemon, the providers, the flow system, the chord model, and the governance surfaces compose into one engine that defines how loopflow actually runs.
+1. **`daily-garden-cycle`** (p1) — chord observes members and proposes mutation PRs on a schedule. Demo: `lf garden` produces a reviewable PR against this repo
+2. **`continuous-build-loop`** (p1) — wave in loop mode ingests from PM, ships PRs, reports lifecycle. Demo: turn on loop, walk away, come back to shipped PRs
+3. **`chat-session-api`** (p2) — lfd backend for native chat (typed events + bidi input + resumable stream). Demo: desktop chat, phone picks up mid-turn
+4. **`pm-round-trip`** (p2) — PM state mirrors wave/PR reality; dependencies + lifecycle + scripted reset. Demo: add `needs:`, Asana graph updates; reset team, clean rebuild
 
-A single wave keeps this work coherent — one engine upgrade at a time, not four parallel refactors that never converge. Inside the wave, items stay focused on their area.
+## Not here
 
-### Not here
-
-- macOS UI polish (→ desktop).
-- iOS read-only view (→ mobile).
-- Chord-level governance questions about the root wave itself (→ root).
-
-## Scope
-
-- **lfd** — runtime host, shared execution model, session input, stream cursoring, regression tests.
-- **model** — chord-model, VSM flows, wave discovery, scheduling, DAG/nested chords, Letta integration, wave mutation, API expansion.
-- **pm** — Asana/Linear/Notion sync, dependency sync, run-lifecycle sync, Notion README sync, team-level delete / reset ops.
-- **gstack** — gstack workstyle import, autoresearch, infrastructure model, company model.
-- **flows** — catalog, session-state overlay, `maybe` primitive, placement tuning, Flows-view polish.
-- **runboard** — wave status API, runboard UI, agent health detection, beat sequencer.
-- **governance UX** — calibration view, portfolio view. Attention surfaces for the garden flow.
-- **experimental** — beat synthesizer, concerto release UI.
+- macOS UI polish (→ desktop)
+- iOS read-only view (→ mobile)
+- Chord-level governance questions about the root wave itself (→ root)
 
 ## Risks
 
-- Too broad to hold in one head. Roadmap priority buckets (1 urgent / 2 high / 3 medium / 4 low) are the focus tool — the wave is big, the active set is small.
-- Inter-item dependencies between lfd / model / runboard / flows need explicit tracking.
-- Governance UX (calibration, portfolio) is coupled to model work — surfaces depend on the underlying wave-modes and run-lifecycle landing first.
+- Four tasks cover a lot of architecture. Each PR will be large — that's the deal with "one task per product experience."
+- Inter-task dependencies: `chat-session-api` is infrastructure for desktop and mobile chat; `pm-round-trip` is infrastructure for `continuous-build-loop`.
+- Scheduled execution (cron-driven garden, overnight loop) only works if waves and providers stay stable enough — so hardening comes before cadence polish.

@@ -1,3 +1,6 @@
+---
+asana_id: '1214270016716361'
+---
 # Daily rhythm and status
 
 **Finish line:** Manual `review-open-work` and automated `govern-*` / `garden-*` flows share surfaces and vocabulary. The conductor has one morning ritual — open Concerto, see the full overnight picture (shipped PRs, pending chord proposals, calibration checkpoints, anything that needs manual attention) in one place. Not two parallel systems; one rhythm.

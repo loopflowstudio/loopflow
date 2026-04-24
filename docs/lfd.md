@@ -248,12 +248,12 @@ Chord-waves are regular waves whose `area` points at other wave directories:
 ```bash
 curl -s -X POST "$LFD_ADDR/v0/waves" \
   -H "Content-Type: application/json" \
-  -d '{"repo":"'"$(pwd)"'","name":"redesign"}'
+  -d '{"repo":"'"$(pwd)"'","name":"conductor"}'
 
-curl -s "$LFD_ADDR/v0/waves/redesign"
+curl -s "$LFD_ADDR/v0/waves/conductor"
 ```
 
-The `wave/redesign/redesign.yaml` file is the source of truth for member waves.
+The `wave/conductor/conductor.yaml` file is the source of truth for member waves.
 
 ## Browse the flow catalog
 

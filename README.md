@@ -393,10 +393,10 @@ loopflow.run_wave("ux")
 ```python
 import loopflow.api as loopflow
 
-loopflow.create_wave("redesign", repo=".")
-redesign = loopflow.wave("redesign")
-print(redesign.primary_flow)
-print(redesign.area)
+loopflow.create_wave("conductor", repo=".")
+conductor = loopflow.wave("conductor")
+print(conductor.primary_flow)
+print(conductor.area)
 ```
 
 [Documentation →](docs/index.md)

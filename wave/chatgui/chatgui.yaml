@@ -1,7 +1,0 @@
-flow: build
-area:
-  - swift/Concerto/Views/
-  - swift/LoopflowCore/State/SessionState.swift
-direction:
-  - ux
-  - craft

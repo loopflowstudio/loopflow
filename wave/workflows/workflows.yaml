@@ -1,0 +1,7 @@
+flow: build
+direction:
+- clarity
+- care
+pm:
+  provider: asana
+  asana_project: '1214270115593839'

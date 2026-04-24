@@ -46,155 +46,20 @@ pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
 // Built-in step metadata for formatted listing
 // =============================================================================
 
-pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
-    ("Setup", &["init"]),
-    (
-        "Planning & Design",
-        &[
-            "design",
-            "explore",
-            "refine",
-            "review-design",
-            "review-open-work",
-            "refresh-plan",
-            "kickoff",
-            "5whys",
-        ],
-    ),
-    (
-        "Implementation",
-        &[
-            "implement",
-            "iterate",
-            "expand",
-            "reduce",
-            "compress",
-            "integrate-upstream",
-        ],
-    ),
-    (
-        "Quality",
-        &[
-            "demo",
-            "code-review",
-            "research",
-            "polish",
-            "lint",
-            "debug",
-            "ci-fix",
-            "qa",
-            "triage",
-            "gate",
-        ],
-    ),
-    ("Git", &["commit", "rebase", "pr", "land"]),
-    (
-        "Ops",
-        &[
-            "ingest",
-            "split-wave",
-            "update-wave",
-            "synthesize",
-            "validate",
-            "release",
-            "release-notes",
-        ],
-    ),
-    ("Garden", &["scan", "assess", "wave-report"]),
-    ("Wave", &["mutate", "review"]),
-    (
-        "VSM",
-        &[
-            "s2-scan",
-            "s2-assess",
-            "s3-scan",
-            "s3-assess",
-            "s4-scan",
-            "s4-assess",
-            "s5-scan",
-            "s5-assess",
-        ],
-    ),
-];
+pub use crate::engine::builtins::BUILTIN_STEP_CATEGORIES;
 
-pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
-    HashMap::from([
-        ("init", "Set up loopflow in this repo"),
-        ("design", "Plan what to build"),
-        ("split-wave", "Split a large wave into child waves"),
-        ("explore", "Investigate current diff"),
-        ("implement", "Build from design doc"),
-        ("iterate", "Improve code on branch"),
-        ("expand", "Explore ambitious extensions"),
-        ("reduce", "Simplify while preserving behavior"),
-        ("demo", "Experience-first walkthrough of changes"),
-        (
-            "code-review",
-            "Walk through structural and architectural decisions",
-        ),
-        ("research", "Map the territory, understand what exists"),
-        ("polish", "Fix issues, run tests"),
-        ("lint", "Run linter, fix issues"),
-        ("debug", "Fix errors from clipboard"),
-        ("ci-fix", "Fix latest CI failures for current PR"),
-        ("commit", "Commit with generated message"),
-        ("rebase", "Rebase onto main"),
-        ("pr", "Open or update PR with generated description"),
-        ("land", "Land PR, rotate worktree"),
-        ("refine", "Iteratively refine text"),
-        ("compress", "Simplify touched code"),
-        ("gate", "Ship-ready check with reviewer docs"),
-        ("5whys", "Root cause analysis on a bug fix"),
-        ("kickoff", "Elaborate design with alternatives"),
-        ("ingest", "Pick wave item, move to scratch/"),
-        ("update-wave", "Create, update, or delete wave state"),
-        ("synthesize", "Combine multiple perspectives"),
-        ("validate", "Validate flows, steps, and directions"),
-        ("release", "Run one-shot release workflow"),
-        ("release-notes", "Write narrative release notes"),
-        (
-            "review-design",
-            "Reshape AI-elaborated design into user intent",
-        ),
-        (
-            "review-open-work",
-            "Survey branches, PRs, worktrees, and waves for inbox-zero triage",
-        ),
-        (
-            "refresh-plan",
-            "Reconcile scratch/ with the branch after rebasing",
-        ),
-        (
-            "integrate-upstream",
-            "Adapt wave code after rebasing onto main",
-        ),
-        ("qa", "Test, fix, verify"),
-        (
-            "triage",
-            "Assess QA findings, separate blocking from polish",
-        ),
-        ("scan", "Read member wave state"),
-        ("assess", "Judge wave health and identify pressure points"),
-        ("wave-report", "Read health signals across all waves"),
-        ("mutate", "Compose and apply coordinated mutations"),
-        ("review", "Review mutations, amend or revert"),
-        ("s2-scan", "Scan backlogs, PR overlap, conflict history"),
-        ("s2-assess", "Assess coordination risk and safe ordering"),
-        ("s3-scan", "Scan live health, velocity, CI, usage signals"),
-        ("s3-assess", "Assess control health and mechanical blocks"),
-        ("s4-scan", "Scan dependencies, advisories, upstream APIs"),
-        ("s4-assess", "Assess environmental changes and implications"),
-        ("s5-scan", "Scan chord identity, roster, policy"),
-        ("s5-assess", "Assess identity, boundary, and autonomy drift"),
-    ])
-}
-
-/// All builtin step names (from BUILTIN_CATEGORIES).
+/// All builtin step names (from BUILTIN_STEP_CATEGORIES).
 pub fn builtin_steps() -> HashSet<String> {
-    BUILTIN_CATEGORIES
+    BUILTIN_STEP_CATEGORIES
         .iter()
         .flat_map(|(_, steps)| steps.iter().map(|s| (*s).to_string()))
         .collect()
+}
+
+/// One-line description for a builtin step, derived from its file's frontmatter
+/// or leading prose.
+pub fn builtin_step_description(name: &str) -> String {
+    crate::engine::builtins::builtin_step_description(name)
 }
 
 /// Check if a step is interactive by loading it via the engine.
@@ -219,143 +84,43 @@ pub struct SkillSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillSourceKind {
-    /// Directory of skills (e.g., superpowers)
-    Directory,
     /// Single file skill (e.g., rams)
     SingleFile,
     /// Agent Skills cache sourced by `npx skills`
     Npx,
-    /// Namespaced step directory at .lf/steps/<name>/
-    Namespaced,
 }
 
-/// Discover external skill sources (config, npx cache, superpowers, rams).
+/// Discover external skill sources (npx cache and rams).
 pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     let mut sources = Vec::new();
-    let mut seen_prefixes = HashSet::new();
 
-    // 1. Config-defined sources (checked first)
+    // npx skill cache in repo-local .agents/skills (fetched live on demand)
     if let Some(repo_root) = repo {
-        if let Ok(Some(config)) = crate::engine::load_config(Some(repo_root)) {
-            for source_config in &config.skill_sources {
-                let path = expand_tilde(&source_config.path);
-                if !path.exists() {
-                    continue;
-                }
-                let skills = discover_superpowers_skills(&path);
-                if !skills.is_empty() {
-                    sources.push(SkillSource {
-                        name: source_config.name.clone(),
-                        prefix: source_config.prefix.clone(),
-                        path: Some(path),
-                        skills,
-                        kind: SkillSourceKind::Directory,
-                    });
-                    seen_prefixes.insert(source_config.prefix.clone());
-                }
-            }
-        }
+        let cache_dir = repo_root.join(".agents/skills");
+        sources.push(SkillSource {
+            name: "npx skills".to_string(),
+            prefix: "npx".to_string(),
+            path: Some(cache_dir.clone()),
+            skills: discover_npx_cache_skills(&cache_dir),
+            kind: SkillSourceKind::Npx,
+        });
     }
 
-    // 2. Namespaced step directories (.lf/steps/<name>/)
-    if let Some(repo_root) = repo {
-        let steps_dir = repo_root.join(".lf/steps");
-        if let Ok(entries) = std::fs::read_dir(&steps_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let Some(prefix) = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                else {
-                    continue;
-                };
-                if seen_prefixes.contains(&prefix) {
-                    continue;
-                }
-
-                let skills = discover_namespaced_skills(&path);
-                if skills.is_empty() {
-                    continue;
-                }
-
-                sources.push(SkillSource {
-                    name: prefix.clone(),
-                    prefix: prefix.clone(),
-                    path: Some(path),
-                    skills,
-                    kind: SkillSourceKind::Namespaced,
-                });
-                seen_prefixes.insert(prefix);
-            }
-        }
-    }
-
-    // 3. npx skill cache in repo-local .agents/skills
-    if !seen_prefixes.contains("npx") {
-        if let Some(repo_root) = repo {
-            let cache_dir = repo_root.join(".agents/skills");
+    // rams single-file skill at ~/.claude/commands/rams.md
+    if let Some(home) = dirs::home_dir() {
+        let rams_path = home.join(".claude/commands/rams.md");
+        if rams_path.exists() {
             sources.push(SkillSource {
-                name: "npx skills".to_string(),
-                prefix: "npx".to_string(),
-                path: Some(cache_dir.clone()),
-                skills: discover_npx_cache_skills(&cache_dir),
-                kind: SkillSourceKind::Npx,
+                name: "rams.ai".to_string(),
+                prefix: "rams".to_string(),
+                path: Some(rams_path.parent().unwrap_or(&home).to_path_buf()),
+                skills: vec!["rams".to_string()],
+                kind: SkillSourceKind::SingleFile,
             });
-            seen_prefixes.insert("npx".to_string());
-        }
-    }
-
-    // 4. Auto-detect superpowers
-    let sp_paths = [
-        repo.map(|r| r.join("superpowers")),
-        dirs::home_dir().map(|h| h.join(".superpowers")),
-        dirs::home_dir().map(|h| h.join("superpowers")),
-    ];
-
-    for path in sp_paths.into_iter().flatten() {
-        if seen_prefixes.contains("sp") {
-            break;
-        }
-        if path.exists() {
-            let skills = discover_superpowers_skills(&path);
-            if !skills.is_empty() {
-                sources.push(SkillSource {
-                    name: "superpowers".to_string(),
-                    prefix: "sp".to_string(),
-                    path: Some(path),
-                    skills,
-                    kind: SkillSourceKind::Directory,
-                });
-                seen_prefixes.insert("sp".to_string());
-            }
-        }
-    }
-
-    // 5. Auto-detect rams
-    // Check for rams at ~/.claude/commands/rams.md
-    if !seen_prefixes.contains("rams") {
-        if let Some(home) = dirs::home_dir() {
-            let rams_path = home.join(".claude/commands/rams.md");
-            if rams_path.exists() {
-                sources.push(SkillSource {
-                    name: "rams.ai".to_string(),
-                    prefix: "rams".to_string(),
-                    path: Some(rams_path.parent().unwrap_or(&home).to_path_buf()),
-                    skills: vec!["rams".to_string()],
-                    kind: SkillSourceKind::SingleFile,
-                });
-            }
         }
     }
 
     sources
-}
-
-fn discover_namespaced_skills(dir: &Path) -> Vec<String> {
-    list_md_stems(std::slice::from_ref(&dir.to_path_buf()))
 }
 
 fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
@@ -378,32 +143,6 @@ fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
 
             if let Some(name) = path.file_name() {
                 skills.push(name.to_string_lossy().to_string());
-            }
-        }
-    }
-
-    skills.sort();
-    skills
-}
-
-fn discover_superpowers_skills(source_path: &Path) -> Vec<String> {
-    let skills_dir = source_path.join("skills");
-    if !skills_dir.exists() {
-        return Vec::new();
-    }
-
-    let mut skills = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(skills_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let skill_file = path.join(SKILL_FILE_NAME);
-                if skill_file.exists() {
-                    if let Some(name) = path.file_name() {
-                        let name = normalize_skill_name(&name.to_string_lossy());
-                        skills.push(name);
-                    }
-                }
             }
         }
     }
@@ -438,7 +177,7 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
     let mut skills = Vec::new();
     for source in sources {
         for skill_name in &source.skills {
-            let prefixed = format!("{}:{}", source.prefix, skill_name);
+            let prefixed = format!("{}/{}", source.prefix, skill_name);
             skills.push((prefixed, source.name.clone()));
         }
     }
@@ -447,23 +186,32 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 }
 
 // =============================================================================
-// Step discovery (user, global, builtin)
+// Step discovery (user, global, builtin, external skills)
 // =============================================================================
 
-/// Discover a step by name, checking skills first, then repo → global → builtins
-/// via `load_step`.
+/// Discover a step by name. Normalizes `:` to `/`, tries the engine first
+/// (user paths → core builtins → namespaced builtins → bare-name fallback),
+/// then falls back to `npx/<name>` live fetch.
 pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
-    if name.contains(':') {
-        if let Some(step) = find_skill(name, Some(repo)) {
-            return Ok(step);
+    let canonical = name.replace(':', "/");
+
+    match crate::engine::load_step(&canonical, repo) {
+        Ok(step) => Ok(step),
+        Err(LoadError::StepNotFound(_)) => {
+            if let Some(step) = find_external_skill(&canonical, Some(repo)) {
+                Ok(step)
+            } else {
+                Err(LoadError::StepNotFound(canonical).into())
+            }
         }
+        Err(err) => Err(err.into()),
     }
-    crate::engine::load_step(name, repo).map_err(Into::into)
 }
 
-/// Resolve a skill reference like "sp:brainstorm" to a Step.
-fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
-    let (prefix, skill_name) = name.split_once(':')?;
+/// Resolve an external skill reference like `npx/vercel-labs/deep-research` or
+/// `rams/rams` to a Step.
+fn find_external_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
+    let (prefix, skill_name) = name.split_once('/')?;
     let sources = discover_skill_sources(repo);
 
     for source in &sources {
@@ -484,9 +232,6 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
         }
 
         let prompt_path = find_skill_prompt_path(source, skill_name)?;
-        if source.kind == SkillSourceKind::Namespaced {
-            return load_namespaced_from_path(name, &prompt_path);
-        }
         return load_skill_from_path(name, &prompt_path);
     }
 
@@ -591,10 +336,6 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
         interactive: Some(true),
         fast_path: None,
     })
-}
-
-fn load_namespaced_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
-    crate::engine::flow::load_step_from_path(name, prompt_path).ok()
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
@@ -773,30 +514,9 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
     let source_path = source.path.as_ref()?;
 
     match source.kind {
-        SkillSourceKind::SingleFile | SkillSourceKind::Namespaced => {
+        SkillSourceKind::SingleFile => {
             let candidate = source_path.join(format!("{skill_name}.md"));
             candidate.is_file().then_some(candidate)
-        }
-        SkillSourceKind::Directory => {
-            let skills_dir = source_path.join("skills");
-            if !skills_dir.exists() {
-                return None;
-            }
-            // Walk skill directories, matching normalized names
-            let entries = std::fs::read_dir(&skills_dir).ok()?;
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let normalized = normalize_skill_name(&path.file_name()?.to_string_lossy());
-                    if normalized == skill_name {
-                        let skill_file = path.join(SKILL_FILE_NAME);
-                        if skill_file.is_file() {
-                            return Some(skill_file);
-                        }
-                    }
-                }
-            }
-            None
         }
         SkillSourceKind::Npx => None,
     }
@@ -966,7 +686,8 @@ fn format_flow_description(yaml_content: &str) -> String {
     names.join(" → ")
 }
 
-/// Extract step names from a flow value, formatting forks as "fork(step×N)".
+/// Extract step names from a flow value, formatting forks as "fork(step×N)"
+/// and and/xor/or/loop constructs with their keyword.
 fn extract_flow_summary(value: &serde_yaml_ng::Value) -> Vec<String> {
     let serde_yaml_ng::Value::Sequence(seq) = value else {
         return Vec::new();
@@ -977,20 +698,38 @@ fn extract_flow_summary(value: &serde_yaml_ng::Value) -> Vec<String> {
         match item {
             serde_yaml_ng::Value::String(s) => names.push(s.clone()),
             serde_yaml_ng::Value::Mapping(map) => {
+                let key = |k: &str| serde_yaml_ng::Value::String(k.into());
                 // Fork: { fork: { step: "reduce", drafts: [...] } }
-                if let Some(serde_yaml_ng::Value::Mapping(fork_map)) =
-                    map.get(serde_yaml_ng::Value::String("fork".into()))
-                {
+                if let Some(serde_yaml_ng::Value::Mapping(fork_map)) = map.get(key("fork")) {
                     let step = fork_map
-                        .get(serde_yaml_ng::Value::String("step".into()))
+                        .get(key("step"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("?");
                     let count = fork_map
-                        .get(serde_yaml_ng::Value::String("drafts".into()))
+                        .get(key("drafts"))
                         .and_then(|v| v.as_sequence())
                         .map(|s| s.len())
                         .unwrap_or(0);
                     names.push(format!("fork({step}×{count})"));
+                    continue;
+                }
+                if let Some(step) = map.get(key("step")).and_then(|v| v.as_str()) {
+                    names.push(step.to_string());
+                    continue;
+                }
+                if let Some(flow) = map.get(key("flow")).and_then(|v| v.as_str()) {
+                    names.push(flow.to_string());
+                    continue;
+                }
+                if let Some(op) = map.get(key("op")).and_then(|v| v.as_str()) {
+                    names.push(format!("op: {op}"));
+                    continue;
+                }
+                for branch_key in ["and", "xor", "or", "loop"] {
+                    if map.contains_key(key(branch_key)) {
+                        names.push(format!("[{branch_key}]"));
+                        break;
+                    }
                 }
             }
             _ => {}
@@ -1074,16 +813,6 @@ fn extract_flow_step_names(path: &Path) -> Vec<String> {
     };
 
     extract_step_names_from_value(&value)
-}
-
-/// Expand ~ to home directory.
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(path)
 }
 
 fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
@@ -1193,96 +922,32 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn discover_skill_sources_includes_namespaced_steps() {
+    fn discover_step_loads_user_namespaced_override() {
         let tmp = TempDir::new().expect("tempdir");
         let steps_dir = tmp.path().join(".lf/steps/gstack");
         fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
         fs::write(
             steps_dir.join("office-hours.md"),
-            "---\ninteractive: false\n---\nDo the work.\n",
+            "---\ninteractive: false\ndirections: [gstack]\n---\n# user override\n",
         )
         .expect("write step");
 
-        let sources = discover_skill_sources(Some(tmp.path()));
-        let gstack = sources
-            .iter()
-            .find(|source| source.prefix == "gstack")
-            .expect("gstack source");
+        let step = discover_step(tmp.path(), "gstack/office-hours").expect("discover step");
 
-        assert_eq!(gstack.kind, SkillSourceKind::Namespaced);
-        assert_eq!(gstack.skills, vec!["office-hours".to_string()]);
-    }
-
-    #[test]
-    fn discover_step_loads_namespaced_frontmatter() {
-        let tmp = TempDir::new().expect("tempdir");
-        let steps_dir = tmp.path().join(".lf/steps/gstack");
-        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
-        fs::write(
-            steps_dir.join("office-hours.md"),
-            "---\ninteractive: false\ndirections: [gstack]\n---\n# /office-hours\nShip it.\n",
-        )
-        .expect("write step");
-
-        let step = discover_step(tmp.path(), "gstack:office-hours").expect("discover step");
-
-        assert_eq!(step.name, "gstack:office-hours");
         assert_eq!(step.interactive, Some(false));
         assert_eq!(step.directions, vec!["gstack".to_string()]);
         assert!(step
             .content
             .as_deref()
             .expect("content")
-            .contains("# /office-hours"));
+            .contains("# user override"));
     }
 
     #[test]
-    fn list_all_steps_includes_namespaced_steps_as_external_skills() {
+    fn discover_step_normalizes_colon_to_slash() {
         let tmp = TempDir::new().expect("tempdir");
-        let steps_dir = tmp.path().join(".lf/steps/gstack");
-        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
-        fs::write(steps_dir.join("office-hours.md"), "Ship it.\n").expect("write step");
-
-        let (_user, _global, _builtin, external) = list_all_steps(Some(tmp.path()));
-
-        assert!(external.contains(&("gstack:office-hours".to_string(), "gstack".to_string())));
-    }
-
-    #[test]
-    fn builtin_categories_covers_all_builtin_steps() {
-        let category_steps = builtin_steps();
-        let all_steps: HashSet<String> = crate::engine::builtins::builtin_step_names()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let missing_from_categories: Vec<_> = all_steps.difference(&category_steps).collect();
-        let phantom_in_categories: Vec<_> = category_steps.difference(&all_steps).collect();
-
-        assert!(
-            missing_from_categories.is_empty(),
-            "Steps on disk but not in BUILTIN_CATEGORIES: {missing_from_categories:?}"
-        );
-        assert!(
-            phantom_in_categories.is_empty(),
-            "Steps in BUILTIN_CATEGORIES but not on disk: {phantom_in_categories:?}"
-        );
-    }
-
-    #[test]
-    fn builtin_descriptions_covers_all_builtin_steps() {
-        let descriptions = builtin_descriptions();
-        let category_steps = builtin_steps();
-
-        let missing: Vec<_> = category_steps
-            .iter()
-            .filter(|s| !descriptions.contains_key(s.as_str()))
-            .collect();
-
-        assert!(
-            missing.is_empty(),
-            "Steps in BUILTIN_CATEGORIES missing a description: {missing:?}"
-        );
+        let step = discover_step(tmp.path(), "gstack:office-hours").expect("discover step");
+        assert_eq!(step.name, "gstack/office-hours");
     }
 
     #[test]

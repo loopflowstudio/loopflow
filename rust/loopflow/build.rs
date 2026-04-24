@@ -6,14 +6,20 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Category directories whose step/flow names are registered flat (no prefix).
+/// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
+/// Core categories share one flat namespace and must not collide with each other.
+const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
+
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    // Builtins are organized as `<category>/<kind>/*.ext` where category is
-    // one of build/govern/ops and kind is flow/step/prompt.
+    // Builtins live at `<cat>/<kind>/*.ext`. Steps and flows from CORE_CATEGORIES
+    // are registered flat; steps and flows from other categories are registered
+    // as `<cat>/<name>` and are also reachable by bare name when unambiguous.
     generate_kind_map(
         &builtins_dir,
         "step",
@@ -78,8 +84,9 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
 }
 
 /// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
-/// for each top-level category directory. Duplicate file stems across
-/// categories panic — step and flow names are one flat namespace.
+/// for each top-level category directory. Core categories (build/govern/ops)
+/// share one flat namespace — duplicate stems across cores panic. Non-core
+/// categories get their name as a prefix: `gstack/office-hours`.
 fn generate_kind_map(
     builtins_dir: &Path,
     kind: &str,
@@ -90,9 +97,25 @@ fn generate_kind_map(
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     if let Ok(cats) = fs::read_dir(builtins_dir) {
         for cat in cats.flatten() {
-            let kind_dir = cat.path().join(kind);
-            if kind_dir.is_dir() {
-                collect_files(&kind_dir, extension, &mut entries);
+            let cat_path = cat.path();
+            let kind_dir = cat_path.join(kind);
+            if !kind_dir.is_dir() {
+                continue;
+            }
+            let cat_name = cat_path
+                .file_name()
+                .expect("dir has no name")
+                .to_string_lossy()
+                .to_string();
+            let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
+            let mut files: Vec<(String, PathBuf)> = Vec::new();
+            collect_files(&kind_dir, extension, &mut files);
+            if is_core {
+                entries.extend(files);
+            } else {
+                for (stem, path) in files {
+                    entries.push((format!("{cat_name}/{stem}"), path));
+                }
             }
         }
     }
@@ -140,7 +163,9 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
 }
 
 /// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
-/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased.
+/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased. Names
+/// for core categories stay bare; names for non-core categories get the
+/// `<cat>/` prefix so they match the keys in BUILTIN_STEPS / BUILTIN_FLOWS.
 fn generate_category_map(
     builtins_dir: &Path,
     kind: &str,
@@ -174,6 +199,7 @@ fn generate_category_map(
             .expect("dir has no name")
             .to_string_lossy()
             .to_string();
+        let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
         let category = title_case(&cat_name);
 
         let mut names = Vec::new();
@@ -187,11 +213,16 @@ fn generate_category_map(
                     other => file_path.extension().is_some_and(|e| e == other),
                 };
                 if matches_ext {
-                    let name = file_path
+                    let stem = file_path
                         .file_stem()
                         .expect("file has no stem")
                         .to_string_lossy()
                         .to_string();
+                    let name = if is_core {
+                        stem
+                    } else {
+                        format!("{cat_name}/{stem}")
+                    };
                     names.push(name);
                 }
             }

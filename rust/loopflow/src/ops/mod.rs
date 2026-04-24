@@ -4,7 +4,6 @@ mod combine;
 mod commit;
 mod error;
 mod flow;
-pub mod gstack;
 pub(crate) mod ingest;
 mod land;
 mod next;

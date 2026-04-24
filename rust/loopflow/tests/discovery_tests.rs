@@ -5,9 +5,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use loopflow::engine::builtins::{builtin_flow_names, builtin_step_names};
+use loopflow::engine::{load_flow, load_step};
 use loopflow::lf::discovery::{
-    builtin_steps, discover_step, discover_target, list_all_steps, list_directions,
-    list_user_flows, Target, BUILTIN_CATEGORIES,
+    builtin_step_description, builtin_steps, discover_step, discover_target, list_all_steps,
+    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_STEP_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -233,10 +235,121 @@ fn discover_target_errors_for_unknown() {
 #[test]
 fn categorized_listing_includes_known_steps() {
     let builtins = builtin_steps();
-    for (_category, steps) in BUILTIN_CATEGORIES {
+    for (_category, steps) in BUILTIN_STEP_CATEGORIES {
         for step in *steps {
-            assert!(builtins.contains(*step));
+            assert!(
+                builtins.contains(*step),
+                "category includes unknown step: {step}"
+            );
         }
+    }
+}
+
+/// Every builtin step file on disk must appear in exactly one category and
+/// must resolve via `discover_step`. New files are picked up automatically by
+/// `build.rs`; this test guards against a step existing in the binary but not
+/// in the list output.
+#[test]
+fn every_builtin_step_is_categorized_and_discoverable() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_STEP_CATEGORIES
+        .iter()
+        .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
+        .collect();
+
+    for name in builtin_step_names() {
+        // Appears in exactly one category.
+        assert!(
+            categorized.contains_key(name),
+            "builtin step {name} is missing from BUILTIN_STEP_CATEGORIES",
+        );
+
+        // Resolves by exact name.
+        let step = discover_step(tmp.path(), name)
+            .unwrap_or_else(|err| panic!("builtin step {name} did not resolve: {err}"));
+        assert!(
+            step.content
+                .as_deref()
+                .map(|c| !c.is_empty())
+                .unwrap_or(false),
+            "builtin step {name} loaded with empty content"
+        );
+
+        // Has a description (frontmatter or first prose line).
+        let desc = builtin_step_description(name);
+        assert!(
+            !desc.is_empty(),
+            "builtin step {name} has no description (add a `description:` frontmatter \
+             field or a leading prose line)"
+        );
+    }
+
+    // Every category entry must be a known builtin — no phantom names.
+    let known: std::collections::HashSet<&'static str> = builtin_step_names().into_iter().collect();
+    for (_cat, names) in BUILTIN_STEP_CATEGORIES {
+        for name in *names {
+            assert!(
+                known.contains(*name),
+                "category lists {name} but no matching builtin exists"
+            );
+        }
+    }
+}
+
+/// Every builtin flow file on disk must appear in exactly one category and
+/// must load via `load_flow`.
+#[test]
+fn every_builtin_flow_is_categorized_and_loadable() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_FLOW_CATEGORIES
+        .iter()
+        .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
+        .collect();
+
+    for name in builtin_flow_names() {
+        assert!(
+            categorized.contains_key(name),
+            "builtin flow {name} is missing from BUILTIN_FLOW_CATEGORIES",
+        );
+        load_flow(name, tmp.path())
+            .unwrap_or_else(|err| panic!("builtin flow {name} failed to load: {err}"));
+    }
+
+    let known: std::collections::HashSet<&'static str> = builtin_flow_names().into_iter().collect();
+    for (_cat, names) in BUILTIN_FLOW_CATEGORIES {
+        for name in *names {
+            assert!(
+                known.contains(*name),
+                "category lists flow {name} but no matching builtin exists"
+            );
+        }
+    }
+}
+
+/// Bare-name fallback: a step in a namespaced builtin must also resolve by its
+/// short name when no core step / other namespaced step shares that short name.
+#[test]
+fn namespaced_steps_resolve_by_bare_name_when_unique() {
+    let tmp = TempDir::new().expect("tempdir");
+    // office-hours lives only in gstack; it must also work as a bare name.
+    let bare = load_step("office-hours", tmp.path()).expect("bare name resolves");
+    let qualified = load_step("gstack/office-hours", tmp.path()).expect("qualified resolves");
+    assert_eq!(bare.name, qualified.name);
+}
+
+/// A bare name that matches a core builtin must resolve to the core one, not
+/// to any namespaced sibling.
+#[test]
+fn bare_name_prefers_core_over_namespaced() {
+    let tmp = TempDir::new().expect("tempdir");
+    // `debug` exists in core (build/) and in gstack/. Bare name → core.
+    let step = discover_step(tmp.path(), "debug").expect("debug resolves");
+    assert_eq!(step.name, "debug");
+    match discover_target(tmp.path(), "debug").expect("debug resolves via target") {
+        Target::Step(s) => assert_eq!(s.name, "debug"),
+        Target::Flow(f) => panic!("expected Step, got Flow {}", f.name),
     }
 }
 
@@ -260,9 +373,9 @@ fn npx_skills_are_listed_from_cache_and_loopflow_skipped() {
     .expect("write loopflow marker skill");
 
     let (_user, _global, _builtin, external) = list_all_steps(Some(repo.path()));
-    assert!(external.contains(&("npx:explain-code".to_string(), "npx skills".to_string())));
+    assert!(external.contains(&("npx/explain-code".to_string(), "npx skills".to_string())));
     assert!(
-        !external.iter().any(|(name, _)| name == "npx:design"),
+        !external.iter().any(|(name, _)| name == "npx/design"),
         "loopflow marker skills should be excluded from npx listing"
     );
 }
@@ -297,7 +410,7 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx:explain-code").expect("load npx skill");
+    let step = discover_step(repo.path(), "npx/explain-code").expect("load npx skill");
     assert!(step
         .content
         .as_deref()
@@ -344,7 +457,7 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx:deep-research").expect("load npx skill");
+    let step = discover_step(repo.path(), "npx/deep-research").expect("load npx skill");
     assert!(step
         .content
         .as_deref()
@@ -394,7 +507,7 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx:skill-creator").expect("load qualified npx skill");
+    let step = discover_step(repo.path(), "npx/skill-creator").expect("load qualified npx skill");
     assert!(step
         .content
         .as_deref()

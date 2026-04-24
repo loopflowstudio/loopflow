@@ -226,11 +226,40 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
-    let content = match find_flow_path(name, repo) {
-        Ok(flow_path) => fs::read_to_string(&flow_path)?,
+    load_flow_inner(name, repo, true)
+}
+
+/// Like `load_flow`, but resolves only exact-name matches in the builtin
+/// catalog — no bare-name fallback across namespaced flows. Used when
+/// expanding an already-loaded flow so a bare step name like `review` can't
+/// accidentally expand into `gstack/review`.
+pub fn load_flow_strict(name: &str, repo: &Path) -> Result<Flow, LoadError> {
+    load_flow_inner(name, repo, false)
+}
+
+fn load_flow_inner(name: &str, repo: &Path, allow_bare_fallback: bool) -> Result<Flow, LoadError> {
+    // Normalize colon to slash: "gstack:sprint" → "gstack/sprint"
+    let canonical = name.replace(':', "/");
+    let name = canonical.as_str();
+
+    let (resolved_name, content) = match find_flow_path(name, repo) {
+        Ok(flow_path) => (name.to_string(), fs::read_to_string(&flow_path)?),
         Err(LoadError::FlowNotFound(_)) => {
-            if let Some(builtin) = crate::engine::builtins::get_builtin_flow(name) {
-                builtin.to_string()
+            let builtin_key = if allow_bare_fallback {
+                crate::engine::builtins::resolve_builtin_flow(name)
+            } else {
+                crate::engine::builtins::get_builtin_flow(name).map(|_| {
+                    // Re-look up the exact key by querying with same name.
+                    // This is a static &str with the same lifetime as the map.
+                    // Safe: we already know the key exists.
+                    name_as_static_key(name).unwrap_or(name)
+                })
+            };
+
+            if let Some(key) = builtin_key {
+                let builtin = crate::engine::builtins::get_builtin_flow(key)
+                    .expect("builtin flow lookup should succeed");
+                (key.to_string(), builtin.to_string())
             } else if load_step(name, repo).is_ok() {
                 // Auto-wrap a step name as a single-step flow.
                 return Ok(Flow {
@@ -247,9 +276,16 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
         serde_yaml_ng::from_str(&content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
     let items = parse_flow_items(&value)?;
     Ok(Flow {
-        name: name.to_string(),
+        name: resolved_name,
         items,
     })
+}
+
+/// Get the `&'static str` key matching `name` from the builtin flow map.
+fn name_as_static_key(name: &str) -> Option<&'static str> {
+    crate::engine::builtins::builtin_flow_names()
+        .into_iter()
+        .find(|k| *k == name)
 }
 
 pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadError> {
@@ -266,9 +302,12 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
         return load_step_from_path(name, &step_path);
     }
 
-    // Fall back to built-in steps
-    if let Some(content) = crate::engine::builtins::get_builtin_step(name) {
-        return step_from_content(name, content);
+    // Fall back to built-in steps — exact match, then unique bare-name match
+    // across namespaces (so `office-hours` resolves to `gstack/office-hours`).
+    if let Some(key) = crate::engine::builtins::resolve_builtin_step(name) {
+        let content = crate::engine::builtins::get_builtin_step(key)
+            .expect("resolve_builtin_step returned a known key");
+        return step_from_content(key, content);
     }
 
     // Fall back to .agents/skills/<name>/SKILL.md (user-installed, not loopflow-injected)
@@ -488,12 +527,18 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced steps: "gstack/office-hours" → .lf/steps/gstack/office-hours.md
-    // (colon form is already normalized to slash by load_step)
+    // Namespaced steps: "gstack/office-hours" → <dir>/.lf/steps/gstack/office-hours.md
+    // Check repo first, then home (so users can override namespaced builtins).
     if let Some((prefix, step_name)) = name.split_once('/') {
-        let namespaced_path = markdown_path(&repo.join(".lf/steps").join(prefix), step_name);
-        if namespaced_path.exists() {
-            return Ok(namespaced_path);
+        let repo_ns = markdown_path(&repo.join(".lf/steps").join(prefix), step_name);
+        if repo_ns.exists() {
+            return Ok(repo_ns);
+        }
+        if let Some(home) = home_dir() {
+            let home_ns = markdown_path(&home.join(".lf/steps").join(prefix), step_name);
+            if home_ns.exists() {
+                return Ok(home_ns);
+            }
         }
     }
 
@@ -1259,11 +1304,23 @@ fn is_multi_step_flow(flow: &Flow, step_name: &str) -> bool {
 }
 
 fn try_load_multi_step_flow(step: &Step, repo: &Path, chain: &[String]) -> Option<Flow> {
-    if step.content.is_some() || chain.contains(&step.name) {
+    if step.content.is_some() {
+        return None;
+    }
+    // Normalize for recursion check: `gstack:review` and `gstack/review` are the
+    // same flow, and the chain may hold either form depending on where the entry
+    // was added.
+    let canonical = step.name.replace(':', "/");
+    if chain
+        .iter()
+        .any(|entry| entry.replace(':', "/") == canonical)
+    {
         return None;
     }
 
-    let flow = load_flow(&step.name, repo).ok()?;
+    // Strict resolution inside an expanding flow: a bare step name like `review`
+    // must not auto-escalate to `gstack/review`. Only exact-key matches.
+    let flow = load_flow_strict(&step.name, repo).ok()?;
     is_multi_step_flow(&flow, &step.name).then_some(flow)
 }
 
@@ -1301,7 +1358,8 @@ fn expand_flow_ref_branch(
     chain: &[String],
     depth: usize,
 ) -> Result<ConcreteAndBranch, LoadError> {
-    let nested_items = expand_with_chain(nested, repo, chain.to_vec(), depth + 1)?;
+    let nested_chain = chain_with(chain, name);
+    let nested_items = expand_with_chain(nested, repo, nested_chain, depth + 1)?;
     let steps = extract_and_branch_steps(name, &nested_items)?;
     let flow_parents = and_branch_parents(chain, name);
     Ok(ConcreteAndBranch {

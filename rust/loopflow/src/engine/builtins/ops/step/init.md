@@ -98,15 +98,9 @@ chose. If they skip everything, don't create the file.
 
 ## Phase 5: Optional extras
 
-**superpowers:** If `~/.superpowers` doesn't exist, offer:
-"Install superpowers skill library? Adds community prompts via `lf sp:` commands"
-- Yes: `git clone https://github.com/obra/superpowers ~/.superpowers`
-- No: skip
-
-**SkillRegistry:** Offer to enable in config:
-"Enable SkillRegistry? Adds remote skills via `lf sr:` commands"
-- Yes: set `skill_registry.enabled: true` in `.lf/config.yaml`
-- No: skip
+**External skills via npx:** mention that any Claude Skills package can be run as
+`lf npx/<owner>/<repo>` — fetched live, no install step. `gstack` and core loopflow
+workflows are built in; npx covers everything else.
 
 ## Phase 6: Next steps
 

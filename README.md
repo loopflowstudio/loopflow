@@ -79,11 +79,14 @@ Every new wave ships with two default triggers: `repo` (whole repo → integrate
 lf debug -c    # paste an error, watch it fix
 lf op ingest --item 2-daemon-integrity.md    # move one roadmap item to scratch/
 lf design      # interactive design session
-lf gstack:office-hours   # run an imported gstack workstyle step
-lf npx:explain-code   # fetch from npx skills ecosystem and run
+lf gstack/office-hours   # run a built-in gstack workstyle step
+lf office-hours          # same thing — bare name works when unambiguous
+lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
 ```
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
+
+Names resolve in this order: your repo (`.lf/steps/<name>.md` or `.lf/steps/<ns>/<name>.md`) → your global dir (`~/.lf/steps/`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …). A bare name resolves to a namespaced builtin only when exactly one namespace has that name. For anything not shipped in the binary, use `lf npx/<owner>/<repo>` — fetched live via `npx skills`.
 
 Steps and flows are organized into three categories by agency: **build** (manual work you drive), **govern** (autonomous coordination the system drives), **ops** (side-channel utilities).
 

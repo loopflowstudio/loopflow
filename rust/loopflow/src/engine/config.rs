@@ -12,13 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &[
-    "context",
-    "exclude",
-    "skill_sources",
-    "summaries",
-    "supported_harnesses",
-];
+const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "summaries", "supported_harnesses"];
 
 /// Token budgets for prompt sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,14 +57,6 @@ pub struct SummaryConfig {
 
 fn default_summary_agent() -> String {
     "gemini".to_string()
-}
-
-/// External skill library configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillSourceConfig {
-    pub name: String,
-    pub prefix: String,
-    pub path: String,
 }
 
 /// Branch naming configuration.
@@ -293,10 +279,6 @@ pub struct Config {
     #[serde(default = "default_summary_tokens")]
     pub summary_tokens: usize,
 
-    /// External skill libraries
-    #[serde(default)]
-    pub skill_sources: Vec<SkillSourceConfig>,
-
     /// Branch naming schema
     #[serde(default)]
     pub branch_names: Option<BranchNameConfig>,
@@ -379,7 +361,6 @@ impl Default for Config {
             area: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
-            skill_sources: Vec::new(),
             branch_names: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
@@ -880,20 +861,6 @@ summaries:
         assert_eq!(config.summaries[0].agent, "claude");
         assert_eq!(config.summaries[1].path, "tests/");
         assert_eq!(config.summaries[1].agent, "gemini"); // default
-    }
-
-    #[test]
-    fn config_from_yaml_skill_sources() {
-        let yaml = r#"
-skill_sources:
-  - name: superpowers
-    prefix: sp
-    path: ~/.lf/skills/superpowers
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.skill_sources.len(), 1);
-        assert_eq!(config.skill_sources[0].name, "superpowers");
-        assert_eq!(config.skill_sources[0].prefix, "sp");
     }
 
     #[test]

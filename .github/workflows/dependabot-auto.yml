@@ -2,7 +2,7 @@ name: Dependabot zero-touch
 
 on:
   pull_request_target:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
   workflow_run:
     workflows: ["CI"] # Keep in sync with .github/workflows/ci.yml.
     types: [completed]
@@ -31,6 +31,8 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          # Keep in sync with branch protection required_status_checks on main.
+          REQUIRED_CHECKS: "swift-test rust-test e2e-smoke python-test"
         run: |
           set -euo pipefail
           # workflow_run doesn't give us the PR number; match the open PR by head SHA.
@@ -41,6 +43,22 @@ jobs:
             echo "No open dependabot PR at $HEAD_SHA."
             exit 0
           fi
+
+          # Only close when a required check failed. Flakes in non-required
+          # jobs (e.g. concerto-ui-test) must not kill otherwise-good PRs.
+          FAILED=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup \
+            --jq '[.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name] | join(" ")')
+          HARD_FAIL=""
+          for check in $REQUIRED_CHECKS; do
+            case " $FAILED " in
+              *" $check "*) HARD_FAIL="$check"; break ;;
+            esac
+          done
+          if [ -z "$HARD_FAIL" ]; then
+            echo "No required check failed on PR #$PR (failed: $FAILED). Leaving open."
+            exit 0
+          fi
+
           gh pr comment "$PR" --repo "$REPO" \
-            --body "CI red — abandoning. Dependabot will open a new PR on the next version bump."
+            --body "Required check \`$HARD_FAIL\` red — abandoning. Dependabot will open a new PR on the next version bump."
           gh pr close "$PR" --repo "$REPO"

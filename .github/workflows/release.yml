@@ -59,7 +59,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
       - uses: astral-sh/setup-uv@v7
       - name: Fetch secrets
-        uses: dopplerhq/secrets-fetch-action@v1.3.1
+        uses: dopplerhq/secrets-fetch-action@v2.0.0
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
           inject-env-vars: true
@@ -243,7 +243,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Fetch secrets
-        uses: dopplerhq/secrets-fetch-action@v1.3.1
+        uses: dopplerhq/secrets-fetch-action@v2.0.0
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
           inject-env-vars: true

@@ -83,7 +83,7 @@ Prompt parity and golden prompt tests live in Rust.
 
 ```bash
 cargo test -p loopflow golden_prompt
-uv run pytest tests/parity/test_prompt_parity.py
+uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
 ## E2E Tests

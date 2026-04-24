@@ -153,7 +153,7 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `update-wave` | Create, update, or delete wave state |
 | `split-wave` | Split a wave into smaller independent waves |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
-| `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
+| `release-notes` | Write narrative `RELEASE_NOTES.md` from release context, preferring release decisions when present |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
 
@@ -209,6 +209,23 @@ Flows can include mechanical ops items directly:
 | `sync` | rebase → integrate-upstream → op: pm pull |
 
 `deploy` lands the branch, then syncs PM state when there is PM work to do. `sync` rebases and pulls PM state for the current branch's wave. On branches with no PM-enabled wave, or no `wave/<name>/` changes, the PM step in either flow exits cleanly.
+
+## Release artifacts
+
+```bash
+cat release/unreleased/DECISIONS.md
+lf op release run patch
+find release -maxdepth 2 -type f | sort
+```
+
+| Path | What it does |
+|------|--------------|
+| `release/unreleased/DECISIONS.md` | Append-only ledger of release-worthy intent and policy decisions during the current cycle |
+| `release/vX.Y.Z/DECISIONS.md` | Archived decision ledger for a shipped version |
+| `release/vX.Y.Z/NOTES.md` | Snapshot of the release notes generated for that shipped version |
+| `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
+
+Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf op release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
 
 ### Browse the catalog
 

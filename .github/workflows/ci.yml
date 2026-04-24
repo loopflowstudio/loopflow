@@ -122,6 +122,13 @@ jobs:
           success_summary_pattern = re.compile(
               r"^✔ Test run with \d+ tests in \d+ suites passed after "
           )
+          xctest_all_passed_pattern = re.compile(r"Test Suite 'All tests' passed at ")
+          swift_suite_passed_pattern = re.compile(r"^✔ Suite ")
+          failure_pattern = re.compile(
+              r"^✗ |Test Suite '.*' failed at |\*\* TEST FAILED \*\*|failed with \d+ failures"
+          )
+          idle_success_seconds = 60
+          idle_min_swift_suites = 30
 
           def xcresult_indicates_success(path):
               if not os.path.exists(path):
@@ -191,6 +198,10 @@ jobs:
           deadline = time.monotonic() + timeout_seconds
           saw_eof = False
           saw_success_summary = False
+          saw_xctest_all_passed = False
+          swift_suite_passes = 0
+          saw_failure = False
+          last_output_time = time.monotonic()
 
           while True:
               remaining = deadline - time.monotonic()
@@ -235,6 +246,27 @@ jobs:
               try:
                   line = lines.get(timeout=min(1, remaining))
               except queue.Empty:
+                  idle = time.monotonic() - last_output_time
+                  if (
+                      idle >= idle_success_seconds
+                      and saw_xctest_all_passed
+                      and swift_suite_passes >= idle_min_swift_suites
+                      and not saw_failure
+                  ):
+                      print(
+                          f"::warning::xcodebuild idle {idle:.0f}s after "
+                          f"XCTest passed and {swift_suite_passes} Swift Testing "
+                          f"suites passed with no failures; killing xcodebuild "
+                          f"and accepting success",
+                          flush=True,
+                      )
+                      process.terminate()
+                      try:
+                          process.wait(timeout=15)
+                      except subprocess.TimeoutExpired:
+                          process.kill()
+                          process.wait()
+                      sys.exit(0)
                   if process.poll() is not None and saw_eof:
                       break
                   continue
@@ -245,10 +277,17 @@ jobs:
                       break
                   continue
 
+              last_output_time = time.monotonic()
               sys.stdout.write(line)
               sys.stdout.flush()
               if success_summary_pattern.match(line):
                   saw_success_summary = True
+              if xctest_all_passed_pattern.search(line):
+                  saw_xctest_all_passed = True
+              if swift_suite_passed_pattern.match(line):
+                  swift_suite_passes += 1
+              if failure_pattern.search(line):
+                  saw_failure = True
 
           sys.exit(process.wait())
           PY

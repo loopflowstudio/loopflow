@@ -206,7 +206,7 @@ pub enum OpsCommand {
         #[arg(long = "no-rebase")]
         no_rebase: bool,
     },
-    /// Commit changes (explicit message required)
+    /// Commit changes
     Commit {
         #[arg(short = 'm', long = "message", short_alias = 'M')]
         message: Option<String>,

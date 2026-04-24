@@ -27,6 +27,24 @@ for feedback. Be concise—bullets, short snippets, minimal back-and-forth.
 - `scratch/<branch>.md` — design doc for current work
 - `scratch/questions.md` — open questions, unknowns, blockers
 
+**release/unreleased/DECISIONS.md** *(interactive runs only)*: append-only ledger of intent and policy decisions for the current release cycle. Pre-writes the release notes.
+
+When running interactively, if this session produces a decision a contributor would cite six months from now — intent changes, policy choices, scope calls, paths not taken — append an entry:
+
+```markdown
+## YYYY-MM-DD — Short title
+
+**Context:** What pressure or problem forced the choice.
+
+**Decision:** What we're doing, stated concretely.
+
+**Implications:** Consequences, tradeoffs, what this rules out.
+```
+
+Not every change is a decision. "Fixed a bug", "renamed a function", "added a test" are not decisions. "We stopped supporting X because Y", "we chose append-only over editable because Z" are. When in doubt, ask the user rather than write speculatively. Headless runs do *not* write to this file — too much noise from autonomous work.
+
+If `release/unreleased/` exists, `lf op release run` promotes it to `release/v<version>/` during the release workflow and feeds DECISIONS.md into the release-notes step. If the ledger is absent, release notes fall back to merged PR history.
+
 **Code**: The actual work. Tests, implementation, fixes.
 
 ---

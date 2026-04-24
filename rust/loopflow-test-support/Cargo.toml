@@ -6,4 +6,4 @@ license.workspace = true
 publish = false
 
 [dependencies]
-tempfile = "3.9"
+tempfile = "3.27"

@@ -31,7 +31,7 @@ ignore = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_urlencoded = "0.7"
-serde_yaml_ng = "0.9"
+serde_yaml_ng = "0.10"
 tracing = "0.1"
 thiserror = "1.0"
 tiktoken-rs = "0.11"

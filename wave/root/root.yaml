@@ -5,11 +5,9 @@ crons:
 - flow: garden
   schedule: 0 0 * * *
 area:
-- wave/model/
-- wave/macos/
-- wave/lfd/
-- wave/pm/
-- wave/ios/
+- wave/desktop/
+- wave/mobile/
+- wave/workflows/
 direction:
 - care
 - clarity

@@ -1,4 +1,4 @@
-# Redesign
+# Root
 
 Orchestrating agents, not being one.
 
@@ -20,55 +20,49 @@ A wave builds — code, tests, PRs. A chord-wave gardens — `scan-waves`, `asse
 
 This wave is the first chord-wave. Its first job is building itself. Its second job is gardening the waves that build everything else. The recursive case — a chord-wave that gardens its own construction — is the real test.
 
-Both member waves use existing `build` / `build-or-silent` flows until the chord-model wave produces `garden`. Then this wave starts using what it built.
-
-During bootstrap, these waves register in `manual` mode. Wiring the structure together should not immediately start build/garden loops.
+Member waves use existing `build` / `build-or-silent` flows. The garden flow lives here in root; member waves build.
 
 ```
-wave: redesign (chord-wave)
+wave: root (chord-wave)
 │
-│  area: wave/chord-model/,
-│        wave/agent-embedding/
+│  area: wave/desktop/, wave/mobile/, wave/workflows/
 │  flow: garden
 │
-├── wave: chord-model           13 items — runtime config, governance, Letta, mutations, APIs
-└── wave: agent-embedding       5 items — Concerto as conductor
+├── wave: desktop      Concerto macOS — embedded terminal build driver + native chat UX
+├── wave: mobile       iOS read-only view of remote lfd — waves, roadmap, attention
+└── wave: workflows    Engine — lfd, model, pm, gstack, flows, runboard, governance UX
 ```
 
 ## Phasing
 
 ### Phase 1: Bootstrap
 
-Build enough to run the first garden cycle. Uses existing flows.
+Run the first real garden cycle. Uses existing flows.
 
-- **chord-model/02** — live garden-cycle validation (boot lfd, register redesign, run garden for real)
-- **chord-model/03** — Letta integration once live garden output exists to remember
+- **workflows** (live garden validation, Letta integration) — the operational gap between "garden machinery parses" and "the root chord actually runs in lfd"
+- **desktop** (embedded terminal build driver) — the conductor's daily surface, so running a garden cycle feels first-class instead of ceremonial
 
-Current sequencing matters:
-- `chord-model/02` owns the operational gap between "the garden machinery parses" and "the redesign chord actually runs in lfd"
-- stall detection, algedonic polish, and memory-backed pattern work stay inside `chord-model` after the live proof exists
-- `agent-embedding/01` can keep tightening queue and workspace UX inside `swift/`, but backend/auth/pm work that escapes `swift/` should move into the owning wave instead of broadening its scope silently
-
-First garden cycle runs. The chord-wave observes its own bootstrap commits. Letta records its first memories. The recursive loop is live.
+First garden cycle runs. The chord-wave observes its own commits. Letta records its first memories. The recursive loop is live.
 
 ### Phase 2: Build and Garden in Counterpoint
 
 Waves produce real PRs. The chord-wave gardens them. Build and garden alternate — waves create, chord-wave observes, chord-wave proposes, waves adjust.
 
-**agent-embedding** now turns the old detail panel into a workspace. The remaining roadmap starts with interactive checkpoints in the queue (01), closes the last lifecycle gaps (02), then expands into portfolio (03) and calibration (04).
+**desktop** drives daily build work — embedded terminal for builds, native chat UX as second priority. Workspace multiplexer, worktree lifecycle, typed auth UI.
 
-**chord-model** continues with Letta (04), area model (05), wave mutation (06), and later API expansion (08). Stall detection, self-healing polish, and signal memory now live here instead of in a separate `signals` lane.
+**workflows** extends the engine: wave mutation, Letta memory, VSM flows, PM sync, governance UX (calibration view, portfolio view), runboard, gstack workstyle. Stall detection, self-healing polish, and signal memory all live here.
+
+**mobile** ships the remote read surface — no build work, just the conductor's read channel away from the laptop. Folds in the lfd/model deps needed to make that self-contained.
 
 ### Phase 3: The Chord-Wave Earns Its Keep
 
 Enough garden cycles to answer the open questions with evidence.
 
-- chord-model/07 — DAG enforcement and default chord-wave
-- chord-model/04 — memory starts carrying repeated algedonic and calibration patterns
-- agent-embedding/04 — calibration view (trajectory review UX)
-- agent-embedding/05 — window-composition polish once the workspace usage patterns are proven
+- workflows (DAG enforcement, default chord-wave, Letta patterns for repeated algedonic signals)
+- workflows (calibration view — trajectory review UX)
+- desktop (window-composition polish once the embedded-terminal build flow is proven)
 
-The default chord-wave absorbs the existing five waves (foundation, trust, context, concerto, scale) and restructures them through garden cycles. Not manual reshuffling — the chord-wave proposes, the human reviews.
+The default chord-wave proposes further restructuring through garden cycles. Not manual reshuffling — the chord-wave proposes, the human reviews.
 
 ## What stays
 
@@ -96,16 +90,6 @@ The default chord-wave absorbs the existing five waves (foundation, trust, conte
 Loopflow is an open source tool for a single producer. It's designed to drive production — one person or team building something real, with agents doing the work and chord-waves gardening the system.
 
 Not a platform. Not a service. Not selling seats or tiers. The business model is: loopflow makes one producer dramatically more effective, and that producer ships products that make money. Loopflow is the tool, not the product.
-
-## Existing waves
-
-The five existing waves (foundation, trust, context, concerto, scale) keep running as-is. They aren't manually reshuffled into the new structure. When the default chord-wave is ready (chord-model/07), it absorbs them and proposes restructuring through garden cycles.
-
-Some existing work items are already covered by the new waves:
-- scale/04 (chord UI) -> agent-embedding/03 + 04
-- scale/05 (cross-repo UI) -> agent-embedding/03
-
-These overlaps resolve naturally when the default chord-wave runs its first garden cycle and proposes consolidation.
 
 ## What this proves
 

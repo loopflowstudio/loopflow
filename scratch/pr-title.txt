@@ -1,1 +1,0 @@
-repo: automate and document Dependabot updates

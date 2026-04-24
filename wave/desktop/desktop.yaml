@@ -2,3 +2,6 @@ flow: build
 direction:
 - ux
 - clarity
+pm:
+  provider: asana
+  asana_project: '1214269990706324'

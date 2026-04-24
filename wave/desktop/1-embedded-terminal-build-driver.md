@@ -1,3 +1,6 @@
+---
+asana_id: '1214269990746915'
+---
 # Embedded terminal build driver
 
 **Finish line:** Concerto's embedded terminal replaces external Ghostty for daily build work. Flows launch from the command palette into embedded tmux sessions, persist across app restarts, and the workspace layout (tabs/splits per wave) survives too. Dropping to an external Ghostty window becomes a deliberate choice for long interactive sessions, not the default.

@@ -1,3 +1,6 @@
+---
+asana_id: '1214270045998898'
+---
 # Conductor surfaces
 
 **Finish line:** The conductor's morning routine across all waves lives in one Concerto surface family: runboard (live cockpit with health + drill-in), portfolio (cross-wave / cross-repo gallery), calibration (garden-flow human checkpoint), beat composition (program a chord's rhythm). All share the same `wave / run / attention / terminal-session` stores — no parallel dashboards.

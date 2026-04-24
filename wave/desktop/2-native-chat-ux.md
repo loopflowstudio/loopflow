@@ -1,3 +1,6 @@
+---
+asana_id: '1214270016368247'
+---
 # Native chat UX
 
 **Finish line:** Concerto's chat view is a polished native conversational surface — rich rendering (markdown, syntax, diffs), smooth streaming (no jank, no layout jumps), browsable history, and a composer that supports file drop, slash commands, and context awareness.

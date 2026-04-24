@@ -1,3 +1,6 @@
+---
+asana_id: '1214270046069201'
+---
 # Remote lfd connection
 
 **Finish line:** The iOS app authenticates to a remote lfd host, remembers it, and reads live state from it. Single setup flow (URL + token, QR, or OAuth), TLS by default, reconnect cleanly after network changes.

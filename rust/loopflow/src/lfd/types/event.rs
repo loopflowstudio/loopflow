@@ -109,6 +109,17 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
+    /// A wave's roadmap changed in the PM provider. Keyed by repo + wave
+    /// name (not wave_id) so unmanaged waves can also push updates.
+    #[serde(rename = "roadmap.updated")]
+    RoadmapUpdated {
+        repo_path: String,
+        wave_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        wave_id: Option<LfdId>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
     WaveStarted {
         wave_id: LfdId,
         wave_run_id: LfdId,
@@ -461,6 +472,15 @@ impl Event {
 
     pub fn wave_deleted(wave_id: LfdId) -> Self {
         Self::WaveDeleted {
+            wave_id,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn roadmap_updated(repo_path: String, wave_name: String, wave_id: Option<LfdId>) -> Self {
+        Self::RoadmapUpdated {
+            repo_path,
+            wave_name,
             wave_id,
             timestamp: Self::now(),
         }

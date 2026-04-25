@@ -5,7 +5,9 @@ title: Configuration
 
 # Configuration
 
-Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.
+Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), repo config (`.lf/config.yaml`), or repo-specific overrides nested under `repos:` in the global file.
+
+Precedence: CLI flags > `~/.lf/config.yaml` `repos:<path>` override > `.lf/config.yaml` > global defaults in `~/.lf/config.yaml`.
 
 ## Quick Reference
 
@@ -53,20 +55,38 @@ Defaults work well for most repos. Summaries require configuration.
 
 ## Config Files
 
-**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
+**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo. **Repo-specific overrides** under `repos:` in the global file sit on top of both for one local checkout.
 
-For most settings, repo overrides global. For additive settings (`context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, later layers win. For additive settings (`context`, `exclude`, `summaries`, `supported_harnesses`), lists combine across layers.
 
 ```yaml
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 direction: clarity
+repos:
+  /Users/jack/src/myrepo:
+    asana:
+      team: "5555555555"    # local override for this repo only
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
 context:
   - docs/api.md           # combined with global context
 ```
+
+Use `repos:` when one local checkout needs a different PM fence than the committed repo config. For Asana-backed repos, `asana.team` is the canonical wave set for that repo.
+
+PM-backed repo config:
+
+```yaml
+pm:
+  provider: asana
+asana:
+  workspace: "1234567890"   # optional: pin workspace when you have multiple
+  team: "9876543210"        # every project in this team is a wave
+```
+
+If `asana.team` is unset and the pinned workspace is an Asana Organization, the first PM discovery finds or creates a `Loopflow` team and writes the gid back to config.
 
 Example repo config:
 

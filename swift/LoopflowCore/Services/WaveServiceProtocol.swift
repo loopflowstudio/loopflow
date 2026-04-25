@@ -68,6 +68,16 @@ public protocol WaveServiceProtocol: Sendable {
     func removeRepo(path: String) async throws
     func checkConnection() async throws
     func fileDiff(waveId: String, path: String) async throws -> String
+    func deleteWaveItem(waveId: String, filename: String) async throws
+    /// Fetch live roadmap tasks from the PM provider. Returns nil if the
+    /// wave is not PM-backed (so the caller can fall back to file-based).
+    /// Identified by (repo path, wave name) so it works for waves that
+    /// don't have an lfd store record (discovered-but-not-managed).
+    func fetchRoadmap(repo: String, wave: String) async throws -> RoadmapResponse?
+    /// List all PM-configured waves discovered across registered repos.
+    /// For Asana-backed repos, this is the configured team's project list.
+    /// Each entry includes a `managed_wave_id` if loopflow is managing it.
+    func listDiscoveredWaves() async throws -> [DiscoveredWaveSummary]
     func usageSummary(
         filters: UsageAnalyticsFilters,
         groupBy: UsageGroupBy

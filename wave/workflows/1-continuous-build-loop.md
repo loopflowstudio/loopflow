@@ -11,7 +11,7 @@ Autonomous build means: wave config declares `loops` (or `crons`), lfd schedules
 
 What's needed:
 
-- **Wave discovery and scheduling model** — lfd reads `wave/` on disk and reconciles with store. Wave config uses `loops` + `crons` + `triggers`, replacing the `mode` / `flow` / `workers` tangle
+- **Wave discovery and scheduling model** — the configured Asana team is the canonical wave set. lfd discovers waves from team projects, then uses local `wave/<name>/` directories as editing surface and mirror. Wave config uses `loops` + `crons` + `triggers`, replacing the `mode` / `flow` / `workers` tangle
 - **Concurrent ingest** — N workers in a pool call `ingest` simultaneously; the PM provider is the no-double-pick arbiter
 - **CLI/daemon executor parity** — `CliExecutor` and `DaemonFlowExecutor` share `FlowEngine`. Regression tests pin parity across serialized, parallel, queued, cancelled, failed, and run-scoped-override cases
 

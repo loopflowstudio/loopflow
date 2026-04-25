@@ -114,6 +114,7 @@ tests/e2e/test_rebase_conflict.sh
 uv run python scripts/concerto-dev.py run-debug     # build and launch lfd + Concerto (macOS)
 uv run python scripts/concerto-dev.py run-ios        # build and launch in iOS Simulator
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
+uv run python scripts/verify_canonical_waves.py     # verify repo override + canonical Asana team wave discovery
 uv run python scripts/test_session.py               # session API smoke test (starts lfd)
 uv run python scripts/test_pairing_smoke.py         # lfd pairing-token + HTTP + WebSocket smoke
 uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture

@@ -320,16 +320,12 @@ lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf op auth status   # local provider auth for lf steps and ops
 lf op auth asana    # connect Asana locally for `lf op` / step integrations
-lf op auth notion   # connect Notion locally for `lf op` / step integrations
-lf op auth linear  # connect Linear locally for `lf op` / step integrations
-lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
+lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # connect Linear with OAuth
-lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens
@@ -342,20 +338,26 @@ PM provider config:
 ```yaml
 # .lf/config.yaml
 pm:
-  provider: notion
-notion:
-  parent_page: 32af8f99-...  # optional: reuse an existing parent page/teamspace
-  title_property: Name        # optional schema overrides
-  status_property: Status
-  done_value: Done
-  priority_property: Priority
+  provider: asana
+asana:
+  workspace: "1234567890"   # optional: pin workspace when you have multiple
+  team: "9876543210"        # canonical wave set for this repo
+```
+
+```yaml
+# ~/.lf/config.yaml
+repos:
+  /Users/jack/src/myrepo:
+    asana:
+      team: "5555555555"    # local override for this repo only
 ```
 
 ```bash
+lf op pm list              # list waves from the configured Asana team
 lf op branches list --user @me --stale 60d   # preview stale remote branches
 lf op branches prune --user @me --stale 60d  # delete after confirmation
 lf op pm init pm           # connect/create one wave project, link items, write IDs
-lf op pm init --all        # bootstrap every wave/ project on the shared PM team
+lf op pm init --all        # bootstrap every project in the configured Asana team
 lf op pm pull pm           # rewrite one wave from PM; remote changes win
 lf op pm pull --all        # rewrite every wave from PM; remote changes win
 lf op pm export pm         # push one wave to PM; local changes win
@@ -364,6 +366,12 @@ lf op pm push-diff pm      # push only branch-changed items to PM; no-op if wave
 lf op pm push-diff --all   # push-diff every PM-enabled wave
 lf op pm status            # show linked waves and local/remote counts
 ```
+
+Every project in the configured Asana team is a wave. `wave/<name>/` stays the local editing surface and mirror for that wave, not proof that the wave exists.
+
+`repos:` entries in `~/.lf/config.yaml` merge on top of `.lf/config.yaml` for that repo. Use that to point one checkout at a different Asana team without editing committed repo config.
+
+If `asana.team` is unset and the pinned Asana workspace is an organization, the first PM discovery (`lf op pm list`, Concerto sidebar refresh, `GET /v0/waves/discovered`) finds or creates a `Loopflow` team and writes the gid back to config.
 
 Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
 

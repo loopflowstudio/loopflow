@@ -2,24 +2,24 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config_or_default, load_config_resolution, ConfigResolution};
 use crate::engine::git::{
     current_branch, diff_names_under, get_default_branch, list_tree, log_grep, merge_base,
     show_file,
 };
 use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
-use crate::lfd::pm::asana::AsanaClient;
-use crate::lfd::pm::linear::LinearClient;
-use crate::lfd::pm::notion::NotionClient;
+use crate::lfd::pm::asana::{AsanaClient, ResolvedTeam};
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
-    RoadmapItemFrontmatter,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, PmResult,
+    PriorityBucket, RoadmapItemDocument, RoadmapItemFrontmatter,
 };
 use crate::lfd::store::open_store;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::ingest::{list_wave_items, WaveItem};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -166,16 +166,40 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dy
             let token = resolve_provider_token("asana").await?;
             Box::new(AsanaClient::new(token, config.asana.clone()))
         }
-        PmProviderKind::Linear => {
-            let token = resolve_provider_token("linear").await?;
-            Box::new(LinearClient::new(token, config.linear.team.clone()))
-        }
-        PmProviderKind::Notion => {
-            let token = resolve_provider_token("notion").await?;
-            Box::new(NotionClient::new(token, config.notion.clone()))
-        }
     };
     Ok(client)
+}
+
+fn resolve_repo_provider(repo: &Path) -> OpsResult<PmProviderKind> {
+    let config = load_config_or_default(Some(repo));
+    config.pm.as_ref().map(|pm| pm.provider).ok_or_else(|| {
+        OpsError::Message(
+            "No PM provider configured. Set `pm.provider` in .lf/config.yaml.".to_string(),
+        )
+    })
+}
+
+async fn build_repo_client(repo: &Path) -> OpsResult<(Box<dyn PmProvider>, PmProviderKind)> {
+    let provider = resolve_repo_provider(repo)?;
+    let client = build_client(repo, provider).await?;
+    Ok((client, provider))
+}
+
+#[async_trait]
+trait AsanaWaveDiscovery: Send + Sync {
+    async fn resolve_team(&self) -> PmResult<ResolvedTeam>;
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>>;
+}
+
+#[async_trait]
+impl AsanaWaveDiscovery for AsanaClient {
+    async fn resolve_team(&self) -> PmResult<ResolvedTeam> {
+        AsanaClient::resolve_team(self).await
+    }
+
+    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+        <AsanaClient as PmProvider>::list_projects(self, team_id).await
+    }
 }
 
 pub(crate) async fn build_provider(
@@ -221,29 +245,75 @@ fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
 }
 
 async fn resolve_provider_token(provider: &str) -> OpsResult<String> {
-    let store = open_store(&storage_config_from_env()?)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
-    let token = store
-        .get_provider_token(provider)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "No {provider} credential found. Run `lf op auth {provider}`."
-            ))
-        })?;
+    // Prefer the shared credential file at ~/.lf/credentials/<provider>.json
+    // — written by `lf auth <provider>` and readable by every lfd/Concerto
+    // run by the same user. The sqlite cache is a fallback for pre-file
+    // installs until they re-auth once.
+    let from_file = crate::lfd::credentials_file::read(provider).is_some();
+    let token = match crate::lfd::credentials_file::read(provider) {
+        Some(token) => token,
+        None => {
+            let store = open_store(&storage_config_from_env()?)
+                .await
+                .map_err(|err| {
+                    OpsError::Message(format!("failed to open lfd credential store: {err}"))
+                })?;
+            store
+                .get_provider_token(provider)
+                .await
+                .map_err(|err| {
+                    OpsError::Message(format!("failed to load {provider} token: {err}"))
+                })?
+                .ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "No {provider} credential found. Run `lf op auth {provider}`."
+                    ))
+                })?
+        }
+    };
 
-    if token
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp())
-    {
-        return Err(OpsError::Message(format!(
-            "Stored {provider} token has expired. Run `lf op auth {provider}` again."
-        )));
+    if !is_token_expired(&token) {
+        return Ok(token.access_token);
     }
 
-    Ok(token.access_token)
+    // Asana access tokens expire after one hour. If we have a refresh
+    // token (only present in the file path; sqlite-only legacy installs
+    // don't carry one), exchange it for a fresh access token and persist
+    // the result so the next call hits the cached token instead.
+    if from_file && token.refresh_token.is_some() {
+        if let Ok(provider_kind) = provider.parse::<crate::lfd::provider_auth::Provider>() {
+            match crate::lfd::provider_auth::refresh_provider_token(provider_kind).await {
+                Ok(refreshed) => {
+                    if let Err(err) = crate::lfd::credentials_file::write(&refreshed) {
+                        return Err(OpsError::Message(format!(
+                            "refreshed {provider} token but failed to persist it: {err}. \
+                             Run `lf op auth {provider}` to re-store."
+                        )));
+                    }
+                    return Ok(refreshed.access_token);
+                }
+                Err(err) => {
+                    return Err(OpsError::Message(format!(
+                        "Stored {provider} token expired and refresh failed: {err}. \
+                         Run `lf op auth {provider}` again."
+                    )));
+                }
+            }
+        }
+    }
+
+    Err(OpsError::Message(format!(
+        "Stored {provider} token has expired. Run `lf op auth {provider}` again."
+    )))
+}
+
+fn is_token_expired(token: &crate::lfd::store::ProviderToken) -> bool {
+    // 60s slack for clock skew so callers don't race the wire and ship
+    // an access token that expires mid-request.
+    const SKEW_SECONDS: i64 = 60;
+    token.expires_at.is_some_and(|expires_at| {
+        expires_at - SKEW_SECONDS <= time::OffsetDateTime::now_utc().unix_timestamp()
+    })
 }
 
 fn storage_config_from_env() -> OpsResult<crate::lfd::store::StorageConfig> {
@@ -302,8 +372,6 @@ fn read_local_roadmap_items(wave_dir: &Path) -> OpsResult<Vec<LocalRoadmapItem>>
 fn project_key(provider: PmProviderKind) -> &'static str {
     match provider {
         PmProviderKind::Asana => "asana_project",
-        PmProviderKind::Linear => "linear_project",
-        PmProviderKind::Notion => "notion_project",
     }
 }
 
@@ -776,6 +844,195 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
     Ok(waves)
 }
 
+// ── Discovery ──────────────────────────────────────────────────────
+//
+// Wave existence is canonical in Asana. Local `wave/<name>/` directories
+// are the editable mirror, not proof that a wave exists.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredWave {
+    pub repo: PathBuf,
+    pub wave_name: String,
+    pub provider: PmProviderKind,
+    pub project_id: Option<String>,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CachedWorkspaceProjects {
+    team_id: String,
+    projects: Vec<CachedWorkspaceProject>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CachedWorkspaceProject {
+    id: String,
+    name: String,
+}
+
+fn workspace_projects_cache_path(repo: &Path) -> PathBuf {
+    repo.join(".lf")
+        .join("cache")
+        .join("workspace")
+        .join("projects.json")
+}
+
+fn write_workspace_projects_cache(
+    repo: &Path,
+    team_id: &str,
+    projects: &[crate::lfd::pm::PmProject],
+) -> OpsResult<()> {
+    let path = workspace_projects_cache_path(repo);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let payload = CachedWorkspaceProjects {
+        team_id: team_id.to_string(),
+        projects: projects
+            .iter()
+            .map(|project| CachedWorkspaceProject {
+                id: project.id.clone(),
+                name: project.name.clone(),
+            })
+            .collect(),
+    };
+    let body = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| OpsError::Message(format!("failed to serialize workspace cache: {err}")))?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|err| {
+        OpsError::Message(format!("failed to create workspace cache temp file: {err}"))
+    })?;
+    use std::io::Write as _;
+    temp.write_all(&body)
+        .map_err(|err| OpsError::Message(format!("failed to write workspace cache: {err}")))?;
+    temp.persist(&path).map_err(|err| {
+        OpsError::Message(format!("failed to persist workspace cache: {}", err.error))
+    })?;
+    Ok(())
+}
+
+fn read_workspace_projects_cache(
+    repo: &Path,
+    team_id: Option<&str>,
+) -> OpsResult<Vec<DiscoveredWave>> {
+    let path = workspace_projects_cache_path(repo);
+    let content = std::fs::read(&path).map_err(|err| {
+        OpsError::Message(format!(
+            "failed to read cached workspace projects at {}: {err}",
+            path.display()
+        ))
+    })?;
+    let payload: CachedWorkspaceProjects = serde_json::from_slice(&content).map_err(|err| {
+        OpsError::Message(format!(
+            "failed to decode cached workspace projects at {}: {err}",
+            path.display()
+        ))
+    })?;
+    if let Some(expected_team) = team_id {
+        if payload.team_id != expected_team {
+            return Err(OpsError::Message(format!(
+                "cached workspace projects are for team {}, not {expected_team}",
+                payload.team_id
+            )));
+        }
+    }
+    Ok(payload
+        .projects
+        .into_iter()
+        .map(|project| DiscoveredWave {
+            repo: repo.to_path_buf(),
+            wave_name: project.name,
+            provider: PmProviderKind::Asana,
+            project_id: Some(project.id),
+            stale: true,
+        })
+        .collect())
+}
+
+async fn discover_waves_with_client(
+    repo: &Path,
+    resolution: &ConfigResolution,
+    client: &dyn AsanaWaveDiscovery,
+) -> OpsResult<Vec<DiscoveredWave>> {
+    let resolved_team = client.resolve_team().await.map_err(pm_to_ops)?;
+    if let Some(team_id) = resolved_team.team_to_persist.as_deref() {
+        resolution
+            .persist_asana_team(team_id)
+            .map_err(|err| OpsError::Message(err.to_string()))?;
+    }
+
+    match client.list_projects(&resolved_team.gid).await {
+        Ok(projects) => {
+            write_workspace_projects_cache(repo, &resolved_team.gid, &projects)?;
+            let mut waves: Vec<DiscoveredWave> = projects
+                .into_iter()
+                .map(|project| DiscoveredWave {
+                    repo: repo.to_path_buf(),
+                    wave_name: project.name,
+                    provider: PmProviderKind::Asana,
+                    project_id: Some(project.id),
+                    stale: false,
+                })
+                .collect();
+            waves.sort_by(|left, right| left.wave_name.cmp(&right.wave_name));
+            Ok(waves)
+        }
+        Err(err) => {
+            let mut waves = read_workspace_projects_cache(repo, Some(&resolved_team.gid))
+                .map_err(|_| pm_to_ops(err.clone()))?;
+            waves.sort_by(|left, right| left.wave_name.cmp(&right.wave_name));
+            Ok(waves)
+        }
+    }
+}
+
+pub fn discover_waves(repo: &Path) -> OpsResult<Vec<DiscoveredWave>> {
+    let Some(resolution) =
+        load_config_resolution(Some(repo)).map_err(|err| OpsError::Message(err.to_string()))?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let Some(pm) = resolution.config.pm.as_ref() else {
+        return Ok(Vec::new());
+    };
+
+    match pm.provider {
+        PmProviderKind::Asana => block_on_pm(async {
+            let token = resolve_provider_token("asana").await?;
+            let client = AsanaClient::new(token, resolution.config.asana.clone());
+            discover_waves_with_client(repo, &resolution, &client).await
+        }),
+    }
+}
+
+fn linked_projects_by_id(
+    repo: &Path,
+    provider: PmProviderKind,
+) -> OpsResult<HashMap<String, String>> {
+    let wave_dir = repo.join("wave");
+    if !wave_dir.is_dir() {
+        return Ok(HashMap::new());
+    }
+
+    let mut linked = HashMap::new();
+    for entry in std::fs::read_dir(&wave_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let Some(wave_name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if let Some(project_id) = read_wave_pm_config(repo, &wave_name)
+            .and_then(|pm| pm.project_for(provider).map(str::to_string))
+        {
+            linked.insert(project_id, wave_name);
+        }
+    }
+    Ok(linked)
+}
+
 // ── Import ──────────────────────────────────────────────────────────
 
 pub fn pm_import(
@@ -882,6 +1139,292 @@ pub fn pm_export(
     progress: &impl Progress,
 ) -> OpsResult<PmExportResult> {
     block_on_pm(pm_export_async(repo, options, progress))
+}
+
+// ── Roadmap read-through ───────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoadmapTask {
+    pub asana_id: String,
+    pub title: String,
+    pub description: String,
+    pub priority: PriorityBucket,
+    pub completed: bool,
+    pub local_filename: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoadmapResult {
+    pub wave: String,
+    pub provider: PmProviderKind,
+    pub tasks: Vec<RoadmapTask>,
+}
+
+/// Fetch live roadmap items from the PM provider. Asana is the source of
+/// truth; local files are drafts and only become "real" when landed pushes
+/// them with `pm push-diff`.
+pub fn fetch_roadmap(
+    repo: &Path,
+    wave: &str,
+    progress: &impl Progress,
+) -> OpsResult<RoadmapResult> {
+    block_on_pm(fetch_roadmap_async(repo, wave, progress))
+}
+
+async fn fetch_roadmap_async(
+    repo: &Path,
+    wave: &str,
+    progress: &impl Progress,
+) -> OpsResult<RoadmapResult> {
+    let ctx = build_wave_provider(repo, wave).await?;
+    require_project(&ctx, wave)?;
+
+    progress.status(&format!("fetching roadmap from {:?}", ctx.provider));
+    let remote = ctx
+        .client
+        .list_items(&ctx.project)
+        .await
+        .map_err(pm_to_ops)?;
+
+    // Match remote items to local files by PM ID so the UI can still reach
+    // the local markdown if it wants (edit-in-file draft workflow).
+    let local_by_id = build_local_filename_map(repo, wave, ctx.provider);
+
+    let tasks = remote
+        .into_iter()
+        .map(|task| {
+            let local_filename = local_by_id.get(&task.id).cloned();
+            RoadmapTask {
+                title: task.name,
+                description: task.description,
+                priority: PriorityBucket::from_rank(task.rank),
+                completed: task.completed,
+                local_filename,
+                asana_id: task.id,
+            }
+        })
+        .collect();
+
+    Ok(RoadmapResult {
+        wave: wave.to_string(),
+        provider: ctx.provider,
+        tasks,
+    })
+}
+
+fn build_local_filename_map(
+    repo: &Path,
+    wave: &str,
+    provider: PmProviderKind,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Ok(wave_dir) = require_wave_dir(repo, wave) else {
+        return map;
+    };
+    let Ok(items) = read_local_roadmap_items(&wave_dir) else {
+        return map;
+    };
+    for local in items {
+        if let Some(id) = local.doc.frontmatter.id_for(provider) {
+            map.insert(id.to_string(), local.item.filename);
+        }
+    }
+    map
+}
+
+// ── Project management ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmProjectSummary {
+    pub id: String,
+    pub name: String,
+    pub linked_wave: Option<String>,
+}
+
+/// List every project in the team, cross-referenced with any wave that
+/// currently has it linked via `pm.asana_project`. Helps spot orphans
+/// (projects in the team with no wave pointing at them).
+pub fn pm_list_projects(repo: &Path, progress: &impl Progress) -> OpsResult<Vec<PmProjectSummary>> {
+    block_on_pm(pm_list_projects_async(repo, progress))
+}
+
+async fn pm_list_projects_async(
+    repo: &Path,
+    _progress: &impl Progress,
+) -> OpsResult<Vec<PmProjectSummary>> {
+    let provider = resolve_repo_provider(repo)?;
+    let projects = discover_waves(repo)?;
+    let linked = linked_projects_by_id(repo, provider)?;
+
+    let summaries = projects
+        .into_iter()
+        .map(|p| PmProjectSummary {
+            linked_wave: p.project_id.as_ref().and_then(|id| linked.get(id).cloned()),
+            id: p
+                .project_id
+                .expect("discover_waves always includes an Asana project id"),
+            name: p.wave_name,
+        })
+        .collect();
+    Ok(summaries)
+}
+
+#[derive(Debug, Clone)]
+pub struct PmDeleteProjectOptions {
+    pub wave: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmDeleteProjectResult {
+    pub wave: String,
+    pub project_id: String,
+}
+
+/// Delete the PM project linked to a wave and clear the `asana_project`
+/// field from its yaml so the wave no longer points at something that
+/// doesn't exist. Useful for undoing a mistaken `init` or cleaning up
+/// duplicates. Leaves the wave itself intact.
+pub fn pm_delete_project(
+    repo: &Path,
+    options: &PmDeleteProjectOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmDeleteProjectResult> {
+    block_on_pm(pm_delete_project_async(repo, options, progress))
+}
+
+async fn pm_delete_project_async(
+    repo: &Path,
+    options: &PmDeleteProjectOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmDeleteProjectResult> {
+    let ctx = build_wave_provider(repo, &options.wave).await?;
+    if ctx.project.trim().is_empty() {
+        return Err(OpsError::Message(format!(
+            "wave/{} is not linked to a PM project",
+            options.wave
+        )));
+    }
+
+    progress.status(&format!(
+        "deleting {:?} project {}",
+        ctx.provider, ctx.project
+    ));
+    ctx.client
+        .delete_project(&ctx.project)
+        .await
+        .map_err(pm_to_ops)?;
+
+    clear_wave_project_id(repo, &options.wave, ctx.provider)?;
+
+    Ok(PmDeleteProjectResult {
+        wave: options.wave.clone(),
+        project_id: ctx.project,
+    })
+}
+
+/// Remove the `*_project` entry from `wave/<name>/<name>.yaml` so the
+/// wave no longer claims to be linked to a PM project.
+fn clear_wave_project_id(repo: &Path, wave: &str, provider: PmProviderKind) -> OpsResult<()> {
+    update_wave_pm_yaml(repo, wave, |pm| {
+        pm.remove(serde_yaml_ng::Value::String(
+            project_key(provider).to_string(),
+        ));
+        Ok(())
+    })
+}
+
+/// Delete a provider project by raw id without touching any wave yaml —
+/// used to clean up orphans surfaced by `pm list`.
+pub fn pm_delete_project_by_id(
+    repo: &Path,
+    project_id: &str,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    block_on_pm(pm_delete_project_by_id_async(repo, project_id, progress))
+}
+
+async fn pm_delete_project_by_id_async(
+    repo: &Path,
+    project_id: &str,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let (client, provider) = build_repo_client(repo).await?;
+
+    progress.status(&format!("deleting {provider:?} project {project_id}"));
+    client.delete_project(project_id).await.map_err(pm_to_ops)
+}
+
+// ── Delete ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PmDeleteOptions {
+    pub wave: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmDeleteResult {
+    pub wave: String,
+    pub filename: String,
+    pub provider_item_id: Option<String>,
+    pub local_removed: bool,
+}
+
+/// Delete a roadmap item ("not worth doing"). Identified by its local
+/// filename within `wave/<name>/`. If the file's frontmatter carries a PM
+/// provider ID, the provider task is destroyed first; the local file is
+/// then removed. PM deletion is authoritative, so a local fs hiccup after
+/// a successful Asana delete leaves the repo dirty rather than resurrecting
+/// the task.
+pub fn pm_delete_item(
+    repo: &Path,
+    options: &PmDeleteOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmDeleteResult> {
+    block_on_pm(pm_delete_item_async(repo, options, progress))
+}
+
+async fn pm_delete_item_async(
+    repo: &Path,
+    options: &PmDeleteOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmDeleteResult> {
+    let wave_dir = require_wave_dir(repo, &options.wave)?;
+    let file_path = wave_dir.join(&options.filename);
+    if !file_path.is_file() {
+        return Err(OpsError::Message(format!(
+            "roadmap item not found: wave/{}/{}",
+            options.wave, options.filename
+        )));
+    }
+
+    let content = std::fs::read_to_string(&file_path)?;
+    let doc = RoadmapItemDocument::parse(&content).map_err(pm_to_ops)?;
+
+    let provider_item_id = if let Ok(ctx) = build_wave_provider(repo, &options.wave).await {
+        if let Some(id) = doc.frontmatter.id_for(ctx.provider).map(str::to_string) {
+            progress.status(&format!("deleting {id} in {:?}", ctx.provider));
+            ctx.client.delete_item(&id).await.map_err(pm_to_ops)?;
+            Some(id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    std::fs::remove_file(&file_path)?;
+    progress.status(&format!(
+        "removed wave/{}/{}",
+        options.wave, options.filename
+    ));
+
+    Ok(PmDeleteResult {
+        wave: options.wave.clone(),
+        filename: options.filename.clone(),
+        provider_item_id,
+        local_removed: true,
+    })
 }
 
 // ── Claim (for ingest) ─────────────────────────────────────────────
@@ -1691,6 +2234,10 @@ mod tests {
             panic!("list_projects should not be called in this test");
         }
 
+        async fn list_managed_projects(&self) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            panic!("list_managed_projects should not be called in this test");
+        }
+
         async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
             Ok(self.items.clone())
         }
@@ -1705,6 +2252,14 @@ mod tests {
 
         async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
             panic!("complete_item should not be called in this test");
+        }
+
+        async fn delete_item(&self, _item_id: &str) -> PmResult<()> {
+            panic!("delete_item should not be called in this test");
+        }
+
+        async fn delete_project(&self, _project_id: &str) -> PmResult<()> {
+            panic!("delete_project should not be called in this test");
         }
 
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
@@ -1726,6 +2281,10 @@ mod tests {
             panic!("list_projects should not be called in this test");
         }
 
+        async fn list_managed_projects(&self) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            panic!("list_managed_projects should not be called in this test");
+        }
+
         async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
             Ok(Vec::new())
         }
@@ -1737,7 +2296,7 @@ mod tests {
                 .push(item.name.clone());
             let mut next_id = self.next_id.lock().expect("next_id lock");
             *next_id += 1;
-            Ok(format!("lin-{}", *next_id))
+            Ok(format!("task-{}", *next_id))
         }
 
         async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
@@ -1746,6 +2305,14 @@ mod tests {
 
         async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
             panic!("complete_item should not be called in this test");
+        }
+
+        async fn delete_item(&self, _item_id: &str) -> PmResult<()> {
+            panic!("delete_item should not be called in this test");
+        }
+
+        async fn delete_project(&self, _project_id: &str) -> PmResult<()> {
+            panic!("delete_project should not be called in this test");
         }
 
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
@@ -1767,6 +2334,10 @@ mod tests {
             panic!("list_projects should not be called in this test");
         }
 
+        async fn list_managed_projects(&self) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            panic!("list_managed_projects should not be called in this test");
+        }
+
         async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
             Ok(self.items.lock().expect("items lock").clone())
         }
@@ -1774,7 +2345,7 @@ mod tests {
         async fn create_item(&self, _project_id: &str, item: &PmItemCreate) -> PmResult<String> {
             let mut next_id = self.next_id.lock().expect("next_id lock");
             *next_id += 1;
-            let id = format!("lin-{}", *next_id);
+            let id = format!("task-{}", *next_id);
             self.items.lock().expect("items lock").push(PmItem {
                 id: id.clone(),
                 name: item.name.clone(),
@@ -1805,12 +2376,37 @@ mod tests {
             panic!("complete_item should not be called in this test");
         }
 
+        async fn delete_item(&self, _item_id: &str) -> PmResult<()> {
+            panic!("delete_item should not be called in this test");
+        }
+
+        async fn delete_project(&self, _project_id: &str) -> PmResult<()> {
+            panic!("delete_project should not be called in this test");
+        }
+
         async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
             panic!("comment should not be called in this test");
         }
 
         async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
             panic!("claim_item should not be called in this test");
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockAsanaDiscovery {
+        resolved_team: PmResult<ResolvedTeam>,
+        projects: PmResult<Vec<crate::lfd::pm::PmProject>>,
+    }
+
+    #[async_trait]
+    impl AsanaWaveDiscovery for MockAsanaDiscovery {
+        async fn resolve_team(&self) -> PmResult<ResolvedTeam> {
+            self.resolved_team.clone()
+        }
+
+        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
+            self.projects.clone()
         }
     }
 
@@ -1840,10 +2436,8 @@ mod tests {
             assignee: None,
         };
 
-        let doc = remote_item_to_document(&item, PmProviderKind::Linear);
-        assert_eq!(doc.frontmatter.linear_id.as_deref(), Some("item-42"));
-        assert_eq!(doc.frontmatter.asana_id, None);
-        assert_eq!(doc.frontmatter.notion_id, None);
+        let doc = remote_item_to_document(&item, PmProviderKind::Asana);
+        assert_eq!(doc.frontmatter.asana_id.as_deref(), Some("item-42"));
         assert!(doc.body.starts_with("# Build the thing\n"));
         assert!(doc.body.contains("Some details here."));
     }
@@ -1899,7 +2493,7 @@ mod tests {
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
 
-        write_pm_provider_to_wave_yaml(dir.path(), "pm", PmProviderKind::Linear)
+        write_pm_provider_to_wave_yaml(dir.path(), "pm", PmProviderKind::Asana)
             .expect("write pm provider");
 
         let content = std::fs::read_to_string(wave_dir.join("pm.yaml")).expect("read wave config");
@@ -1907,7 +2501,137 @@ mod tests {
         let pm = value.get("pm").expect("pm block");
         assert_eq!(
             pm.get("provider").and_then(|value| value.as_str()),
-            Some("linear")
+            Some("asana")
+        );
+    }
+
+    #[test]
+    fn discover_waves_returns_asana_team_projects() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\n  team: team-1\n",
+        )
+        .expect("write repo config");
+        let resolution = load_config_resolution(Some(repo))
+            .expect("load config")
+            .expect("resolved config");
+        let discovery = MockAsanaDiscovery {
+            resolved_team: Ok(ResolvedTeam {
+                gid: "team-1".to_string(),
+                team_to_persist: None,
+            }),
+            projects: Ok(vec![
+                crate::lfd::pm::PmProject {
+                    id: "project-2".to_string(),
+                    name: "beta".to_string(),
+                },
+                crate::lfd::pm::PmProject {
+                    id: "project-1".to_string(),
+                    name: "alpha".to_string(),
+                },
+            ]),
+        };
+
+        let discovered = block_on_pm(discover_waves_with_client(repo, &resolution, &discovery))
+            .expect("discover succeeds");
+
+        assert_eq!(discovered.len(), 2);
+        assert_eq!(discovered[0].wave_name, "alpha");
+        assert_eq!(discovered[0].project_id.as_deref(), Some("project-1"));
+        assert!(!discovered[0].stale);
+        assert_eq!(discovered[1].wave_name, "beta");
+        assert_eq!(discovered[1].project_id.as_deref(), Some("project-2"));
+        assert!(!discovered[1].stale);
+    }
+
+    #[test]
+    fn discover_waves_falls_back_to_cache_on_api_failure() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\n  team: team-1\n",
+        )
+        .expect("write repo config");
+        let resolution = load_config_resolution(Some(repo))
+            .expect("load config")
+            .expect("resolved config");
+
+        let prime_cache = MockAsanaDiscovery {
+            resolved_team: Ok(ResolvedTeam {
+                gid: "team-1".to_string(),
+                team_to_persist: None,
+            }),
+            projects: Ok(vec![crate::lfd::pm::PmProject {
+                id: "project-1".to_string(),
+                name: "alpha".to_string(),
+            }]),
+        };
+        block_on_pm(discover_waves_with_client(repo, &resolution, &prime_cache))
+            .expect("prime cache");
+
+        let failing = MockAsanaDiscovery {
+            resolved_team: Ok(ResolvedTeam {
+                gid: "team-1".to_string(),
+                team_to_persist: None,
+            }),
+            projects: Err(PmError::Message("asana offline".to_string())),
+        };
+        let discovered = block_on_pm(discover_waves_with_client(repo, &resolution, &failing))
+            .expect("discover from cache");
+
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].wave_name, "alpha");
+        assert!(discovered[0].stale);
+    }
+
+    #[test]
+    fn discover_waves_autocreates_team_when_unset() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\n",
+        )
+        .expect("write repo config");
+        let resolution = load_config_resolution(Some(repo))
+            .expect("load config")
+            .expect("resolved config");
+        let discovery = MockAsanaDiscovery {
+            resolved_team: Ok(ResolvedTeam {
+                gid: "team-99".to_string(),
+                team_to_persist: Some("team-99".to_string()),
+            }),
+            projects: Ok(Vec::new()),
+        };
+
+        let discovered = block_on_pm(discover_waves_with_client(repo, &resolution, &discovery))
+            .expect("discover succeeds");
+
+        assert!(discovered.is_empty());
+        let rewritten = std::fs::read_to_string(repo.join(".lf/config.yaml")).expect("read config");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&rewritten).expect("parse yaml");
+        let asana = value.get("asana").expect("asana block");
+        assert_eq!(asana.get("team").and_then(|v| v.as_str()), Some("team-99"));
+    }
+
+    #[test]
+    fn discover_waves_returns_empty_when_no_pm_config_anywhere() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = dir.path();
+        let wave_dir = repo.join("wave").join("solo");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("solo.yaml"), "flow: build\n").expect("write wave config");
+
+        let discovered = discover_waves(repo).expect("discover succeeds");
+        assert!(
+            discovered.is_empty(),
+            "expected no waves; got {discovered:?}"
         );
     }
 
@@ -1916,21 +2640,17 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
         std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
-        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: linear\n")
+        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: asana\n")
             .expect("write config");
 
         let wave_dir = repo.join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
-        )
-        .expect("write wave config");
+        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
         assert!(!wave_pm_is_enabled(repo, "pm"));
 
         std::fs::write(
             wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  linear_project: \"lin-1\"\n  asana_project: \"asa-1\"\n",
+            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
         )
         .expect("rewrite wave config");
         assert!(wave_pm_is_enabled(repo, "pm"));
@@ -1961,7 +2681,7 @@ mod tests {
             client: Box::new(StaticProvider {
                 items: vec![
                     PmItem {
-                        id: "lin-1".to_string(),
+                        id: "asa-1".to_string(),
                         name: "Existing task".to_string(),
                         description: "Remote body should not replace local.".to_string(),
                         rank: 0,
@@ -1969,7 +2689,7 @@ mod tests {
                         assignee: None,
                     },
                     PmItem {
-                        id: "lin-2".to_string(),
+                        id: "asa-2".to_string(),
                         name: "Second task".to_string(),
                         description: "Imported from remote.".to_string(),
                         rank: 1,
@@ -1978,7 +2698,7 @@ mod tests {
                     },
                 ],
             }),
-            provider: PmProviderKind::Linear,
+            provider: PmProviderKind::Asana,
             project: "proj-1".to_string(),
         };
 
@@ -1989,60 +2709,15 @@ mod tests {
         assert_eq!(result.created_local, vec!["02-second-task.md"]);
 
         let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
-        assert!(existing.contains("linear_id: lin-1"));
+        assert!(existing.contains("asana_id: asa-1"));
         assert!(existing.contains("Local body stays put."));
         assert!(!existing.contains("Remote body should not replace local."));
 
         let imported =
             std::fs::read_to_string(wave_dir.join("02-second-task.md")).expect("read imported");
-        assert!(imported.contains("linear_id: lin-2"));
+        assert!(imported.contains("asana_id: asa-2"));
         assert!(imported.contains("# Second task"));
         assert!(imported.contains("Imported from remote."));
-    }
-
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_creates_linear_items_in_reverse_local_order() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = RecordingProvider {
-            created: created.clone(),
-            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
-        };
-        let ctx = PmContext {
-            client: Box::new(provider),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
-
-        bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        let created = created.lock().expect("created lock").clone();
-        assert_eq!(created, vec!["Third", "Second", "First"]);
-
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-1"));
     }
 
     #[tokio::test]
@@ -2083,11 +2758,11 @@ mod tests {
         assert_eq!(created, vec!["Third", "Second", "First"]);
 
         let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-3"));
+        assert!(created_order.contains("asana_id: task-3"));
         let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-2"));
+        assert!(created_order.contains("asana_id: task-2"));
         let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-1"));
+        assert!(created_order.contains("asana_id: task-1"));
     }
 
     #[tokio::test]
@@ -2102,23 +2777,23 @@ mod tests {
         .expect("write new item");
         std::fs::write(
             wave_dir.join("02-unchanged.md"),
-            "---\nlinear_id: lin-2\n---\n# Unchanged\n\nSame remote text.\n",
+            "---\nasana_id: task-2\n---\n# Unchanged\n\nSame remote text.\n",
         )
         .expect("write unchanged item");
         std::fs::write(
             wave_dir.join("03-updated.md"),
-            "---\nlinear_id: lin-3\n---\n# Updated title\n\nNew local text.\n",
+            "---\nasana_id: task-3\n---\n# Updated title\n\nNew local text.\n",
         )
         .expect("write updated item");
         std::fs::write(
             wave_dir.join("04-missing.md"),
-            "---\nlinear_id: lin-404\n---\n# Missing remote\n\nDo not recreate.\n",
+            "---\nasana_id: task-404\n---\n# Missing remote\n\nDo not recreate.\n",
         )
         .expect("write missing item");
 
         let items = std::sync::Arc::new(std::sync::Mutex::new(vec![
             PmItem {
-                id: "lin-2".to_string(),
+                id: "task-2".to_string(),
                 name: "Unchanged".to_string(),
                 description: "Same remote text.".to_string(),
                 rank: 1,
@@ -2126,7 +2801,7 @@ mod tests {
                 assignee: None,
             },
             PmItem {
-                id: "lin-3".to_string(),
+                id: "task-3".to_string(),
                 name: "Old title".to_string(),
                 description: "Old remote text.".to_string(),
                 rank: 2,
@@ -2139,7 +2814,7 @@ mod tests {
                 items: items.clone(),
                 next_id: std::sync::Arc::new(std::sync::Mutex::new(99)),
             }),
-            provider: PmProviderKind::Linear,
+            provider: PmProviderKind::Asana,
             project: "proj-1".to_string(),
         };
 
@@ -2157,28 +2832,28 @@ mod tests {
         );
 
         let new_file = std::fs::read_to_string(wave_dir.join("01-new-item.md")).expect("read");
-        assert!(new_file.contains("linear_id: lin-100"));
+        assert!(new_file.contains("asana_id: task-100"));
 
         let items = items.lock().expect("items lock").clone();
         assert_eq!(items.len(), 3);
         assert!(items.iter().any(|item| {
-            item.id == "lin-100"
+            item.id == "task-100"
                 && item.name == "New item"
                 && item.description == "Fresh local details."
                 && item.rank == 0
         }));
         assert!(items.iter().any(|item| {
-            item.id == "lin-3"
+            item.id == "task-3"
                 && item.name == "Updated title"
                 && item.description == "New local text."
         }));
-        assert!(!items.iter().any(|item| item.id == "lin-404"));
+        assert!(!items.iter().any(|item| item.id == "task-404"));
     }
 
     #[test]
     fn build_text_update_only_includes_changed_text_fields() {
         let remote = PmItem {
-            id: "lin-1".to_string(),
+            id: "task-1".to_string(),
             name: "Existing".to_string(),
             description: "Remote body.".to_string(),
             rank: 0,
@@ -2206,7 +2881,7 @@ mod tests {
 
         let remote_items = vec![
             PmItem {
-                id: "lin-2".to_string(),
+                id: "task-2".to_string(),
                 name: "Remote second".to_string(),
                 description: "Pulled from PM.".to_string(),
                 rank: 1,
@@ -2214,7 +2889,7 @@ mod tests {
                 assignee: None,
             },
             PmItem {
-                id: "lin-1".to_string(),
+                id: "task-1".to_string(),
                 name: "Remote first".to_string(),
                 description: "Higher priority.".to_string(),
                 rank: 0,
@@ -2224,7 +2899,7 @@ mod tests {
         ];
 
         let removed =
-            overwrite_local_wave_from_remote(&wave_dir, &remote_items, PmProviderKind::Linear)
+            overwrite_local_wave_from_remote(&wave_dir, &remote_items, PmProviderKind::Asana)
                 .expect("pull should rewrite local files");
 
         assert_eq!(removed, 2);
@@ -2232,11 +2907,168 @@ mod tests {
         assert!(!wave_dir.join("02-local-second.md").exists());
 
         let first = std::fs::read_to_string(wave_dir.join("01-remote-second.md")).expect("read");
-        assert!(first.contains("linear_id: lin-2"));
+        assert!(first.contains("asana_id: task-2"));
         assert!(first.contains("# Remote second"));
 
         let second = std::fs::read_to_string(wave_dir.join("02-remote-first.md")).expect("read");
-        assert!(second.contains("linear_id: lin-1"));
+        assert!(second.contains("asana_id: task-1"));
         assert!(second.contains("# Remote first"));
+    }
+
+    // ── resolve_provider_token: file-vs-sqlite precedence ───────────────
+    //
+    // The credentials file at ~/.lf/credentials/<provider>.json is the
+    // canonical source of truth; the sqlite cache is only consulted for
+    // legacy installs that haven't re-authed since the file path landed.
+    // These tests pin that contract so a refactor can't quietly resilo
+    // tokens back into per-lfd sqlite databases.
+
+    use crate::lfd::store::{CredentialType, ProviderToken};
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+
+    fn lf_home_mutex() -> &'static Mutex<()> {
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+    }
+
+    struct LfHomeGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        _dir: TempDir,
+        previous: Option<String>,
+    }
+
+    impl LfHomeGuard {
+        fn new() -> Self {
+            // Re-acquire even on poison; we don't care if a prior test
+            // panicked, only that this test sees a clean LF_HOME.
+            let guard = lf_home_mutex().lock().unwrap_or_else(|e| e.into_inner());
+            let dir = TempDir::new().expect("temp dir");
+            let previous = std::env::var("LF_HOME").ok();
+            std::env::set_var("LF_HOME", dir.path());
+            Self {
+                _guard: guard,
+                _dir: dir,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for LfHomeGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("LF_HOME", value),
+                None => std::env::remove_var("LF_HOME"),
+            }
+        }
+    }
+
+    fn fresh_token(provider: &str, access: &str, refresh: Option<&str>) -> ProviderToken {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        ProviderToken {
+            provider: provider.to_string(),
+            access_token: access.to_string(),
+            refresh_token: refresh.map(str::to_string),
+            expires_at: Some(now + 3600),
+            login: None,
+            updated_at: now,
+            credential_type: CredentialType::OAuth,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_token_prefers_file_over_sqlite() {
+        let _env = LfHomeGuard::new();
+
+        crate::lfd::credentials_file::write(&fresh_token("asana", "from-file", Some("rt")))
+            .expect("write file token");
+
+        let store = open_store(&storage_config_from_env().expect("storage config"))
+            .await
+            .expect("open store");
+        store
+            .upsert_provider_token(&fresh_token("asana", "from-sqlite", None))
+            .await
+            .expect("upsert sqlite token");
+
+        let resolved = resolve_provider_token("asana")
+            .await
+            .expect("resolve succeeds");
+        assert_eq!(
+            resolved, "from-file",
+            "credentials file must win over sqlite cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_token_falls_back_to_sqlite_when_file_missing() {
+        let _env = LfHomeGuard::new();
+
+        let store = open_store(&storage_config_from_env().expect("storage config"))
+            .await
+            .expect("open store");
+        store
+            .upsert_provider_token(&fresh_token("asana", "from-sqlite", None))
+            .await
+            .expect("upsert sqlite token");
+
+        let resolved = resolve_provider_token("asana")
+            .await
+            .expect("resolve succeeds");
+        assert_eq!(resolved, "from-sqlite");
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_token_errors_when_expired_with_no_refresh() {
+        let _env = LfHomeGuard::new();
+
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let stale = ProviderToken {
+            provider: "asana".to_string(),
+            access_token: "stale".to_string(),
+            refresh_token: None,
+            expires_at: Some(now - 3600),
+            login: None,
+            updated_at: now - 7200,
+            credential_type: CredentialType::OAuth,
+        };
+        crate::lfd::credentials_file::write(&stale).expect("write expired file token");
+
+        let err = resolve_provider_token("asana")
+            .await
+            .expect_err("expired token without refresh should error");
+        let message = format!("{err}");
+        assert!(
+            message.contains("expired"),
+            "expected expiry message, got: {message}"
+        );
+        assert!(
+            message.contains("lf op auth asana"),
+            "expected re-auth instruction, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_token_treats_near_expiry_as_expired() {
+        let _env = LfHomeGuard::new();
+
+        // Within the 60s skew window: should be treated as expired so
+        // callers don't ship a token that dies mid-flight.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let almost_expired = ProviderToken {
+            provider: "asana".to_string(),
+            access_token: "almost-stale".to_string(),
+            refresh_token: None,
+            expires_at: Some(now + 30),
+            login: None,
+            updated_at: now,
+            credential_type: CredentialType::OAuth,
+        };
+        crate::lfd::credentials_file::write(&almost_expired).expect("write");
+
+        let err = resolve_provider_token("asana")
+            .await
+            .expect_err("near-expiry token should error like an expired one");
+        assert!(format!("{err}").contains("expired"));
     }
 }

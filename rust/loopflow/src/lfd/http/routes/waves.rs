@@ -185,6 +185,64 @@ pub async fn list_waves_handler(
     Ok(Json(ListResponse::new(views, has_more)))
 }
 
+pub async fn list_discovered_waves_handler(
+    State(state): State<HttpState>,
+) -> ApiResult<serde_json::Value> {
+    let repos = state.store.list_repos().await.map_err(map_store_error)?;
+    let managed = state
+        .store
+        .list_waves(None)
+        .await
+        .map_err(map_store_error)?;
+
+    let managed_index: std::collections::HashMap<(String, String), String> = managed
+        .iter()
+        .map(|w| ((w.repo().clone(), w.name().clone()), w.id().to_string()))
+        .collect();
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for repo in repos {
+        let repo_path = std::path::PathBuf::from(&repo.path);
+        let repo_id = repo.repo_id.clone();
+        let discovered = match tokio::task::spawn_blocking({
+            let repo_path = repo_path.clone();
+            move || crate::ops::pm::discover_waves(&repo_path)
+        })
+        .await
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })? {
+            Ok(d) => d,
+            Err(err) => {
+                warn!(repo = %repo.path, error = %err, "discover_waves failed; skipping repo");
+                continue;
+            }
+        };
+
+        for wave in discovered {
+            let managed_wave_id = managed_index
+                .get(&(repo.path.clone(), wave.wave_name.clone()))
+                .cloned();
+            entries.push(serde_json::json!({
+                "repo_path": repo.path,
+                "repo_id": repo_id.to_string(),
+                "wave_name": wave.wave_name,
+                "provider": match wave.provider {
+                    crate::lfd::pm::PmProviderKind::Asana => "asana",
+                },
+                "asana_project_id": wave.project_id,
+                "managed_wave_id": managed_wave_id,
+                "stale": wave.stale,
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "waves": entries })))
+}
+
 pub async fn create_wave_handler(
     State(state): State<HttpState>,
     Json(payload): Json<CreateWaveRequest>,
@@ -1397,6 +1455,244 @@ pub async fn get_wave_file_diff_handler(
     Ok(Json(serde_json::json!({ "diff": diff })))
 }
 
+pub async fn delete_wave_item_handler(
+    State(state): State<HttpState>,
+    Path((wave_id, filename)): Path<(String, String)>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    if filename.contains('/') || filename.contains("..") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid filename"));
+    }
+
+    let repo = wave.repo().clone();
+    let wave_name = wave.name().clone();
+    let filename_clone = filename.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        crate::ops::pm::pm_delete_item(
+            std::path::Path::new(&repo),
+            &crate::ops::pm::PmDeleteOptions {
+                wave: wave_name,
+                filename: filename_clone,
+            },
+            &crate::ops::NullProgress,
+        )
+    })
+    .await
+    .map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        )
+    })?
+    .map_err(|err| {
+        api_error(
+            StatusCode::BAD_GATEWAY,
+            ApiMessage::Untrusted(err.to_string()),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "wave": result.wave,
+        "filename": result.filename,
+        "provider_item_id": result.provider_item_id,
+        "local_removed": result.local_removed,
+        "deleted": true,
+    })))
+}
+
+pub async fn get_wave_roadmap_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    fetch_wave_roadmap(wave.repo().clone(), wave.name().clone()).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RoadmapByPathQuery {
+    pub repo: String,
+    pub wave: String,
+}
+
+pub async fn get_roadmap_by_path_handler(
+    State(_state): State<HttpState>,
+    Query(query): Query<RoadmapByPathQuery>,
+) -> ApiResult<serde_json::Value> {
+    if query.repo.is_empty() || query.wave.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "repo and wave query params are required",
+        ));
+    }
+    if query.wave.contains('/') || query.wave.contains("..") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid wave name"));
+    }
+    fetch_wave_roadmap(query.repo, query.wave).await
+}
+
+/// Shared roadmap fetch path used by both the wave-id and discovery
+/// (repo + wave name) handlers. Returns 404 for non-PM waves so clients
+/// know to fall back to file-based rendering; serves cached state with
+/// `stale: true` when Asana is unreachable.
+async fn fetch_wave_roadmap(repo: String, wave_name: String) -> ApiResult<serde_json::Value> {
+    let repo_path = std::path::PathBuf::from(&repo);
+
+    let is_pm_enabled = {
+        let repo_path = repo_path.clone();
+        let wave_name = wave_name.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::ops::pm::wave_pm_is_enabled(&repo_path, &wave_name)
+        })
+        .await
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?
+    };
+    if !is_pm_enabled {
+        return Err(api_error(StatusCode::NOT_FOUND, "wave is not PM-backed"));
+    }
+
+    let fetch_result = {
+        let wave_name = wave_name.clone();
+        let repo_path = repo_path.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::ops::pm::fetch_roadmap(&repo_path, &wave_name, &crate::ops::NullProgress)
+        })
+        .await
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?
+    };
+
+    match fetch_result {
+        Ok(roadmap) => {
+            let refreshed_at = OffsetDateTime::now_utc().unix_timestamp();
+            let payload = encode_roadmap_payload(&roadmap, refreshed_at, false, None);
+            if let Err(err) = write_roadmap_cache(&repo_path, &wave_name, &payload) {
+                warn!(
+                    wave = %wave_name,
+                    error = %err,
+                    "failed to write roadmap cache"
+                );
+            }
+            Ok(Json(payload))
+        }
+        Err(err) => {
+            if let Some(cached) = read_roadmap_cache(&repo_path, &wave_name) {
+                let stale = mark_cached_payload_stale(cached, &err.to_string());
+                Ok(Json(stale))
+            } else {
+                Err(api_error(
+                    StatusCode::BAD_GATEWAY,
+                    ApiMessage::Untrusted(err.to_string()),
+                ))
+            }
+        }
+    }
+}
+
+fn encode_roadmap_payload(
+    roadmap: &crate::ops::pm::RoadmapResult,
+    refreshed_at: i64,
+    stale: bool,
+    stale_reason: Option<String>,
+) -> serde_json::Value {
+    let tasks: Vec<serde_json::Value> = roadmap
+        .tasks
+        .iter()
+        .map(|task| {
+            serde_json::json!({
+                "asana_id": task.asana_id,
+                "title": task.title,
+                "description": task.description,
+                "priority": priority_to_str(task.priority),
+                "completed": task.completed,
+                "local_filename": task.local_filename,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "wave": roadmap.wave,
+        "provider": match roadmap.provider {
+            crate::lfd::pm::PmProviderKind::Asana => "asana",
+        },
+        "refreshed_at": refreshed_at,
+        "stale": stale,
+        "stale_reason": stale_reason,
+        "tasks": tasks,
+    })
+}
+
+fn priority_to_str(priority: crate::lfd::pm::PriorityBucket) -> &'static str {
+    use crate::lfd::pm::PriorityBucket;
+    match priority {
+        PriorityBucket::Urgent => "urgent",
+        PriorityBucket::High => "high",
+        PriorityBucket::Medium => "medium",
+        PriorityBucket::Low => "low",
+    }
+}
+
+fn roadmap_cache_path(repo: &std::path::Path, wave: &str) -> std::path::PathBuf {
+    repo.join(".lf")
+        .join("cache")
+        .join("waves")
+        .join(wave)
+        .join("roadmap.json")
+}
+
+fn write_roadmap_cache(
+    repo: &std::path::Path,
+    wave: &str,
+    payload: &serde_json::Value,
+) -> std::io::Result<()> {
+    let path = roadmap_cache_path(repo, wave);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = serde_json::to_vec_pretty(payload)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    std::fs::write(path, body)
+}
+
+fn read_roadmap_cache(repo: &std::path::Path, wave: &str) -> Option<serde_json::Value> {
+    let path = roadmap_cache_path(repo, wave);
+    let content = std::fs::read(path).ok()?;
+    serde_json::from_slice(&content).ok()
+}
+
+fn mark_cached_payload_stale(mut payload: serde_json::Value, reason: &str) -> serde_json::Value {
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("stale".to_string(), serde_json::Value::Bool(true));
+        obj.insert(
+            "stale_reason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
+    }
+    payload
+}
+
 fn wave_name_exists_error(name: &str) -> ApiError {
     api_error(
         StatusCode::CONFLICT,
@@ -2411,5 +2707,148 @@ mod tests {
             .as_array()
             .expect("triggers data array");
         assert!(after_remove_data.is_empty());
+    }
+
+    // ── fetch_wave_roadmap: shared roadmap fetch contract ───────────────
+    //
+    // Concerto reads roadmap state through this path. The contract:
+    //   - 404 for non-PM waves so the client falls back to file parsing.
+    //   - When Asana is unreachable, serve the disk cache with stale=true
+    //     so the UI keeps showing something useful instead of erroring.
+
+    use std::sync::Mutex as StdMutex;
+    use std::sync::OnceLock;
+
+    fn lf_home_mutex() -> &'static StdMutex<()> {
+        static M: OnceLock<StdMutex<()>> = OnceLock::new();
+        M.get_or_init(|| StdMutex::new(()))
+    }
+
+    /// Serializes LF_HOME mutation across tests so cargo's parallel
+    /// runner can't interleave two tests pointing the home dir at
+    /// different tempdirs at once.
+    struct LfHomeGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+        previous: Option<String>,
+    }
+
+    impl LfHomeGuard {
+        fn new() -> Self {
+            let guard = lf_home_mutex().lock().unwrap_or_else(|e| e.into_inner());
+            let dir = tempfile::TempDir::new().expect("temp dir");
+            let previous = std::env::var("LF_HOME").ok();
+            std::env::set_var("LF_HOME", dir.path());
+            Self {
+                _guard: guard,
+                _dir: dir,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for LfHomeGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("LF_HOME", value),
+                None => std::env::remove_var("LF_HOME"),
+            }
+        }
+    }
+
+    fn write_pm_wave(repo: &Path, wave: &str, asana_project: &str) {
+        let wave_dir = repo.join("wave").join(wave);
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(
+            wave_dir.join(format!("{wave}.yaml")),
+            format!("flow: build\npm:\n  provider: asana\n  asana_project: \"{asana_project}\"\n"),
+        )
+        .expect("write wave config");
+    }
+
+    #[tokio::test]
+    async fn fetch_wave_roadmap_returns_404_for_non_pm_wave() {
+        let _env = LfHomeGuard::new();
+        let dir = tempdir().expect("tempdir");
+        let repo = dir.path();
+        // wave exists on disk but has no pm config — Concerto must see
+        // 404 so it renders from local files instead of waiting on Asana.
+        let wave_dir = repo.join("wave").join("plain");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("plain.yaml"), "flow: build\n").expect("write plain config");
+
+        let result = fetch_wave_roadmap(repo.display().to_string(), "plain".to_string()).await;
+        let err = result.expect_err("non-PM wave must return an error");
+        assert_eq!(
+            err.0,
+            StatusCode::NOT_FOUND,
+            "non-PM wave should produce a 404; got {:?}",
+            err.0
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_wave_roadmap_serves_stale_cache_when_asana_unreachable() {
+        let _env = LfHomeGuard::new();
+        let dir = tempdir().expect("tempdir");
+        let repo = dir.path();
+
+        write_pm_wave(repo, "engbot", "asa-1");
+
+        // Pre-populate the cache as if a previous successful fetch had
+        // written it; the route must surface this when Asana fails.
+        let cached = serde_json::json!({
+            "wave": "engbot",
+            "provider": "asana",
+            "refreshed_at": 1_700_000_000,
+            "stale": false,
+            "stale_reason": serde_json::Value::Null,
+            "tasks": [
+                {
+                    "asana_id": "task-1",
+                    "title": "Cached task",
+                    "description": "From a previous fetch",
+                    "priority": "high",
+                    "completed": false,
+                    "local_filename": serde_json::Value::Null,
+                }
+            ],
+        });
+        write_roadmap_cache(repo, "engbot", &cached).expect("seed cache");
+
+        // No credentials in LF_HOME → fetch_roadmap fails at token resolve;
+        // route should fall through to the cache instead of erroring.
+        let Json(payload) = fetch_wave_roadmap(repo.display().to_string(), "engbot".to_string())
+            .await
+            .expect("cached payload should be returned when Asana is unreachable");
+
+        assert_eq!(
+            payload["stale"],
+            serde_json::Value::Bool(true),
+            "stale flag must flip when serving from cache: {payload}"
+        );
+        assert!(
+            payload["stale_reason"].as_str().is_some(),
+            "stale_reason should explain why we fell back: {payload}"
+        );
+        assert_eq!(payload["wave"], "engbot");
+        assert_eq!(
+            payload["tasks"][0]["title"], "Cached task",
+            "cached task should pass through unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_wave_roadmap_errors_when_asana_unreachable_and_no_cache() {
+        let _env = LfHomeGuard::new();
+        let dir = tempdir().expect("tempdir");
+        let repo = dir.path();
+
+        write_pm_wave(repo, "engbot", "asa-1");
+        // No cache file, no credentials → 502 so callers know to retry,
+        // not a misleading empty roadmap.
+        let result = fetch_wave_roadmap(repo.display().to_string(), "engbot".to_string()).await;
+        let err = result.expect_err("no cache + no creds must produce an error");
+        assert_eq!(err.0, StatusCode::BAD_GATEWAY);
     }
 }

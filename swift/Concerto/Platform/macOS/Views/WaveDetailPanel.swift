@@ -29,6 +29,10 @@ struct WaveDetailPanel: View {
     @State private var hasAppliedScreenshotTab = false
     @State private var expandedSections: Set<String> = []
     @State private var expandedDiffFiles: Set<String> = []
+    @State private var hoveredRoadmapTaskId: String?
+    @State private var deletingRoadmapTaskIds: Set<String> = []
+    @State private var pendingRoadmapDeletion: RoadmapTask?
+    @State private var roadmapDeletionError: String?
     @State private var fileDiffs: [String: String] = [:]
     @State private var previousCommitSHAs: Set<String> = []
     @State private var displayedCommits: [CommitEntry] = []
@@ -90,6 +94,21 @@ struct WaveDetailPanel: View {
             }
         } message: {
             Text("Stop '\(wave.displayName)'? It can be restarted later.")
+        }
+        .confirmationDialog(
+            pendingRoadmapDeletion.map { "Delete \u{201C}\($0.title)\u{201D}?" } ?? "Delete item?",
+            isPresented: Binding(
+                get: { pendingRoadmapDeletion != nil },
+                set: { if !$0 { pendingRoadmapDeletion = nil } }
+            ),
+            presenting: pendingRoadmapDeletion
+        ) { item in
+            Button("Delete", role: .destructive) {
+                deleteRoadmapTask(item)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Removes this item from Asana and deletes the local file.")
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchToCurrentTab)) { _ in
             guard isSelectedWave else { return }
@@ -465,7 +484,7 @@ struct WaveDetailPanel: View {
 
     @ViewBuilder
     private var roadmapSection: some View {
-        if let roadmapItems = waveContent?.roadmapItems, !roadmapItems.isEmpty {
+        if let roadmapTasks = waveContent?.roadmapTasks, !roadmapTasks.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("Roadmap")
                     .font(Typography.caption())
@@ -473,8 +492,8 @@ struct WaveDetailPanel: View {
                     .foregroundStyle(palette.textSecondary)
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(roadmapItems) { item in
-                        roadmapItemRow(item)
+                    ForEach(roadmapTasks) { item in
+                        roadmapTaskRow(item)
                     }
                 }
                 .padding(.vertical, Spacing.xs)
@@ -486,37 +505,67 @@ struct WaveDetailPanel: View {
     }
 
     @ViewBuilder
-    private func roadmapItemRow(_ item: RoadmapItem) -> some View {
+    private func roadmapTaskRow(_ item: RoadmapTask) -> some View {
         let hasContent = item.content != nil
         let isExpanded = expandedSections.contains(item.id)
+        let isHovered = hoveredRoadmapTaskId == item.id
+        let isDeleting = deletingRoadmapTaskIds.contains(item.id)
 
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Button {
-                toggleSection(item.id)
-            } label: {
-                HStack(alignment: .top, spacing: Spacing.sm) {
-                    if hasContent {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(palette.textSecondary)
-                            .frame(width: 12, alignment: .center)
-                            .padding(.top, 3)
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Button {
+                    toggleSection(item.id)
+                } label: {
+                    HStack(alignment: .top, spacing: Spacing.sm) {
+                        if hasContent {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(palette.textSecondary)
+                                .frame(width: 12, alignment: .center)
+                                .padding(.top, 3)
+                        }
+
+                        Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
+                            .font(Typography.caption())
+                            .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
+
+                        Text("\(String(format: "%02d", item.number)) · \(item.title)")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.text)
+                            .lineLimit(1)
+
+                        Spacer()
                     }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasContent)
 
-                    Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
-                        .font(Typography.caption())
-                        .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
-
-                    Text("\(String(format: "%02d", item.number)) · \(item.title)")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.text)
-                        .lineLimit(1)
-
-                    Spacer()
+                if isHovered || isDeleting {
+                    Button {
+                        pendingRoadmapDeletion = item
+                    } label: {
+                        Group {
+                            if isDeleting {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                        }
+                        .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textSecondary)
+                    .disabled(isDeleting)
+                    .help("Delete — not worth doing")
+                    .accessibilityLabel("Delete \(item.title)")
                 }
             }
-            .buttonStyle(.plain)
-            .disabled(!hasContent)
+            .opacity(isDeleting ? 0.5 : 1)
+            .hoverTracking { hovering in
+                hoveredRoadmapTaskId = hovering ? item.id : (hoveredRoadmapTaskId == item.id ? nil : hoveredRoadmapTaskId)
+            }
 
             if isExpanded, let content = item.content {
                 let indent = 12 + Spacing.sm
@@ -533,6 +582,19 @@ struct WaveDetailPanel: View {
                             .padding(.leading, indent)
                     }
                 }
+            }
+        }
+    }
+
+    private func deleteRoadmapTask(_ item: RoadmapTask) {
+        roadmapDeletionError = nil
+        deletingRoadmapTaskIds.insert(item.id)
+        Task { @MainActor in
+            defer { deletingRoadmapTaskIds.remove(item.id) }
+            do {
+                try await repoState.deleteWaveItem(wave, filename: item.fileName)
+            } catch {
+                roadmapDeletionError = error.localizedDescription
             }
         }
     }

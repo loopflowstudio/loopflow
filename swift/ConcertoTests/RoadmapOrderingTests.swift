@@ -7,7 +7,7 @@ struct RoadmapOrderingTests {
     @Test("planned items stay ahead of shipped items")
     func keepsShippedItemsAtBottom() {
         let items = [
-            RoadmapItem(
+            RoadmapTask(
                 id: "shipped-high",
                 number: 1,
                 title: "Shipped High",
@@ -16,7 +16,7 @@ struct RoadmapOrderingTests {
                 priority: .high,
                 isShipped: true
             ),
-            RoadmapItem(
+            RoadmapTask(
                 id: "planned-low",
                 number: 2,
                 title: "Planned Low",
@@ -25,7 +25,7 @@ struct RoadmapOrderingTests {
                 priority: .low,
                 isShipped: false
             ),
-            RoadmapItem(
+            RoadmapTask(
                 id: "planned-urgent",
                 number: 3,
                 title: "Planned Urgent",
@@ -34,7 +34,7 @@ struct RoadmapOrderingTests {
                 priority: .urgent,
                 isShipped: false
             ),
-            RoadmapItem(
+            RoadmapTask(
                 id: "shipped-medium",
                 number: 4,
                 title: "Shipped Medium",
@@ -45,7 +45,7 @@ struct RoadmapOrderingTests {
             )
         ]
 
-        #expect(sortedRoadmapItems(items).map(\.id) == [
+        #expect(sortedRoadmapTasks(items).map(\.id) == [
             "planned-low",
             "planned-urgent",
             "shipped-high",

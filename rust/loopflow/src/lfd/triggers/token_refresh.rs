@@ -213,6 +213,22 @@ async fn refresh_provider_token_row(
             }
             let login = refreshed_token.login.clone();
 
+            // The credentials file is the canonical store every lfd reads
+            // from; sqlite holds lifecycle metadata. Mirror the auth-flow
+            // order: file first, sqlite second. Skip the file write if the
+            // file didn't already exist — providers that store tokens
+            // elsewhere (Claude in ~/.claude, GitHub in gh's auth file)
+            // shouldn't have a redundant file conjured here.
+            if crate::lfd::credentials_file::read(provider.as_str()).is_some() {
+                if let Err(err) = crate::lfd::credentials_file::write(&refreshed_token) {
+                    tracing::warn!(
+                        provider = %provider,
+                        error = %err,
+                        "failed to persist refreshed token to credentials file"
+                    );
+                }
+            }
+
             if let Err(err) = deps.store.upsert_provider_token(&refreshed_token).await {
                 emit_refresh_failure(&deps.event_hub, provider, err.to_string());
                 return;

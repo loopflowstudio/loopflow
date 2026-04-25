@@ -326,7 +326,7 @@ private struct TerminalContextSidebar: View {
     private var currentWorkSection: some View {
         section("Current work") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let item = wave?.content?.roadmapItems.first(where: { !$0.isShipped }) {
+                if let item = wave?.content?.roadmapTasks.first(where: { !$0.isShipped }) {
                     Text(item.title)
                         .font(Typography.body())
                         .fontWeight(.semibold)

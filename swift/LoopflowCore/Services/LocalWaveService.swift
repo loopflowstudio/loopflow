@@ -34,18 +34,18 @@ public struct RunOverrides: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
-    public var roadmapItem: String?
+    public var roadmapTask: String?
 
     public init(
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
-        roadmapItem: String? = nil
+        roadmapTask: String? = nil
     ) {
         self.area = area
         self.direction = direction
         self.flow = flow
-        self.roadmapItem = roadmapItem
+        self.roadmapTask = roadmapTask
     }
 }
 
@@ -798,6 +798,125 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return json?["diff"] as? String ?? ""
     }
 
+    public func fetchRoadmap(repo: String, wave: String) async throws -> RoadmapResponse? {
+        var components = URLComponents(
+            url: apiBaseURL.appendingPathComponent("roadmap"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "repo", value: repo),
+            URLQueryItem(name: "wave", value: wave),
+        ]
+        guard let url = components?.url else {
+            throw WaveServiceError.commandFailed("failed to build roadmap URL")
+        }
+        let (data, response) = try await performGet(url)
+        if response.statusCode == 404 {
+            return nil
+        }
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        return try Self.parseRoadmapResponse(data: data)
+    }
+
+    public func listDiscoveredWaves() async throws -> [DiscoveredWaveSummary] {
+        let url = apiBaseURL.appendingPathComponent("waves/discovered")
+        let (data, response) = try await performGet(url)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = json["waves"] as? [[String: Any]]
+        else {
+            throw WaveServiceError.commandFailed("Invalid discovered waves response")
+        }
+        return raw.compactMap { entry in
+            guard
+                let repoPath = entry["repo_path"] as? String,
+                let repoId = entry["repo_id"] as? String,
+                let waveName = entry["wave_name"] as? String,
+                let provider = entry["provider"] as? String
+            else {
+                return nil
+            }
+            return DiscoveredWaveSummary(
+                repoPath: repoPath,
+                repoId: repoId,
+                waveName: waveName,
+                provider: provider,
+                asanaProjectId: entry["asana_project_id"] as? String,
+                managedWaveId: entry["managed_wave_id"] as? String
+            )
+        }
+    }
+
+    static func parseRoadmapResponse(data: Data) throws -> RoadmapResponse {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw WaveServiceError.commandFailed("Invalid roadmap response")
+        }
+        let wave = json["wave"] as? String ?? ""
+        let provider = json["provider"] as? String ?? ""
+        let refreshedAt = (json["refreshed_at"] as? NSNumber)?.int64Value ?? 0
+        let stale = json["stale"] as? Bool ?? false
+        let staleReason = json["stale_reason"] as? String
+        let rawTasks = json["tasks"] as? [[String: Any]] ?? []
+        let tasks = rawTasks.enumerated().map { index, raw -> RoadmapTask in
+            let asanaId = raw["asana_id"] as? String ?? ""
+            let title = raw["title"] as? String ?? ""
+            let description = raw["description"] as? String
+            let priorityRaw = raw["priority"] as? String ?? "medium"
+            let completed = raw["completed"] as? Bool ?? false
+            let localFilename = raw["local_filename"] as? String
+            let priority: RoadmapPriority = {
+                switch priorityRaw {
+                case "urgent": return .urgent
+                case "high": return .high
+                case "medium": return .medium
+                case "low": return .low
+                default: return .medium
+                }
+            }()
+            let slug = slugify(title)
+            let number = index + 1
+            let fileName = localFilename ?? "\(number)-\(slug).md"
+            return RoadmapTask(
+                id: asanaId.isEmpty ? fileName : asanaId,
+                number: number,
+                title: title,
+                slug: slug,
+                fileName: fileName,
+                priority: priority,
+                isShipped: completed,
+                content: description,
+                filePath: nil,
+                asanaId: asanaId.isEmpty ? nil : asanaId
+            )
+        }
+        return RoadmapResponse(
+            wave: wave,
+            provider: provider,
+            refreshedAt: refreshedAt,
+            stale: stale,
+            staleReason: staleReason,
+            tasks: tasks
+        )
+    }
+
+    private static func slugify(_ value: String) -> String {
+        let lowered = value.lowercased()
+        let mapped = lowered.unicodeScalars.map { scalar -> Character in
+            if (scalar >= "a" && scalar <= "z") || (scalar >= "0" && scalar <= "9") {
+                return Character(scalar)
+            }
+            return "-"
+        }
+        let compacted = String(mapped)
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        return compacted.isEmpty ? "untitled" : compacted
+    }
+
     public func usageSummary(
         filters: UsageAnalyticsFilters,
         groupBy: UsageGroupBy
@@ -1110,7 +1229,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             if let area = overrides.area { body["area"] = area }
             if let direction = overrides.direction { body["direction"] = direction }
             if let flow = overrides.flow { body["flow"] = flow }
-            if let roadmapItem = overrides.roadmapItem { body["roadmap_item"] = roadmapItem }
+            if let roadmapTask = overrides.roadmapTask { body["roadmap_item"] = roadmapTask }
         }
 
         let request = try makeRequest(
@@ -1416,6 +1535,24 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
             let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
+    }
+
+    /// Delete a roadmap item from a wave. Destructive in the PM provider
+    /// ("not worth doing") and also removes the linked local wave file.
+    public func deleteWaveItem(waveId: String, filename: String) async throws {
+        let encoded = filename
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(waveId)/items/\(encoded)"),
+            method: "DELETE"
+        )
+
+        let (data, response) = try await performRequest(request)
+
+        guard response.statusCode == 200 else {
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
     }
 

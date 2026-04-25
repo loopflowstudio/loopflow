@@ -11,7 +11,7 @@ public enum WaveContentParser {
 
         let readmeURL = waveDirectory.appendingPathComponent("README.md", isDirectory: false)
         let readmeSections = parseReadmeSections(at: readmeURL)
-        let roadmapItems = parseRoadmapItems(in: waveDirectory)
+        let roadmapTasks = parseRoadmapTasks(in: waveDirectory)
         let (scratchDoc, scratchDocPath) = parseScratchDoc(repoRoot: repoRoot, branch: branch)
 
         if readmeSections.vision == nil,
@@ -19,7 +19,7 @@ public enum WaveContentParser {
            readmeSections.goals == nil,
            readmeSections.risks == nil,
            readmeSections.metrics == nil,
-           roadmapItems.isEmpty,
+           roadmapTasks.isEmpty,
            scratchDoc == nil {
             return nil
         }
@@ -30,7 +30,7 @@ public enum WaveContentParser {
             goals: readmeSections.goals,
             risks: readmeSections.risks,
             metrics: readmeSections.metrics,
-            roadmapItems: roadmapItems,
+            roadmapTasks: roadmapTasks,
             scratchDoc: scratchDoc,
             scratchDocPath: scratchDocPath
         )
@@ -157,7 +157,7 @@ public enum WaveContentParser {
         return normalizedSectionText(paragraphLines)
     }
 
-    private static func parseRoadmapItems(in waveDirectory: URL) -> [RoadmapItem] {
+    private static func parseRoadmapTasks(in waveDirectory: URL) -> [RoadmapTask] {
         let fileManager = FileManager.default
 
         guard let files = try? fileManager.contentsOfDirectory(
@@ -176,12 +176,12 @@ public enum WaveContentParser {
                 }
                 return lhs.fileName < rhs.fileName
             }
-            .compactMap(parseRoadmapItem)
+            .compactMap(parseRoadmapTask)
     }
 
-    private static func parseRoadmapItem(_ metadata: RoadmapMetadata) -> RoadmapItem? {
+    private static func parseRoadmapTask(_ metadata: RoadmapMetadata) -> RoadmapTask? {
         guard let text = try? String(contentsOf: metadata.fileURL, encoding: .utf8) else {
-            return RoadmapItem(
+            return RoadmapTask(
                 id: metadata.stem,
                 number: metadata.number,
                 title: metadata.stem,
@@ -201,7 +201,7 @@ public enum WaveContentParser {
 
         let content: String? = isShipped ? nil : extractContent(from: lines)
 
-        return RoadmapItem(
+        return RoadmapTask(
             id: metadata.stem,
             number: metadata.number,
             title: title,

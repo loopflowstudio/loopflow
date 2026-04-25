@@ -564,6 +564,64 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 }
             }
         }
+        PmCommand::List => {
+            let projects = crate::ops::pm::pm_list_projects(&repo_root, progress)?;
+            if projects.is_empty() {
+                println!("no projects in team");
+            } else {
+                for p in projects {
+                    match p.linked_wave {
+                        Some(wave) => println!("  {} {} — wave/{}", p.id, p.name, wave),
+                        None => println!("  {} {} — orphan", p.id, p.name),
+                    }
+                }
+            }
+        }
+        PmCommand::DeleteProject {
+            wave,
+            wave_flag,
+            id,
+        } => {
+            if let Some(project_id) = id {
+                crate::ops::pm::pm_delete_project_by_id(&repo_root, project_id, progress)?;
+                println!("deleted project {project_id}");
+            } else {
+                let wave = wave
+                    .clone()
+                    .or_else(|| wave_flag.clone())
+                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
+                    .ok_or_else(|| anyhow!("cannot determine wave name"))?;
+                let result = crate::ops::pm::pm_delete_project(
+                    &repo_root,
+                    &crate::ops::pm::PmDeleteProjectOptions { wave },
+                    progress,
+                )?;
+                println!(
+                    "deleted project {} (wave {})",
+                    result.project_id, result.wave
+                );
+            }
+        }
+        PmCommand::DeleteTask { wave, filename } => {
+            let result = crate::ops::pm::pm_delete_item(
+                &repo_root,
+                &crate::ops::pm::PmDeleteOptions {
+                    wave: wave.clone(),
+                    filename: filename.clone(),
+                },
+                progress,
+            )?;
+            match result.provider_item_id {
+                Some(id) => println!(
+                    "deleted task {id} from provider and removed wave/{}/{}",
+                    result.wave, result.filename
+                ),
+                None => println!(
+                    "no provider id found; removed wave/{}/{}",
+                    result.wave, result.filename
+                ),
+            }
+        }
     }
     Ok(())
 }

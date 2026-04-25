@@ -226,7 +226,7 @@ struct LocalWaveServiceAuthTests {
 
         try await service.run(
             "wave-1",
-            overrides: RunOverrides(flow: "build", roadmapItem: "03-calibration-view.md")
+            overrides: RunOverrides(flow: "build", roadmapTask: "03-calibration-view.md")
         )
     }
 }

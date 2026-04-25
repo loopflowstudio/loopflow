@@ -29,6 +29,19 @@ loopflow.create_wave("mywave", repo=".", flow="build", direction=["clarity"], ar
 
 This creates the wave in lfd. To give it work, you write wave content on disk.
 
+For PM-backed repos, every project in the configured Asana team is a wave. A local `wave/<name>/` directory is the editing surface and mirror for that wave, not the thing that makes the wave exist.
+
+Use a repo-specific override in `~/.lf/config.yaml` when one local checkout should point at a different Asana team:
+
+```yaml
+repos:
+  /Users/jack/src/myrepo:
+    asana:
+      team: "5555555555"
+```
+
+If `asana.team` is unset and the pinned workspace is an Asana Organization, the first PM discovery finds or creates a `Loopflow` team and writes the gid back to config.
+
 ---
 
 ## The Wave Directory
@@ -44,7 +57,7 @@ wave/infra/
 └── 4-security-research.md # Low — speculative
 ```
 
-The `wave/` directory is the source of truth for what to build. `lfd` reads it; `update-wave` writes it.
+`wave/<name>/` is where you edit the wave's README, item files, and config. For PM-backed waves, create the wave in Concerto or lfd first; the local directory mirrors that Asana project's content.
 
 ### The README
 
@@ -167,9 +180,9 @@ Two paths to wave content:
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The design session can produce a `wave/infra/README.md` and bucketed items. Once these files exist in your repo, Concerto and lfq pick them up.
+The design session can produce a `wave/infra/README.md` and bucketed items. Once the wave exists, those files become its local mirror in your repo.
 
-**Write by hand.** Sometimes a text editor is faster. Create `wave/<name>/README.md`, add bucketed items, push. The structure is simple enough to write directly.
+**Write by hand.** Sometimes a text editor is faster. Create `wave/<name>/README.md`, add bucketed items, push. The structure is simple enough to write directly. For PM-backed repos, create the wave in Concerto or lfd first; the directory alone does not make it discoverable.
 
 ---
 

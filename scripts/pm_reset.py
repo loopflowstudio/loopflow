@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Full PM reset: delete loopflow-managed projects, clear IDs, re-init, push.
 
-One command to wipe PM state and rebuild it from ``wave/``. Use after a wave
-reorg, or any time PM drift has accumulated past the point of incremental
-repair.
+One command to wipe PM state and rebuild it from the configured canonical wave
+set plus local ``wave/`` mirrors. Use after a wave reorg, or any time PM drift
+has accumulated past the point of incremental repair.
 
 Usage:
     uv run python scripts/pm_reset.py --provider asana [--dry-run] [--yes]
@@ -13,7 +13,8 @@ Flow:
        ``pm.<provider>_project`` field.
     2. DELETE each project via the provider API.
     3. Clear the project ID from the YAML.
-    4. Run ``lf op pm init --all`` to bootstrap fresh projects.
+    4. Run ``lf op pm init --all`` to relink every wave in the configured
+       canonical set.
     5. Run ``lf op pm push-diff --all`` to populate items.
 
 Only Asana is implemented at the moment. Linear/Notion raise on --provider.

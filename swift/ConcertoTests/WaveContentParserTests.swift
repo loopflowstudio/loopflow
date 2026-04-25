@@ -65,14 +65,14 @@ struct WaveContentParserTests {
         #expect(content?.risks == "- Parser drift")
         #expect(content?.metrics == "- Time to first wave")
 
-        #expect(content?.roadmapItems.count == 2)
-        #expect(content?.roadmapItems[0].id == "01-design-entry")
-        #expect(content?.roadmapItems[0].title == "Design-first entry")
-        #expect(content?.roadmapItems[0].priority == .urgent)
-        #expect(content?.roadmapItems[0].isShipped == true)
-        #expect(content?.roadmapItems[1].id == "02-detail-panel")
-        #expect(content?.roadmapItems[1].priority == .high)
-        #expect(content?.roadmapItems[1].isShipped == false)
+        #expect(content?.roadmapTasks.count == 2)
+        #expect(content?.roadmapTasks[0].id == "01-design-entry")
+        #expect(content?.roadmapTasks[0].title == "Design-first entry")
+        #expect(content?.roadmapTasks[0].priority == .urgent)
+        #expect(content?.roadmapTasks[0].isShipped == true)
+        #expect(content?.roadmapTasks[1].id == "02-detail-panel")
+        #expect(content?.roadmapTasks[1].priority == .high)
+        #expect(content?.roadmapTasks[1].isShipped == false)
     }
 
     @Test("uses the first README paragraph as vision when present")
@@ -151,7 +151,7 @@ struct WaveContentParserTests {
     }
 
     @Test("parses roadmap item content for non-shipped items")
-    func parsesRoadmapItemContent() throws {
+    func parsesRoadmapTaskContent() throws {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
@@ -198,16 +198,16 @@ struct WaveContentParserTests {
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "content-wave")
 
-        #expect(content?.roadmapItems.count == 2)
+        #expect(content?.roadmapTasks.count == 2)
 
-        let first = content?.roadmapItems[0]
+        let first = content?.roadmapTasks[0]
         #expect(first?.title == "Feature Alpha")
         #expect(first?.slug == "feature-alpha")
         #expect(first?.fileName == "01-feature-alpha.md")
         #expect(first?.content?.contains("first paragraph") == true)
         #expect(first?.filePath != nil)
 
-        let second = content?.roadmapItems[1]
+        let second = content?.roadmapTasks[1]
         #expect(second?.title == "Shipped Feature")
         #expect(second?.isShipped == true)
         #expect(second?.content == nil)
@@ -288,7 +288,7 @@ struct WaveContentParserTests {
     }
 
     @Test("parses bucketed roadmap filenames and sorts by priority")
-    func parsesBucketedRoadmapItems() throws {
+    func parsesBucketedRoadmapTasks() throws {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
@@ -320,7 +320,7 @@ struct WaveContentParserTests {
         )
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "bucket-wave")
-        let items = try #require(content?.roadmapItems)
+        let items = try #require(content?.roadmapTasks)
 
         #expect(items.map(\.fileName) == ["1-urgent.md", "3-medium.md", "02-legacy.md"])
         #expect(items[0].priority == .urgent)
@@ -356,7 +356,7 @@ struct WaveContentParserTests {
         )
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "mixed-wave")
-        let items = try #require(content?.roadmapItems)
+        let items = try #require(content?.roadmapTasks)
 
         #expect(items.map(\.fileName) == ["2-canonical.md", "02-legacy.md"])
         #expect(items.map(\.priority) == [.high, .high])
@@ -395,7 +395,7 @@ struct WaveContentParserTests {
         )
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "prefix-wave")
-        let items = try #require(content?.roadmapItems)
+        let items = try #require(content?.roadmapTasks)
 
         #expect(items[0].title == "CLI Contract")
         #expect(items[1].title == "Wave Modes")

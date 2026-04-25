@@ -160,6 +160,7 @@ impl Scheduler {
                 event_hub.clone(),
                 cancel.clone(),
             ),
+            triggers::spawn_roadmap_poller(store.clone(), event_hub.clone(), cancel.clone()),
             triggers::spawn_token_refresh(store, event_hub, cancel),
         ]
     }

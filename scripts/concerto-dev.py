@@ -50,12 +50,46 @@ from typing import TextIO
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
+
+
+def _resolve_main_repo(start: Path) -> Path:
+    """Resolve `start` to the main repo when it's a git worktree.
+
+    Worktrees share the main repo's `.git` via `.git/worktrees/<name>/`.
+    `git rev-parse --git-common-dir` points at the shared `.git`, whose
+    parent is the canonical main repo path. Falls back to `start` if not
+    inside a git checkout or any error occurs — the launcher should not
+    refuse to run for diagnostics reasons.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=start,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return start
+        common_dir = Path(result.stdout.strip())
+        if not common_dir.is_absolute():
+            common_dir = (start / common_dir).resolve()
+        return common_dir.parent
+    except Exception:
+        return start
+
+
+# Concerto and lfd should operate on the main repo even when this script
+# lives in a sibling worktree (e.g. ~/src/loopflow.roadmap pointing at
+# ~/src/loopflow). Worktrees are checkouts of the same repo, not the
+# unit of management.
+MAIN_REPO = _resolve_main_repo(REPO_ROOT)
 DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
 R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
-LFD_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.lfd.log"
-CONCERTO_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.concerto-run-debug.log"
+LFD_STREAM_LOG = DEV_LOG_DIR / f"{MAIN_REPO.name}.lfd.log"
+CONCERTO_STREAM_LOG = DEV_LOG_DIR / f"{MAIN_REPO.name}.concerto-run-debug.log"
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -110,29 +144,36 @@ def stream_with_log(
 
 
 def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | None = None) -> int:
-    """Launch app bundle through LaunchServices and stream redirected stdout/stderr."""
+    """Launch the app binary directly so it inherits the parent env.
+
+    `open -n` runs the app through LaunchServices, which strips the
+    calling shell's environment. That matters in dev because secrets
+    loaded via `doppler run --` (ASANA_CLIENT_ID, etc.) never reach the
+    bundled lfd, and features that need them fail at runtime. Launching
+    the Mach-O binary directly preserves the env.
+    """
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    open_cmd = [
-        "open",
-        "-n",
-        "-W",
-        "--stdout",
-        str(log_path),
-        "--stderr",
-        str(log_path),
-        str(app_path),
-    ]
+    binary = app_path / "Contents" / "MacOS" / "Concerto"
+    cmd = [str(binary)]
     if args:
-        open_cmd.extend(["--args", *args])
+        cmd.extend(args)
+
     with log_path.open("a", encoding="utf-8") as log_file:
         log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-        log_file.write(f"$ {' '.join(open_cmd)}\n\n")
+        log_file.write(f"$ {' '.join(cmd)}\n\n")
         log_file.flush()
 
     tail_process = subprocess.Popen(["tail", "-n", "0", "-F", str(log_path)])
     try:
-        return run(open_cmd, check=False).returncode
+        with log_path.open("a", encoding="utf-8") as log_file:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=os.environ.copy(),
+            )
+        return process.wait()
     except KeyboardInterrupt:
         print("\nStopping app...")
         _stop_concerto_app(app_path)
@@ -224,7 +265,7 @@ def _remove_sqlite_database(db_path: Path) -> None:
 def _reset_run_debug_databases(with_lfd: bool) -> None:
     _remove_sqlite_database(_bundled_lfd_sqlite_path())
     if with_lfd:
-        db_path = os.environ.get("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+        db_path = os.environ.get("LFD_DB_PATH", f"lfd-{MAIN_REPO.name}.db")
         _remove_sqlite_database(_resolve_lfd_sqlite_path(db_path))
 
 
@@ -235,7 +276,7 @@ def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], 
     env = os.environ.copy()
     env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     env["GRPC_VERBOSITY"] = "ERROR"
-    env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+    env.setdefault("LFD_DB_PATH", f"lfd-{MAIN_REPO.name}.db")
     env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
     env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
@@ -478,7 +519,7 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
     app_exit = run_app_bundle_with_log(
         DEV_APP,
         CONCERTO_STREAM_LOG,
-        args=["--repo", str(REPO_ROOT)],
+        args=["--repo", str(MAIN_REPO)],
     )
 
     if lfd_process is not None:
@@ -789,7 +830,7 @@ def _lfd_native() -> int:
     env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     env["GRPC_VERBOSITY"] = "ERROR"
     # Isolate sqlite state per repo to avoid schema drift across sibling repos.
-    env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+    env.setdefault("LFD_DB_PATH", f"lfd-{MAIN_REPO.name}.db")
     env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
 
     print("Building lfd...")

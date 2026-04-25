@@ -387,13 +387,15 @@ private struct RoadmapPaneView: View {
     @State private var actionErrors: [String: String] = [:]
     @State private var ingestingItemIds: Set<String> = []
     @State private var reprioritizingItemIds: Set<String> = []
+    @State private var deletingItemIds: Set<String> = []
+    @State private var pendingDeletion: RoadmapTask?
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
     }
 
-    private var roadmapItems: [RoadmapItem] {
-        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    private var roadmapTasks: [RoadmapTask] {
+        sortedRoadmapTasks(wave?.content?.roadmapTasks ?? [])
     }
 
     private var selectedItemId: String? {
@@ -407,18 +409,40 @@ private struct RoadmapPaneView: View {
 
     @ViewBuilder
     var body: some View {
-        if wave?.content == nil {
-            ProgressView("Loading roadmap…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if roadmapItems.isEmpty {
-            paneUnavailable(
-                title: "No roadmap items",
-                systemImage: "list.bullet.rectangle",
-                description: "Add numbered roadmap docs under wave/ to surface them here."
-            )
-        } else {
-            roadmapList
+        Group {
+            if wave?.content == nil {
+                ProgressView("Loading roadmap…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if roadmapTasks.isEmpty {
+                paneUnavailable(
+                    title: "No roadmap items",
+                    systemImage: "list.bullet.rectangle",
+                    description: "Add numbered roadmap docs under wave/ to surface them here."
+                )
+            } else {
+                roadmapList
+            }
         }
+        .confirmationDialog(
+            deletionConfirmationTitle,
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { item in
+            Button("Delete", role: .destructive) {
+                deleteItem(item)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Removes this item from Asana and deletes the local file.")
+        }
+    }
+
+    private var deletionConfirmationTitle: String {
+        guard let pendingDeletion else { return "Delete item?" }
+        return "Delete \u{201C}\(pendingDeletion.title)\u{201D}?"
     }
 
     private var roadmapList: some View {
@@ -428,11 +452,11 @@ private struct RoadmapPaneView: View {
     }
 
     private func roadmapScrollView(proxy: ScrollViewProxy) -> some View {
-        let itemIds = roadmapItems.map(\.id)
+        let itemIds = roadmapTasks.map(\.id)
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                ForEach(roadmapItems) { item in
+                ForEach(roadmapTasks) { item in
                     roadmapRow(item)
                         .id(item.id)
                 }
@@ -478,16 +502,18 @@ private struct RoadmapPaneView: View {
         }
     }
 
-    private func roadmapRow(_ item: RoadmapItem) -> some View {
+    private func roadmapRow(_ item: RoadmapTask) -> some View {
         RoadmapRowView(
             item: item,
             isSelected: selectedItemId == item.id,
             isHovered: hoveredItemId == item.id,
             waveIsRunning: waveIsRunning,
             isIngesting: ingestingItemIds.contains(item.id),
+            isDeleting: deletingItemIds.contains(item.id),
             errorMessage: actionErrors[item.id],
             onSelect: { select(item.id) },
             onPlay: { ingestAndBuild(item) },
+            onRequestDelete: { pendingDeletion = item },
             onHoverChanged: { isHovering in
                 hoveredItemId = isHovering ? item.id : (hoveredItemId == item.id ? nil : hoveredItemId)
             }
@@ -496,7 +522,24 @@ private struct RoadmapPaneView: View {
         }
     }
 
-    private func priorityMenu(for item: RoadmapItem, isLoading: Bool) -> some View {
+    private func deleteItem(_ item: RoadmapTask) {
+        guard let wave else { return }
+        actionErrors[item.id] = nil
+        deletingItemIds.insert(item.id)
+        Task { @MainActor in
+            defer { deletingItemIds.remove(item.id) }
+            do {
+                try await repoState.deleteWaveItem(wave, filename: item.fileName)
+                if roadmapSelection.selectedItemId == item.id {
+                    roadmapSelection.select(itemId: nil)
+                }
+            } catch {
+                actionErrors[item.id] = error.localizedDescription
+            }
+        }
+    }
+
+    private func priorityMenu(for item: RoadmapTask, isLoading: Bool) -> some View {
         Menu {
             ForEach(RoadmapPriority.allCases, id: \.self) { priority in
                 Button {
@@ -527,15 +570,15 @@ private struct RoadmapPaneView: View {
     }
 
     private func syncSelection() {
-        guard !roadmapItems.isEmpty else {
+        guard !roadmapTasks.isEmpty else {
             roadmapSelection.select(itemId: nil)
             return
         }
 
-        let selectionStillValid = roadmapItems.contains(where: { $0.id == roadmapSelection.selectedItemId })
+        let selectionStillValid = roadmapTasks.contains(where: { $0.id == roadmapSelection.selectedItemId })
 
         guard !selectionStillValid else { return }
-        roadmapSelection.select(itemId: roadmapItems[0].id)
+        roadmapSelection.select(itemId: roadmapTasks[0].id)
     }
 
     private func select(_ itemId: String) {
@@ -552,19 +595,19 @@ private struct RoadmapPaneView: View {
     }
 
     private func moveSelection(delta: Int) {
-        guard !roadmapItems.isEmpty else { return }
+        guard !roadmapTasks.isEmpty else { return }
 
-        let currentIndex = roadmapItems.firstIndex { $0.id == selectedItemId } ?? 0
-        let nextIndex = (currentIndex + delta + roadmapItems.count) % roadmapItems.count
-        select(roadmapItems[nextIndex].id)
+        let currentIndex = roadmapTasks.firstIndex { $0.id == selectedItemId } ?? 0
+        let nextIndex = (currentIndex + delta + roadmapTasks.count) % roadmapTasks.count
+        select(roadmapTasks[nextIndex].id)
     }
 
     private func ingestSelected() {
-        guard let selectedItem = roadmapItems.first(where: { $0.id == selectedItemId }) else { return }
+        guard let selectedItem = roadmapTasks.first(where: { $0.id == selectedItemId }) else { return }
         ingestAndBuild(selectedItem)
     }
 
-    private func ingestAndBuild(_ item: RoadmapItem) {
+    private func ingestAndBuild(_ item: RoadmapTask) {
         guard let wave else { return }
         actionErrors[item.id] = nil
         ingestingItemIds.insert(item.id)
@@ -578,7 +621,7 @@ private struct RoadmapPaneView: View {
         }
     }
 
-    private func updatePriority(_ priority: RoadmapPriority, for item: RoadmapItem) {
+    private func updatePriority(_ priority: RoadmapPriority, for item: RoadmapTask) {
         guard let wave else { return }
         actionErrors[item.id] = nil
         reprioritizingItemIds.insert(item.id)
@@ -594,14 +637,16 @@ private struct RoadmapPaneView: View {
 }
 
 private struct RoadmapRowView<PriorityControl: View>: View {
-    let item: RoadmapItem
+    let item: RoadmapTask
     let isSelected: Bool
     let isHovered: Bool
     let waveIsRunning: Bool
     let isIngesting: Bool
+    let isDeleting: Bool
     let errorMessage: String?
     let onSelect: () -> Void
     let onPlay: () -> Void
+    let onRequestDelete: () -> Void
     let onHoverChanged: (Bool) -> Void
     @ViewBuilder let priorityControl: () -> PriorityControl
 
@@ -637,6 +682,26 @@ private struct RoadmapRowView<PriorityControl: View>: View {
                     .accessibilityLabel("Ingest \(item.title) and run the wave")
                 }
 
+                if isHovered {
+                    Button(action: onRequestDelete) {
+                        Group {
+                            if isDeleting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                        }
+                        .frame(width: HitTarget.minimum, height: HitTarget.minimum)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textSecondary)
+                    .disabled(isDeleting)
+                    .help("Delete — not worth doing")
+                    .accessibilityLabel("Delete \(item.title)")
+                }
+
                 priorityControl()
             }
             .padding(.horizontal, Spacing.md)
@@ -650,6 +715,13 @@ private struct RoadmapRowView<PriorityControl: View>: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: CornerRadius.md))
             .onTapGesture(perform: onSelect)
+            .opacity(isDeleting ? 0.5 : 1)
+            .contextMenu {
+                Button(role: .destructive, action: onRequestDelete) {
+                    Label("Delete — not worth doing", systemImage: "trash")
+                }
+                .disabled(isDeleting)
+            }
 
             if let errorMessage, !errorMessage.isEmpty {
                 Text(errorMessage)
@@ -686,13 +758,13 @@ private struct RoadmapDetailPaneView: View {
         repoState.waveStore.wave(for: waveId)
     }
 
-    private var roadmapItems: [RoadmapItem] {
-        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    private var roadmapTasks: [RoadmapTask] {
+        sortedRoadmapTasks(wave?.content?.roadmapTasks ?? [])
     }
 
-    private var selectedItem: RoadmapItem? {
+    private var selectedItem: RoadmapTask? {
         guard let selectedItemId = roadmapSelection.selectedItemId else { return nil }
-        return roadmapItems.first(where: { $0.id == selectedItemId })
+        return roadmapTasks.first(where: { $0.id == selectedItemId })
     }
 
     private var waveIsRunning: Bool {
@@ -797,7 +869,7 @@ private struct RoadmapDetailPaneView: View {
         }
     }
 
-    private func roadmapMarkdown(for item: RoadmapItem) -> String? {
+    private func roadmapMarkdown(for item: RoadmapTask) -> String? {
         if let filePath = item.filePath,
            let text = try? String(contentsOfFile: filePath, encoding: .utf8),
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -811,7 +883,7 @@ private struct RoadmapDetailPaneView: View {
         return nil
     }
 
-    private func ingestAndBuild(_ item: RoadmapItem) {
+    private func ingestAndBuild(_ item: RoadmapTask) {
         guard let wave else { return }
         actionError = nil
         isIngesting = true
@@ -825,7 +897,7 @@ private struct RoadmapDetailPaneView: View {
         }
     }
 
-    private func playButtonBackground(for item: RoadmapItem) -> Color {
+    private func playButtonBackground(for item: RoadmapTask) -> Color {
         if item.isShipped || waveIsRunning {
             return Color.statusNeutral
         }
@@ -1276,7 +1348,7 @@ extension PaneType {
     }
 }
 
-func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
+func sortedRoadmapTasks(_ items: [RoadmapTask]) -> [RoadmapTask] {
     items.filter { !$0.isShipped } + items.filter(\.isShipped)
 }
 

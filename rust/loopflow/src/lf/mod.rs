@@ -393,6 +393,33 @@ pub enum PmCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
+    /// List every project in the PM team; annotates orphans.
+    List,
+    /// Delete a PM project. Pass a wave name to delete the project it's
+    /// linked to (and clear the link from the wave yaml), or `--id` to
+    /// delete a specific project by provider gid — useful for orphans
+    /// that aren't linked to any wave.
+    #[command(name = "delete-project")]
+    DeleteProject {
+        /// Wave name (auto-detected if omitted and --id not set)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "id"])]
+        wave_flag: Option<String>,
+        /// Delete this specific project id (orphan cleanup path)
+        #[arg(long = "id", conflicts_with_all = ["wave", "wave_flag"])]
+        id: Option<String>,
+    },
+    /// Delete a roadmap task from the PM provider and remove the local
+    /// wave file that tracks it. Identified by its filename inside
+    /// `wave/<wave>/`.
+    #[command(name = "delete-task")]
+    DeleteTask {
+        /// Wave name
+        wave: String,
+        /// Filename within `wave/<wave>/` (e.g. "4-async-auth.md")
+        filename: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

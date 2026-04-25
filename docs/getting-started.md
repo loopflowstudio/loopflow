@@ -187,7 +187,15 @@ lfq stop shipper     # stop a wave
 
 `lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/steps/*.md` overrides in the repo.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, Concerto and lfq pick them up and run them.
+You can draft wave content with `lf design` locally, or write it by hand.
+
+Local-only repos discover waves from `wave/`.
+
+PM-backed repos discover waves from the configured Asana team, then use `wave/<name>/` as the local mirror and editing surface.
+
+```bash
+lf op pm list    # list every wave from the configured Asana team
+```
 
 [Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
 
@@ -211,13 +219,11 @@ Auth connects your providers:
 
 ```bash
 lf op auth asana    # connect Asana for local `lf` commands like `lf op export`
-lf op auth linear   # connect Linear for local `lf` PM commands
 lf op auth status   # check local lf credentials
 
 lfq auth github      # connect GitHub
 lfq auth claude      # connect Claude
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # connect Linear with OAuth
 lfq auth status      # check connections
 ```
 

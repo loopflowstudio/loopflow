@@ -104,11 +104,24 @@ public final class RepoState {
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
     private var autoPresentTerminalWaveIds: Set<String> = []
-    private var roadmapBootstrapRepos: Set<String> = []
-    private var bootstrappingRoadmapRepoPath: String?
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
+
+    /// Discovered waves for the current repo: every project in the
+    /// configured Asana team, including ones loopflow isn't actively
+    /// managing yet.
+    public var discoveredWaves: [DiscoveredWaveSummary] = []
+    /// Discovered waves whose `managedWaveId` doesn't appear in the
+    /// current `waves` list — i.e. Asana-backed waves loopflow isn't
+    /// running anything for yet.
+    public var unmanagedDiscoveredWaves: [DiscoveredWaveSummary] {
+        let managedIds = Set(waves.map(\.id))
+        return discoveredWaves.filter { discovered in
+            guard let id = discovered.managedWaveId else { return true }
+            return !managedIds.contains(id)
+        }
+    }
 
     // Selection — ID-based, derived from store
     public var selectedWaveId: String? {
@@ -224,7 +237,7 @@ public final class RepoState {
 
     // Loading
     public var isLoading: Bool = false
-    public var isBootstrappingRoadmapWaves: Bool = false
+    public var isRefreshingDiscoveredWaves: Bool = false
     public var errorMessage: String?
 
     // Connection
@@ -534,6 +547,8 @@ public final class RepoState {
                             self.authProviderStore.handleEvent(authEvent)
                         case .terminalSession(let terminalEvent):
                             await self.handleTerminalSessionEvent(terminalEvent)
+                        case .roadmapUpdated(let roadmapEvent):
+                            await self.handleRoadmapUpdated(roadmapEvent)
                         case .agentStarted, .agentEnded, .worktree, .secrets:
                             break
                         }
@@ -550,11 +565,6 @@ public final class RepoState {
     }
 
     private func handleWaveEvent(_ event: WaveEvent) async {
-        if let bootstrappingRoadmapRepoPath,
-           currentRepo?.path == bootstrappingRoadmapRepoPath {
-            return
-        }
-
         let currentRepoPath = repoTarget?.path.normalizedFilePath
 
         if let currentRepoPath,
@@ -723,18 +733,12 @@ public final class RepoState {
         }
         LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
         do {
-            var newWaves = try await waveService.listWaves(repo: repo)
+            let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            let bootstrapped = await bootstrapRoadmapWavesIfNeeded(repo: repo, existingWaves: newWaves)
-            if bootstrapped {
-                newWaves = try await waveService.listWaves(repo: repo)
-                LoggingService.model("refreshWaves: after bootstrap got \(newWaves.count) waves")
-                await refreshWorktrees()
-                await refreshFlowsAsync()
-            }
             waveStore.setAll(newWaves.map(makeWaveViewModel))
             preloadWaveContent(for: waves)
             await refreshAttention()
+            await refreshDiscoveredWaves()
             if let selectedWaveId {
                 loadWaveContent(for: selectedWaveId)
             }
@@ -745,81 +749,25 @@ public final class RepoState {
         }
     }
 
-    private func bootstrapRoadmapWavesIfNeeded(
-        repo: RepoTarget,
-        existingWaves: [Wave]
-    ) async -> Bool {
-        guard case .local(let repoURL) = repo else { return false }
-
-        let repoPath = repoURL.path
-        let roadmapWaves = roadmapWaveNames(in: repoURL)
-        guard !roadmapWaves.isEmpty else { return false }
-
-        let existingNames = Set(existingWaves.map(\.name))
-        let missingWaves = roadmapWaves.filter { !existingNames.contains($0) }
-        guard !missingWaves.isEmpty else {
-            roadmapBootstrapRepos.insert(repoPath)
-            return false
+    /// Refresh the list of all PM-configured waves for the active repo
+    /// (managed or not). For Asana-backed repos this comes from the
+    /// configured team's project list. Discovered-but-not-managed entries
+    /// get a "Start working" affordance in the sidebar.
+    public func refreshDiscoveredWaves() async {
+        isRefreshingDiscoveredWaves = true
+        defer { isRefreshingDiscoveredWaves = false }
+        do {
+            let all = try await waveService.listDiscoveredWaves()
+            // Scope to the active repo so a repo switch doesn't bleed
+            // discovered entries from other repos into this view.
+            let activePath = currentRepo?.path()
+            let scoped = all.filter { $0.repoPath == activePath }
+            discoveredWaves = scoped
+        } catch {
+            LoggingService.model(
+                "refreshDiscoveredWaves: error=\(error.localizedDescription)"
+            )
         }
-
-        if roadmapBootstrapRepos.contains(repoPath) {
-            return false
-        }
-
-        LoggingService.model(
-            "bootstrapRoadmapWaves: repo=\(repoPath) creating \(missingWaves.count) waves"
-        )
-
-        bootstrappingRoadmapRepoPath = repoPath
-        isBootstrappingRoadmapWaves = true
-        defer {
-            bootstrappingRoadmapRepoPath = nil
-            isBootstrappingRoadmapWaves = false
-        }
-
-        var created = 0
-        for waveName in missingWaves {
-            do {
-                _ = try await waveService.createWave(
-                    name: waveName,
-                    repo: repo,
-                    flow: "ship-roadmap",
-                    run: false,
-                    status: .paused
-                )
-                created += 1
-            } catch {
-                LoggingService.model(
-                    "bootstrapRoadmapWaves: wave=\(waveName) error=\(error.localizedDescription)"
-                )
-            }
-        }
-
-        if created == missingWaves.count {
-            roadmapBootstrapRepos.insert(repoPath)
-        }
-        return created > 0
-    }
-
-    private func roadmapWaveNames(in repoURL: URL) -> [String] {
-        let waveRoot = repoURL.appendingPathComponent("wave", isDirectory: true)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: waveRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return entries.compactMap { entry in
-            guard let values = try? entry.resourceValues(forKeys: [.isDirectoryKey]),
-                  values.isDirectory == true
-            else {
-                return nil
-            }
-            return entry.lastPathComponent
-        }
-        .sorted()
     }
 
     public func refreshAttention() async {
@@ -1046,10 +994,10 @@ public final class RepoState {
         }
     }
 
-    public func ingestAndBuild(wave: WaveViewModel, item: RoadmapItem) async throws {
+    public func ingestAndBuild(wave: WaveViewModel, item: RoadmapTask) async throws {
         try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
             let flow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
-            let overrides = RunOverrides(flow: flow, roadmapItem: item.fileName)
+            let overrides = RunOverrides(flow: flow, roadmapTask: item.fileName)
             try await self.waveService.run(wave.id, overrides: overrides)
         }
         loadWaveContent(for: wave.id)
@@ -1057,7 +1005,7 @@ public final class RepoState {
 
     public func updateRoadmapPriority(
         wave: WaveViewModel,
-        item: RoadmapItem,
+        item: RoadmapTask,
         priority: RoadmapPriority
     ) throws {
         guard repoTarget?.isRemote != true else {
@@ -1149,6 +1097,17 @@ public final class RepoState {
             waveStore.rollback(wave)
             throw error
         }
+    }
+
+    /// Delete a roadmap item from a wave ("not worth doing"). Destructive in
+    /// the PM provider and removes the local wave file. Refreshes the wave's
+    /// roadmap content so the UI reflects the change.
+    public func deleteWaveItem(_ wave: WaveViewModel, filename: String) async throws {
+        try await waveService.deleteWaveItem(waveId: wave.id, filename: filename)
+        if let refreshed = try? await waveService.getWave(wave.id) {
+            waveStore.set(makeWaveViewModel(api: refreshed))
+        }
+        loadWaveContent(for: wave.id)
     }
 
     public func updateWave(
@@ -1547,15 +1506,69 @@ public final class RepoState {
     }
 
     public func loadWaveContent(for waveId: String) {
-        guard let repoRoot = currentRepo,
-              let wave = waveStore.wave(for: waveId),
-              repoTarget?.isRemote != true else {
-            return
+        if let repoRoot = currentRepo,
+           let wave = waveStore.wave(for: waveId),
+           repoTarget?.isRemote != true {
+            let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
+            _ = waveStore.applyOptimistic(waveId) { $0.content = content }
+            waveStore.commitMutation(waveId)
         }
 
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
-        _ = waveStore.applyOptimistic(waveId) { $0.content = content }
-        waveStore.commitMutation(waveId)
+        // Under PM-as-truth, the roadmap list is fetched live from the PM
+        // provider (Asana) when the wave is PM-backed. File-parsed tasks are
+        // drafts; landed tasks live in Asana. For non-PM waves the fetch
+        // returns nil and the file-parsed roadmap (above) stays in place.
+        Task { @MainActor in
+            await refreshRoadmapFromPM(for: waveId)
+        }
+    }
+
+    private func refreshRoadmapFromPM(for waveId: String) async {
+        guard let wave = waveStore.wave(for: waveId) else { return }
+        await refreshRoadmapFromPM(repo: wave.repo, waveName: wave.name, attachToWaveId: waveId)
+    }
+
+    /// Handle a push notification that a wave's Asana roadmap changed.
+    /// Refresh the local view if we know about this wave.
+    private func handleRoadmapUpdated(_ event: RoadmapUpdatedEvent) async {
+        let waveId = event.waveId
+            ?? waves
+                .first(where: { $0.repo == event.repoPath && $0.name == event.waveName })?
+                .id
+        await refreshRoadmapFromPM(
+            repo: event.repoPath,
+            waveName: event.waveName,
+            attachToWaveId: waveId
+        )
+    }
+
+    /// Fetch a roadmap by (repo, wave_name) and optionally attach it to a
+    /// managed WaveViewModel in the store. The path-based fetch lets
+    /// discovered-but-not-managed waves load roadmaps too.
+    func refreshRoadmapFromPM(repo: String, waveName: String, attachToWaveId waveId: String?) async {
+        do {
+            guard let roadmap = try await waveService.fetchRoadmap(repo: repo, wave: waveName) else {
+                return
+            }
+            if let waveId {
+                _ = waveStore.applyOptimistic(waveId) { wave in
+                    var content = wave.content ?? WaveContent()
+                    content.roadmapTasks = roadmap.tasks
+                    wave.content = content
+                }
+                waveStore.commitMutation(waveId)
+            }
+            if roadmap.stale {
+                let reason = roadmap.staleReason ?? "unknown"
+                LoggingService.model(
+                    "roadmap for \(waveName) served from cache: \(reason)"
+                )
+            }
+        } catch {
+            LoggingService.model(
+                "refreshRoadmapFromPM failed: wave=\(waveName) error=\(error.localizedDescription)"
+            )
+        }
     }
 
     private func preloadWaveContent(for waves: [WaveViewModel]) {

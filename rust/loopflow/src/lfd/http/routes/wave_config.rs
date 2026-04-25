@@ -26,18 +26,12 @@ pub(crate) struct WavePmConfig {
     pub provider: Option<PmProviderKind>,
     #[serde(default)]
     pub asana_project: Option<String>,
-    #[serde(default)]
-    pub linear_project: Option<String>,
-    #[serde(default)]
-    pub notion_project: Option<String>,
 }
 
 impl WavePmConfig {
     pub fn project_for(&self, provider: PmProviderKind) -> Option<&str> {
         match provider {
             PmProviderKind::Asana => self.asana_project.as_deref(),
-            PmProviderKind::Linear => self.linear_project.as_deref(),
-            PmProviderKind::Notion => self.notion_project.as_deref(),
         }
     }
 }
@@ -160,34 +154,14 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\npm:\n  provider: linear\n  asana_project: \"1234567890\"\n  notion_project: \"notion-db\"\n",
+            "flow: build\npm:\n  provider: asana\n  asana_project: \"1234567890\"\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
-        assert_eq!(pm.provider, Some(PmProviderKind::Linear));
+        assert_eq!(pm.provider, Some(PmProviderKind::Asana));
         assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
-        assert_eq!(pm.linear_project, None);
-        assert_eq!(pm.notion_project.as_deref(), Some("notion-db"));
-    }
-
-    #[test]
-    fn read_wave_config_parses_multiple_provider_projects() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\npm:\n  asana_project: \"1234567890\"\n  linear_project: \"uuid-here\"\n  notion_project: \"notion-here\"\n",
-        )
-        .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let pm = config.pm.expect("pm config should exist");
-        assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
-        assert_eq!(pm.linear_project.as_deref(), Some("uuid-here"));
-        assert_eq!(pm.notion_project.as_deref(), Some("notion-here"));
     }
 
     #[test]

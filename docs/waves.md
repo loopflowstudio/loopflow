@@ -20,6 +20,8 @@ This creates a wave with the `build` flow on `src/api/` and the `clarity` direct
 
 Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
+For PM-backed repos, every project in the configured Asana team is a wave. `wave/<name>/` is the local mirror and editing surface for a discovered wave, not the thing that makes the wave exist.
+
 ## Modes
 
 The wave's `mode` controls its primary execution pattern.

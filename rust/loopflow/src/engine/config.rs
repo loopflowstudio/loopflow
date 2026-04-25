@@ -174,29 +174,9 @@ pub struct ReleaseTargetConfig {
 pub struct AsanaConfig {
     #[serde(default)]
     pub workspace: Option<String>,
-    #[serde(default)]
-    pub default_team: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct LinearConfig {
-    #[serde(default)]
+    #[serde(default, alias = "default_team")]
+    // Back-compat for existing configs; remove in a future cleanup.
     pub team: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct NotionConfig {
-    /// Parent page or teamspace ID under which databases are created.
-    #[serde(default)]
-    pub parent_page: Option<String>,
-    #[serde(default)]
-    pub title_property: Option<String>,
-    #[serde(default)]
-    pub status_property: Option<String>,
-    #[serde(default)]
-    pub done_value: Option<String>,
-    #[serde(default)]
-    pub priority_property: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -303,14 +283,6 @@ pub struct Config {
     #[serde(default)]
     pub asana: AsanaConfig,
 
-    /// Linear configuration for PM integration.
-    #[serde(default)]
-    pub linear: LinearConfig,
-
-    /// Notion configuration for PM integration.
-    #[serde(default)]
-    pub notion: NotionConfig,
-
     /// Default PM provider roles for PM-enabled waves.
     #[serde(default)]
     pub pm: Option<PmRolesConfig>,
@@ -322,6 +294,22 @@ pub struct Config {
     /// Max RLM recursion depth
     #[serde(default = "default_rlm_max_depth")]
     pub rlm_max_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSource {
+    Global,
+    Repo,
+    RepoOverride,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigResolution {
+    pub config: Config,
+    global_path: PathBuf,
+    repo_path: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
+    team_write_target: ConfigSource,
 }
 
 fn default_land() -> String {
@@ -367,11 +355,38 @@ impl Default for Config {
             rlm_agent: None,
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
-            linear: LinearConfig::default(),
-            notion: NotionConfig::default(),
             pm: None,
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
+        }
+    }
+}
+
+impl ConfigResolution {
+    pub fn persist_asana_team(&self, team_id: &str) -> Result<(), LoadError> {
+        match self.team_write_target {
+            ConfigSource::Global => {
+                write_yaml_config(&self.global_path, |root| set_asana_team(root, team_id))
+            }
+            ConfigSource::Repo => {
+                let repo_path = self.repo_path.as_ref().ok_or_else(|| {
+                    LoadError::InvalidFlow(
+                        "cannot persist repo config without a resolved repo path".to_string(),
+                    )
+                })?;
+                write_yaml_config(repo_path, |root| set_asana_team(root, team_id))
+            }
+            ConfigSource::RepoOverride => {
+                let repo_root = self.repo_root.as_ref().ok_or_else(|| {
+                    LoadError::InvalidFlow(
+                        "cannot persist repo override without a resolved repo root".to_string(),
+                    )
+                })?;
+                write_yaml_config(&self.global_path, |root| {
+                    let repo_key = repo_root.to_string_lossy().to_string();
+                    set_repo_override_asana_team(root, &repo_key, team_id);
+                })
+            }
         }
     }
 }
@@ -410,6 +425,136 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
         LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
     Ok(Some(value))
+}
+
+fn global_config_path() -> PathBuf {
+    if let Ok(home) = std::env::var("LF_HOME") {
+        PathBuf::from(home).join("config.yaml")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join(".lf").join("config.yaml"))
+            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
+    }
+}
+
+fn resolved_repo_root(repo_root: &Path) -> PathBuf {
+    std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf())
+}
+
+fn as_mapping_mut(value: &mut serde_yaml_ng::Value) -> Option<&mut serde_yaml_ng::Mapping> {
+    if !matches!(value, serde_yaml_ng::Value::Mapping(_)) {
+        *value = serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new());
+    }
+    match value {
+        serde_yaml_ng::Value::Mapping(mapping) => Some(mapping),
+        _ => None,
+    }
+}
+
+fn get_or_insert_mapping<'a>(
+    parent: &'a mut serde_yaml_ng::Mapping,
+    key: &str,
+) -> &'a mut serde_yaml_ng::Mapping {
+    let key = serde_yaml_ng::Value::String(key.to_string());
+    let value = parent
+        .entry(key)
+        .or_insert_with(|| serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()));
+    if !matches!(value, serde_yaml_ng::Value::Mapping(_)) {
+        *value = serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new());
+    }
+    match value {
+        serde_yaml_ng::Value::Mapping(mapping) => mapping,
+        _ => unreachable!("value was normalized to a mapping"),
+    }
+}
+
+fn set_asana_team(root: &mut serde_yaml_ng::Value, team_id: &str) {
+    let Some(root_map) = as_mapping_mut(root) else {
+        return;
+    };
+    let asana = get_or_insert_mapping(root_map, "asana");
+    asana.insert(
+        serde_yaml_ng::Value::String("team".to_string()),
+        serde_yaml_ng::Value::String(team_id.to_string()),
+    );
+}
+
+fn set_repo_override_asana_team(root: &mut serde_yaml_ng::Value, repo_key: &str, team_id: &str) {
+    let Some(root_map) = as_mapping_mut(root) else {
+        return;
+    };
+    let repos = get_or_insert_mapping(root_map, "repos");
+    let repo_override = get_or_insert_mapping(repos, repo_key);
+    let asana = get_or_insert_mapping(repo_override, "asana");
+    asana.insert(
+        serde_yaml_ng::Value::String("team".to_string()),
+        serde_yaml_ng::Value::String(team_id.to_string()),
+    );
+}
+
+fn write_yaml_config(
+    path: &Path,
+    update: impl FnOnce(&mut serde_yaml_ng::Value),
+) -> Result<(), LoadError> {
+    let mut root = load_yaml_file(path)?
+        .unwrap_or_else(|| serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()));
+    update(&mut root);
+
+    let content = serde_yaml_ng::to_string(&root)
+        .map_err(|err| LoadError::InvalidFlow(format!("failed to serialize config: {err}")))?;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp =
+        tempfile::NamedTempFile::new_in(parent).map_err(|err| LoadError::Io(err.to_string()))?;
+    use std::io::Write as _;
+    temp.write_all(content.as_bytes())
+        .map_err(|err| LoadError::Io(err.to_string()))?;
+    temp.persist(path)
+        .map_err(|err| LoadError::Io(err.error.to_string()))?;
+    Ok(())
+}
+
+fn select_repo_override(
+    global: &mut serde_yaml_ng::Value,
+    repo_root: Option<&Path>,
+) -> Option<serde_yaml_ng::Value> {
+    let serde_yaml_ng::Value::Mapping(global_map) = global else {
+        return None;
+    };
+    let repos_key = serde_yaml_ng::Value::String("repos".to_string());
+    let Some(serde_yaml_ng::Value::Mapping(repos)) = global_map.remove(&repos_key) else {
+        return None;
+    };
+    let repo_key = repo_root.map(|path| path.to_string_lossy().to_string())?;
+    repos.get(serde_yaml_ng::Value::String(repo_key)).cloned()
+}
+
+fn merge_config_values_for_repo(
+    global: Option<serde_yaml_ng::Value>,
+    repo: Option<serde_yaml_ng::Value>,
+    repo_root: Option<&Path>,
+) -> (serde_yaml_ng::Value, bool) {
+    let (global_base, repo_override, override_active) = match global {
+        Some(mut global_value) => {
+            let override_value = select_repo_override(&mut global_value, repo_root);
+            (
+                Some(global_value),
+                override_value.clone(),
+                override_value.is_some(),
+            )
+        }
+        None => (None, None, false),
+    };
+
+    let merged = merge_config_values(global_base, repo);
+    let merged = match repo_override {
+        Some(override_value) => merge_config_values(Some(merged), Some(override_value)),
+        None => merged,
+    };
+    (merged, override_active)
 }
 
 /// Merge global and repo config. Repo wins for scalars, additive keys combine.
@@ -454,33 +599,51 @@ fn merge_config_values(
 
 /// Load config, merging global (~/.lf/config.yaml) with repo (.lf/config.yaml).
 pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError> {
-    let global_path = if let Ok(home) = std::env::var("LF_HOME") {
-        PathBuf::from(home).join("config.yaml")
-    } else {
-        dirs::home_dir()
-            .map(|h| h.join(".lf").join("config.yaml"))
-            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
-    };
+    Ok(load_config_resolution(repo_root)?.map(|resolved| resolved.config))
+}
 
-    let repo_path = repo_root.map(|r| r.join(".lf").join("config.yaml"));
+pub fn load_config_resolution(
+    repo_root: Option<&Path>,
+) -> Result<Option<ConfigResolution>, LoadError> {
+    let global_path = global_config_path();
+    let resolved_repo_root = repo_root.map(resolved_repo_root);
+    let repo_path = resolved_repo_root
+        .as_ref()
+        .map(|root| root.join(".lf").join("config.yaml"));
 
     let global_data = load_yaml_file(&global_path)?;
     let repo_data = repo_path
         .as_ref()
-        .map(|p| load_yaml_file(p))
+        .map(|path| load_yaml_file(path))
         .transpose()?
         .flatten();
+    let repo_config_exists = repo_data.is_some();
 
     if global_data.is_none() && repo_data.is_none() {
         return Ok(None);
     }
 
-    let merged = merge_config_values(global_data, repo_data);
+    let (merged, repo_override_active) =
+        merge_config_values_for_repo(global_data, repo_data, resolved_repo_root.as_deref());
 
     let config: Config = serde_yaml_ng::from_value(merged)
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
-    Ok(Some(config))
+    let team_write_target = if repo_override_active {
+        ConfigSource::RepoOverride
+    } else if repo_config_exists {
+        ConfigSource::Repo
+    } else {
+        ConfigSource::Global
+    };
+
+    Ok(Some(ConfigResolution {
+        config,
+        global_path,
+        repo_path,
+        repo_root: resolved_repo_root,
+        team_write_target,
+    }))
 }
 
 /// Get config or default if no config files exist.
@@ -564,16 +727,9 @@ mod tests {
         let yaml = r#"
 asana:
   workspace: "1234567890"
-  default_team: "9876543210"
-linear:
-  team: "TEAM-ID"
-notion:
-  title_property: "Task"
-  status_property: "State"
-  done_value: "Shipped"
-  priority_property: "Severity"
+  team: "9876543210"
 pm:
-  provider: linear
+  provider: asana
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
@@ -581,29 +737,13 @@ pm:
             config.asana,
             AsanaConfig {
                 workspace: Some("1234567890".to_string()),
-                default_team: Some("9876543210".to_string()),
-            }
-        );
-        assert_eq!(
-            config.linear,
-            LinearConfig {
-                team: Some("TEAM-ID".to_string()),
-            }
-        );
-        assert_eq!(
-            config.notion,
-            NotionConfig {
-                parent_page: None,
-                title_property: Some("Task".to_string()),
-                status_property: Some("State".to_string()),
-                done_value: Some("Shipped".to_string()),
-                priority_property: Some("Severity".to_string()),
+                team: Some("9876543210".to_string()),
             }
         );
         assert_eq!(
             config.pm,
             Some(PmRolesConfig {
-                provider: crate::lfd::pm::PmProviderKind::Linear,
+                provider: crate::lfd::pm::PmProviderKind::Asana,
             })
         );
     }
@@ -997,6 +1137,160 @@ supported_harnesses:
         let merged = merge_config_values(Some(global), Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
         assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
+    }
+
+    #[test]
+    fn merge_config_values_repo_overrides_picks_matching_repo() {
+        let repo_dir = tempfile::tempdir().expect("temp dir");
+        let repo_root = resolved_repo_root(repo_dir.path());
+        let repo_key = repo_root.to_string_lossy();
+
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(&format!(
+            r#"
+agent: claude:opus
+asana:
+  team: global-team
+repos:
+  {repo_key}:
+    agent: codex
+    asana:
+      team: override-team
+"#
+        ))
+        .unwrap();
+
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            r#"
+agent: gemini
+asana:
+  team: repo-team
+"#,
+        )
+        .unwrap();
+
+        let (merged, override_active) =
+            merge_config_values_for_repo(Some(global), Some(repo), Some(&repo_root));
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
+
+        assert!(override_active);
+        assert_eq!(config.agent.as_deref(), Some("codex"));
+        assert_eq!(config.asana.team.as_deref(), Some("override-team"));
+    }
+
+    #[test]
+    fn load_config_resolution_persists_autocreated_team_to_global_without_repo_config() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let lf_home = temp.path().join("lf-home");
+        std::fs::create_dir_all(&lf_home).expect("create lf home");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("create repo");
+        std::fs::create_dir_all(repo.join(".lf")).expect("create repo .lf");
+
+        std::fs::write(
+            lf_home.join("config.yaml"),
+            "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\n",
+        )
+        .expect("write global config");
+
+        let previous_lf_home = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", &lf_home);
+
+        let result = (|| -> Result<(), LoadError> {
+            let resolution =
+                load_config_resolution(Some(&repo))?.expect("resolved config should exist");
+            resolution.persist_asana_team("team-99")?;
+            Ok(())
+        })();
+
+        match previous_lf_home {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+
+        result.expect("persist team succeeds");
+
+        let global_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(lf_home.join("config.yaml")).expect("read global config"),
+        )
+        .expect("parse global config");
+        assert_eq!(
+            global_value
+                .get("asana")
+                .and_then(|value| value.get("team"))
+                .and_then(|value| value.as_str()),
+            Some("team-99")
+        );
+        assert!(
+            !repo.join(".lf/config.yaml").exists(),
+            "persist should not invent a repo config when only global config existed"
+        );
+    }
+
+    #[test]
+    fn load_config_resolution_persists_autocreated_team_to_repo_override() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let lf_home = temp.path().join("lf-home");
+        std::fs::create_dir_all(&lf_home).expect("create lf home");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".lf")).expect("create repo .lf");
+        let repo_root = resolved_repo_root(&repo);
+        let repo_key = repo_root.to_string_lossy();
+
+        std::fs::write(
+            lf_home.join("config.yaml"),
+            format!(
+                "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\nrepos:\n  {repo_key}:\n    asana:\n      workspace: workspace-override\n"
+            ),
+        )
+        .expect("write global config");
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "pm:\n  provider: asana\nasana:\n  workspace: workspace-1\n",
+        )
+        .expect("write repo config");
+
+        let previous_lf_home = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", &lf_home);
+
+        let result = (|| -> Result<(), LoadError> {
+            let resolution =
+                load_config_resolution(Some(&repo))?.expect("resolved config should exist");
+            resolution.persist_asana_team("team-42")?;
+            Ok(())
+        })();
+
+        match previous_lf_home {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+
+        result.expect("persist team succeeds");
+
+        let global_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(lf_home.join("config.yaml")).expect("read global config"),
+        )
+        .expect("parse global config");
+        assert_eq!(
+            global_value
+                .get("repos")
+                .and_then(|value| value.get(repo_key.as_ref()))
+                .and_then(|value| value.get("asana"))
+                .and_then(|value| value.get("team"))
+                .and_then(|value| value.as_str()),
+            Some("team-42")
+        );
+
+        let repo_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(repo.join(".lf/config.yaml")).expect("read repo config"),
+        )
+        .expect("parse repo config");
+        assert_eq!(
+            repo_value
+                .get("asana")
+                .and_then(|value| value.get("team"))
+                .and_then(|value| value.as_str()),
+            None
+        );
     }
 
     #[test]

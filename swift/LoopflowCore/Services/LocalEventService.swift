@@ -124,6 +124,13 @@ public struct AuthEvent: Sendable {
     public let timestamp: Date
 }
 
+public struct RoadmapUpdatedEvent: Sendable {
+    public let repoPath: String
+    public let waveName: String
+    public let waveId: String?
+    public let timestamp: Date
+}
+
 public enum LFDEvent: Sendable {
     case connected(ConnectedEvent)
     case wave(WaveEvent)
@@ -135,6 +142,7 @@ public enum LFDEvent: Sendable {
     case terminalSession(TerminalSessionEvent)
     case auth(AuthEvent)
     case secrets(SecretsEvent)
+    case roadmapUpdated(RoadmapUpdatedEvent)
 }
 
 public actor EventService {
@@ -525,6 +533,15 @@ public actor EventService {
                 initialUserMessage: json["initial_user_message"] as? String,
                 name: json["name"] as? String,
                 wave: wave,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "roadmap.updated":
+            guard let repoPath = json["repo_path"] as? String,
+                  let waveName = json["wave_name"] as? String else { return nil }
+            return .roadmapUpdated(RoadmapUpdatedEvent(
+                repoPath: repoPath,
+                waveName: waveName,
+                waveId: json["wave_id"] as? String,
                 timestamp: parseTimestamp(json["timestamp"])
             ))
         case "worktree_updated":

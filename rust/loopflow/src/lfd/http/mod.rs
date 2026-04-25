@@ -140,6 +140,10 @@ pub fn router(state: HttpState) -> Router {
             get(waves::list_waves_handler).post(waves::create_wave_handler),
         )
         .route(
+            "/waves/discovered",
+            get(waves::list_discovered_waves_handler),
+        )
+        .route(
             "/waves/{wave_id}",
             get(waves::get_wave_handler)
                 .patch(waves::update_wave_handler)
@@ -149,6 +153,15 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/diff",
             get(waves::get_wave_file_diff_handler),
         )
+        .route(
+            "/waves/{wave_id}/items/{filename}",
+            delete(waves::delete_wave_item_handler),
+        )
+        .route(
+            "/waves/{wave_id}/roadmap",
+            get(waves::get_wave_roadmap_handler),
+        )
+        .route("/roadmap", get(waves::get_roadmap_by_path_handler))
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
             "/waves/{wave_id}/triggers",

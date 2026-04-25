@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -14,7 +13,6 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
@@ -47,17 +45,6 @@ const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
 const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
 const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
 const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
-const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
-const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
-const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
-const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
-const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
-const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
-const NOTION_OAUTH_AUTHORIZE_URL: &str = "https://api.notion.com/v1/oauth/authorize";
-const NOTION_OAUTH_TOKEN_URL: &str = "https://api.notion.com/v1/oauth/token";
-const NOTION_OAUTH_REDIRECT_URI: &str = "http://localhost:19223/oauth/callback";
-const NOTION_CLIENT_ID_ENV: &str = "NOTION_CLIENT_ID";
-const NOTION_CLIENT_SECRET_ENV: &str = "NOTION_CLIENT_SECRET";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -79,8 +66,6 @@ pub enum Provider {
     Codex,
     OpenCodeZen,
     Asana,
-    Linear,
-    Notion,
     Doppler,
 }
 
@@ -92,21 +77,17 @@ impl Provider {
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
             Self::Asana => "asana",
-            Self::Linear => "linear",
-            Self::Notion => "notion",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 6] {
         [
             Self::GitHub,
             Self::Claude,
             Self::Codex,
             Self::OpenCodeZen,
             Self::Asana,
-            Self::Linear,
-            Self::Notion,
             Self::Doppler,
         ]
     }
@@ -118,8 +99,6 @@ impl Provider {
             Self::Codex => "Codex",
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Asana => "Asana",
-            Self::Linear => "Linear",
-            Self::Notion => "Notion",
             Self::Doppler => "Doppler",
         }
     }
@@ -129,7 +108,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Asana | Self::Linear | Self::Notion | Self::Doppler => None,
+            Self::GitHub | Self::Asana | Self::Doppler => None,
         }
     }
 
@@ -140,8 +119,6 @@ impl Provider {
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
             Self::Asana => Some("Asana requires OAuth. Run 'lf op auth asana' to connect."),
-            Self::Linear => Some("Linear requires OAuth. Run 'lf op auth linear' to connect."),
-            Self::Notion => Some("Notion requires OAuth. Run 'lf op auth notion' to connect."),
             _ => None,
         }
     }
@@ -171,8 +148,6 @@ impl FromStr for Provider {
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "asana" => Ok(Self::Asana),
-            "linear" | "lin" => Ok(Self::Linear),
-            "notion" => Ok(Self::Notion),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -260,7 +235,7 @@ pub enum AuthError {
     NoPendingFlow(Provider),
     #[error("{0} auth flow does not accept manual completion")]
     CompletionUnavailable(Provider),
-    #[error("{provider} CLI not found: {command}")]
+    #[error("{provider} auth unavailable: {command}")]
     CommandUnavailable { provider: Provider, command: String },
     #[error("failed to start {provider} auth command: {source}")]
     CommandSpawn {
@@ -517,6 +492,80 @@ impl AsanaOAuthBroker {
     }
 }
 
+/// Exchange a stored Asana OAuth refresh token for a fresh access token.
+/// Asana access tokens live for an hour; this is what every long-running
+/// caller hits between manual `lf op auth asana` runs.
+async fn refresh_asana_token(refresh_token: &str) -> Result<ProviderToken, TokenRefreshError> {
+    let app = AsanaOAuthBroker::oauth_app().map_err(|err| TokenRefreshError::CommandFailed {
+        provider: Provider::Asana,
+        message: err.to_string(),
+    })?;
+    let body = serde_urlencoded::to_string([
+        ("grant_type", "refresh_token"),
+        ("client_id", app.client_id.as_str()),
+        ("client_secret", app.client_secret.as_str()),
+        ("redirect_uri", ASANA_OAUTH_REDIRECT_URI),
+        ("refresh_token", refresh_token),
+    ])
+    .map_err(|err| TokenRefreshError::CommandFailed {
+        provider: Provider::Asana,
+        message: format!("encode refresh body: {err}"),
+    })?;
+    let response = reqwest::Client::new()
+        .post(ASANA_OAUTH_TOKEN_URL)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| TokenRefreshError::CommandFailed {
+            provider: Provider::Asana,
+            message: format!("refresh request: {err}"),
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.bytes().await.unwrap_or_default();
+        let message = oauth_error_message(body.as_ref())
+            .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
+        return Err(TokenRefreshError::CommandFailed {
+            provider: Provider::Asana,
+            message: format!("HTTP {status}: {message}"),
+        });
+    }
+
+    let payload = response
+        .json::<AsanaOAuthTokenResponse>()
+        .await
+        .map_err(|err| TokenRefreshError::CommandFailed {
+            provider: Provider::Asana,
+            message: format!("decode refresh response: {err}"),
+        })?;
+
+    let expires_at = payload
+        .expires_in
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| now_unix() + seconds);
+    let login = payload
+        .data
+        .and_then(|user| user.email.or(user.name))
+        .filter(|value| !value.trim().is_empty());
+
+    Ok(ProviderToken {
+        provider: Provider::Asana.as_str().to_string(),
+        access_token: payload.access_token,
+        // Asana may rotate the refresh token or omit it; preserve the
+        // existing one when no replacement is sent so we don't lose the
+        // ability to refresh again.
+        refresh_token: payload
+            .refresh_token
+            .or_else(|| Some(refresh_token.to_string())),
+        expires_at,
+        login,
+        updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
+    })
+}
+
 #[async_trait]
 impl AuthBroker for AsanaOAuthBroker {
     fn provider(&self) -> Provider {
@@ -602,413 +651,6 @@ impl AuthBroker for AsanaOAuthBroker {
                 Err(err)
             }
         }
-    }
-
-    async fn extract_token(&self) -> Option<ProviderToken> {
-        self.completed_token.lock().await.clone()
-    }
-}
-
-// ── Linear OAuth ────────────────────────────────────────────────────
-
-struct LinearOAuthBroker {
-    completed_token: Arc<Mutex<Option<ProviderToken>>>,
-}
-
-struct NotionOAuthBroker {
-    completed_token: Arc<Mutex<Option<ProviderToken>>>,
-}
-
-#[derive(Debug, Clone)]
-struct LinearOAuthApp {
-    client_id: String,
-    client_secret: String,
-    scope: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct LinearOAuthTokenResponse {
-    access_token: String,
-    expires_in: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-struct NotionOAuthApp {
-    client_id: String,
-    client_secret: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct NotionOAuthTokenResponse {
-    access_token: String,
-    bot_id: Option<String>,
-    workspace_name: Option<String>,
-    workspace_id: Option<String>,
-    duplicated_template_id: Option<String>,
-    owner: Option<NotionOAuthOwner>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NotionOAuthOwner {
-    user: Option<NotionOAuthOwnerUser>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NotionOAuthOwnerUser {
-    person: Option<NotionOAuthOwnerPerson>,
-    name: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NotionOAuthOwnerPerson {
-    email: Option<String>,
-}
-
-impl LinearOAuthBroker {
-    fn new() -> Self {
-        Self {
-            completed_token: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
-        let (client_id, client_secret) = oauth_client_credentials(
-            Provider::Linear,
-            LINEAR_CLIENT_ID_ENV,
-            LINEAR_CLIENT_SECRET_ENV,
-        )?;
-
-        Ok(LinearOAuthApp {
-            client_id,
-            client_secret,
-            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
-        })
-    }
-
-    fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
-        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-        let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
-            .expect("linear oauth authorize URL should parse");
-        {
-            let mut pairs = url.query_pairs_mut();
-            pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", LINEAR_OAUTH_REDIRECT_URI);
-            pairs.append_pair("response_type", "code");
-            pairs.append_pair("state", state);
-            pairs.append_pair("scope", &app.scope);
-            pairs.append_pair("code_challenge", &code_challenge);
-            pairs.append_pair("code_challenge_method", "S256");
-            pairs.append_pair("prompt", "consent");
-        }
-        url.to_string()
-    }
-
-    async fn exchange_code(
-        &self,
-        app: &LinearOAuthApp,
-        code_verifier: &str,
-        code: &str,
-    ) -> Result<ProviderToken, AuthError> {
-        let body = serde_urlencoded::to_string([
-            ("grant_type", "authorization_code"),
-            ("client_id", app.client_id.as_str()),
-            ("client_secret", app.client_secret.as_str()),
-            ("redirect_uri", LINEAR_OAUTH_REDIRECT_URI),
-            ("code", code),
-            ("code_verifier", code_verifier),
-        ])
-        .map_err(|err| AuthError::OAuthRequest {
-            provider: Provider::Linear,
-            message: format!("failed to encode token request: {err}"),
-        })?;
-        let response = reqwest::Client::new()
-            .post(LINEAR_OAUTH_TOKEN_URL)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
-                message: err.to_string(),
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .bytes()
-                .await
-                .map_err(|err| AuthError::OAuthRequest {
-                    provider: Provider::Linear,
-                    message: err.to_string(),
-                })?;
-            let message = oauth_error_message(body.as_ref())
-                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
-            if status == reqwest::StatusCode::BAD_REQUEST
-                || status == reqwest::StatusCode::UNAUTHORIZED
-            {
-                return Err(AuthError::CodeExchangeRejected {
-                    provider: Provider::Linear,
-                    message,
-                });
-            }
-            return Err(AuthError::OAuthRequest {
-                provider: Provider::Linear,
-                message: format!("HTTP {status}: {message}"),
-            });
-        }
-
-        let payload = response
-            .json::<LinearOAuthTokenResponse>()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
-                message: format!("failed to decode token response: {err}"),
-            })?;
-
-        let expires_at = payload
-            .expires_in
-            .filter(|seconds| *seconds > 0)
-            .map(|seconds| now_unix() + seconds);
-
-        Ok(ProviderToken {
-            provider: Provider::Linear.as_str().to_string(),
-            access_token: payload.access_token,
-            refresh_token: None,
-            expires_at,
-            login: None,
-            updated_at: now_unix(),
-            credential_type: CredentialType::OAuth,
-        })
-    }
-}
-
-#[async_trait]
-impl AuthBroker for LinearOAuthBroker {
-    fn provider(&self) -> Provider {
-        Provider::Linear
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app()?;
-        let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let state = Uuid::new_v4().to_string();
-        let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-        let listener = oauth_callback_listener(Provider::Linear, "127.0.0.1:19222")?;
-        let completed_token = self.completed_token.clone();
-        let monitor = tokio::spawn(monitor_oauth_callback(
-            Provider::Linear,
-            listener,
-            Duration::from_secs(15 * 60),
-            "linear OAuth timed out",
-            completed_token,
-            move |code| {
-                let app = app.clone();
-                let code_verifier = code_verifier.clone();
-                async move {
-                    LinearOAuthBroker::new()
-                        .exchange_code(&app, &code_verifier, &code)
-                        .await
-                }
-            },
-        ));
-
-        let response = AuthFlowResponse {
-            provider: Provider::Linear,
-            verification_uri_complete: Some(verification_uri.clone()),
-            verification_uri,
-            user_code: None,
-            expires_in: Some(15 * 60),
-        };
-
-        Ok(AuthFlowHandle::new(response, monitor))
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let token = self.completed_token.lock().await;
-        let Some(token) = token.as_ref() else {
-            return Ok(AuthStatus::None);
-        };
-        if token
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now_unix())
-        {
-            return Ok(AuthStatus::Expired);
-        }
-        Ok(AuthStatus::Active { login: None })
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        *self.completed_token.lock().await = None;
-        Ok(())
-    }
-
-    async fn extract_token(&self) -> Option<ProviderToken> {
-        self.completed_token.lock().await.clone()
-    }
-}
-
-impl NotionOAuthBroker {
-    fn new() -> Self {
-        Self {
-            completed_token: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn oauth_app() -> Result<NotionOAuthApp, AuthError> {
-        let (client_id, client_secret) = oauth_client_credentials(
-            Provider::Notion,
-            NOTION_CLIENT_ID_ENV,
-            NOTION_CLIENT_SECRET_ENV,
-        )?;
-        Ok(NotionOAuthApp {
-            client_id,
-            client_secret,
-        })
-    }
-
-    fn build_authorization_url(app: &NotionOAuthApp, state: &str) -> String {
-        let mut url = Url::parse(NOTION_OAUTH_AUTHORIZE_URL)
-            .expect("notion oauth authorize URL should parse");
-        {
-            let mut pairs = url.query_pairs_mut();
-            pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", NOTION_OAUTH_REDIRECT_URI);
-            pairs.append_pair("response_type", "code");
-            pairs.append_pair("owner", "user");
-            pairs.append_pair("state", state);
-        }
-        url.to_string()
-    }
-
-    async fn exchange_code(
-        &self,
-        app: &NotionOAuthApp,
-        code: &str,
-    ) -> Result<ProviderToken, AuthError> {
-        let response = reqwest::Client::new()
-            .post(NOTION_OAUTH_TOKEN_URL)
-            .basic_auth(&app.client_id, Some(&app.client_secret))
-            .json(&json!({
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": NOTION_OAUTH_REDIRECT_URI,
-            }))
-            .send()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Notion,
-                message: err.to_string(),
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .bytes()
-                .await
-                .map_err(|err| AuthError::OAuthRequest {
-                    provider: Provider::Notion,
-                    message: err.to_string(),
-                })?;
-            let message = oauth_error_message(body.as_ref())
-                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
-            if status == reqwest::StatusCode::BAD_REQUEST
-                || status == reqwest::StatusCode::UNAUTHORIZED
-            {
-                return Err(AuthError::CodeExchangeRejected {
-                    provider: Provider::Notion,
-                    message,
-                });
-            }
-            return Err(AuthError::OAuthRequest {
-                provider: Provider::Notion,
-                message: format!("HTTP {status}: {message}"),
-            });
-        }
-
-        let payload = response
-            .json::<NotionOAuthTokenResponse>()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Notion,
-                message: format!("failed to decode token response: {err}"),
-            })?;
-
-        let login = payload
-            .owner
-            .and_then(|owner| owner.user)
-            .and_then(|user| user.person.and_then(|person| person.email).or(user.name))
-            .or(payload.workspace_name)
-            .or(payload.workspace_id)
-            .or(payload.bot_id)
-            .or(payload.duplicated_template_id)
-            .filter(|value| !value.trim().is_empty());
-
-        Ok(ProviderToken {
-            provider: Provider::Notion.as_str().to_string(),
-            access_token: payload.access_token,
-            refresh_token: None,
-            expires_at: None,
-            login,
-            updated_at: now_unix(),
-            credential_type: CredentialType::OAuth,
-        })
-    }
-}
-
-#[async_trait]
-impl AuthBroker for NotionOAuthBroker {
-    fn provider(&self) -> Provider {
-        Provider::Notion
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app()?;
-        let state = Uuid::new_v4().to_string();
-        let verification_uri = Self::build_authorization_url(&app, &state);
-        let listener = oauth_callback_listener(Provider::Notion, "127.0.0.1:19223")?;
-        let completed_token = self.completed_token.clone();
-        let monitor = tokio::spawn(monitor_oauth_callback(
-            Provider::Notion,
-            listener,
-            Duration::from_secs(15 * 60),
-            "notion OAuth timed out",
-            completed_token,
-            move |code| {
-                let app = app.clone();
-                async move { NotionOAuthBroker::new().exchange_code(&app, &code).await }
-            },
-        ));
-
-        let response = AuthFlowResponse {
-            provider: Provider::Notion,
-            verification_uri_complete: Some(verification_uri.clone()),
-            verification_uri,
-            user_code: None,
-            expires_in: Some(15 * 60),
-        };
-
-        Ok(AuthFlowHandle::new(response, monitor))
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let token = self.completed_token.lock().await;
-        let Some(token) = token.as_ref() else {
-            return Ok(AuthStatus::None);
-        };
-        if token
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now_unix())
-        {
-            return Ok(AuthStatus::Expired);
-        }
-        Ok(AuthStatus::Active {
-            login: token.login.clone(),
-        })
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        *self.completed_token.lock().await = None;
-        Ok(())
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
@@ -1230,6 +872,9 @@ impl ProviderAuthService {
             if let Some(store) = &self.store {
                 if let Some(token) = broker.extract_token().await {
                     info!(provider = %provider, "auto-persisting CLI token");
+                    if let Err(err) = crate::lfd::credentials_file::write(&token) {
+                        warn!(provider = %provider, error = %err, "failed to write provider credential file");
+                    }
                     if let Err(err) = store.upsert_provider_token(&token).await {
                         warn!(provider = %provider, error = %err, "failed to auto-persist provider token");
                     }
@@ -1304,6 +949,9 @@ impl ProviderAuthService {
                                 }
                             }
                             if let Some(token) = broker_for_task.extract_token().await {
+                                if let Err(err) = crate::lfd::credentials_file::write(&token) {
+                                    warn!(provider = %provider, error = %err, "failed to write provider credential file");
+                                }
                                 if let Err(err) = store.upsert_provider_token(&token).await {
                                     warn!(provider = %provider, error = %err, "failed to persist provider token");
                                 }
@@ -1345,6 +993,9 @@ impl ProviderAuthService {
     ) -> Result<(), AuthError> {
         self.abort_pending(provider).await;
         self.broker(provider)?.disconnect().await?;
+        if let Err(err) = crate::lfd::credentials_file::delete(provider.as_str()) {
+            warn!(provider = %provider, error = %err, "failed to remove provider credential file");
+        }
         if let Some(store) = &self.store {
             if let Err(err) = store.delete_provider_token(provider.as_str()).await {
                 warn!(provider = %provider, error = %err, "failed to delete provider token");
@@ -1403,12 +1054,8 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
-    [
-        Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>,
-        Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>,
-        Arc::new(NotionOAuthBroker::new()) as Arc<dyn AuthBroker>,
-    ]
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 1] {
+    [Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>]
 }
 
 fn socket_auth_flow_handle(
@@ -2281,88 +1928,6 @@ fn oauth_client_credentials(
     Ok((client_id, client_secret))
 }
 
-fn oauth_callback_listener(
-    provider: Provider,
-    address: &str,
-) -> Result<tokio::net::TcpListener, AuthError> {
-    let listener = std::net::TcpListener::bind(address).map_err(|err| AuthError::OAuthRequest {
-        provider,
-        message: format!("failed to bind {address} for OAuth callback: {err}"),
-    })?;
-    listener.set_nonblocking(true).ok();
-    tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
-        provider,
-        message: format!("failed to create async listener: {err}"),
-    })
-}
-
-async fn monitor_oauth_callback<F, Fut>(
-    provider: Provider,
-    listener: tokio::net::TcpListener,
-    timeout: Duration,
-    timeout_message: &'static str,
-    completed_token: Arc<Mutex<Option<ProviderToken>>>,
-    exchange_code: F,
-) -> Result<(), AuthError>
-where
-    F: Fn(String) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<ProviderToken, AuthError>> + Send,
-{
-    let deadline = Instant::now() + timeout;
-    loop {
-        if Instant::now() >= deadline {
-            return Err(AuthError::CommandFailed {
-                provider,
-                message: timeout_message.to_string(),
-            });
-        }
-
-        let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
-        let (stream, _) = match accept {
-            Ok(Ok(conn)) => conn,
-            Ok(Err(_)) | Err(_) => continue,
-        };
-        let Some(code) = read_oauth_callback_code(stream).await else {
-            continue;
-        };
-
-        match exchange_code(code).await {
-            Ok(token) => {
-                *completed_token.lock().await = Some(token);
-                return Ok(());
-            }
-            Err(err) => {
-                return Err(AuthError::CommandFailed {
-                    provider,
-                    message: err.to_string(),
-                });
-            }
-        }
-    }
-}
-
-async fn read_oauth_callback_code(stream: tokio::net::TcpStream) -> Option<String> {
-    let (mut reader, mut writer) = stream.into_split();
-    let mut buf = vec![0u8; 4096];
-    let n = tokio::io::AsyncReadExt::read(&mut reader, &mut buf)
-        .await
-        .ok()?;
-    let request = String::from_utf8_lossy(&buf[..n]);
-    let code = extract_oauth_code_from_request(&request);
-
-    let response_body = if code.is_some() {
-        "Authenticated! You can close this tab."
-    } else {
-        "Authentication failed — no code found."
-    };
-    let http_response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
-    );
-    let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes()).await;
-    let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
-    code
-}
-
 fn read_nonempty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().and_then(|value| {
         let trimmed = value.trim();
@@ -2491,23 +2056,6 @@ fn oauth_error_message(body: &[u8]) -> Option<String> {
     }
 }
 
-/// Extract the `code` query parameter from an HTTP request line like
-/// `GET /oauth/callback?code=abc123&state=xyz HTTP/1.1`.
-fn extract_oauth_code_from_request(request: &str) -> Option<String> {
-    let first_line = request.lines().next()?;
-    let path = first_line.split_whitespace().nth(1)?;
-    let query = path.split_once('?')?.1;
-    for pair in query.split('&') {
-        if let Some(value) = pair.strip_prefix("code=") {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
-}
-
 fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
     let auth_path = opencode_auth_path(home_dir);
     if !auth_path.exists() {
@@ -2569,9 +2117,22 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Linear | Provider::Notion | Provider::Doppler => {
-            Err(TokenRefreshError::MissingToken { provider })
+        Provider::Asana => {
+            let token = crate::lfd::credentials_file::read(Provider::Asana.as_str()).ok_or(
+                TokenRefreshError::MissingToken {
+                    provider: Provider::Asana,
+                },
+            )?;
+            let refresh = token
+                .refresh_token
+                .as_deref()
+                .filter(|value| !value.is_empty())
+                .ok_or(TokenRefreshError::MissingToken {
+                    provider: Provider::Asana,
+                })?;
+            refresh_asana_token(refresh).await
         }
+        Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 
@@ -2863,9 +2424,6 @@ mod tests {
         assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
-        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
-        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
-        assert_eq!("notion".parse::<Provider>(), Ok(Provider::Notion));
         assert!("gemini".parse::<Provider>().is_err());
     }
 
@@ -2876,8 +2434,6 @@ mod tests {
         assert!(Provider::Codex.api_key_bills_per_token());
         assert!(Provider::OpenCodeZen.api_key_bills_per_token());
         assert!(!Provider::Asana.api_key_bills_per_token());
-        assert!(!Provider::Linear.api_key_bills_per_token());
-        assert!(!Provider::Notion.api_key_bills_per_token());
     }
 
     #[test]
@@ -3425,9 +2981,7 @@ mod tests {
 
     #[test]
     fn pm_providers_do_not_support_api_key_env_auth() {
-        for provider in [Provider::Asana, Provider::Linear, Provider::Notion] {
-            assert_eq!(provider.api_key_env_name(), None);
-        }
+        assert_eq!(Provider::Asana.api_key_env_name(), None);
     }
 
     #[test]
@@ -3435,14 +2989,6 @@ mod tests {
         assert_eq!(
             Provider::Asana.api_key_configure_error(),
             Some("Asana requires OAuth. Run 'lf op auth asana' to connect.")
-        );
-        assert_eq!(
-            Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
-        );
-        assert_eq!(
-            Provider::Notion.api_key_configure_error(),
-            Some("Notion requires OAuth. Run 'lf op auth notion' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

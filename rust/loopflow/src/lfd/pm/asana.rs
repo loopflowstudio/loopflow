@@ -21,9 +21,16 @@ const PROJECT_TEXT_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype";
 const WORKSPACE_TEXT_FIELD_FIELDS: &str = "gid,name,resource_subtype";
 const CLAIM_TASK_FIELDS: &str = "assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.text_value";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
+const WORKSPACE_FIELDS: &str = "gid,name,is_organization";
+const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
 const PRIORITY_FIELD_NAME: &str = "Priority";
 const WORKING_BRANCH_FIELD_NAME: &str = "Working branch";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTeam {
+    pub gid: String,
+    pub team_to_persist: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct AsanaClient {
@@ -103,7 +110,13 @@ impl AsanaClient {
     /// List all workspaces visible to the authenticated user.
     pub async fn list_workspaces(&self) -> PmResult<Vec<AsanaWorkspace>> {
         let response: AsanaResponse<Vec<AsanaWorkspace>> = self
-            .send_json(|| self.request(Method::GET, "/workspaces", &[]))
+            .send_json(|| {
+                self.request(
+                    Method::GET,
+                    "/workspaces",
+                    &[("opt_fields", WORKSPACE_FIELDS)],
+                )
+            })
             .await?;
         Ok(response.data)
     }
@@ -142,6 +155,14 @@ impl AsanaClient {
         Ok(response.data)
     }
 
+    async fn get_workspace(&self, workspace_id: &str) -> PmResult<AsanaWorkspace> {
+        let path = format!("/workspaces/{workspace_id}");
+        let response: AsanaResponse<AsanaWorkspace> = self
+            .send_json(|| self.request(Method::GET, &path, &[("opt_fields", WORKSPACE_FIELDS)]))
+            .await?;
+        Ok(response.data)
+    }
+
     async fn create_team_in_workspace(&self, workspace_id: &str, name: &str) -> PmResult<String> {
         let body = AsanaRequest {
             data: CreateTeamRequest {
@@ -155,21 +176,41 @@ impl AsanaClient {
         Ok(response.data.gid)
     }
 
-    async fn resolve_team_for_project_bootstrap(&self, workspace_id: &str) -> PmResult<String> {
-        if let Some(team) = self.config.default_team.as_deref() {
-            return Ok(team.to_string());
+    pub async fn resolve_team(&self) -> PmResult<ResolvedTeam> {
+        if let Some(team) = self.config.team.as_deref() {
+            return Ok(ResolvedTeam {
+                gid: team.to_string(),
+                team_to_persist: None,
+            });
         }
 
-        let teams = self.list_teams(workspace_id).await?;
+        let workspace_id = self.resolve_workspace().await?;
+        let workspace = self.get_workspace(&workspace_id).await?;
+        if !workspace.is_organization {
+            return Err(PmError::Message(format!(
+                "asana workspace {} ({}) is not an organization; set asana.team or use an Asana organization with teams",
+                workspace.name, workspace.gid
+            )));
+        }
+
+        let teams = self.list_teams(&workspace_id).await?;
         if let Some(existing) = teams
             .iter()
             .find(|team| team.name.eq_ignore_ascii_case(DEFAULT_LOOPFLOW_TEAM_NAME))
         {
-            return Ok(existing.gid.clone());
+            return Ok(ResolvedTeam {
+                gid: existing.gid.clone(),
+                team_to_persist: Some(existing.gid.clone()),
+            });
         }
 
-        self.create_team_in_workspace(workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
-            .await
+        let gid = self
+            .create_team_in_workspace(&workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
+            .await?;
+        Ok(ResolvedTeam {
+            gid: gid.clone(),
+            team_to_persist: Some(gid),
+        })
     }
 
     async fn create_project_for_team(
@@ -343,9 +384,9 @@ impl AsanaClient {
 #[async_trait]
 impl PmProvider for AsanaClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
-        let workspace = self.resolve_workspace().await?;
-        let team = self.resolve_team_for_project_bootstrap(&workspace).await?;
-        self.create_project_for_team(&team, name, description).await
+        let team = self.resolve_team().await?;
+        self.create_project_for_team(&team.gid, name, description)
+            .await
     }
 
     async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
@@ -367,6 +408,11 @@ impl PmProvider for AsanaClient {
         self.ensure_working_branch_field_for_project(project_id)
             .await
             .map(|_| ())
+    }
+
+    async fn list_managed_projects(&self) -> PmResult<Vec<PmProject>> {
+        let team = self.resolve_team().await?;
+        self.list_projects(&team.gid).await
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -461,6 +507,22 @@ impl PmProvider for AsanaClient {
         let path = format!("/tasks/{item_id}");
         let _: AsanaResponse<Value> = self
             .send_json(|| self.request(Method::PUT, &path, &[]).json(&body))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_item(&self, item_id: &str) -> PmResult<()> {
+        let path = format!("/tasks/{item_id}");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::DELETE, &path, &[]))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_project(&self, project_id: &str) -> PmResult<()> {
+        let path = format!("/projects/{project_id}");
+        let _: AsanaResponse<Value> = self
+            .send_json(|| self.request(Method::DELETE, &path, &[]))
             .await?;
         Ok(())
     }
@@ -750,6 +812,8 @@ fn working_branch_value<'a>(task: &'a Value, field_id: &str) -> Option<&'a str> 
 pub struct AsanaWorkspace {
     pub gid: String,
     pub name: String,
+    #[serde(default)]
+    pub is_organization: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -799,7 +863,7 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
         if let Some(error) = error_body.errors.first() {
             if error.message.contains("Missing required `team` field") {
                 return format!(
-                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/<name>.yaml or `asana.default_team` in .lf/config.yaml."
+                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/<name>.yaml or `asana.team` in .lf/config.yaml."
                 );
             }
             return format!(
@@ -874,7 +938,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: Some("team-9".to_string()),
+                team: Some("team-9".to_string()),
             },
             base_url,
         );
@@ -906,13 +970,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_reuses_existing_loopflow_team_when_default_missing() {
+    async fn create_project_reuses_existing_loopflow_team_when_team_missing() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
+                    "data": {
+                        "gid": "workspace-1",
+                        "name": "Workspace",
+                        "is_organization": true
+                    }
+                }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({
                     "data": [
-                        { "gid": "team-1", "name": "Waves" },
+                        { "gid": "team-1", "name": "Loopflow" },
                         { "gid": "team-2", "name": "Other" }
                     ]
                 }),
@@ -927,7 +1001,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: None,
+                team: None,
             },
             base_url,
         );
@@ -939,16 +1013,28 @@ mod tests {
 
         assert_eq!(project_id, "project-123");
         let requests = requests.lock().await;
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert_eq!(requests[0].method, "GET");
-        assert_eq!(requests[0].path, "/workspaces/workspace-1/teams");
-        assert_eq!(requests[1].method, "POST");
-        assert_eq!(requests[1].path, "/teams/team-1/projects");
+        assert_eq!(requests[0].path, "/workspaces/workspace-1");
+        assert_eq!(requests[1].method, "GET");
+        assert_eq!(requests[1].path, "/workspaces/workspace-1/teams");
+        assert_eq!(requests[2].method, "POST");
+        assert_eq!(requests[2].path, "/teams/team-1/projects");
     }
 
     #[tokio::test]
     async fn create_project_creates_loopflow_team_when_missing() {
         let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "data": {
+                        "gid": "workspace-1",
+                        "name": "Workspace",
+                        "is_organization": true
+                    }
+                }),
+            ),
             json_response(StatusCode::OK, json!({ "data": [] })),
             json_response(
                 StatusCode::CREATED,
@@ -964,7 +1050,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: None,
+                team: None,
             },
             base_url,
         );
@@ -976,22 +1062,24 @@ mod tests {
 
         assert_eq!(project_id, "project-123");
         let requests = requests.lock().await;
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 4);
         assert_eq!(requests[0].method, "GET");
-        assert_eq!(requests[0].path, "/workspaces/workspace-1/teams");
-        assert_eq!(requests[1].method, "POST");
-        assert_eq!(requests[1].path, "/teams");
+        assert_eq!(requests[0].path, "/workspaces/workspace-1");
+        assert_eq!(requests[1].method, "GET");
+        assert_eq!(requests[1].path, "/workspaces/workspace-1/teams");
+        assert_eq!(requests[2].method, "POST");
+        assert_eq!(requests[2].path, "/teams");
         assert_eq!(
-            serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
+            serde_json::from_str::<Value>(&requests[2].body).expect("json body"),
             json!({
                 "data": {
-                    "name": "Waves",
+                    "name": "Loopflow",
                     "organization": "workspace-1"
                 }
             })
         );
-        assert_eq!(requests[2].method, "POST");
-        assert_eq!(requests[2].path, "/teams/team-loopflow/projects");
+        assert_eq!(requests[3].method, "POST");
+        assert_eq!(requests[3].path, "/teams/team-loopflow/projects");
     }
 
     #[tokio::test]
@@ -1025,7 +1113,7 @@ mod tests {
         let message = parse_error_message(StatusCode::BAD_REQUEST, &body);
 
         assert!(message.contains("pm.team"));
-        assert!(message.contains("asana.default_team"));
+        assert!(message.contains("asana.team"));
     }
 
     #[tokio::test]
@@ -1310,6 +1398,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_item_issues_asana_delete_request() {
+        let (base_url, requests) =
+            test_server::spawn(vec![json_response(StatusCode::OK, json!({ "data": {} }))]).await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        client
+            .delete_item("task-123")
+            .await
+            .expect("delete item should succeed");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "DELETE");
+        assert_eq!(requests[0].path, "/tasks/task-123");
+        assert_eq!(requests[0].body, "");
+        assert_eq!(
+            requests[0].authorization.as_deref(),
+            Some("Bearer secret-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_item_propagates_asana_errors() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::NOT_FOUND,
+            json!({ "errors": [{ "message": "task: Not Found" }] }),
+        )])
+        .await;
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig::default(),
+            base_url,
+        );
+
+        let err = client
+            .delete_item("missing-task")
+            .await
+            .expect_err("delete should fail when asana returns 404");
+        let PmError::Message(message) = err;
+        assert!(
+            message.contains("task: Not Found"),
+            "expected asana error surfaced, got: {message}"
+        );
+    }
+
+    #[tokio::test]
     async fn update_item_skips_rank_only_updates() {
         let (base_url, requests) = test_server::spawn(Vec::new()).await;
         let client = AsanaClient::with_base_url(
@@ -1398,7 +1536,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: None,
+                team: None,
             },
             base_url,
         );
@@ -1436,7 +1574,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: None,
+                team: None,
             },
             base_url,
         );
@@ -1483,7 +1621,7 @@ mod tests {
             "secret-token".to_string(),
             AsanaConfig {
                 workspace: Some("workspace-1".to_string()),
-                default_team: None,
+                team: None,
             },
             base_url,
         );

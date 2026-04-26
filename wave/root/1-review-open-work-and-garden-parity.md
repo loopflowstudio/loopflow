@@ -1,7 +1,7 @@
 ---
 asana_id: '1214270115593678'
 ---
-# Review-open-work and garden parity
+# review-open-work ↔ build/garden parity
 
 **Finish line:** `review-open-work`, `garden`, and the `govern-*` flows produce one status language, one set of surfaces, and one morning ritual. Manual review is not a separate universe from automated status meetings.
 
@@ -14,12 +14,25 @@ Today there are two families of status work:
 
 They overlap heavily, but they still feel like different systems. Different wording, different artifacts, different places to look. That split costs trust.
 
-## What to shape
+## Shared pieces
 
-- **Shared signal vocabulary** — wave health, attention items, mutation proposals, calibration notes, shipped work
-- **Shared surface contract** — the runboard should show overnight automation and a manual refresh pass side by side
-- **Fresh-on-demand review** — running `review-open-work` should be able to trigger a current scan/assess pass before presenting the status picture
-- **Clear ownership** — `review-open-work` stays human-driven; govern/garden stays automated; the output model is shared
+- **Signal vocabulary** — wave health, attention items, mutation proposals, calibration notes, shipped work
+- **Surface contract** — the runboard should show overnight automation and a manual refresh pass side by side
+- **Freshness story** — running `review-open-work` can trigger a current scan/assess pass before presenting the status picture
+- **Reusable mechanics** — shared scans, shared summaries, shared routing where the data is the same
+
+## What stays different
+
+- `review-open-work` is human-driven and can do deck-clearing tasks like branch/worktree cleanup
+- `garden` and `govern-*` are scheduled system passes that keep pressure moving without a human present
+- Manual review can choose what to act on immediately; automated review should bias toward reviewable mutation proposals
+
+## Questions to resolve
+
+- What should `review-open-work` keep that scheduled flows should never own?
+- Which sub-steps should be shared outright instead of duplicated?
+- Is the manual pass best modeled as “refresh then review,” or as a richer wrapper around the same scan/assess pipeline?
+- Which artifacts should persist between runs, and which should be recomputed on demand?
 
 ## Daily experience
 
@@ -30,4 +43,4 @@ Morning coffee. Open Concerto. One runboard answers the whole question: what shi
 - Manual and automated status runs emit compatible artifacts
 - Runboard can present both without translation or special casing
 - `review-open-work` can request a fresh govern/garden pass when needed
-- The morning ritual feels like one system, not parallel checklists
+- The relationship between manual review and automated status meetings is explicit in the docs and the UX

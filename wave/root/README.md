@@ -1,12 +1,12 @@
 # Root
 
-Garden the active waves. Keep the whole system legible.
+Garden the active waves. Keep the system legible.
 
-Root is the conductor wave for this repo. It does not own a product surface of its own; it owns the rhythm between the other waves. The job is simple: keep `desktop`, `mobile`, and `workflows` moving in the right order, surface drift early, and make the morning status pass feel like one coherent ritual instead of three disconnected dashboards.
+Root is the conductor wave for this repo. It does not own a product surface. It owns coordination: keep `desktop`, `mobile`, and `workflows` moving in the right order, keep their boundaries clean, and make the daily status pass feel like one system.
 
 ## Active waves
 
-```
+```text
 wave: root
 │
 │  area: wave/desktop/, wave/mobile/, wave/workflows/
@@ -14,35 +14,28 @@ wave: root
 │
 ├── wave: desktop      Concerto macOS — embedded terminal build driver, then native chat UX
 ├── wave: mobile       iOS read surface for remote lfd — waves and roadmap
-└── wave: workflows    Engine, providers, flows, governance UX
+└── wave: workflows    Engine, providers, flows, and governance UX
 ```
-
-## What root is for
-
-- **Garden the other waves** — scheduled `garden` and `govern-*` passes observe pressure, propose mutations, and keep the wave map honest
-- **Unify status language** — manual `review-open-work` and automated govern/garden passes should produce the same kinds of signals
-- **Keep scope clean** — desktop owns build-driving UX, mobile owns the read surface, workflows owns engine + governance machinery
 
 ## Current priorities
 
-1. **`review-open-work-and-garden-parity`** — manual and automated status passes should read as one system
+1. **`review-open-work ↔ build/garden parity`** — manual and automated status passes should read as one system
 2. **Calendar rhythm that earns trust** — scheduled scans need to be current enough to matter and quiet enough not to create noise
-3. **Mutation review that stays human-sized** — root should propose reviewable adjustments, not dump a strategy deck into a PR
+3. **Mutation review that stays human-sized** — root should propose reviewable adjustments, not dump strategy decks into PRs
 
-## Boundaries
-
-### Root owns
+## Root owns
 
 - The relationship between the active waves
-- The status vocabulary shared across manual and automated review
-- The schedule and posture of garden/govern flows
+- The status vocabulary shared across `review-open-work`, `garden`, and `govern-*`
+- The cadence and posture of garden/govern flows
+- The morning ritual: one pass from “what changed?” to “what needs me?”
 
-### Root does not own
+## Not here
 
 - Embedded terminal and chat implementation details — `desktop`
 - Remote iOS read-surface work — `mobile`
 - Flow engine, PM sync, and governance surfaces — `workflows`
 
-## What success looks like
+## Success
 
-Open Concerto in the morning and get the full picture in one pass: shipped work, blocked work, mutation proposals, calibration checkpoints, and anything that needs a human. Root is doing its job when that ritual feels obvious and the next action is clear.
+Open Concerto in the morning and get the full picture in one pass: shipped work, blocked work, mutation proposals, calibration checkpoints, and anything that needs a human. Root is doing its job when the next action is obvious.

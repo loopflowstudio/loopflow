@@ -90,3 +90,5 @@ If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 **Decisions over options.** Don't present choices—make them. The design should be implementable as-is.
 
 **Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
+
+**Comprehensive over light.** Kickoff outputs get read by humans evaluating the design and by implementing agents executing it. Be thorough — decisions, alternatives, "done when." This isn't a roadmap sketch; it's the spec a future session works from.

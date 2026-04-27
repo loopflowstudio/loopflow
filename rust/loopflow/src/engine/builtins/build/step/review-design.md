@@ -59,6 +59,8 @@ The scratch doc reflects the human's intent, not the AI's elaboration. The human
 
 If major open questions remain, note them in the doc rather than leaving them implicit. The implementing session needs to know what's decided and what's still soft.
 
+Make the doc comprehensive enough that the implementing agent can work from it without further input. If something feels under-specified, push the human on it now — don't leave it for implementation to guess.
+
 ## Wave alignment
 
 If wave context is present:

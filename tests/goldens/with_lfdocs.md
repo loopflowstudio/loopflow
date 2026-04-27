@@ -104,6 +104,28 @@ In interactive surfaces, commit at natural breakpoints when the user signals rea
 
 ---
 
+## Checkpoint and proceed
+
+Don't ask "do you want me to get started?" for reversible work. Checkpoint and proceed.
+
+```bash
+# Tree dirty? Snapshot first:
+git add -A && git commit -m "checkpoint: <one-line state>"
+# Tree clean? HEAD is the rollback point. Go.
+```
+
+Reversible: editing files, sketching code, running local builds or tests, refactoring. Commit history is the safety net — `git reset --hard <sha>` rolls back cleanly.
+
+Still ask before:
+- Pushing, force-pushing, opening or closing PRs
+- Sending messages, posting comments, calling external APIs with side effects
+- Destructive ops: `rm -rf`, dropping tables, deleting branches
+- Anything visible to others or hard to reverse
+
+Checkpoint liberally. Mid-session commits are cheap; reconstructing lost work is not. Squash later if needed.
+
+---
+
 ## Ambition
 
 Build momentum through complete milestones. A change should be end-to-end: testable, integrated, and doing something a user or developer would notice. Rough edges are fine — partial stacks are not.
@@ -111,6 +133,16 @@ Build momentum through complete milestones. A change should be end-to-end: testa
 Don't split work into separate commits or PRs unless each piece stands on its own and someone would care about it independently. Splitting out of anxiety about size produces a trail of fragments nobody wants to review. One working feature beats three inert layers.
 
 Target ~1000 LOC per PR. Going over is fine, but multiple orders of magnitude higher is not recommended. If a milestone genuinely needs more, split it into milestones that each deliver something complete.
+
+---
+
+## Design at different stages
+
+The closer to implementation, the more comprehensive.
+
+**Wave roadmaps and future-work sketches** (`wave/<name>/N-*.md`, follow-up notes). Pick a few illustrative details — a function name, an example flow, a concrete data shape — that anchor direction. Don't pre-commit to architecture, sequencing, or dependencies. Over-specified roadmap items rot as the codebase moves.
+
+**Kickoff and review-design outputs** (`scratch/<slug>.md` post-elaboration). Comprehensive. The reader is a human pushing back or an implementing agent that needs to know what's decided. Under-commitment here wastes implementation time.
 
 ---
 

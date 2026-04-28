@@ -238,6 +238,7 @@ fn finalize_local(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_pr(
     repo_root: &Path,
     pr_exists: bool,

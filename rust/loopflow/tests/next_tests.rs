@@ -40,6 +40,7 @@ fn next_creates_branch_from_current() {
             create_pr: false,
             rebase: false,
             wave_name: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -68,6 +69,7 @@ fn next_with_naming_schema() {
             create_pr: false,
             rebase: false,
             wave_name: Some("wave".to_string()),
+            agent: None,
         },
         &NullProgress,
     )
@@ -96,6 +98,7 @@ fn next_detects_merged_pr_starts_fresh() {
             create_pr: false,
             rebase: false,
             wave_name: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -122,6 +125,7 @@ fn next_appends_suffix_on_branch_name_collision() {
             create_pr: false,
             rebase: false,
             wave_name: Some("wave".to_string()),
+            agent: None,
         },
         &NullProgress,
     )

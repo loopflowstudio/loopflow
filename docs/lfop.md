@@ -34,8 +34,12 @@ Options:
 Create or update a PR, open in browser.
 
 ```bash
+lf -m codex op pr
+lf op pr -m codex
 lf op pr --title "area: short title" --body "## Summary ..."
 ```
+
+Use `-m/--model` for a one-off agent override when `lf op pr` needs a different harness than your configured default. When omitted, `lf op pr` uses `agent:` from `.lf/config.yaml` or `~/.lf/config.yaml`.
 
 `--title` and `--body` are always required. Use `lf pr` to generate them with agent judgment.
 

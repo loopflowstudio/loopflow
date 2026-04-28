@@ -295,9 +295,9 @@ fn main() -> anyhow::Result<()> {
                 loopflow::lf::commands::run::run(None, Some(&text), &cli)
             })
         }
-        Some(Commands::Op { op }) => {
-            in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run(op))
-        }
+        Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
+            loopflow::lf::commands::ops::run(op, cli.model.as_deref())
+        }),
         Some(Commands::External(external_args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
             let message = join_args(&step_args);

@@ -20,6 +20,7 @@ pub struct CommitOptions {
     pub task: String,
     pub flow_parents: Vec<String>,
     pub message: Option<String>,
+    pub agent: Option<String>,
 }
 
 impl CommitOptions {
@@ -31,6 +32,7 @@ impl CommitOptions {
             task: task.into(),
             flow_parents: Vec::new(),
             message: None,
+            agent: None,
         }
     }
 }
@@ -70,7 +72,7 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        let generated = generate_commit_message(repo);
+        let generated = generate_commit_message(repo, options.agent.as_deref());
         format_commit_message(
             &options.task,
             &options.flow_parents,
@@ -121,7 +123,7 @@ struct CommitMessage {
     body: String,
 }
 
-fn generate_commit_message(repo: &Path) -> OpsResult<CommitMessage> {
+fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResult<CommitMessage> {
     let template = get_builtin_ops_prompt("commit_message")
         .ok_or_else(|| OpsError::Message("builtin commit_message prompt not found".to_string()))?;
 
@@ -136,9 +138,9 @@ fn generate_commit_message(repo: &Path) -> OpsResult<CommitMessage> {
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = config
-        .agent
-        .clone()
+    let agent = agent_override
+        .map(str::to_string)
+        .or_else(|| config.agent.clone())
         .unwrap_or_else(|| "claude:haiku".to_string());
 
     let launch = AgentConfig {

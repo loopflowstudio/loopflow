@@ -59,6 +59,7 @@ fn pr_create_calls_gh() {
         &PrOptions {
             title: Some("test title".to_string()),
             body: Some("test body".to_string()),
+            agent: None,
         },
         &NullProgress,
     )
@@ -92,6 +93,7 @@ fn pr_update_refreshes_body() {
         &PrOptions {
             title: Some("updated title".to_string()),
             body: Some("updated body".to_string()),
+            agent: None,
         },
         &NullProgress,
     )
@@ -122,6 +124,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         &PrOptions {
             title: Some("test title".to_string()),
             body: Some("test body".to_string()),
+            agent: None,
         },
         &NullProgress,
     )
@@ -167,6 +170,7 @@ fn pr_auto_generates_title_when_missing() {
         &PrOptions {
             title: None,
             body: Some("some body".to_string()),
+            agent: None,
         },
         &NullProgress,
     );
@@ -206,6 +210,7 @@ Body:
         &PrOptions {
             title: None,
             body: None,
+            agent: None,
         },
         &NullProgress,
     );

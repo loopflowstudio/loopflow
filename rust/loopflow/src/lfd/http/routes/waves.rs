@@ -1259,6 +1259,7 @@ pub async fn land_wave_handler(
                     commit_message: None,
                     pr_title: None,
                     pr_body: None,
+                    agent: None,
                 },
                 &progress,
             )

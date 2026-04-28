@@ -26,6 +26,7 @@ pub struct LandOptions {
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,
     pub pr_body: Option<String>,
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +78,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
             options.create_pr,
             pr_title.as_deref(),
             pr_body.as_deref(),
+            options.agent.as_deref(),
             progress,
         )?;
         finalize_remote(
@@ -122,7 +124,7 @@ fn resolve_pr_copy(
         return Ok((pr_title, pr_body));
     }
 
-    let generated = generate_pr_copy(repo_root, progress)?;
+    let generated = generate_pr_copy(repo_root, progress, options.agent.as_deref())?;
     pr_title = Some(generated.title);
     if pr_body.is_none() {
         pr_body = Some(generated.body);
@@ -202,6 +204,7 @@ fn prepare_land(
             push: true,
             create_draft_pr: true,
             message: Some(message),
+            agent: options.agent.clone(),
             ..CommitOptions::for_task("land")
         };
         let _ = commit_workflow(repo_root, &commit_options, progress)?;
@@ -235,6 +238,7 @@ fn finalize_local(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_pr(
     repo_root: &Path,
     pr_exists: bool,
@@ -242,6 +246,7 @@ fn ensure_pr(
     create_pr: bool,
     pr_title: Option<&str>,
     pr_body: Option<&str>,
+    agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
@@ -261,6 +266,7 @@ fn ensure_pr(
                 &crate::ops::pr::PrOptions {
                     title: Some(title.to_string()),
                     body: Some(body.to_string()),
+                    agent: agent_override.map(str::to_string),
                 },
                 progress,
             )?;

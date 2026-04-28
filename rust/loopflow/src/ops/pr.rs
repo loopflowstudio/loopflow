@@ -18,6 +18,7 @@ use crate::ops::util::{command_exists, stderr_from_output};
 pub struct PrOptions {
     pub title: Option<String>,
     pub body: Option<String>,
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +68,7 @@ pub fn create_or_update_pr(
         add: true,
         push: true,
         message: Some("lf op pr: prepare branch".to_string()),
+        agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
@@ -136,14 +138,18 @@ fn resolve_pr_copy(
         });
     }
 
-    let mut generated = generate_pr_copy(repo, progress)?;
+    let mut generated = generate_pr_copy(repo, progress, options.agent.as_deref())?;
     if let Some(body_override) = options.body.as_deref() {
         generated.body = body_override.to_string();
     }
     Ok(generated)
 }
 
-pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCopy> {
+pub fn generate_pr_copy(
+    repo: &Path,
+    progress: &impl Progress,
+    agent_override: Option<&str>,
+) -> OpsResult<PrCopy> {
     let template = get_builtin_ops_prompt("pr_message")
         .ok_or_else(|| OpsError::Message("builtin pr_message prompt not found".to_string()))?;
     let main_repo = resolve_main_repo(repo);
@@ -164,9 +170,9 @@ pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCo
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = config
-        .agent
-        .clone()
+    let agent = agent_override
+        .map(str::to_string)
+        .or_else(|| config.agent.clone())
         .unwrap_or_else(|| "claude:opus".to_string());
     progress.status("Generating PR title/body...");
 

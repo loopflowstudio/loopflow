@@ -192,6 +192,8 @@ pub enum OpsCommand {
     },
     /// Create or update a PR
     Pr {
+        #[arg(short = 'm', long = "model", short_alias = 'M')]
+        model: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -715,5 +717,36 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("redesign"));
         assert!(dry_run);
         assert!(yes);
+    }
+
+    #[test]
+    fn op_pr_accepts_model_override() {
+        let cli = Cli::try_parse_from(["lf", "op", "pr", "-m", "codex"]).expect("parse");
+        let Some(Commands::Op {
+            op: OpsCommand::Pr { model, title, body },
+        }) = cli.command
+        else {
+            panic!("expected pr command");
+        };
+
+        assert_eq!(model.as_deref(), Some("codex"));
+        assert_eq!(title, None);
+        assert_eq!(body, None);
+    }
+
+    #[test]
+    fn top_level_model_reaches_op_command() {
+        let cli = Cli::try_parse_from(["lf", "-m", "codex", "op", "pr"]).expect("parse");
+        let Some(Commands::Op {
+            op: OpsCommand::Pr { model, title, body },
+        }) = cli.command
+        else {
+            panic!("expected pr command");
+        };
+
+        assert_eq!(cli.model.as_deref(), Some("codex"));
+        assert_eq!(model, None);
+        assert_eq!(title, None);
+        assert_eq!(body, None);
     }
 }

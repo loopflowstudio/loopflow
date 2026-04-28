@@ -82,6 +82,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                     commit_message: message.clone(),
                     pr_title: title.clone(),
                     pr_body: body.clone(),
+                    agent: None,
                 },
                 progress,
             )?;
@@ -103,12 +104,17 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             )?;
             Ok(())
         }
-        OpsCommand::Pr { title, body } => {
+        OpsCommand::Pr {
+            model: _,
+            title,
+            body,
+        } => {
             create_or_update_pr(
                 repo,
                 &PrOptions {
                     title: title.clone(),
                     body: body.clone(),
+                    agent: None,
                 },
                 progress,
             )?;
@@ -133,6 +139,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                     create_pr: *create_pr,
                     rebase: !*no_rebase,
                     wave_name: None,
+                    agent: None,
                 },
                 progress,
             )?;

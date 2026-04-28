@@ -106,6 +106,7 @@ fn land_local_squash_merges_to_main() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -150,6 +151,7 @@ fn land_preserves_main_on_failure() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     );
@@ -186,6 +188,7 @@ fn land_cleans_up_remote_branch() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -231,6 +234,7 @@ fn land_clears_scratch_and_preserves_gitkeep() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -278,6 +282,7 @@ fn land_missing_pr_error_includes_branch_name() {
             commit_message: None,
             pr_title: Some("cached title".to_string()),
             pr_body: Some("cached body".to_string()),
+            agent: None,
         },
         &NullProgress,
     );
@@ -317,6 +322,7 @@ fn land_uses_cached_pr_copy_when_available() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     )
@@ -378,6 +384,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         &NullProgress,
     )

@@ -26,7 +26,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::Command;
 
-pub fn run(op: &OpsCommand) -> Result<()> {
+pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match op {
         OpsCommand::Cp {
@@ -55,20 +55,26 @@ pub fn run(op: &OpsCommand) -> Result<()> {
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
+                agent: cli_model.map(str::to_string),
             },
             &progress,
         ),
-        OpsCommand::Pr { title, body } => open_pr(title.clone(), body.clone(), &progress),
+        OpsCommand::Pr { model, title, body } => open_pr(
+            title.clone(),
+            body.clone(),
+            model.as_deref().or(cli_model),
+            &progress,
+        ),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
             no_rebase,
-        } => next_branch_cmd(*create_pr, !*no_rebase, &progress),
+        } => next_branch_cmd(*create_pr, !*no_rebase, cli_model, &progress),
         OpsCommand::Commit {
             message,
             push,
             no_add,
-        } => commit_current(message.as_deref(), *push, !no_add, &progress),
+        } => commit_current(message.as_deref(), *push, !no_add, cli_model, &progress),
         OpsCommand::Abandon { force, branch } => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
@@ -187,13 +193,19 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress) -> Result<()> {
+fn open_pr(
+    title: Option<String>,
+    body: Option<String>,
+    agent_override: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = match create_or_update_pr(
         &repo_root,
         &PrOptions {
             title: title.clone(),
             body: body.clone(),
+            agent: agent_override.map(str::to_string),
         },
         progress,
     ) {
@@ -205,7 +217,15 @@ fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress
             progress.status("Launching rebase agent to resolve conflicts...");
             launch_step_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying PR creation after rebase...");
-            create_or_update_pr(&repo_root, &PrOptions { title, body }, progress)?
+            create_or_update_pr(
+                &repo_root,
+                &PrOptions {
+                    title,
+                    body,
+                    agent: agent_override.map(str::to_string),
+                },
+                progress,
+            )?
         }
         Err(err) => return Err(err.into()),
     };
@@ -223,7 +243,12 @@ fn sync_current() -> Result<()> {
     Ok(())
 }
 
-fn next_branch_cmd(create_pr: bool, rebase: bool, progress: &impl Progress) -> Result<()> {
+fn next_branch_cmd(
+    create_pr: bool,
+    rebase: bool,
+    agent_override: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = next_branch(
         &repo_root,
@@ -231,6 +256,7 @@ fn next_branch_cmd(create_pr: bool, rebase: bool, progress: &impl Progress) -> R
             create_pr,
             rebase,
             wave_name: None,
+            agent: agent_override.map(str::to_string),
         },
         progress,
     )?;
@@ -242,6 +268,7 @@ fn commit_current(
     message: Option<&str>,
     push: bool,
     add: bool,
+    agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -252,6 +279,7 @@ fn commit_current(
             push,
             create_draft_pr: true,
             message: message.map(str::to_string),
+            agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
         },
         progress,

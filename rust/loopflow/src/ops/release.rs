@@ -416,6 +416,7 @@ fn prepare_release_in_worktree(
             commit_message: None,
             pr_title: None,
             pr_body: None,
+            agent: None,
         },
         progress,
     )?;

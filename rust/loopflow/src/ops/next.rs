@@ -18,6 +18,7 @@ pub struct NextOptions {
     pub rebase: bool,
     /// Wave name override (used when lfd orchestrates). If None, inferred from worktree or branch.
     pub wave_name: Option<String>,
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ pub fn next_branch(
         push: true,
         create_draft_pr: true,
         message: Some("lf op next: checkpoint".to_string()),
+        agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;
@@ -84,6 +86,7 @@ pub fn next_branch(
             &crate::ops::pr::PrOptions {
                 title: Some(draft_title),
                 body: Some("*Draft — title and body will be updated.*".to_string()),
+                agent: options.agent.clone(),
             },
             progress,
         )?;

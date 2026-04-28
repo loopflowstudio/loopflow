@@ -6,6 +6,22 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
+    @Test("refresh registers repo before loading waves")
+    func refreshRegistersRepo() async {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-refresh")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let service = MockWaveService()
+        service.waves = [makeWave(id: "wave-1", repoPath: repo.path, status: .running, diffStat: nil)]
+        let state = PortfolioRepoState(repo: repo, waveService: service)
+
+        await state.refresh()
+
+        #expect(service.addedRepoPaths == [repo.path])
+        #expect(service.listWavesTargets.map(\.path) == [repo.path])
+        #expect(state.isConnected)
+        #expect(state.waves.count == 1)
+    }
+
     @Test("summary metrics count blocked and diff totals")
     func summaryMetrics() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
@@ -108,4 +124,86 @@ struct PortfolioRepoStateTests {
             diffStat: diffStat
         )
     }
+}
+
+private final class MockWaveService: WaveServiceProtocol, @unchecked Sendable {
+    var addedRepoPaths: [String] = []
+    var listWavesTargets: [RepoTarget] = []
+    var waves: [Wave] = []
+
+    func listWaves(repo: RepoTarget) async throws -> [Wave] {
+        listWavesTargets.append(repo)
+        return waves
+    }
+
+    func addRepo(path: String) async throws -> RemoteRepo {
+        addedRepoPaths.append(path)
+        return RemoteRepo(path: path, name: URL(fileURLWithPath: path).lastPathComponent, waveCount: 0)
+    }
+
+    func getWave(_ id: String) async throws -> Wave { fatalError("unused") }
+    func createWave(name: String, repo: RepoTarget) async throws -> Wave { fatalError("unused") }
+    func createWave(
+        name: String,
+        repo: RepoTarget,
+        flow: String,
+        run: Bool,
+        status: WaveStatus?
+    ) async throws -> Wave { fatalError("unused") }
+    func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave { fatalError("unused") }
+    func deleteWave(_ id: String) async throws { fatalError("unused") }
+    func cloneWave(_ id: String, name: String?) async throws -> Wave { fatalError("unused") }
+    func run(_ id: String, overrides: RunOverrides?) async throws { fatalError("unused") }
+    func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String?) async throws -> Trigger {
+        fatalError("unused")
+    }
+    func removeTrigger(_ waveId: String, triggerId: String) async throws { fatalError("unused") }
+    func createSession(
+        harness: String,
+        waveRunId: String?,
+        config: AgentSessionConfig
+    ) async throws -> AgentSession { fatalError("unused") }
+    func getSession(_ id: String) async throws -> AgentSession { fatalError("unused") }
+    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
+        fatalError("unused")
+    }
+    func streamSessionEvents(
+        sessionId: String,
+        afterSeq: Int?
+    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error> { fatalError("unused") }
+    func stopSession(_ id: String) async throws -> AgentSession { fatalError("unused") }
+    func stop(_ id: String) async throws { fatalError("unused") }
+    func restartStep(_ id: String) async throws { fatalError("unused") }
+    func listAttention(repo: RepoTarget) async throws -> [AttentionItem] { fatalError("unused") }
+    func getAttention(_ id: String) async throws -> AttentionItem { fatalError("unused") }
+    func markAttentionViewed(_ id: String) async throws -> AttentionItem { fatalError("unused") }
+    func listTerminalSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [TerminalSession] {
+        fatalError("unused")
+    }
+    func getTerminalSession(_ id: String) async throws -> TerminalSession { fatalError("unused") }
+    func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {
+        fatalError("unused")
+    }
+    func startTerminalSession(_ id: String) async throws -> TerminalSession { fatalError("unused") }
+    func cancelTerminalSession(_ id: String) async throws -> TerminalSession { fatalError("unused") }
+    func landWave(_ id: String) async throws { fatalError("unused") }
+    func nextWave(_ id: String) async throws -> String { fatalError("unused") }
+    func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult { fatalError("unused") }
+    func listWorktrees(repo: RepoTarget) async throws -> [WorktreeInfo] { fatalError("unused") }
+    func listRepos() async throws -> [RemoteRepo] { fatalError("unused") }
+    func removeRepo(path: String) async throws { fatalError("unused") }
+    func checkConnection() async throws { fatalError("unused") }
+    func fileDiff(waveId: String, path: String) async throws -> String { fatalError("unused") }
+    func deleteWaveItem(waveId: String, filename: String) async throws { fatalError("unused") }
+    func fetchRoadmap(repo: String, wave: String) async throws -> RoadmapResponse? { fatalError("unused") }
+    func listDiscoveredWaves() async throws -> [DiscoveredWaveSummary] { fatalError("unused") }
+    func usageSummary(
+        filters: UsageAnalyticsFilters,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageSummary { fatalError("unused") }
+    func usageTimeseries(
+        filters: UsageAnalyticsFilters,
+        bucket: UsageTimeBucket,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageTimeseries { fatalError("unused") }
 }

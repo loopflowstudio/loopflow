@@ -105,13 +105,25 @@ private enum AppRuntime {
     }
 }
 
+@MainActor
 private enum LaunchArguments {
+    private static var didConsumeRepo = false
+
     static func repoURL() -> URL? {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--repo"), args.count > index + 1 else {
             return nil
         }
         return URL(fileURLWithPath: args[index + 1])
+    }
+
+    // Returns the launch repo URL only on the first call. Subsequent calls
+    // return nil so additional windows (Cmd-N) fall through to the picker
+    // instead of re-opening the launch repo.
+    static func consumeRepoURL() -> URL? {
+        guard !didConsumeRepo, let url = repoURL() else { return nil }
+        didConsumeRepo = true
+        return url
     }
 }
 
@@ -165,6 +177,45 @@ private enum TmuxTerminationCleanup {
 #endif
 
 #if os(macOS)
+private struct AppRootContent: View {
+    let portfolioService: PortfolioService
+    let screenshotMode: RepoState.ScreenshotMode?
+    let isUITestMode: Bool
+
+    @State private var resolvedRepoURL: URL?
+
+    init(
+        portfolioService: PortfolioService,
+        screenshotMode: RepoState.ScreenshotMode?,
+        isUITestMode: Bool
+    ) {
+        self.portfolioService = portfolioService
+        self.screenshotMode = screenshotMode
+        self.isUITestMode = isUITestMode
+        // Consume the launch arg once per process. The first window grabs
+        // it; later windows (Cmd-N) get nil and fall through to the picker.
+        let initial: URL? = (screenshotMode == nil && !isUITestMode)
+            ? LaunchArguments.consumeRepoURL()
+            : nil
+        _resolvedRepoURL = State(initialValue: initial)
+    }
+
+    var body: some View {
+        if let mode = screenshotMode {
+            ScreenshotWindow(mode: mode)
+        } else if isUITestMode {
+            RepoWindow(
+                repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
+                portfolioService: portfolioService
+            )
+        } else if let url = resolvedRepoURL {
+            RepoWindow(repoURL: url, portfolioService: portfolioService)
+        } else {
+            PortfolioWindow(portfolioService: portfolioService)
+        }
+    }
+}
+
 @main
 struct ConcertoApp: App {
     @State private var portfolioService = PortfolioService()
@@ -185,23 +236,13 @@ struct ConcertoApp: App {
         let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
-        let launchRepoURL = screenshotMode == nil ? LaunchArguments.repoURL() : nil
 
         WindowGroup {
-            Group {
-                if let screenshot = screenshotMode {
-                    ScreenshotWindow(mode: screenshot)
-                } else if uiTestMode != nil {
-                    RepoWindow(
-                        repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
-                        portfolioService: portfolioService
-                    )
-                } else if let launchRepoURL {
-                    RepoWindow(repoURL: launchRepoURL, portfolioService: portfolioService)
-                } else {
-                    PortfolioWindow(portfolioService: portfolioService)
-                }
-            }
+            AppRootContent(
+                portfolioService: portfolioService,
+                screenshotMode: screenshotMode,
+                isUITestMode: uiTestMode != nil
+            )
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)

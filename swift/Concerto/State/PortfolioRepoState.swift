@@ -9,7 +9,7 @@ final class PortfolioRepoState {
     let repo: PortfolioRepo
 
     private let repoPath: String
-    private let waveService: WaveService
+    private let waveService: any WaveServiceProtocol
 
     private(set) var waves: [WaveViewModel] = []
     private(set) var isConnected = false
@@ -21,11 +21,18 @@ final class PortfolioRepoState {
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
     }
 
+    init(repo: PortfolioRepo, waveService: any WaveServiceProtocol) {
+        self.repo = repo
+        self.repoPath = repo.path.normalizedFilePath
+        self.waveService = waveService
+    }
+
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
 
         do {
+            _ = try await waveService.addRepo(path: repoPath)
             let loaded = try await waveService.listWaves(repo: .local(repo.url))
             applyConnectedWaves(loaded)
             isConnected = true

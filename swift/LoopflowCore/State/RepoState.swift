@@ -1210,6 +1210,9 @@ public final class RepoState {
             availableRemoteRepos = []
             if let currentRepo {
                 repoTarget = .local(currentRepo)
+                // Tell the daemon about this repo so wave discovery has
+                // something to walk. Upsert is idempotent.
+                _ = try? await waveService.addRepo(path: currentRepo.path())
             }
         } else {
             for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {

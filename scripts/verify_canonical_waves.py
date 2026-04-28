@@ -167,8 +167,9 @@ def assert_pm_list_matches(step: int, stdout: str, expected: list[AsanaProject])
 
 
 def run_pm_list(repo: Path) -> str:
+    lf_bin = os.environ.get("LF_BIN", "lf")
     result = subprocess.run(
-        ["lf", "op", "pm", "list"],
+        [lf_bin, "op", "pm", "list"],
         cwd=repo,
         text=True,
         capture_output=True,

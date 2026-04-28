@@ -987,6 +987,10 @@ async fn discover_waves_with_client(
 }
 
 pub fn discover_waves(repo: &Path) -> OpsResult<Vec<DiscoveredWave>> {
+    block_on_pm(discover_waves_async(repo))
+}
+
+async fn discover_waves_async(repo: &Path) -> OpsResult<Vec<DiscoveredWave>> {
     let Some(resolution) =
         load_config_resolution(Some(repo)).map_err(|err| OpsError::Message(err.to_string()))?
     else {
@@ -998,11 +1002,11 @@ pub fn discover_waves(repo: &Path) -> OpsResult<Vec<DiscoveredWave>> {
     };
 
     match pm.provider {
-        PmProviderKind::Asana => block_on_pm(async {
+        PmProviderKind::Asana => {
             let token = resolve_provider_token("asana").await?;
             let client = AsanaClient::new(token, resolution.config.asana.clone());
             discover_waves_with_client(repo, &resolution, &client).await
-        }),
+        }
     }
 }
 
@@ -1253,7 +1257,7 @@ async fn pm_list_projects_async(
     _progress: &impl Progress,
 ) -> OpsResult<Vec<PmProjectSummary>> {
     let provider = resolve_repo_provider(repo)?;
-    let projects = discover_waves(repo)?;
+    let projects = discover_waves_async(repo).await?;
     let linked = linked_projects_by_id(repo, provider)?;
 
     let summaries = projects

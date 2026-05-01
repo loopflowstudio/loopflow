@@ -59,7 +59,7 @@ axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 bytes = "1"
 bollard = "0.19"
-cron = "0.12"
+cron = "0.16"
 deadpool-postgres = "0.14"
 futures-util = "0.3"
 gethostname = "1.1"

@@ -63,7 +63,7 @@ cron = "0.16"
 deadpool-postgres = "0.14"
 futures-util = "0.3"
 gethostname = "1.1"
-hmac = "0.12"
+hmac = "0.13"
 humantime = "2"
 ipnet = "2"
 reqwest = { version = "0.13", features = ["blocking", "json"] }

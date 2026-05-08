@@ -14,7 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", .upToNextMinor(from: "0.18.0")),
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", .upToNextMinor(from: "1.0.0")),
     ],
     targets: [
         .target(

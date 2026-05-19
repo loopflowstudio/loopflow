@@ -6,6 +6,16 @@ asana_id: '1214269992004911'
 ---
 # Embedded terminal build driver
 
+> Reshaped by `review-design` (headless). The kickoff's mechanics held up
+> against the code; its data model did not. The kickoff invented two new
+> `TerminalSession` fields (`interactive`, `provider`) and a new
+> `PaneConfig.terminalSessionId`. The codebase already has `source`, `agent`,
+> and `PaneConfig.terminalSessionName`. Persistence is a Postgres table with an
+> explicit column list, so each invented field costs a migration plus three
+> hand-mirrored DTOs. This version reuses what exists: **zero new
+> `TerminalSession` fields, no schema migration, one new wire type (the create
+> request).** See `scratch/questions.md` for the soft spots.
+
 ## Problem
 
 Concerto's workspace multiplexer ships, but the embedded terminal is still a
@@ -24,164 +34,206 @@ broken embedded experience.
 
 **Make lfd the single owner of every embedded terminal.** Collapse the two
 parallel terminal stacks onto one: lfd's daemon-managed `TerminalSession`
-(persisted, tmux-backed, attach contract already wired). The Swift multiplexer
-pane becomes a thin client that attaches to an lfd session by ID. This is the
-load-bearing decision — reattach, provider display, correct worktree, and layout
-durability all fall out of having one source of truth instead of two.
+(persisted in Postgres, tmux-backed, attach contract already wired and proven in
+`TerminalWorkspaceView`). The Swift multiplexer pane becomes a thin client that
+attaches to an lfd session by ID. This is the load-bearing decision — reattach,
+provider display, correct worktree, and layout durability all fall out of having
+one source of truth instead of two.
 
 Four concrete changes ride on that decision:
 
 1. **On-demand session creation.** New `POST /v0/terminal-sessions` endpoint
-   builds an `lf <flow>` invocation for a given `{flow, worktree, provider}`,
-   launches the tmux-backed session, returns attach info. Decoupled from the
-   full wave-run machinery — the palette calls this directly.
+   builds an `lf <flow>` invocation for a given `{wave_id, flow, worktree,
+   agent}`, launches the tmux-backed session, returns the `TerminalSession` plus
+   attach info. Decoupled from the full wave-run machinery — the palette calls
+   this directly. The request body is the **only genuinely new wire type** in
+   this design.
 
-2. **Sessions stay alive after the flow exits.** Replace the wrapped command's
-   trailing `exit "$EXIT_CODE"` (wave/mod.rs:690) with `exec "$SHELL"` for
-   interactive sessions. The flow runs, writes its exit code to the exit file,
-   then drops into a shell at the worktree. Scrollback, re-run, and reattach now
-   mean something *after* a flow completes — the single biggest parity fix.
+2. **Sessions stay alive after the flow exits.** The wrapped command at
+   `wave/mod.rs:689-693` ends in `exit "$EXIT_CODE"`. For palette-created
+   sessions, end it in `exec "$SHELL"` instead: the flow runs, writes its exit
+   code to the exit file, then drops into a shell at the worktree. Scrollback,
+   re-run, and reattach now mean something *after* a flow completes — the single
+   biggest parity fix. The branch is keyed off the session's existing `source`
+   field, not a new flag (see Key decisions).
 
-3. **Durable pane↔session binding.** `PaneConfig` stores the lfd
-   `terminalSessionId` (not a synthesized local name). On Concerto restart the
-   pane reattaches by ID if `tmux has-session`, else shows a "session ended —
-   relaunch" affordance. Layout already persists in `UserDefaults`; this makes
-   the persisted layout *reconnect* instead of spawning fresh blank shells.
+3. **Durable pane↔session binding.** `PaneConfig` already has an optional
+   `terminalSessionName: String?` (MultiplexerLayout.swift:23), and
+   `MultiplexerView.swift:240` already falls back to a synthesized
+   `lf-{waveId}-{paneId}` when it's nil. Store the lfd **session id** in that
+   existing field and delete the synthesized fallback. On Concerto restart the
+   pane reattaches by id if `tmux has-session`, else shows a "session ended —
+   relaunch" affordance. Layout already persists in `UserDefaults`
+   (MultiplexerStore.swift:219); this makes the persisted layout *reconnect*
+   instead of spawning fresh blank shells.
 
-4. **Provider visible in the header.** The create path passes `lf <flow> -m
-   <harness[:model]>` and stores the provider on the session. The pane header
-   shows "claude:opus" / "codex:o3" / "opencode" — multi-agent dispatch you can
-   see.
+4. **Provider visible in the header.** `TerminalSession` already carries
+   `agent: String` ("claude", "claude:opus", …). The create path passes
+   `lf <flow> -m <agent>` and stores that same string as the session's `agent`.
+   The pane header reads `session.agent`. **No new `provider` field** — it would
+   duplicate `agent` across a Postgres column and three DTO mirrors, the exact
+   drift the DTO rule forbids.
 
 ## De-risking
 
+Every line reference below was re-verified against the tree (kickoff numbers
+drifted; these are current).
+
 | Question | Finding | Impact on design |
 |----------|---------|------------------|
-| Can the embedded pane attach to an lfd tmux session at all? | Yes. `POST /v0/terminal-sessions/{id}/attach` returns `{session_name, host, cwd, status}` (terminal_sessions.rs:89). `GhosttyTerminalView` already takes `argv`; `tmux attach-session -t {name}` is exactly what the local `TmuxSession.attachCommand()` produces. The contract exists; only the wiring is missing. | Swift pane swaps its local `TmuxSession` for an attach against an lfd session ID. No new transport. |
-| Does an lfd session survive a flow finishing? | **No.** Wrapped command is `…; {cmd}; EXIT_CODE=$?; printf … > exit_file; exit "$EXIT_CODE"` (wave/mod.rs:690). When `lf build` ends, the shell exits, tmux session dies. `wait_for_tmux_session_exit` (wave/mod.rs:728) *depends* on that death to mark completion. | Interactive sessions must `exec "$SHELL"` instead of `exit`. Completion detection must switch from "tmux session died" to "exit file appeared" — the poller watches the exit file, not `has-session`. Headless wave-executor sessions keep the old auto-exit behavior (don't leak tmux servers in autonomous runs); the difference is a per-session `interactive` flag. |
-| Is there an API to launch a flow on demand? | **No.** Routes are list / get / attach / start / complete / cancel (http/mod.rs:82-102). Sessions are created only inside the wave executor (wave/mod.rs:310). | Add `POST /v0/terminal-sessions` (create). Reuse `build_lf_step_command` (helpers.rs:358) for argv, `tmux_session_name` for naming, `launch_tmux_terminal_session` for spawn. |
-| Can `lf` take a provider override? | Yes. `lf <step> -m/--model <harness[:model]>` (lf/mod.rs:42); launch resolves override → step agent → config agent → default (launch.rs:138). | Create endpoint injects `-m <provider>` into argv. No CLI change needed. Provider stored on the session for the header. |
-| Does tmux survive an lfd restart (not just a Concerto restart)? | Yes. `tmux new-session -d` detaches into the independent tmux server; lfd's process isn't tmux's parent. lfd persists `TerminalSession` rows via `Store` (store/mod.rs:597). | lfd reconciles on startup: for each non-terminal session, `tmux has-session` → keep if alive, else mark complete. Without this, a restarted lfd shows stale "running" sessions. |
-| Two terminal stacks — how entangled? | Multiplexer `TerminalPaneView` uses client-side `TmuxSession` (`lf-{waveId}-{paneId}`). `TerminalWorkspaceView` already uses the lfd attach RPC (`RepoState.attachTerminalSession`, RepoState.swift:867). | The lfd-attach path is proven in `TerminalWorkspaceView`; lift it into the multiplexer pane and delete the client-side `TmuxSession` ("keep one implementation", CLAUDE.md). |
-| Parity ceiling — will the embedded terminal ever fully match Ghostty? | Known wave risk. Ghostty-in-Ghostty is solid (full `NSTextInputClient`, IME, mouse, clipboard already wired in `GhosttyMetalView`). The real gap was never rendering — it was lifecycle (death on exit, no reattach, wrong cwd). | This design closes the lifecycle gap, not the rendering gap. "Pop out to external Ghostty" stays a one-click escape (`openWorkspaceShellExternally`, TerminalWorkspaceView.swift:453) for sessions that genuinely want a standalone window. |
+| Can the embedded pane attach to an lfd tmux session at all? | Yes, and it's already done in one view. `POST /v0/terminal-sessions/{id}/attach` returns `TerminalConnectionInfoDto { session_name, host, cwd, status }` (`http/routes/terminal_sessions.rs:89`, struct at `:290-295`). `TerminalWorkspaceView.swift:187-191` already turns that into `argv: ["tmux","attach-session","-t",sessionName]` and feeds `GhosttyTerminalView(workingDirectory:argv:)` (`GhosttyTerminalView.swift:18-30`), gated on `connection.usesLocalTmux`. The contract exists *and ships*; only the multiplexer-pane wiring is missing. | The multiplexer pane reuses `RepoState.attachTerminalSession(_:)` (`RepoState.swift:867`) — the proven path — and deletes its client-side `TmuxSession`. No new transport. |
+| Does an lfd session survive a flow finishing? | **No.** `wave/mod.rs:689-693`: `…; {cmd}; EXIT_CODE=$?; printf '%s' "$EXIT_CODE" > {exit_file}; exit "$EXIT_CODE"`. When `lf` ends, the shell exits, tmux dies. `wait_for_tmux_session_exit` (`wave/mod.rs:728-743`) *depends* on that death — it polls `tmux has-session` every 250ms and breaks when the session is gone. | Palette-created sessions `exec "$SHELL"` instead of `exit`. Completion for those is detected by the exit file appearing, not by session death. Wave-executor sessions keep the existing auto-exit + has-session path (don't leak tmux servers in autonomous runs). The discriminator is `source`, already on the session. |
+| Is there an API to launch a flow on demand? | **No.** Routes registered at `http/mod.rs:82-104` are list / get / `{id}/attach` / `{id}/start` / `{id}/complete` / `{id}/cancel`. No `POST /terminal-sessions`. Sessions are constructed only as a struct literal inside the wave executor (`wave/mod.rs:320-346`, then `store.create_terminal_session()`). | Add `POST /v0/terminal-sessions` (create). Argv via `build_lf_step_command` (`helpers.rs:358`, signature `(step_name, batch, directions, area, wave_name) -> Vec<String>` — note it takes **no** model or cwd arg, so the endpoint appends `-m <agent>` and sets `cwd` itself). Name via `tmux_session_name` (`terminal_session.rs:14`). Spawn via `launch_tmux_terminal_session` (`wave/mod.rs:669-725`). |
+| Can `lf` take a provider override? | Yes. `-m`/`--model <harness[:model]>`, `short_alias = 'M'` (`lf/mod.rs:42`). Resolution: override → step agent → config agent → step default → `"claude:opus"` (`engine/launch.rs:138-147`). | Create endpoint appends `-m <agent>` to argv and stores the same string as `TerminalSession.agent`. No CLI change. No new field. |
+| Does tmux survive an lfd restart (not just a Concerto restart)? | Yes. `tmux new-session -d` detaches into the independent tmux server; lfd isn't tmux's parent. Sessions persist as Postgres rows — `INSERT INTO terminal_sessions (16 cols)` at `store/postgres.rs:893-925`. | lfd reconciles on startup: for each non-terminal session, `tmux has-session` → keep if alive, else mark complete. Without this a restarted lfd shows stale "running" sessions. **Postgres is the only persistence path found** — adding a column means a schema migration, which is why this design adds none. |
+| Two terminal stacks — how entangled? | Multiplexer `TerminalPaneView` (`MultiplexerView.swift:182`) uses client-side `TmuxSession` (`TmuxSession.swift:8`, name `lf-{waveId}-{paneId}` at `:240`). `TerminalWorkspaceView` already uses the lfd attach RPC (`RepoState.attachTerminalSession`, `RepoState.swift:867`). | Lift the proven lfd-attach path into the multiplexer pane; delete `TmuxSession` and its `attachCommand()` ("keep one implementation", CLAUDE.md). |
+| Does `TerminalSession` already model the things the kickoff wanted to add? | **Yes — this is the key correction.** Rust struct (`terminal_session.rs:79-106`) and Swift mirror (`TerminalSession.swift:21-70`) both have `source: String` ("wave_step" / "user_shell") and `agent: String` ("claude" / "interactive" / …). Neither has `interactive` or `provider`. | Reuse `source` for the lifecycle discriminator (new value, see Key decisions) and `agent` for provider display. Zero new `TerminalSession` fields; no migration; no new DTO mirror for the session itself. |
+| Parity ceiling — will the embedded terminal ever fully match Ghostty? | Known wave risk. `GhosttyMetalView` (`GhosttyTerminalView.swift:81`) is a real `NSTextInputClient` embedding — IME (`:326-413`), mouse (`:421-500`), clipboard (`:544-561`), keyboard (`:235-322`) all wired. The gap was never rendering; it was lifecycle. | This design closes the lifecycle gap, not the rendering gap. `openWorkspaceShellExternally` (`TerminalWorkspaceView.swift:453`) stays a one-click escape for genuine standalone-window sessions. |
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| Keep client-side `TmuxSession`, teach it about lfd | Smallest Swift diff | Two sources of truth permanently. Reattach, provider, and worktree all drift between the stack the palette uses and the stack a wave run uses. Directly violates "keep one implementation." |
-| Drive the pane off lfd's agent **Session** SSE API (`/sessions/{id}/events`) instead of tmux | Reuses streaming infra from native-chat work | Not a real PTY — no scrollback, no interactive re-run, dies with the daemon. tmux is what makes "still there after lunch" true across lfd restarts. SSE sessions are the right tool for chat, not for a build terminal. |
-| `tmux set-option remain-on-exit on` instead of `exec $SHELL` | One tmux option, no command rewrite | Leaves a *dead* pane that needs `respawn-pane` to become usable; reattach lands you in a corpse. `exec $SHELL` lands you in a live shell at the worktree, ready to re-run. |
-| Spawn tmux client-side from Swift, persist layout client-side only | No Rust changes | lfd can't observe or reconcile sessions it didn't create; a wave run and a palette launch produce incompatible session namespaces. The daemon must own sessions for governance/observability to ever see embedded work. |
+| Keep client-side `TmuxSession`, teach it about lfd | Smallest Swift diff | Two sources of truth permanently. Reattach, provider, and worktree drift between the palette stack and the wave-run stack. Violates "keep one implementation." |
+| Add explicit `interactive: bool` + `provider` fields to `TerminalSession` (the kickoff's model) | Reads literally | Both duplicate existing fields (`source`, `agent`). Each costs a Postgres migration + Rust/Swift DTO mirrors + a new fixture field — the precise drift the DTO rule exists to kill. Rejected in favor of reusing `source`/`agent`. |
+| Drive the pane off lfd's agent **Session** SSE API instead of tmux | Reuses native-chat streaming infra | Not a real PTY — no scrollback, no interactive re-run, dies with the daemon. tmux is what makes "still there after lunch" true across lfd restarts. SSE is the right tool for chat (task 2), not a build terminal. |
+| `tmux set-option remain-on-exit on` instead of `exec $SHELL` | One tmux option, no command rewrite | Leaves a *dead* pane needing `respawn-pane`; reattach lands you in a corpse. `exec $SHELL` lands you in a live shell at the worktree, ready to re-run. |
+| Spawn tmux client-side from Swift, persist layout client-side only | No Rust changes | lfd can't observe or reconcile sessions it didn't create; a wave run and a palette launch produce incompatible namespaces. The daemon must own sessions for governance/observability to ever see embedded work. |
 
 ## Key decisions
 
 - **lfd owns terminals; Swift is a client.** The decision someone will question
-  ("why not just spawn tmux from the app?"). Answer: the daemon already persists
+  ("why not just spawn tmux from the app?"). The daemon already persists
   sessions, already has the attach contract, already observes wave runs through
   the same journals. One owner means reattach, provider, worktree, and
   cross-restart survival are properties of the system, not of whichever view you
   opened.
 
-- **Interactive vs managed session mode.** A new `interactive: bool` on
-  `TerminalSession`. Interactive (palette-launched) → `exec "$SHELL"` after the
-  flow, completion detected via exit-file watch. Managed (wave-executor) →
-  unchanged `exit "$EXIT_CODE"`, completion via session death. Headless
-  autonomous runs must not leak idle tmux servers; interactive build sessions
-  must not vanish. Same code path, one flag.
+- **Lifecycle mode is provenance, not a new flag.** `TerminalSession.source`
+  already discriminates `"wave_step"` from `"user_shell"`. A palette-launched
+  flow is a *third provenance*: it runs `lf <flow>` like a wave step but must
+  stay alive like a user shell. Add a new `source` value — proposed
+  `"palette"` — and key behavior off it: `source == "palette"` → `exec "$SHELL"`
+  after the flow + completion via exit-file watch; everything else → unchanged
+  `exit "$EXIT_CODE"` + has-session watch. `source` is a `String` column, so a
+  new value needs no migration. The exact string is the one soft spot — see
+  `scratch/questions.md`.
 
-- **Completion = exit file, not session death.** The wrapped command already
-  writes the exit code to `{session_id}.exit` *before* exiting (wave/mod.rs:690).
-  The poller watches for that file for interactive sessions. This is a strictly
-  more robust completion signal — it survives the session staying alive.
+- **Provider display reuses `agent`.** The create request carries an `agent`
+  override string; the endpoint appends it to argv as `-m <agent>` and stores it
+  as `TerminalSession.agent`. The header reads `session.agent`. No `provider`
+  field — it would be a synonym for `agent` replicated across three layers.
 
-- **Pane stores the lfd session ID.** `PaneConfig.terminalSessionId` replaces the
-  synthesized `lf-{waveId}-{paneId}` name. Layout JSON in `UserDefaults` already
-  persists; binding to a daemon ID is what makes a restored layout reconnect to
-  live output instead of blank shells.
+- **Completion = exit file, not session death (palette sessions only).** The
+  wrapped command already writes the exit code to the exit file *before* the
+  trailing `exit`/`exec`. For palette sessions the poller watches that file
+  appear; this survives the session staying alive and is strictly more robust.
+  Wave-executor sessions keep `wait_for_tmux_session_exit` unchanged.
 
-- **DTO discipline.** The create request and the session DTO cross the lfd HTTP
-  boundary and are mirrored in Rust/Swift. No `#[serde(default)]`, no Swift init
-  defaults — `interactive` and `provider` are required-or-explicitly-Optional,
-  with a round-trip fixture under `tests/fixtures/dto/` and a per-language
-  fixture test (CLAUDE.md "DTOs").
+- **Pane binds to the lfd session id via the existing field.**
+  `PaneConfig.terminalSessionName` already persists through `UserDefaults`.
+  Store the lfd session **id** there and delete the synthesized
+  `lf-{waveId}-{paneId}` fallback at `MultiplexerView.swift:240`. No new
+  `PaneConfig` field; one field changes meaning (and arguably should be renamed
+  `terminalSessionId` for honesty — see questions).
+
+- **DTO discipline, applied honestly.** The only new wire type is the create
+  **request** (`{wave_id, flow, worktree, agent}`). It crosses the lfd HTTP
+  boundary → no `#[serde(default)]`, no Swift init defaults, every field
+  required-or-explicitly-Optional. Add a `tests/fixtures/dto/` fixture for it
+  and a per-language fixture test. Also add the missing
+  `tests/fixtures/dto/terminal_session.json` (only `session.json` /
+  `session_unsupported_input.json` exist today) so the *response* shape is
+  pinned — but the session DTO gains no fields, so this is pinning, not
+  extending. `TerminalSessionDto` lives at `http/dto.rs:245-266`, converter at
+  `:268`; Rust test `rust/loopflow/tests/dto_fixtures.rs`, Swift test
+  `swift/ConcertoTests/DTOFixtureTests.swift`.
 
 ## Scope
 
 **In scope:**
-- `POST /v0/terminal-sessions` create endpoint (`{wave_id, flow, worktree, provider, interactive}` → session + attach info)
-- `interactive` + `provider` fields on `TerminalSession`; DTO fixtures + tests
-- Interactive-mode tmux command (`exec "$SHELL"` after flow) and exit-file-watch completion path
-- lfd startup reconcile: prune dead sessions, keep live ones
-- Multiplexer terminal pane attaches to an lfd session by ID; delete client-side `TmuxSession`
-- `PaneConfig.terminalSessionId`; restore-time reattach with "session ended — relaunch" fallback
-- Command palette flow launch → create session → bind to focused (or new) pane, replacing the external `runWave` spawn for the in-app path
-- Pane header shows provider; provider picker in the launch path (Claude / Codex / OpenCode)
-- Polish on the lifecycle surface only: focus ring on the terminal pane, "session ended" / "reattaching…" states, header composition
+- `POST /v0/terminal-sessions` create endpoint (`{wave_id, flow, worktree,
+  agent}` → `TerminalSession` + attach info); register alongside the existing
+  six routes at `http/mod.rs:82-104`
+- New `source` value (`"palette"`) — Rust + Swift constants, no schema change
+- Create-request DTO fixture + Rust/Swift fixture tests; add the missing
+  `terminal_session.json` response fixture
+- `source == "palette"` tmux command (`exec "$SHELL"` after flow) and
+  exit-file-watch completion path, branched at `wave/mod.rs:689-693` /
+  `:728-743`
+- lfd startup reconcile: for non-terminal sessions, `tmux has-session` → keep
+  live, else mark complete
+- Multiplexer terminal pane attaches via `RepoState.attachTerminalSession`;
+  delete client-side `TmuxSession` + `attachCommand()`
+- `PaneConfig.terminalSessionName` holds the lfd session id; delete the
+  synthesized fallback; restore-time reattach with "session ended — relaunch"
+  fallback
+- Command palette flow launch → create session → bind to focused (or new) pane,
+  replacing the external launch path for the in-app case
+- Pane header shows `session.agent`; provider picker in the launch path
+  (Claude / Codex / OpenCode) feeding the create request's `agent`
+- Polish on the lifecycle surface only: focus ring on the terminal pane,
+  "session ended" / "reattaching…" states, header composition
 
 **Out of scope:**
 - Native chat rendering, history, composer (task 2 — must not steal focus)
-- Governance dashboards / portfolio / calibration (belongs to `workflows`, per Desktop README "Not here")
-- Replacing external Ghostty for every session — pop-out stays a one-click escape
-- Closing the *rendering* parity gap — rendering already works; this is lifecycle
-- tmux split/window management *inside* a single session — pane-level splits are the multiplexer's job, already shipped
+- Governance dashboards / portfolio / calibration (`workflows`, per README)
+- Replacing external Ghostty for every session — pop-out stays one click
+- Closing the *rendering* parity gap — rendering already works
+- tmux split/window management *inside* a single session — multiplexer's job,
+  already shipped
+- Any new `TerminalSession` field or Postgres migration — explicitly designed
+  out
 
 ## Done when
 
-Verified by `scripts/verify_embedded_build_driver.py` (new; one command, drives a
-real lfd + a scripted flow), asserting:
+Verified by `scripts/verify_embedded_build_driver.py` (new; one command, drives
+a real lfd + a scripted flow), asserting:
 
-- `POST /v0/terminal-sessions` with a flow + worktree + provider returns a
-  session whose `attach` info points at a live tmux session running `lf <flow>`
+- `POST /v0/terminal-sessions` with a flow + worktree + agent returns a session
+  whose attach info points at a live tmux session running `lf <flow> -m <agent>`
 - After the flow exits, `tmux has-session` is still true and the session shows a
-  shell at the worktree (interactive mode); the session row is `Succeeded` with
-  the captured exit code
-- Killing and restarting lfd leaves the session attachable; a session whose tmux
-  died is reconciled to a terminal state on startup
-- The created session's `provider` round-trips through the DTO and matches `-m`
+  shell at the worktree (`source == "palette"`); the session row is `Succeeded`
+  with the captured exit code, detected via the exit file
+- Killing and restarting lfd leaves the session attachable; a session whose
+  tmux died is reconciled to a terminal state on startup
+- `session.agent` round-trips through the DTO and matches the `-m` value
+- The create-request fixture round-trips identically in Rust and Swift
 
 Plus an observable Concerto walkthrough in the same script's `--ui` mode:
 `⌘K` → "ship" → Enter runs the flow in the focused embedded pane (no
 Terminal.app window); quit and relaunch Concerto → the pane reattaches with
-output intact; the pane header reads the dispatched provider.
+output intact; the header reads the dispatched agent.
 
-The subjective bar from the finish line — "no longer feels second-class for
-build work" — is met when the external-Ghostty path is used by choice, not
-because the embedded one lost state.
+The subjective bar — "no longer feels second-class for build work" — is met
+when external Ghostty is used by choice, not because the embedded one lost
+state.
 
 ## Wave alignment
 
 **Vision** (Desktop README): "Make Concerto the default build-driving surface."
-This design *is* that vision's mechanism — it removes every reason the embedded
+This design is that vision's mechanism — it removes every reason the embedded
 terminal loses to external Ghostty for build work.
 
-**Goals** (item "Done when"): advances all five —
-- "Flow launch from command palette runs in the embedded terminal, not
-  Terminal.app" → create endpoint + palette rewiring
-- "Sessions survive Concerto restart and reattach cleanly" → lfd ownership +
-  durable pane binding + `exec $SHELL`
-- "Multi-agent dispatch visible in the session header" → `provider` field +
-  `-m` injection + header
-- "Layout persists per wave across launches" → `PaneConfig.terminalSessionId`
-  reconnect on restore
-- "No longer feels second-class" → lifecycle parity (the actual gap)
+**Goals** — advances all five: palette launch (create endpoint + rewiring),
+restart survival (lfd ownership + durable pane binding + `exec $SHELL`),
+multi-agent dispatch visible (reused `agent` field + `-m` + header), layout
+persists (existing `terminalSessionName` reconnect), no longer second-class
+(lifecycle parity).
 
-**Risks** (Desktop README): "Embedded terminal parity has a ceiling" — addressed
-head-on in de-risking: the ceiling was lifecycle, not rendering; rendering
-already works, and pop-out stays for the genuine standalone-window cases.
-"Build-driver polish can sprawl" — scope explicitly fences polish to the
-lifecycle surface and excludes chat (task 2) and governance (workflows).
+**Risks** (README): "parity has a ceiling" — addressed: the ceiling was
+lifecycle, not rendering; pop-out stays. "Polish can sprawl" — scope fences
+polish to the lifecycle surface, excludes chat and governance.
 
-New risk introduced: leaked tmux servers if an interactive session is never
-closed. Mitigated by the startup reconcile and a session `cancel` that kills
-tmux (terminal_sessions.rs:137 already does this) — but document a cap or idle
+New risk: leaked tmux servers if a palette session is never closed. Mitigated by
+startup reconcile and the existing cancel→`stop_tmux_terminal_session`
+(`terminal_sessions.rs:137-148`, `tmux kill-session`). Document a cap or idle
 sweep if dogfooding shows accumulation.
 
 ## Measure
 
 - **Baseline:** count of build flows launched via external Terminal.app/Ghostty
   vs embedded over a dogfooding day (instrument the palette launch path).
-- **Target:** ≥90% of build-flow launches stay embedded (the finish line's
-  "90% of daily build work stays in the app").
-- **Restart integrity:** quit/relaunch Concerto mid-flow N=10 times; 10/10
-  reattach with progressed output and no orphaned/duplicate sessions.
+- **Target:** ≥90% of build-flow launches stay embedded.
+- **Restart integrity:** quit/relaunch Concerto mid-flow N=10; 10/10 reattach
+  with progressed output, no orphaned/duplicate sessions.

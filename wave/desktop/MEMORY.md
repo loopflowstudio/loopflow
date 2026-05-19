@@ -28,9 +28,10 @@
 - **Palette lifecycle completion is exit-file based.** Wave-run tmux sessions
   still exit the shell and complete after `tmux has-session` goes false.
   Palette sessions write `.lf/tmp/terminal-sessions/<id>.exit`, mark the row
-  terminal, then `exec "${SHELL:-/bin/zsh}"` so the pane stays attachable.
-  Startup reconcile re-arms palette exit-file watchers when tmux is still live
-  and completes rows whose tmux session died while lfd was down.
+  terminal, remove the temporary exit file, then keep the tmux pane alive via
+  `exec "${SHELL:-/bin/zsh}"` so the pane stays attachable. Startup reconcile
+  re-arms palette exit-file watchers when tmux is still live and completes rows
+  whose tmux session died while lfd was down.
 - **Multiplexer pane binding stores lfd session ids.** `PaneConfig` uses
   `terminalSessionId`; default terminal panes no longer synthesize
   `lf-<waveId>-<paneId>`. A pane without a session id shows an empty-state until

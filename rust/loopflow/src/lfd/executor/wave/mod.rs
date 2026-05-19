@@ -894,9 +894,10 @@ impl WaveExecutor {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
-        let exit_code = read_tmux_exit_code(exit_file).await?.unwrap_or(1);
+        let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
         self.complete_terminal_session(&session.id, exit_code)
             .await?;
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         Ok(exit_code)
     }
 

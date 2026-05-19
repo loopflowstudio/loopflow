@@ -4,7 +4,7 @@
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test -p loopflow
-uv run pytest python/tests/test_dto_fixtures.py -q
+uv run pytest python/tests/
 swift test --package-path swift
 uv run python scripts/verify_embedded_build_driver.py --skip-build
 ```
@@ -25,11 +25,11 @@ Make Concerto's embedded terminal a first-class build-driving surface. Palette a
 ## Key decisions
 
 - Added `POST /v0/terminal-sessions` with a required `{wave_id, flow, worktree, agent}` request and a `{session, connection}` response.
-- Palette terminal sessions write an exit file, complete the lfd row from that file, then `exec $SHELL` so scrollback and reruns survive after the flow exits.
+- Palette terminal sessions write a temporary exit file, complete the lfd row from that file, remove it, then keep the tmux pane alive via `exec $SHELL` so scrollback and reruns survive after the flow exits.
 - Startup reconcile handles tmux sessions that outlive lfd and rows whose tmux sessions disappeared while lfd was down.
 - Multiplexer panes store lfd session ids and attach through `RepoState.attachTerminalSession`; the old synthesized `lf-<waveId>-<paneId>` path is gone.
 - DTO fixtures pin the new create request and terminal-session response shape across Rust, Swift, and Python.
-- Gitignored `.lf/tmp/`: palette sessions write exit files there, so the runtime scratch directory must not be tracked.
+- Gitignored `.lf/tmp/`: palette sessions use temporary exit files there, so the runtime scratch directory must not be tracked.
 
 ## Not included
 

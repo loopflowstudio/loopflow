@@ -84,16 +84,15 @@
   `MarkdownBlock` and does not reappear as platform-specific markdown styling
   helpers.
 
-## Patterns (verified 2026-05-19, native-chat-ux review-design)
+## Patterns (verified 2026-05-19, native-chat-ux review-design pre-M1)
 
-- **Chat markdown parsing is in the view layer, not Core.** Current parser is
-  `parseMessageSegments` + text/code-only `MessageSegment` enum at
-  `swift/Concerto/Views/WaveSessionView.swift:691-753`, cached by
-  `MessageSegmentCache` keyed on `content.count` (`cachedContentLength`) in
-  `swift/Concerto/Views/MessageRow.swift`, tested in
-  `swift/ConcertoTests/WaveSessionViewTests.swift`. native-chat M1 *relocates*
-  this into `LoopflowCore` (`MarkdownBlock`/`parseMarkdownBlocks`) and deletes
-  the old enum/parser/tests — not a parallel impl.
+- **Pre-M1 chat markdown parsing lived in the view layer, not Core.** The old
+  implementation was `parseMessageSegments` + text/code-only `MessageSegment`
+  in `swift/Concerto/Views/WaveSessionView.swift`, cached by
+  `MessageSegmentCache` keyed on `content.count`, with parser tests in
+  `swift/ConcertoTests/WaveSessionViewTests.swift`. M1 replaced it with
+  `LoopflowCore` `MarkdownBlock`/`parseMarkdownBlocks` and deleted the old
+  enum/parser/tests; do not cite this as current architecture.
 - **iOS already does inline markdown; macOS does not.** iOS:
   `NSAttributedString(markdown:options:.init(interpretedSyntax:.inlineOnlyPreservingWhitespace))`
   at `swift/Concerto/Platform/iOS/SelectableAssistantTextView.swift:112-114`.
@@ -150,3 +149,8 @@
   journal ids or branch-derived ingest claims must clear that environment
   explicitly or full `cargo test -p loopflow` fails only under agent-driven
   validation.
+- Headless Concerto UI validation on macOS may compile and run all Swift package
+  tests, then fail the `xcodebuild test` UI runner bootstrap with
+  `Early unexpected exit` / signal kill when no rendering environment is
+  available. Treat that as an environment limitation after confirming
+  `swift test --package-path swift` is green and recording the xcresult path.

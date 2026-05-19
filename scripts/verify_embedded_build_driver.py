@@ -29,27 +29,27 @@ ROOT_URL = "http://127.0.0.1:2486"
 BASE_URL = f"{ROOT_URL}/v0"
 
 
-def log(message: str) -> None:
+def _log(message: str) -> None:
     print(message, flush=True)
 
 
-def fail(message: str) -> None:
-    log(f"FAIL: {message}")
+def _fail(message: str) -> None:
+    _log(f"FAIL: {message}")
     raise SystemExit(1)
 
 
-def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, text=True, **kwargs)
 
 
-def read_token() -> str | None:
+def _read_token() -> str | None:
     try:
         return (Path.home() / ".lf" / "session-token").read_text().strip() or None
     except OSError:
         return None
 
 
-def request(method: str, path: str, token: str, body: dict | None = None) -> dict:
+def _request(method: str, path: str, token: str, body: dict | None = None) -> dict:
     data = None
     headers = {"Authorization": f"Bearer {token}"}
     if body is not None:
@@ -61,11 +61,11 @@ def request(method: str, path: str, token: str, body: dict | None = None) -> dic
             payload = response.read().decode()
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
-        fail(f"{method} {path} failed: HTTP {error.code}\n{detail}")
+        _fail(f"{method} {path} failed: HTTP {error.code}\n{detail}")
     return json.loads(payload) if payload else {}
 
 
-def health_ready() -> bool:
+def _health_ready() -> bool:
     try:
         with urllib.request.urlopen(f"{ROOT_URL}/health", timeout=2) as response:
             return response.status == 200
@@ -73,15 +73,15 @@ def health_ready() -> bool:
         return False
 
 
-def build_lfd() -> None:
-    log("Building lfd…")
-    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT)
+def _build_lfd() -> None:
+    _log("Building lfd…")
+    result = _run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT)
     if result.returncode != 0:
-        fail("cargo build --bin lfd failed")
+        _fail("cargo build --bin lfd failed")
 
 
-def kill_existing_lfd() -> None:
-    result = run(["lsof", "-ti", ":2486"], capture_output=True)
+def _kill_existing_lfd() -> None:
+    result = _run(["lsof", "-ti", ":2486"], capture_output=True)
     if result.returncode != 0:
         return
     for pid in result.stdout.splitlines():
@@ -92,8 +92,8 @@ def kill_existing_lfd() -> None:
     time.sleep(1)
 
 
-def start_lfd() -> subprocess.Popen:
-    kill_existing_lfd()
+def _start_lfd() -> subprocess.Popen:
+    _kill_existing_lfd()
     env = os.environ.copy()
     env["RUST_LOG"] = "loopflow=info"
     # Self-contained smoke: this script exercises terminal-session lifecycle,
@@ -110,9 +110,9 @@ def start_lfd() -> subprocess.Popen:
     )
     for _ in range(40):
         time.sleep(0.5)
-        token = read_token()
-        if token and health_ready():
-            log("lfd ready")
+        token = _read_token()
+        if token and _health_ready():
+            _log("lfd ready")
             return proc
     proc.terminate()
     try:
@@ -120,22 +120,22 @@ def start_lfd() -> subprocess.Popen:
     except subprocess.TimeoutExpired:
         proc.kill()
         output, _ = proc.communicate(timeout=5)
-    fail(f"lfd did not become ready\n{output[-2000:]}")
+    _fail(f"lfd did not become ready\n{output[-2000:]}")
 
 
-def tmux_has_session(name: str) -> bool:
-    return run(["tmux", "has-session", "-t", name], capture_output=True).returncode == 0
+def _tmux_has_session(name: str) -> bool:
+    return _run(["tmux", "has-session", "-t", name], capture_output=True).returncode == 0
 
 
-def wait_for_terminal_status(token: str, session_id: str, timeout: float = 30) -> dict:
+def _wait_for_terminal_status(token: str, session_id: str, timeout: float = 30) -> dict:
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
-        last = request("GET", f"/terminal-sessions/{session_id}", token)
+        last = _request("GET", f"/terminal-sessions/{session_id}", token)
         if last["status"] in {"succeeded", "failed", "canceled"}:
             return last
         time.sleep(0.5)
-    fail(f"terminal session did not reach terminal status: {last}")
+    _fail(f"terminal session did not reach terminal status: {last}")
 
 
 def main() -> None:
@@ -148,13 +148,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.skip_build:
-        build_lfd()
-    proc = start_lfd()
+        _build_lfd()
+    proc = _start_lfd()
     try:
-        token = read_token()
+        token = _read_token()
         if not token:
-            fail("missing lfd session token")
-        wave = request(
+            _fail("missing lfd session token")
+        wave = _request(
             "POST",
             "/waves",
             token,
@@ -166,7 +166,7 @@ def main() -> None:
                 "run": False,
             },
         )
-        created = request(
+        created = _request(
             "POST",
             "/terminal-sessions",
             token,
@@ -182,13 +182,13 @@ def main() -> None:
         assert session["source"] == "palette"
         assert session["agent"] == args.agent
         assert connection["session_name"] == session["tmux_name"]
-        if not tmux_has_session(session["tmux_name"]):
-            fail("tmux session was not created")
-        completed = wait_for_terminal_status(token, session["id"])
-        if not tmux_has_session(session["tmux_name"]):
-            fail("palette tmux session exited instead of staying attachable")
-        log(f"OK: {completed['status']} session stayed attachable at {session['tmux_name']}")
-        request("POST", f"/terminal-sessions/{session['id']}/cancel", token, {})
+        if not _tmux_has_session(session["tmux_name"]):
+            _fail("tmux session was not created")
+        completed = _wait_for_terminal_status(token, session["id"])
+        if not _tmux_has_session(session["tmux_name"]):
+            _fail("palette tmux session exited instead of staying attachable")
+        _log(f"OK: {completed['status']} session stayed attachable at {session['tmux_name']}")
+        _request("POST", f"/terminal-sessions/{session['id']}/cancel", token, {})
     finally:
         proc.terminate()
         try:

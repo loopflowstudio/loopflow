@@ -1150,7 +1150,7 @@ private struct LaunchpadPaneView: View {
                             launchButton("Launch lf session", icon: "sparkles") {
                                 launchPaletteSession(flow: selectedStep, worktreePath: worktreePath)
                             }
-                            launchButton("Fresh shell", icon: "terminal") {
+                            launchButton("Empty terminal pane", icon: "terminal") {
                                 replaceWithEmptyTerminal()
                             }
                         }

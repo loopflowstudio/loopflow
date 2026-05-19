@@ -165,7 +165,8 @@ struct ContentView: View {
             let ide = IDEApp.cursor
             let remoteHost = repoState.repoTarget?.remoteHost
 
-            actions.append(PaletteAction("Run \(wave.configuredFlow) embedded", icon: "play.square", shortcut: "R") {
+            let embeddedFlow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
+            actions.append(PaletteAction("Run \(embeddedFlow) embedded", icon: "play.square", shortcut: "R") {
                 launchEmbeddedFlow(for: wave, worktreePath: worktreePath)
             })
 

@@ -1187,6 +1187,12 @@ public final class RepoState {
         try await connectLfd(outputBuffer: outputBuffer)
     }
 
+    public func connect(pairingURL url: URL, outputBuffer: OutputBuffer) async throws {
+        let payload = try PairingPayload(url: url)
+        connectionStore.setPairingPayload(payload)
+        try await connectLfd(outputBuffer: outputBuffer)
+    }
+
     public func connectBundled(outputBuffer: OutputBuffer) async throws {
         connectionStore.setMode(.bundled)
         try await connectLfd(outputBuffer: outputBuffer)

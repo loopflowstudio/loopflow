@@ -12,7 +12,10 @@
   (Keychain `studio.loopflow.connection.token`, keyed by `host:port`),
   `CertificatePinningDelegate` (SHA256 pin in UserDefaults `lfd.pinned-cert.*`),
   `EventService` (WS with exponential backoff + `NWPathMonitor`),
-  `DiscoveryService` (studio OAuth → loopflow.studio daemon list).
+  `DiscoveryService` (studio OAuth → loopflow.studio daemon list). Pairing
+  now enters through `PairingPayload` in `LoopflowCore` and
+  `ConnectionStore.setPairingPayload(_:)` so token + optional pin storage stay
+  centralized.
 - **Multiplatform boundary is enforced** by
   `scripts/check_swift_multiplatform_boundaries.py`: `LoopflowCore` shared and
   must not import AppKit/macOS frameworks; `#if os(iOS)` only as whole-file
@@ -39,14 +42,16 @@
   (`bin/lfd.rs:108-114`, `is_tailscale_ip`). "TLS by default" is a *client*
   policy: useTLS=true, plaintext only over Tailscale (WireGuard L3), real TLS
   only from a reverse proxy/relay in front. Don't promise lfd-terminated TLS.
-- **No QR scanning anywhere** — only `AVCaptureDevice` for audio in
-  `VoiceInputService`. iOS Simulator has no camera; the paste / deep-link
-  path is the headless-testable fallback and must exist.
-  `NSCameraUsageDescription` is **absent** from `Concerto/Info.plist` — adding
-  it is required for the QR path.
-- **`EventService` has reconnect but no `scenePhase` and no `4401` handling** —
-  device-sleep recovery and token-expiry UX are genuine gaps, not bugs in
-  existing code.
+- **QR scanning exists only in the iOS pairing setup path**
+  (`Concerto/Platform/iOS/ConnectionSetupView.swift`) using
+  `AVCaptureMetadataOutput`; iOS Simulator still has no camera, so paste and
+  `loopflow://pair` deep-link remain the required smoke-test paths.
+  `NSCameraUsageDescription` is now present in `Concerto/Info.plist`.
+- **`EventService` reconnects on path/foreground and maps WS 4401 to auth
+  failure.** `MobileRootView` calls `checkConnectionHealth()` on active
+  `scenePhase`, and `EventService` emits `authFailed("Session expired…")` when
+  URLSession exposes close code `4401`. Full path-aware studio rediscovery on
+  4401 is still a follow-up; QR/paste now shows re-pair instead of a spinner.
 - Remote contract reference: `scripts/test_remote_smoke.py` (Bearer header,
   http→ws / https→wss, `connected` snapshot, `--insecure`/custom CA).
 - **TokenLedger has per-row `expires_at`** (`token_ledger.rs` schema
@@ -56,12 +61,22 @@
   re-validates every 60s (`ws.rs:82-104`) and `validate()` never bumps expiry,
   so sliding = 1 DB write/phone/minute. Fixed 90-day TTL clears the
   daily-experience bar without it. `token_kind` audit column deferred.
-- **iOS already registers the `loopflow` URL scheme** for studio OAuth
-  (`Concerto/Info.plist:21-30`) but has **no `onOpenURL` handler anywhere** —
-  deep-linking is greenfield. Reuse `loopflow://pair`; don't add `lfd://`.
-- **`lf op pair` can't auto-capture a TLS fingerprint** — lfd serves no TLS;
-  any cert lives in a separate proxy on another host. Operator supplies the
-  pin (`--fingerprint` / `--tls-url`); absent → phone TOFU.
+- **iOS registers and handles `loopflow://pair`.** The scheme was already in
+  `Concerto/Info.plist`; `MobileRootView.onOpenURL` now routes pair URLs into
+  `RepoState.connect(pairingURL:outputBuffer:)`. Do not add `lfd://`.
+- **`lf op pair` mints 90-day ledger tokens and prints QR + URL.** Host
+  resolution is `--host` else `tailscale ip -4`; plaintext is refused unless
+  the encoded host is in `100.64.0.0/10`. Auto Tailscale pairing emits
+  plaintext because lfd has no native TLS; explicit non-Tailscale hosts default
+  to TLS. Operator supplies cert pin via `--fingerprint` / `--tls-url`.
+- **Accountless pairing uses `auth.mode=studio` without studio registration.**
+  As of 2026-05-18, missing `~/.lf/credentials.json` no longer kills lfd in
+  studio mode; it logs that discovery is disabled but keeps the local
+  connection-token ledger active. This preserves the two-mode auth model while
+  enabling QR/paste without a loopflow.studio account.
+- **Run an iOS build for mobile UI changes.** `swift test --package-path swift`
+  only built macOS here and missed iOS-only errors. The useful check was:
+  `cd swift && xcodegen generate && xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`.
 
 ## Preferences
 

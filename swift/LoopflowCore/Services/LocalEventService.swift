@@ -306,9 +306,15 @@ public actor EventService {
         logger.info("disconnected from lfd: \(error.localizedDescription)")
         LoggingService.append("disconnected: \(error.localizedDescription)", category: LoggingService.Category.lfd)
 
+        let closeCode = webSocketTask?.closeCode.rawValue
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         _isConnected = false
+
+        if closeCode == 4401 {
+            emitConnectionState(.authFailed("Session expired. Re-pair this device."))
+            return
+        }
 
         guard !intentionallyDisconnected else {
             emitConnectionState(.disconnected(nil))

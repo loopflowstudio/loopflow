@@ -244,6 +244,28 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
+
+    /// Pair a phone with a remote lfd by printing a QR/deep link
+    Pair {
+        /// Reachable host for the phone. Defaults to `tailscale ip -4`.
+        #[arg(long = "host")]
+        host: Option<String>,
+        /// lfd port to encode in the pairing link
+        #[arg(long = "port", default_value_t = 2486)]
+        port: u16,
+        /// Force TLS in the pairing link
+        #[arg(long = "tls", conflicts_with = "no_tls")]
+        tls: bool,
+        /// Force plaintext. Only allowed for Tailscale 100.64.0.0/10 hosts.
+        #[arg(long = "no-tls", conflicts_with = "tls")]
+        no_tls: bool,
+        /// SHA-256 certificate fingerprint to pin on the phone
+        #[arg(long = "fingerprint")]
+        fingerprint: Option<String>,
+        /// HTTPS URL whose leaf certificate should be hashed for pinning
+        #[arg(long = "tls-url", conflicts_with = "fingerprint")]
+        tls_url: Option<String>,
+    },
     /// Pick next wave item and move to scratch/
     Ingest {
         /// Wave name (auto-detected from worktree or branch if omitted)

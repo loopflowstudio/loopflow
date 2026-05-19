@@ -1,9 +1,8 @@
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use ipnet::IpNet;
 use qrcode::render::unicode;
 use qrcode::QrCode;
 use serde::Serialize;
@@ -199,7 +198,7 @@ fn mint_pairing_token() -> OpsResult<String> {
         let storage_config = crate::lfd::storage_config_from_env()
             .map_err(|err| OpsError::Message(format!("failed resolving lfd storage: {err}")))?;
         let ledger_path = crate::lfd::connection_token_ledger_path(&storage_config);
-        let ledger = TokenLedger::with_ttl(ledger_path, PAIRING_TOKEN_TTL)
+        let ledger = TokenLedger::new(ledger_path)
             .await
             .map_err(|err| OpsError::Message(format!("failed opening token ledger: {err}")))?;
         ledger
@@ -274,15 +273,15 @@ fn print_qr(url: &str, progress: &impl crate::ops::Progress) {
 fn is_tailscale_host(host: &str) -> bool {
     host.parse::<Ipv4Addr>()
         .map(|ip| {
-            let cidr: IpNet = "100.64.0.0/10".parse().expect("valid tailscale cidr");
-            cidr.contains(&IpAddr::V4(ip))
+            let octets = ip.octets();
+            octets[0] == 100 && (64..=127).contains(&octets[1])
         })
         .unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{is_tailscale_host, pairing_url};
 
     #[test]
     fn pairing_url_encodes_expected_scheme_and_query() {

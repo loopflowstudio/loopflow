@@ -51,7 +51,7 @@ def main() -> int:
             )
             try:
                 _wait_for_health(f"http://127.0.0.1:{port}", process, log_path, args.timeout)
-                pair_url = _run_pair(env)
+                pair_url = _run_pair(env, port)
                 payload = _parse_pair_url(pair_url)
                 base_url = f"http://127.0.0.1:{port}"
                 token = payload["token"]
@@ -63,7 +63,7 @@ def main() -> int:
                         timeout_seconds=args.timeout,
                         ssl_context=None,
                     )
-                    runner.run_scenario("pair_url_shape", lambda: _scenario_pair_url(payload))
+                    runner.run_scenario("pair_url_shape", lambda: _scenario_pair_url(payload, port))
                     runner.run_scenario("paired_token_http", lambda: _scenario_http(api))
                     runner.run_scenario("paired_token_websocket", lambda: _scenario_ws(ws))
             finally:
@@ -84,7 +84,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _run_pair(env: dict[str, str]) -> str:
+def _run_pair(env: dict[str, str], port: int) -> str:
     result = subprocess.run(
         [
             str(REPO_ROOT / "target" / "debug" / "lf"),
@@ -93,6 +93,8 @@ def _run_pair(env: dict[str, str]) -> str:
             "--host",
             "100.64.1.2",
             "--no-tls",
+            "--port",
+            str(port),
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -115,9 +117,9 @@ def _parse_pair_url(url: str) -> dict[str, str]:
     return {key: values[0] for key, values in query.items()}
 
 
-def _scenario_pair_url(payload: dict[str, str]) -> None:
+def _scenario_pair_url(payload: dict[str, str], port: int) -> None:
     assert payload["host"] == "100.64.1.2"
-    assert payload["port"] == "2486"
+    assert payload["port"] == str(port)
     assert payload["tls"] == "false"
     assert payload["token"]
 
@@ -156,6 +158,7 @@ def _wait_for_health(
         time.sleep(0.2)
     logs = log_path.read_text(encoding="utf-8")
     raise RuntimeError(f"timed out waiting for lfd health: {last_error}\n{logs}")
+
 
 def _reserve_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

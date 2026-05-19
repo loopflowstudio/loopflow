@@ -69,6 +69,11 @@
   the encoded host is in `100.64.0.0/10`. Auto Tailscale pairing emits
   plaintext because lfd has no native TLS; explicit non-Tailscale hosts default
   to TLS. Operator supplies cert pin via `--fingerprint` / `--tls-url`.
+- **Terminal QR rendering does not need `qrcode` image features.** As of
+  2026-05-19, `rust/loopflow/Cargo.toml` uses
+  `qrcode = { version = "0.14", default-features = false }`; enabling defaults
+  reintroduces the optional `image` dependency tree even though `lf op pair`
+  only uses `render::unicode`.
 - **Accountless pairing uses `auth.mode=studio` without studio registration.**
   As of 2026-05-18, missing `~/.lf/credentials.json` no longer kills lfd in
   studio mode; it logs that discovery is disabled but keeps the local

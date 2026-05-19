@@ -452,40 +452,41 @@ mod tests {
 
     #[test]
     fn terminal_run_events_clear_context_for_the_next_run() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let worktree = repo.create_wave_worktree("runtime");
-        let command = vec!["lf".to_string(), "build".to_string()];
+        with_run_id_env(None, || {
+            let repo = TestRepo::new();
+            let worktree = repo.create_wave_worktree("runtime");
+            let command = vec!["lf".to_string(), "build".to_string()];
 
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Started,
-            started_fields(&command, &worktree, "runtime"),
-        );
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Started,
-            started_fields(&command, &worktree, "runtime"),
-        );
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Started,
+                started_fields(&command, &worktree, "runtime"),
+            );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Completed,
+                LfEventFields::default(),
+            );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Started,
+                started_fields(&command, &worktree, "runtime"),
+            );
+            emit(
+                &worktree,
+                LfNode::Run,
+                LfEventType::Completed,
+                LfEventFields::default(),
+            );
 
-        let entries = std::fs::read_dir(runs_root(&worktree))
-            .expect("read runs")
-            .count();
-        assert_eq!(entries, 2);
+            let entries = std::fs::read_dir(runs_root(&worktree))
+                .expect("read runs")
+                .count();
+            assert_eq!(entries, 2);
+        });
     }
 
     #[test]

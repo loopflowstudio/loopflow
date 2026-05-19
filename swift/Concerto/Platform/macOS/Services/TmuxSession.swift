@@ -1,5 +1,4 @@
-// Manages the tmux session backing a multiplexer terminal pane.
-// Concerto owns layout and focus; tmux just hosts one durable shell per pane.
+// Manages the tmux session backing a workspace shell.
 
 import Foundation
 import LoopflowCore
@@ -20,7 +19,7 @@ final class TmuxSession {
         self.registry = registry
     }
 
-    func ensureBaseSession(launchCommand: String? = nil) async throws {
+    func ensureBaseSession() async throws {
         if await sessionExists(sessionName) {
             registry.track(sessionName: sessionName)
             return
@@ -28,15 +27,7 @@ final class TmuxSession {
 
         try await run("tmux", "new-session", "-d", "-s", sessionName, "-c", worktreePath)
         try await run("tmux", "set-option", "-t", sessionName, "status", "off")
-        if let launchCommand, !launchCommand.isEmpty {
-            try await run("tmux", "send-keys", "-t", sessionName, "-l", launchCommand)
-            try await run("tmux", "send-keys", "-t", sessionName, "Enter")
-        }
         registry.track(sessionName: sessionName)
-    }
-
-    func attachCommand() -> [String] {
-        ["tmux", "attach-session", "-t", sessionName]
     }
 
     func sessionExists(_ name: String) async -> Bool {

@@ -280,7 +280,7 @@ struct PortfolioRepoCard: View {
                         .tint(.white)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, Spacing.md)
-                } else if repoState.waves.isEmpty {
+                } else if repoState.hasNoWaves {
                     Text("No waves")
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.55))
@@ -291,6 +291,9 @@ struct PortfolioRepoCard: View {
                         LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                             ForEach(repoState.waves) { wave in
                                 waveRow(wave)
+                            }
+                            ForEach(repoState.unmanagedDiscoveredWaves) { wave in
+                                discoveredWaveRow(wave)
                             }
                         }
                     }
@@ -323,7 +326,7 @@ struct PortfolioRepoCard: View {
 
     private var summaryText: String {
         let diff = repoState.totalDiff
-        return "\(repoState.waves.count) waves · \(repoState.blockedCount) blocked · +\(diff.insertions) -\(diff.deletions)"
+        return "\(repoState.totalWaveCount) waves · \(repoState.blockedCount) blocked · +\(diff.insertions) -\(diff.deletions)"
     }
 
     @ViewBuilder
@@ -368,6 +371,28 @@ struct PortfolioRepoCard: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func discoveredWaveRow(_ wave: DiscoveredWaveSummary) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "circle.dashed")
+                .font(Typography.caption(11))
+                .foregroundStyle(.white.opacity(0.4))
+
+            Text(wave.waveName)
+                .font(Typography.body(13))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.xs)
+
+            Text("In Asana")
+                .font(Typography.caption(10))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
     }
 }
 

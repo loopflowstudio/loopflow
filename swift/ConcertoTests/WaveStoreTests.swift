@@ -459,3 +459,41 @@ struct WaveStoreOptimisticTests {
         #expect(store.wave(for: "wave-1")?.status == .waiting)
     }
 }
+
+@MainActor
+@Suite("WaveStore stable ordering")
+struct WaveStoreOrderingTests {
+    private func wave(_ id: String, _ status: WaveStatus) -> WaveViewModel {
+        WaveViewModel(
+            api: Wave(
+                id: id,
+                name: id,
+                repo: "/tmp/repo",
+                flow: "build",
+                direction: [],
+                area: ["src/"],
+                triggers: [],
+                status: status,
+                iteration: 0,
+                openPRCount: 0
+            )
+        )
+    }
+
+    // Guards the B fix: a status flip must not physically reorder a wave.
+    // Pre-fix `ordered` was `active + idle`, so flipping B to running
+    // jumped it ahead of A in the sidebar.
+    @Test("ordered stays insertion order when a wave changes status")
+    func orderedIsStableAcrossStatusChange() {
+        let store = WaveStore()
+        store.set(wave("a", .idle))
+        store.set(wave("b", .idle))
+        store.set(wave("c", .idle))
+        #expect(store.ordered.map(\.id) == ["a", "b", "c"])
+
+        store.set(wave("b", .running))
+
+        #expect(store.ordered.map(\.id) == ["a", "b", "c"])
+        #expect(store.wave(for: "b")?.status == .running)
+    }
+}

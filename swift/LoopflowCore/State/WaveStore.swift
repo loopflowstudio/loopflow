@@ -158,6 +158,8 @@ public final class WaveStore {
         let idle = allWaves.filter { $0.status == .idle }
 
         groups = WaveGroups(active: active, idle: idle)
-        ordered = groups.allInOrder
+        // Stable insertion order, not active-first: a status flip must not
+        // physically reorder a wave in the list (that's a visible jump).
+        ordered = allWaves
     }
 }

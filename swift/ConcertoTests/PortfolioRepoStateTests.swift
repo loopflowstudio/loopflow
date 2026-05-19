@@ -22,6 +22,34 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.count == 1)
     }
 
+    // Guards #2 (portfolio blind to Asana) + the normalizedFilePath lesson:
+    // a discovered repoPath with a trailing slash must still scope to this
+    // repo and count toward the card.
+    @Test("refresh counts unmanaged Asana waves with path normalization")
+    func refreshCountsDiscoveredWaves() async {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-discovered")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let service = MockWaveService()
+        service.discoveredWaves = [
+            DiscoveredWaveSummary(
+                repoPath: repo.path + "/",
+                repoId: "owner/repo",
+                waveName: "Desktop",
+                provider: "asana",
+                asanaProjectId: "p1",
+                managedWaveId: nil
+            )
+        ]
+        let state = PortfolioRepoState(repo: repo, waveService: service)
+
+        await state.refresh()
+
+        #expect(state.waves.isEmpty)
+        #expect(!state.hasNoWaves)
+        #expect(state.totalWaveCount == 1)
+        #expect(state.unmanagedDiscoveredWaves.map(\.waveName) == ["Desktop"])
+    }
+
     @Test("summary metrics count blocked and diff totals")
     func summaryMetrics() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
@@ -130,6 +158,7 @@ private final class MockWaveService: WaveServiceProtocol, @unchecked Sendable {
     var addedRepoPaths: [String] = []
     var listWavesTargets: [RepoTarget] = []
     var waves: [Wave] = []
+    var discoveredWaves: [DiscoveredWaveSummary] = []
 
     func listWaves(repo: RepoTarget) async throws -> [Wave] {
         listWavesTargets.append(repo)
@@ -196,7 +225,7 @@ private final class MockWaveService: WaveServiceProtocol, @unchecked Sendable {
     func fileDiff(waveId: String, path: String) async throws -> String { fatalError("unused") }
     func deleteWaveItem(waveId: String, filename: String) async throws { fatalError("unused") }
     func fetchRoadmap(repo: String, wave: String) async throws -> RoadmapResponse? { fatalError("unused") }
-    func listDiscoveredWaves() async throws -> [DiscoveredWaveSummary] { fatalError("unused") }
+    func listDiscoveredWaves() async throws -> [DiscoveredWaveSummary] { discoveredWaves }
     func usageSummary(
         filters: UsageAnalyticsFilters,
         groupBy: UsageGroupBy

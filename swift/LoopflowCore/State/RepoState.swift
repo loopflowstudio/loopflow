@@ -757,11 +757,20 @@ public final class RepoState {
         isRefreshingDiscoveredWaves = true
         defer { isRefreshingDiscoveredWaves = false }
         do {
+            // Self-heal the connect-time registration race: the discovered
+            // handler iterates *registered* repos, and the addRepo at connect
+            // can fail silently on a still-starting daemon. Re-asserting it
+            // here (idempotent upsert) means the next refresh registers and
+            // populates within seconds instead of whenever something else
+            // happens to register the repo.
+            if let currentRepo {
+                _ = try? await waveService.addRepo(path: currentRepo.path())
+            }
             let all = try await waveService.listDiscoveredWaves()
             // Scope to the active repo so a repo switch doesn't bleed
             // discovered entries from other repos into this view.
-            let activePath = currentRepo?.path()
-            let scoped = all.filter { $0.repoPath == activePath }
+            let activePath = currentRepo?.normalizedFilePath
+            let scoped = all.filter { $0.repoPath.normalizedFilePath == activePath }
             discoveredWaves = scoped
         } catch {
             LoggingService.model(

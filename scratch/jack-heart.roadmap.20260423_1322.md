@@ -46,7 +46,7 @@ The error message in `rust/loopflow/src/lfd/pm/asana.rs:824` already mentions `a
 - `asana.default_team` renamed to `asana.team` across Rust, Python, Swift, docs. It's the canonical fence — everyone reads it, it's not optional anymore. Add `#[serde(alias = "default_team")]` so existing configs keep parsing; alias removal is a future PR.
 - `discover_waves()` replaced: reads projects from `asana.team` via `list_managed_projects(team_id)` instead of walking `wave/<name>/<name>.yaml` on disk. Filesystem walk becomes a fallback IF Asana is unreachable, fed from a cache at `.lf/cache/workspace/projects.json`.
 - `GET /v0/waves/discovered` route returns Asana-backed list. Wire shape unchanged.
-- Concerto's `RepoState.refreshDiscoveredWaves` consumes the new shape (no Swift-side change needed for the basic flip — DTO is stable). `bootstrapRoadmapWavesIfNeeded` and `roadmapWaveNames(in:)` are deleted; users create new waves via Concerto's "New Wave" affordance, which creates the Asana project first.
+- Concerto's `RepoState.refreshDiscoveredWaves` consumes the new shape. (Originally scoped as "no Swift-side change needed — DTO stable"; the demo proved otherwise — see the correction in the RepoState section below for the actual Swift changes required.) `bootstrapRoadmapWavesIfNeeded` and `roadmapWaveNames(in:)` are deleted; users create new waves via Concerto's "New Wave" affordance, which creates the Asana project first.
 - `~/.lf/config.yaml` supports per-repo overrides:
   ```yaml
   repos:
@@ -140,7 +140,14 @@ Tests:
 
 Delete `roadmapWaveNames(in:)` and `bootstrapRoadmapWavesIfNeeded`. The autobootstrap path goes away — discovered waves come from the lfd `/v0/waves/discovered` route, which is now Asana-backed.
 
-`refreshDiscoveredWaves` and `unmanagedDiscoveredWaves` stay as-is. The DTO is stable.
+~~`refreshDiscoveredWaves` and `unmanagedDiscoveredWaves` stay as-is. The DTO is stable.~~
+
+**Correction (demo findings):** the DTO *is* stable, but the Swift consumption was not. Required Swift-side changes:
+- `RepoState.refreshDiscoveredWaves` scoped discovered waves with raw `URL.path()` vs the lfd-canonicalized DTO path → every wave filtered out. Now compares `normalizedFilePath` both sides.
+- `URL/String.normalizedFilePath` did not strip trailing slashes (`/repo/` ≠ `/repo`); hardened the shared helper so all repo-path comparisons agree.
+- Connect-time `addRepo` can fail silently on a still-starting bundled daemon; the discovered handler iterates *registered* repos, so the UI showed "No waves yet" until something else registered the repo (~minutes). `refreshDiscoveredWaves` now re-asserts the idempotent registration before listing.
+- Sidebar split In Flight / Ready into two sections and `ordered` was `active + idle`, so a freshly-started wave hopped sections and reordered. Collapsed into one stable-order section.
+- Portfolio cards counted managed waves only and were blind to Asana-discovered waves; `PortfolioRepoState` now fetches discovered and reflects them in the count/empty-state/list.
 
 **`swift/Concerto/Platform/macOS/Views/WaveSidebar.swift`**
 

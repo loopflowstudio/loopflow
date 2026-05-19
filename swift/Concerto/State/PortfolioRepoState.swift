@@ -12,8 +12,24 @@ final class PortfolioRepoState {
     private let waveService: any WaveServiceProtocol
 
     private(set) var waves: [WaveViewModel] = []
+    private(set) var discoveredWaves: [DiscoveredWaveSummary] = []
     private(set) var isConnected = false
     private(set) var isLoading = true
+
+    /// Asana-discovered waves this repo isn't managing yet. Mirrors
+    /// RepoState.unmanagedDiscoveredWaves so the portfolio card reflects
+    /// the same canonical wave set as the sidebar.
+    var unmanagedDiscoveredWaves: [DiscoveredWaveSummary] {
+        let managedIds = Set(waves.map(\.id))
+        return discoveredWaves.filter { discovered in
+            guard let id = discovered.managedWaveId else { return true }
+            return !managedIds.contains(id)
+        }
+    }
+
+    var totalWaveCount: Int { waves.count + unmanagedDiscoveredWaves.count }
+
+    var hasNoWaves: Bool { waves.isEmpty && unmanagedDiscoveredWaves.isEmpty }
 
     init(repo: PortfolioRepo, connection: ServerConnection, token: String?) {
         self.repo = repo
@@ -35,6 +51,11 @@ final class PortfolioRepoState {
             _ = try await waveService.addRepo(path: repoPath)
             let loaded = try await waveService.listWaves(repo: .local(repo.url))
             applyConnectedWaves(loaded)
+            if let discovered = try? await waveService.listDiscoveredWaves() {
+                discoveredWaves = discovered.filter {
+                    $0.repoPath.normalizedFilePath == repoPath
+                }
+            }
             isConnected = true
         } catch {
             isConnected = false

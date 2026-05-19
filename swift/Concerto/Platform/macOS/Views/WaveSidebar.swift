@@ -64,7 +64,7 @@ struct WaveSidebar: View {
         connectingState
       } else if repoState.waves.isEmpty && !repoState.lfdConnected {
         disconnectedState
-      } else if repoState.waves.isEmpty {
+      } else if repoState.waves.isEmpty && repoState.unmanagedDiscoveredWaves.isEmpty {
         emptyState
       } else {
         waveList
@@ -362,14 +362,12 @@ struct WaveSidebar: View {
   private var waveList: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-        if !waveGroups.active.isEmpty {
-          sectionHeader("In Flight", icon: "circle.fill", count: waveGroups.active.count)
-          waveRows(waveGroups.active)
-        }
-
-        if !waveGroups.idle.isEmpty {
-          sectionHeader("Ready", icon: "circle", count: waveGroups.idle.count)
-          waveRows(waveGroups.idle)
+        // One managed section in stable order. Splitting into In Flight /
+        // Ready made a freshly-started wave hop sections and reorder on
+        // every status flip; per-row status now carries that signal.
+        if !repoState.waves.isEmpty {
+          sectionHeader("Waves", icon: "circle", count: repoState.waves.count)
+          waveRows(repoState.waves)
         }
 
         let unmanaged = repoState.unmanagedDiscoveredWaves
@@ -389,7 +387,7 @@ struct WaveSidebar: View {
   }
 
   private func moveFocus(_ delta: Int) {
-    let waves = waveGroups.allInOrder
+    let waves = repoState.waves
     guard !waves.isEmpty else { return }
 
     if let currentId = keyboardFocusedId,
@@ -407,7 +405,7 @@ struct WaveSidebar: View {
   }
 
   private func moveFocusToBoundary(isFirst: Bool) {
-    let waves = waveGroups.allInOrder
+    let waves = repoState.waves
     guard !waves.isEmpty else { return }
     let target = isFirst ? waves.first?.id : waves.last?.id
     guard let target else { return }
@@ -424,7 +422,7 @@ struct WaveSidebar: View {
       repoState.waveStore.wave(for: selectedWaveId) != nil
     {
       selectWave(selectedWaveId)
-    } else if let firstId = waveGroups.allInOrder.first?.id {
+    } else if let firstId = repoState.waves.first?.id {
       selectWave(firstId)
     }
   }

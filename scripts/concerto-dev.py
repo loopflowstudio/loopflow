@@ -97,6 +97,28 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproce
     return subprocess.run(cmd, cwd=cwd, check=check)
 
 
+_DOPPLER_CREDS = Path.home() / ".lf" / "credentials" / "doppler.json"
+_DOPPLER_PROJECT = "loopflow"
+_DOPPLER_CONFIG = "dev"
+
+
+def _doppler_run_prefix() -> list[str]:
+    """Wrapper that injects Doppler-managed secrets (ASANA_CLIENT_ID, etc.)
+    into a child process. Returns an empty list when Doppler isn't set up,
+    so callers can splat it unconditionally.
+    """
+    if not _DOPPLER_CREDS.exists():
+        return []
+    if shutil.which("doppler") is None:
+        print(
+            "warning: Doppler creds present but `doppler` CLI is not on PATH; "
+            "secrets will not be injected.",
+            file=sys.stderr,
+        )
+        return []
+    return ["doppler", "run", "-p", _DOPPLER_PROJECT, "-c", _DOPPLER_CONFIG, "--"]
+
+
 def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Run a command and capture output."""
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -155,7 +177,7 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | No
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     binary = app_path / "Contents" / "MacOS" / "Concerto"
-    cmd = [str(binary)]
+    cmd = [*_doppler_run_prefix(), str(binary)]
     if args:
         cmd.extend(args)
 
@@ -269,6 +291,20 @@ def _reset_run_debug_databases(with_lfd: bool) -> None:
         _remove_sqlite_database(_resolve_lfd_sqlite_path(db_path))
 
 
+def _rotate_concerto_log() -> None:
+    """Move the previous run's combined Concerto/lfd stdout aside so each
+    `run-debug` produces a fresh, easily greppable log. Keep one prior
+    snapshot at .prev for cross-run comparison.
+    """
+    if not CONCERTO_STREAM_LOG.exists():
+        return
+    DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    prev = CONCERTO_STREAM_LOG.with_suffix(CONCERTO_STREAM_LOG.suffix + ".prev")
+    if prev.exists():
+        prev.unlink()
+    CONCERTO_STREAM_LOG.rename(prev)
+
+
 def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], TextIO]:
     if docker:
         raise RuntimeError("run-debug --with-lfd currently supports native lfd only")
@@ -296,7 +332,7 @@ def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], 
     print(f"Stream log: {LFD_STREAM_LOG}")
     print("Starting lfd from this branch (debug logging enabled)...")
     process = subprocess.Popen(
-        [lfd_bin, "serve"],
+        [*_doppler_run_prefix(), lfd_bin, "serve"],
         cwd=REPO_ROOT,
         env=env,
         stdout=log_file,
@@ -475,12 +511,16 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
     lfd_process: subprocess.Popen[str] | None = None
     lfd_log: TextIO | None = None
 
-    if with_lfd:
-        _stop_installed_lfd()
-        if docker_lfd:
-            print("run-debug --docker-lfd is not supported yet")
-            return 1
+    # Always evict the installed lfd (launchd or otherwise) before starting.
+    # Two parallel lfds clobber each other's session token at
+    # ~/.lf/session-token and produce confusing port races.
+    _stop_installed_lfd()
+
+    if with_lfd and docker_lfd:
+        print("run-debug --docker-lfd is not supported yet")
+        return 1
     _reset_run_debug_databases(with_lfd=with_lfd)
+    _rotate_concerto_log()
 
     if with_lfd:
         try:

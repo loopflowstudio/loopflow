@@ -330,14 +330,12 @@ impl WaveExecutor {
                 continue;
             }
             let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
-            let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-            if self
-                .complete_terminal_session(&session.id, exit_code)
-                .await?
-            {
+            let (_, changed) = self
+                .complete_tmux_terminal_session(&session.id, exit_file)
+                .await?;
+            if changed {
                 completed += 1;
             }
-            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         }
         Ok(completed)
     }
@@ -864,12 +862,9 @@ impl WaveExecutor {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
-        let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-
-        self.complete_terminal_session(&session.id, exit_code)
+        let (exit_code, _) = self
+            .complete_tmux_terminal_session(&session.id, exit_file)
             .await?;
-
-        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         Ok(exit_code)
     }
 
@@ -894,11 +889,23 @@ impl WaveExecutor {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
+        let (exit_code, _) = self
+            .complete_tmux_terminal_session(&session.id, exit_file)
+            .await?;
+        Ok(exit_code)
+    }
+
+    async fn complete_tmux_terminal_session(
+        &self,
+        session_id: &LfdId,
+        exit_file: PathBuf,
+    ) -> Result<(i32, bool)> {
         let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-        self.complete_terminal_session(&session.id, exit_code)
+        let changed = self
+            .complete_terminal_session(session_id, exit_code)
             .await?;
         let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
-        Ok(exit_code)
+        Ok((exit_code, changed))
     }
 
     async fn complete_terminal_session(&self, session_id: &LfdId, exit_code: i32) -> Result<bool> {

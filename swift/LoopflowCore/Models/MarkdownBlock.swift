@@ -42,8 +42,8 @@ private struct MarkdownBlockParser {
                 continue
             }
 
-            if let fence = fenceLanguage(trimmed) {
-                blocks.append(parseCodeBlock(language: fence))
+            if isCodeFence(trimmed) {
+                blocks.append(parseCodeBlock(language: codeFenceLanguage(trimmed)))
             } else if let heading = parseHeading(line) {
                 blocks.append(heading)
                 index += 1
@@ -73,10 +73,13 @@ private struct MarkdownBlockParser {
         return parsed
     }
 
-    private func fenceLanguage(_ trimmed: String) -> String?? {
-        guard trimmed.hasPrefix("```") else { return nil }
+    private func isCodeFence(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("```")
+    }
+
+    private func codeFenceLanguage(_ trimmed: String) -> String? {
         let suffix = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-        return suffix.isEmpty ? .some(nil) : .some(String(suffix))
+        return suffix.isEmpty ? nil : String(suffix)
     }
 
     private mutating func parseCodeBlock(language: String?) -> MarkdownBlock {
@@ -206,7 +209,12 @@ private struct MarkdownBlockParser {
             let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            if trimmed.isEmpty || fenceLanguage(trimmed) != nil || parseHeading(line) != nil || isRule(trimmed) || isBlockquote(line) || listMarker(line) != nil {
+            if trimmed.isEmpty ||
+                isCodeFence(trimmed) ||
+                parseHeading(line) != nil ||
+                isRule(trimmed) ||
+                isBlockquote(line) ||
+                listMarker(line) != nil {
                 break
             }
 

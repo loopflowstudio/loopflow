@@ -1,7 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
 import UIKit
-import LoopflowCore
 
 enum QuoteAction {
     case quoteReply(String)
@@ -11,11 +10,6 @@ enum QuoteAction {
 struct SelectableAssistantTextView: UIViewRepresentable {
     let attributedText: AttributedString
     let onQuoteAction: (QuoteAction) -> Void
-
-    init(text: String, onQuoteAction: @escaping (QuoteAction) -> Void) {
-        self.attributedText = AttributedString(text)
-        self.onQuoteAction = onQuoteAction
-    }
 
     init(attributedText: AttributedString, onQuoteAction: @escaping (QuoteAction) -> Void) {
         self.attributedText = attributedText
@@ -68,12 +62,6 @@ final class SelectableTextView: UITextView {
         invalidateIntrinsicContentSize()
     }
 
-    func applyStyledContent(_ markdown: String) {
-        lastText = AttributedString(markdown)
-        attributedText = Self.styledAttributedString(from: markdown)
-        invalidateIntrinsicContentSize()
-    }
-
     override var intrinsicContentSize: CGSize {
         let width = bounds.width > 0 ? bounds.width : (window?.screen?.bounds.width ?? 320) - 32
         let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
@@ -121,64 +109,6 @@ final class SelectableTextView: UITextView {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    static func styledAttributedString(from markdown: String) -> NSAttributedString {
-        let baseFont = UIFont(name: Typography.sansFamily, size: 14) ?? .systemFont(ofSize: 14)
-        let baseColor = UIColor.label
-
-        guard let foundation = try? NSAttributedString(
-            markdown: markdown,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else {
-            return NSAttributedString(string: markdown, attributes: [
-                .font: baseFont,
-                .foregroundColor: baseColor,
-            ])
-        }
-
-        let mutable = NSMutableAttributedString(attributedString: foundation)
-        let fullRange = NSRange(location: 0, length: mutable.length)
-
-        mutable.enumerateAttributes(in: fullRange) { attrs, range, _ in
-            var updated: [NSAttributedString.Key: Any] = [
-                .foregroundColor: baseColor,
-            ]
-
-            if let existingFont = attrs[.font] as? UIFont {
-                let traits = existingFont.fontDescriptor.symbolicTraits
-                let isBold = traits.contains(.traitBold)
-                let isItalic = traits.contains(.traitItalic)
-                let isMonospace = traits.contains(.traitMonoSpace)
-
-                if isMonospace {
-                    let monoFont = UIFont(name: Typography.monoFamily, size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
-                    updated[.font] = monoFont
-                } else if isBold && isItalic {
-                    var descriptor = baseFont.fontDescriptor
-                    descriptor = descriptor.withSymbolicTraits([.traitBold, .traitItalic]) ?? descriptor
-                    updated[.font] = UIFont(descriptor: descriptor, size: 14)
-                } else if isBold {
-                    updated[.font] = UIFont(name: "\(Typography.sansFamily)-Bold", size: 14) ?? baseFont.bold()
-                } else if isItalic {
-                    updated[.font] = UIFont(name: "\(Typography.sansFamily)-Italic", size: 14) ?? baseFont.italic()
-                } else {
-                    updated[.font] = baseFont
-                }
-            } else {
-                updated[.font] = baseFont
-            }
-
-            if let link = attrs[.link] {
-                updated[.link] = link
-            }
-            if let strikethrough = attrs[.strikethroughStyle] {
-                updated[.strikethroughStyle] = strikethrough
-            }
-
-            mutable.setAttributes(updated, range: range)
-        }
-
-        return mutable
-    }
 }
 
 extension SelectableAssistantTextView {
@@ -188,18 +118,6 @@ extension SelectableAssistantTextView {
         init(onQuoteAction: @escaping (QuoteAction) -> Void) {
             self.onQuoteAction = onQuoteAction
         }
-    }
-}
-
-private extension UIFont {
-    func bold() -> UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
-        return UIFont(descriptor: descriptor, size: pointSize)
-    }
-
-    func italic() -> UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitItalic) else { return self }
-        return UIFont(descriptor: descriptor, size: pointSize)
     }
 }
 

@@ -80,8 +80,9 @@
   package or JS/tree-sitter dependency.
 - **Selectable assistant text now accepts attributed content.** macOS
   `SelectableAssistantMessageTextView` and iOS `SelectableAssistantTextView`
-  accept `AttributedString` so inline markdown can flow through the existing
-  quote/emoji selection affordances for paragraph blocks.
+  accept `AttributedString` only, so inline markdown parsing stays in
+  `MarkdownBlock` and does not reappear as platform-specific markdown styling
+  helpers.
 
 ## Patterns (verified 2026-05-19, native-chat-ux review-design)
 

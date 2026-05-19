@@ -7,12 +7,6 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
     let selectionResetToken: Int
     let onSelectionChanged: (String?) -> Void
 
-    init(text: String, selectionResetToken: Int, onSelectionChanged: @escaping (String?) -> Void) {
-        self.text = AttributedString(text)
-        self.selectionResetToken = selectionResetToken
-        self.onSelectionChanged = onSelectionChanged
-    }
-
     init(text: AttributedString, selectionResetToken: Int, onSelectionChanged: @escaping (String?) -> Void) {
         self.text = text
         self.selectionResetToken = selectionResetToken

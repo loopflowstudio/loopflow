@@ -1,4 +1,3 @@
-#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -24,6 +23,7 @@ private final class MarkdownBlockCache {
     }
 }
 
+#if os(macOS)
 struct MessageRow: View {
     @Environment(\.palette) private var palette
     let message: SessionMessage
@@ -165,31 +165,6 @@ struct MessageRow: View {
 }
 
 #else
-import SwiftUI
-import LoopflowCore
-
-private final class MarkdownBlockCache {
-    private var cachedMessageId: UUID?
-    private var cachedFinalLength = -1
-    private var cachedBlocks: [MarkdownBlock] = []
-
-    func blocks(for message: SessionMessage, isStreaming: Bool) -> [MarkdownBlock] {
-        if isStreaming {
-            return parseStreamingMarkdownBlocks(message.content)
-        }
-
-        let contentLength = message.content.count
-        guard cachedMessageId != message.id || cachedFinalLength != contentLength else {
-            return cachedBlocks
-        }
-
-        cachedMessageId = message.id
-        cachedFinalLength = contentLength
-        cachedBlocks = parseMarkdownBlocks(message.content)
-        return cachedBlocks
-    }
-}
-
 struct MessageRow: View {
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -282,15 +257,6 @@ struct MessageRow: View {
         case .assistant: return palette.textSecondary.opacity(0.4)
         case .error: return .statusError
         case .system: return .clear
-        }
-    }
-
-    private func handleQuoteAction(_ action: QuoteAction) {
-        switch action {
-        case .quoteReply(let selected):
-            composerQuote = selected
-        case .emojiReact(let selected, let emoji):
-            onQueueEntry(.emojiReact(quoted: selected, emoji: emoji))
         }
     }
 

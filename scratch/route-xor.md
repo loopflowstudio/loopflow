@@ -6,20 +6,29 @@ iOS gains the single setup screen (Scan QR / Paste link / Sign in with
 Loopflow), `loopflow://pair` deep links route into the existing connection
 stack, and WS close 4401 surfaces a re-pair state instead of a spinner.
 
-Validation re-run on the current tree (code unchanged since the gate commit
-0532cbc3 — the two later commits are scratch/route bookkeeping only):
+Gate polish after the first route kept scope unchanged and hardened one host
+side edge: `--tls-url` no longer builds a shell pipeline or depends on `xxd`;
+it fetches/converts the leaf cert with `openssl` and hashes DER bytes in Rust.
+
+Validation re-run on the current tree:
 
 - `cargo fmt --check` — pass
 - `cargo clippy -p loopflow -- -D warnings` — pass
-- `env -u LF_RUN_ID cargo test -p loopflow pair --lib` — pass (11 tests)
-- `scripts/test_pairing_smoke.py` — pass (`pair_url_shape`,
+- `env -u LF_RUN_ID cargo test -p loopflow pair --lib` — pass (12 tests)
+- `env -u LF_RUN_ID cargo test --all` — pass
+- `uv run pytest python/tests/` — pass (137 tests)
+- `swift test --package-path swift` — pass (10 XCTest + 338 Swift Testing tests)
+- `swift test --package-path swift --filter PairingPayload` — pass (5 tests)
+- `uv run python scripts/check_swift_multiplatform_boundaries.py` — pass
+- `uv run python scripts/test_pairing_smoke.py --timeout 10` — pass (`pair_url_shape`,
   `paired_token_http`, `paired_token_websocket`)
-- `swift test --filter PairingPayload` — pass (5 tests)
-- `check_swift_multiplatform_boundaries.py` — pass
+- `cd swift && xcodegen generate && xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` — pass
+- `tests/e2e/test_smoke.sh` — pass
+- `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` — pass (16 tests)
+- `cd swift && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -only-testing:ConcertoTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` — pass (338 Swift Testing tests)
 
-The full Rust + Swift + iOS-build suite was exercised at the gate commit per
-`scratch/jack-heart.mobile.20260518_1805-review.md`; nothing in code changed
-after, so re-running the long iOS build adds no signal. PR copy is complete
-and accurate; `.pr-copy-ref` refreshed to current HEAD so `lf op land`
-consumes the cached body. Scope held to the view-only charter — no
+A full local `ConcertoUITests` xcodebuild run was attempted and interrupted
+after the runner hung locally; no branch-specific failure surfaced before the
+hang. The iOS build and Swift package tests cover the mobile compile path that
+previously missed iOS-only errors. Scope held to the view-only charter — no
 write/build/land/chat surfaces. No reason to iterate.

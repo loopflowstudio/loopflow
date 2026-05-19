@@ -16,10 +16,10 @@ use crate::lf::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, list_branch_candidates,
-    next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
-    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
+    next_branch, pair_lfd, prune_branches, rebase_with_recovery, release_bump, release_check,
+    release_notes, release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
     BranchListOptions, BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions,
-    PrOptions, Progress, RebaseOptions, RotationResult,
+    PairOptions, PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -97,6 +97,31 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
             ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
         },
+        OpsCommand::Pair {
+            host,
+            port,
+            tls,
+            no_tls,
+            fingerprint,
+            tls_url,
+        } => {
+            let tls = match (*tls, *no_tls) {
+                (true, false) => Some(true),
+                (false, true) => Some(false),
+                _ => None,
+            };
+            pair_lfd(
+                &PairOptions {
+                    host: host.clone(),
+                    port: *port,
+                    tls,
+                    fingerprint: fingerprint.clone(),
+                    tls_url: tls_url.clone(),
+                },
+                &progress,
+            )?;
+            Ok(())
+        }
         OpsCommand::Ingest { wave, item } => {
             ingest_cmd(wave.as_deref(), item.as_deref(), &progress)
         }

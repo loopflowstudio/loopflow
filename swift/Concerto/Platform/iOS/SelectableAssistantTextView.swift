@@ -59,7 +59,7 @@ final class SelectableTextView: UITextView {
     }
 
     override var intrinsicContentSize: CGSize {
-        let width = bounds.width > 0 ? bounds.width : (window?.screen?.bounds.width ?? 320) - 32
+        let width = bounds.width > 0 ? bounds.width : (window?.screen.bounds.width ?? 320) - 32
         let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: UIView.noIntrinsicMetric, height: ceil(size.height))
     }

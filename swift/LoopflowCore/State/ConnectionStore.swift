@@ -117,6 +117,14 @@ public final class ConnectionStore {
         persistSettings()
     }
 
+    public func setPairingPayload(_ payload: PairingPayload) {
+        let connection = payload.serverConnection
+        setRemoteConnection(connection)
+        if let fingerprint = payload.fingerprint {
+            pinStore.setPinnedFingerprint(fingerprint, for: connection)
+        }
+    }
+
     public func setRemoteConnection(_ connection: ServerConnection) {
         var next = connection
         if next.authMode.requiresToken {

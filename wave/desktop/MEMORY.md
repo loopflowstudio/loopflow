@@ -53,6 +53,52 @@
   scripts that wait for local lfd should probe `http://127.0.0.1:2486/health`
   instead of `/v0/status` (`/status` is root and auth-protected).
 
+## Patterns (verified 2026-05-19, native-chat-ux review-design)
+
+- **Chat markdown parsing is in the view layer, not Core.** Current parser is
+  `parseMessageSegments` + text/code-only `MessageSegment` enum at
+  `swift/Concerto/Views/WaveSessionView.swift:691-753`, cached by
+  `MessageSegmentCache` keyed on `content.count` (`cachedContentLength`) in
+  `swift/Concerto/Views/MessageRow.swift`, tested in
+  `swift/ConcertoTests/WaveSessionViewTests.swift`. native-chat M1 *relocates*
+  this into `LoopflowCore` (`MarkdownBlock`/`parseMarkdownBlocks`) and deletes
+  the old enum/parser/tests — not a parallel impl.
+- **iOS already does inline markdown; macOS does not.** iOS:
+  `NSAttributedString(markdown:options:.init(interpretedSyntax:.inlineOnlyPreservingWhitespace))`
+  at `swift/Concerto/Platform/iOS/SelectableAssistantTextView.swift:112-114`.
+  macOS renders raw text via `AutosizingSelectableTextView`, `isRichText =
+  false`, `swift/Concerto/Platform/macOS/Views/SelectableAssistantMessageTextView.swift:85`
+  (`:17` assigns the string verbatim). M1 unifies on the iOS technique.
+- **`DiffLinesView` exists but is wired only to transcript tool cards.**
+  `swift/Concerto/Views/DiffLinesView.swift:47-125` (parser `parseDiffLines()`
+  `:22-43`), reached from `TranscriptItemCardView` at
+  `WaveSessionView.swift:607`. Routing ` ```diff ` message blocks to it is
+  *new wiring*, not a reroute.
+- **Session resume/replay is `afterSeq: nil`, not `0`.**
+  `SessionState.joinSession(id)` (`swift/LoopflowCore/State/SessionState.swift:218`)
+  then `reconnectIfNeeded()` → `startStream(... afterSeq: nil ...)`
+  (`:327-351`); the `replayCompletedLastSeq` envelope promotes replay→`.live`
+  (`:452-462`). Ended sessions have no live tail — replay completes and stops.
+  This is the exact path live reconnect already uses.
+- **`Session` has `wave_run_id`, NOT `wave_id`.** Model at
+  `rust/loopflow/src/lfd/sessions/types.rs:403-415` carries
+  `{id, harness, status (SessionStatus), wave_run_id, provider_session_id,
+  config, created_at, ended_at}`. `wave_id`/`wave_name` for any session DTO
+  must derive via `JOIN wave_runs wr ON wr.id = s.wave_run_id` (then `waves`
+  for the name) — the join the usage route already does. No `title` or
+  `message_count` columns; derive from `session_events`.
+- **Session-list query is per-wave only.** `list_sessions_for_wave`
+  (`rust/loopflow/src/lfd/store/sqlite.rs:784`) and `list_events_for_sessions`
+  (`:747`); usage route calls both at
+  `rust/loopflow/src/lfd/http/routes/usage.rs:81,88`. No
+  `list_sessions_for_repo`. There is no `GET /sessions` list route yet
+  (`lfd/http/mod.rs` has create/get/input/events/usage only). native-chat M2's
+  history is **per-wave for v1** (`wave_id` required); cross-wave is v2.
+- **`session_events` is append-only, no prune.** PK `(session_id, seq)`; zero
+  `DELETE`/prune paths in `sqlite.rs`/`postgres.rs`. Replay query
+  `list_session_events(session_id, after_seq)` (`sqlite.rs:675`) is the same
+  one the live-reconnect SSE handler uses (`lfd/http/routes/sessions.rs:124`).
+
 ## Preferences
 
 - For this wave, prefer lfd-owned terminal sessions over Swift-owned tmux.

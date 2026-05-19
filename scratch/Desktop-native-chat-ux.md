@@ -6,23 +6,35 @@ asana_id: '1214270115439574'
 ---
 # Native chat UX
 
+> Review-design pass (headless, 2026-05-19): the approach held under scrutiny.
+> What changed is grounding — kickoff's `file:line` refs had drifted and one
+> backend field was under-specified. All integration points below are
+> re-verified against the current tree. One scope call was made: history is
+> **per-wave** for v1 (see Key decisions).
+
 ## Problem
 
 Concerto's chat works — SSE streaming, turn state, tool-call grouping, voice
 input, quote-reply all ship. But it reads like a debug console, not a place you
 want to think. Three concrete gaps stop it from being a product:
 
-- **Assistant text is unstyled.** On macOS the assistant message is a plain
-  `NSTextView` with `isRichText = false`
-  (`SelectableAssistantMessageTextView.swift:69,82`). Headings, lists, bold,
-  links, blockquotes all render as literal `#`, `*`, `-`. Code blocks are
-  monospace with zero syntax color. ` ```diff ` blocks route to the generic
-  `CodeBlockView`, not the diff renderer that already exists.
+- **Assistant text is unstyled.** On macOS the assistant message renders
+  through `AutosizingSelectableTextView` with `isRichText = false`
+  (`swift/Concerto/Platform/macOS/Views/SelectableAssistantMessageTextView.swift:85`)
+  and the raw string assigned verbatim (`:17`, `textView.string = text`).
+  Headings, lists, bold, links, blockquotes all render as literal `#`, `*`,
+  `-`. Code blocks are monospace with zero syntax color. ` ```diff ` blocks
+  render as a generic `CodeBlockView`, even though a real diff renderer
+  (`DiffLinesView`) already exists — it's just wired only into transcript
+  tool/command cards, not into assistant messages.
 - **History is unreachable.** lfd persists every session event durably
-  (`session_events` table, no pruning). The store can already list a wave's
-  sessions and batch-fetch their events — `usage.rs:81,88` does exactly this.
-  But no HTTP route exposes it, so closing a conversation loses it. You cannot
-  scroll back a week.
+  (`session_events`, primary key `(session_id, seq)`, append-only — no
+  `DELETE`/prune path exists in `sqlite.rs` or `postgres.rs`). The store can
+  already list a wave's sessions and batch-fetch their events; the usage route
+  does exactly this (`lfd/http/routes/usage.rs:81,88` →
+  `store/sqlite.rs:784` `list_sessions_for_wave`, `:747`
+  `list_events_for_sessions`). But no HTTP route exposes a session list, so
+  closing a conversation loses it. You cannot scroll back a week.
 - **The composer is a bare `TextField`.** No file drop, no slash commands, no
   way to point the agent at the file you're looking at.
 
@@ -38,8 +50,18 @@ order; each lands on its own.
 
 ### M1 — Rich rendering (no new dependencies)
 
-Replace the single `parseMessageSegments` (text vs. code) with a real block
-model in `LoopflowCore` so it is testable without SwiftUI:
+The current parser is `parseMessageSegments` with a text-vs-code-only
+`MessageSegment` enum, living in the **view layer**
+(`swift/Concerto/Views/WaveSessionView.swift:691-753`) and cached by
+`MessageSegmentCache` keyed on `content.count`
+(`swift/Concerto/Views/MessageRow.swift`, field `cachedContentLength`). Its
+tests are pure-function tests in `swift/ConcertoTests/WaveSessionViewTests.swift`.
+
+**Move and replace** it with a real block model in `LoopflowCore` (the SwiftPM
+package, testable with no SwiftUI host). This is a relocation, not a parallel
+implementation: the old `MessageSegment` enum, `parseMessageSegments`, and the
+`WaveSessionViewTests` parser cases are deleted and superseded — one
+implementation, history in git (CLAUDE.md).
 
 ```swift
 enum MarkdownBlock: Equatable {
@@ -56,47 +78,82 @@ func parseMarkdownBlocks(_ content: String) -> [MarkdownBlock]
 
 `Concerto` renders each block as a native view, styled with the design system
 (headings in `loopflowBurgundy`, `Spacing`/`CornerRadius` tokens). Inline spans
-(bold/italic/code/links) come from `AttributedString(markdown:
-.inlineOnlyPreservingWhitespace)` — the exact technique the iOS path already
-uses (`SelectableAssistantTextView.swift:108`), now unified across platforms.
+(bold/italic/code/links) come from `NSAttributedString(markdown:
+options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))` — the
+exact technique the iOS path already uses
+(`swift/Concerto/Platform/iOS/SelectableAssistantTextView.swift:112-114`), now
+unified across platforms.
+
 ` ```diff ` / ` ```patch ` blocks render through the existing `DiffLinesView`
-(`DiffLinesView.swift`), which already does add/delete/hunk coloring.
+(`swift/Concerto/Views/DiffLinesView.swift:47-125`, parser `parseDiffLines()`
+at `:22-43`). Note: this is **new wiring for the assistant-message path** —
+today `DiffLinesView` is reached only from `TranscriptItemCardView` for tool
+file output (`WaveSessionView.swift:607`). M1 routes the `diff` block case to
+the same view; `DiffLinesView` itself stays in `Concerto/Views` (it's a
+rendering view, not parse logic).
 
-Syntax highlighting: a built-in synchronous `SyntaxHighlighter` covering the
-languages that actually appear in agent output — swift, rust, python,
-bash/sh/zsh, json, yaml, toml, diff, markdown — with a plain fallback for
-everything else. No JS engine, no tree-sitter, no package. It tokenizes by
-keyword/string/comment/number heuristics and themes to the palette. Good
-enough for a chat surface; not an IDE.
+Syntax highlighting: a built-in synchronous `SyntaxHighlighter` in
+`LoopflowCore` covering the languages that actually appear in agent output —
+swift, rust, python, bash/sh/zsh, json, yaml, toml, diff, markdown — with a
+plain fallback for everything else. No JS engine, no tree-sitter, no package.
+It tokenizes by keyword/string/comment/number heuristics and themes to the
+palette. Good enough for a chat surface; not an IDE.
 
-### M2 — Conversation history
+### M2 — Conversation history (per-wave, v1)
 
-Add `GET /v0/sessions?repo=<path>&wave_id=<id>&limit=<n>&before=<iso8601>`.
-It mirrors the `usage.rs` query path exactly: `list_sessions_for_wave` →
-`list_events_for_sessions` → derive a summary per session.
+Add `GET /v0/sessions?repo=<path>&wave_id=<id>&limit=<n>&before=<iso8601>`,
+mounted under `/v0` alongside the existing session routes
+(`lfd/http/mod.rs`). It mirrors the usage route's query path:
+`list_sessions_for_wave(wave_id)` → `list_events_for_sessions(ids)` → derive a
+summary per session.
+
+**`wave_id` is required.** The existing store query is per-wave
+(`list_sessions_for_wave`); there is no `list_sessions_for_repo`. A repo-wide
+cross-wave list would be a new store query and a new SQL path — explicitly out
+of scope for v1 (see Scope). `limit` + `before` are a small extension to the
+existing per-wave query: add `ORDER BY created_at DESC`, `LIMIT`, and an
+optional `created_at < before` filter. No new query machinery.
 
 ```rust
-// new DTO — follows CLAUDE.md DTO rules: no defaults, every field required or Optional
+// new DTO — CLAUDE.md DTO rules: no defaults, every field required or Optional
 pub struct SessionSummaryDto {
     pub id: String,
     pub harness: String,
-    pub wave_id: Option<String>,
+    pub wave_id: String,        // route filters by it; never absent here
     pub wave_name: Option<String>,
-    pub title: String,          // first user message, truncated to 80 chars
+    pub title: String,          // first user message from events, truncated 80
     pub message_count: u32,
-    pub status: String,         // active | ended | failed
+    pub status: String,         // SessionStatus serialized: active | ended | failed
     pub created_at: String,
     pub ended_at: Option<String>,
 }
 ```
 
+Field grounding (the `Session` model is `lfd/sessions/types.rs:403-415`):
+
+- `id`, `harness`, `status`, `created_at`, `ended_at` — present on `Session`
+  directly. `status` is the `SessionStatus` enum; serialize to its string form.
+- `wave_id` / `wave_name` — **not on `Session`**. The model carries
+  `wave_run_id`, not `wave_id`. Derive both via the join the usage query
+  already performs: `JOIN wave_runs wr ON wr.id = s.wave_run_id` (and
+  `wr.wave_id` → `waves` for the name). Since the route filters by `wave_id`,
+  `SessionSummaryDto.wave_id` is always known — hence required, not Optional.
+- `title` / `message_count` — derived from the events already batch-fetched by
+  `list_events_for_sessions`: title = first user message truncated to 80
+  chars; count = message events for that session. No extra query.
+
 Swift: `LocalWaveService.listSessions(repo:waveId:limit:before:)`. UI: a
-history panel reachable from `WaveSessionView` — list grouped by day, filter by
-wave (the `wave_id` param) and time (the `before` cursor). Tapping a row
-resumes through the path that **already works**: `joinSession(id)` +
-`streamSessionEvents(afterSeq: 0)` replays the persisted event log into a
-transcript. Ended sessions replay read-only (composer disabled, "Resumed from
-history" system row); active sessions join live. No new resume machinery.
+history panel reachable from `WaveSessionView` — list grouped by day within the
+selected wave, time-paged by the `before` cursor. Tapping a row resumes through
+the path that **already works**: `SessionState.joinSession(id)` then
+`reconnectIfNeeded()` → `startStream(... afterSeq: nil ...)`
+(`swift/LoopflowCore/State/SessionState.swift:218,327-351,452-462`). `afterSeq:
+nil` replays from the earliest persisted event; the `replayCompletedLastSeq`
+envelope promotes the stream to `.live`. For an ended session there is simply
+no live tail — replay completes, promotes, and stops. Ended sessions are
+read-only (composer disabled, "Resumed from history" system row); active
+sessions continue live. No new resume machinery; this is exactly the path
+production already runs on every live reconnect.
 
 ### M3 — Composer upgrades
 
@@ -118,13 +175,15 @@ history" system row); active sessions join live. No new resume machinery.
 
 | Question | Finding | Impact on design |
 |----------|---------|-----------------|
-| Does SwiftUI `Text(AttributedString)` render block markdown (lists, headings, quotes)? | No. `AttributedString(markdown:)` encodes block structure as `presentationIntent` attributes but `Text` lays out inline only. Block layout must be ours. | Custom block model + native per-block views. Inline spans only via `AttributedString`. Confirms M1 design; rules out "just use AttributedString". |
-| Add a markdown package (swift-markdown-ui)? | Large dependency, brings its own theming that fights `VISUAL_DESIGN.md` (burgundy headings, cream/slate, design tokens). Repo has only ViewInspector + WhisperKit and a strong simplicity bias. | Rejected. Custom parser is ~1 file, fully testable in `LoopflowCore`, themable. |
-| Is there a backend to list past sessions? | Store layer already has `list_sessions_for_wave` and `list_events_for_sessions`; `usage.rs:81-88,218-237` already calls them for token usage. Only the HTTP route + DTO + client + UI are missing. | History collapses from "design persistence" to "expose an existing query". Big de-risk. |
-| Are session events durable / not pruned? | `session_events` rows are append-only via `append_session_event`; no `DELETE`/prune path found in `sqlite.rs`. Replay via `list_session_events(after_seq)` is the same path used for live reconnect today. | History resume needs no new storage or replay code — reuse `joinSession` + `afterSeq: 0`. |
+| Does SwiftUI `Text(AttributedString)` render block markdown (lists, headings, quotes)? | No. `AttributedString(markdown:)` encodes block structure as `presentationIntent` attributes but `Text` lays out inline only. Block layout must be ours. | Custom block model + native per-block views. Inline spans only via `AttributedString`. Confirms M1; rules out "just use AttributedString". |
+| Add a markdown package (swift-markdown-ui)? | Large dependency, brings its own theming that fights `VISUAL_DESIGN.md` (burgundy headings, cream/slate, design tokens). Repo deps are only ViewInspector + WhisperKit and a strong simplicity bias. | Rejected. Custom parser is ~1 file, fully testable in `LoopflowCore`, themable. |
+| Where does the current parser live? | View layer: `WaveSessionView.swift:691-753`, text/code-only `MessageSegment`, cached on `content.count` in `MessageRow.swift`, tested in `ConcertoTests`. | M1 is a *move* into `LoopflowCore` + delete the old enum/parser/tests. Not a parallel impl. |
+| Is there a backend to list past sessions? | Store has `list_sessions_for_wave` (`sqlite.rs:784`) and `list_events_for_sessions` (`:747`); `usage.rs:81,88` already calls both for token usage. No `GET /sessions` list route exists. | History collapses to "expose an existing per-wave query". Big de-risk. |
+| Does `Session` carry `wave_id`, `title`, `message_count`? | No. `Session` (`lfd/sessions/types.rs:403-415`) has `wave_run_id` not `wave_id`; no title or count fields. The usage query already joins `wave_runs` to filter by `wave_id`. | `SessionSummaryDto` derives `wave_id`/`wave_name` via the existing join; `title`/`message_count` from the already-fetched events. No invented storage. `wave_id` is required (route always knows it). |
+| Are session events durable / not pruned? | `session_events` is append-only (`(session_id, seq)` PK); zero `DELETE`/prune paths in `sqlite.rs`/`postgres.rs`. Replay via `list_session_events(after_seq)` (`sqlite.rs:675`) is the same path the live-reconnect SSE handler uses (`sessions.rs:124`). | History resume needs no new storage or replay code — reuse `joinSession` + `afterSeq: nil`. |
 | Syntax highlighting tech? | Highlightr = JSContext + highlight.js (async, heavyweight, streaming jank risk); Splash = Swift-only; tree-sitter = heavy native deps. | Built-in heuristic tokenizer, synchronous, themed. "Production quality" for chat ≠ IDE-accurate. Avoids the streaming-jank failure mode entirely. |
 | Streaming perf at 30 tok/s, 100-entry transcript? | `MessageSegmentCache` keys on `content.count`, so it re-parses the whole streaming message every token. Full block parse + highlight on every delta over a 100-row `LazyVStack` is the frame-drop risk. | Split path: finalized messages parse+highlight once, cached by `(id, finalLength)`; the actively-streaming message uses a cheap path (fence split + plain text, no per-token inline/highlight) and swaps to the rich render once on `TurnCompleted`. `LazyVStack` already virtualizes. |
-| Resume of an *ended* session — live join or replay? | `streamSessionEvents` replays persisted events then goes live; an ended session simply has no live tail. | Ended → read-only replay, composer disabled. Active → join live. One code path, gated by status. |
+| Resume of an *ended* session — live join or replay? | `reconnectIfNeeded()` replays persisted events (`afterSeq: nil`) then promotes to `.live` via `replayCompletedLastSeq`; an ended session simply has no live tail. | Ended → read-only replay, composer disabled. Active → join live. One code path, gated by status. |
 | File drop into an LLM agent — what does "picks it up" mean? | Agent runs in lfd with the repo as cwd and has file tools. | Drop inserts a path reference, not an upload. In-repo only. Keeps scope and the security boundary tight. |
 
 ## Alternatives considered
@@ -135,7 +194,8 @@ history" system row); active sessions join live. No new resume machinery.
 | `AttributedString(markdown: .full)` + `Text` | Zero code | Doesn't lay out blocks — verified. Lists/headings collapse. |
 | Highlightr (highlight.js via JSCore) for syntax | Broad language coverage | Async + JS bridge re-tokenizes on every streaming delta → exactly the jank the metric forbids. |
 | Persist transcripts client-side for history | Works offline | Duplicates a durable server log; invents a sync problem. lfd already is the source of truth (same philosophy as embedded-terminal "tmux is source of truth"). |
-| New resume endpoint / transcript-fetch route | Explicit | Redundant. `joinSession` + `afterSeq: 0` already reconstructs a full transcript from the event log. |
+| New resume endpoint / transcript-fetch route | Explicit | Redundant. `joinSession` + `afterSeq: nil` already reconstructs a full transcript from the event log — the path live reconnect uses. |
+| Repo-wide cross-wave session list in v1 | One panel for everything | No `list_sessions_for_repo` exists; it's a new store query + SQL path. Per-wave mirrors the proven query exactly. Cross-wave is a clean v2 follow-up, not v1 risk. |
 | Full slash-command DSL / plugin system | Powerful | Scope sprawl; steals focus from the p1 build-driver. A 4-command grounded set with one registry is enough to be noticeable. |
 
 ## Key decisions
@@ -144,18 +204,29 @@ history" system row); active sessions join live. No new resume machinery.
   hand-written in `LoopflowCore`. Justified by the de-risking: the alternatives
   either don't work (`AttributedString` blocks) or break the perf metric
   (Highlightr) or fight the design system (swift-markdown-ui).
-- **Block model lives in `LoopflowCore`, rendering in `Concerto`.** Parsing is
-  unit-tested with no SwiftUI host, matching the existing `parseMessageSegments`
-  test pattern (`WaveSessionViewTests`).
+- **Parsing moves from the view layer into `LoopflowCore`, rendering stays in
+  `Concerto`.** The existing `MessageSegment`/`parseMessageSegments` in
+  `WaveSessionView.swift` and its `ConcertoTests` cases are deleted and
+  replaced by `MarkdownBlock`/`parseMarkdownBlocks` with tests in the
+  `LoopflowCore` package — one implementation, pure-function tests, no SwiftUI
+  host. (Kickoff framed this as "matching the existing test pattern"; the
+  existing tests are in `ConcertoTests`, so this is a deliberate relocation,
+  not a match.)
+- **History is per-wave for v1.** `wave_id` is a required query param and a
+  required `SessionSummaryDto` field. This mirrors the existing
+  `list_sessions_for_wave` query exactly and adds zero new store code beyond
+  pagination. Cross-wave/repo-wide history is an explicit v2.
 - **History is a read path over an existing write path.** New code is one
   route + one DTO + one client method + UI. Resume is the existing reconnect
-  code with `afterSeq: 0` and a status gate. `SessionSummaryDto` follows the
+  code with `afterSeq: nil` and a status gate. `SessionSummaryDto` follows the
   CLAUDE.md DTO rules (no defaults; required-or-Optional) and gets a
-  `tests/fixtures/dto/` round-trip fixture asserted in Rust, Swift, Python.
+  `tests/fixtures/dto/session_summary.json` round-trip fixture asserted in
+  Rust, Swift, Python.
 - **Streaming message uses a deliberately cheaper render than the finalized
   one.** The rich parse runs once per message at turn completion, never
-  per-token. This is the design's answer to the 0-dropped-frames target, not
-  an afterthought.
+  per-token. The `MessageSegmentCache` key changes from `content.count` to
+  `(id, finalLength)`. This is the design's answer to the 0-dropped-frames
+  target, not an afterthought.
 - **File drop inserts a path, never uploads.** Keeps the agent's filesystem
   boundary intact and the feature one-screen simple.
 - **Composer context reuses `ReplyQueue` + `contextSnapshot`.** No second
@@ -165,12 +236,14 @@ history" system row); active sessions join live. No new resume machinery.
 
 **In scope**
 
-- M1: block markdown parser + per-block native rendering (macOS + iOS unified);
-  built-in syntax highlighter; ` ```diff ` → `DiffLinesView`; split
-  streaming/finalized render path with the new cache key.
-- M2: `GET /v0/sessions` list route + `SessionSummaryDto` + DTO fixture;
-  `listSessions` Swift client; history panel with wave + time filter; resume
-  via existing join/replay with read-only gating for ended sessions.
+- M1: block markdown parser + per-block native rendering (macOS + iOS unified),
+  relocated into `LoopflowCore` with the old view-layer parser/tests deleted;
+  built-in syntax highlighter; ` ```diff ` → `DiffLinesView` (new wiring on the
+  message path); split streaming/finalized render path with the new cache key.
+- M2: `GET /v0/sessions` per-wave list route (`wave_id` required) +
+  `SessionSummaryDto` + DTO fixture; `listSessions` Swift client; history panel
+  with within-wave day grouping + `before` time paging; resume via existing
+  join/replay (`afterSeq: nil`) with read-only gating for ended sessions.
 - M3: file drop (in-repo path token), slash-command menu (`/file`, `/code`,
   `/search`, `/image`) with a registry, context chip row.
 
@@ -178,6 +251,7 @@ history" system row); active sessions join live. No new resume machinery.
 
 - Replacing the CLI or the embedded terminal (wave README "not here").
 - Governance/usage dashboards (those are `workflows`, not desktop chrome).
+- Repo-wide / cross-wave session listing (needs a new store query; v2).
 - Uploading or sandbox-copying out-of-repo files.
 - IDE-grade syntax accuracy; arbitrary-language highlighting.
 - Cross-device transcript sync; server-side full-text search of history
@@ -190,9 +264,9 @@ history" system row); active sessions join live. No new resume machinery.
   syntax-colored ` ```rust ` block, and a ` ```diff ` block renders each as a
   styled native element — verified by `swift test --package-path swift
   --filter MarkdownBlock` plus the manual walkthrough below.
-- From a fresh app launch you can open the history panel, filter to a wave,
-  open a week-old conversation, and read its full transcript without touching
-  a terminal; reopening an active session resumes live.
+- From a fresh app launch you can open the history panel, pick a wave, open a
+  week-old conversation in that wave, and read its full transcript without
+  touching a terminal; reopening an active session resumes live.
 - Dragging an in-repo file onto the composer inserts its path; `/` opens the
   command menu and `/file` inserts a reference.
 - DTO fixture `tests/fixtures/dto/session_summary.json` round-trips in Rust,

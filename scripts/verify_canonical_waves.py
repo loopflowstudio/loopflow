@@ -81,6 +81,17 @@ class AsanaApi:
         data = self._request("GET", f"/teams/{team_id}/projects", params={"opt_fields": "name"})
         return [AsanaProject(gid=str(item["gid"]), name=str(item["name"])) for item in data or []]
 
+    def team_workspace(self, team_id: str) -> str:
+        data = self._request(
+            "GET",
+            f"/teams/{team_id}",
+            params={"opt_fields": "organization.gid"},
+        )
+        organization = data.get("organization") if isinstance(data, dict) else None
+        if not isinstance(organization, dict) or not organization.get("gid"):
+            raise RuntimeError(f"Asana team {team_id} did not include an organization gid")
+        return str(organization["gid"])
+
     def create_team(self, workspace_id: str, name: str) -> str:
         data = self._request(
             "POST",
@@ -229,10 +240,7 @@ def main() -> int:
             or ((global_config.get("asana") or {}).get("workspace"))
         )
         if not effective_workspace:
-            raise StepFailure(
-                2,
-                "No asana.workspace found in repo or global config. Set it before running verification.",
-            )
+            effective_workspace = api.team_workspace(str(repo_team))
 
         # Step 3.
         team_name = f"loopflow-verify-{int(time.time())}"

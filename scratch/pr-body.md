@@ -15,7 +15,7 @@ lf op pm list
 uv run python scripts/verify_canonical_waves.py
 ```
 
-Expected: `lf op pm list` shows projects from the configured `asana.team`; a local `wave/fake/fake.yaml` that is not an Asana project does not appear in discovered waves. A matching `~/.lf/config.yaml` `repos:` override changes discovery to that override team.
+Expected: `lf op pm list` shows projects from the configured `asana.team`; a local `wave/fake/fake.yaml` that is not an Asana project does not appear in discovered waves. A matching `~/.lf/config.yaml` `repos:` override changes discovery to that override team. The verification script creates a temporary Asana team, uses it as an override, restores local config, and deletes the temporary team.
 
 ## Intent
 
@@ -25,6 +25,7 @@ Make the configured Asana team the shared source of truth for which waves exist.
 
 - PM-backed wave discovery uses Asana for this milestone.
 - `asana.team` may be absent temporarily so first discovery can find or create a `Loopflow` team in an organization workspace.
+- `asana.workspace` is optional when a canonical team is configured; tooling can derive the organization workspace from that team when it needs to create a temporary verification team.
 - The stale project cache is only a fallback after at least one successful Asana project fetch.
 
 ## Key decisions

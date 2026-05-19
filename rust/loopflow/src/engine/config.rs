@@ -654,6 +654,40 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn lf_home_mutex() -> &'static Mutex<()> {
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+    }
+
+    struct LfHomeGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl LfHomeGuard {
+        fn new(path: &Path) -> Self {
+            let guard = lf_home_mutex()
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            let previous = std::env::var_os("LF_HOME");
+            std::env::set_var("LF_HOME", path);
+            Self {
+                _guard: guard,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for LfHomeGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("LF_HOME", value),
+                None => std::env::remove_var("LF_HOME"),
+            }
+        }
+    }
 
     // ==========================================================================
     // parse_agent tests
@@ -1192,22 +1226,14 @@ asana:
         )
         .expect("write global config");
 
-        let previous_lf_home = std::env::var_os("LF_HOME");
-        std::env::set_var("LF_HOME", &lf_home);
-
-        let result = (|| -> Result<(), LoadError> {
+        let _lf_home = LfHomeGuard::new(&lf_home);
+        (|| -> Result<(), LoadError> {
             let resolution =
                 load_config_resolution(Some(&repo))?.expect("resolved config should exist");
             resolution.persist_asana_team("team-99")?;
             Ok(())
-        })();
-
-        match previous_lf_home {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
-
-        result.expect("persist team succeeds");
+        })()
+        .expect("persist team succeeds");
 
         let global_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             &std::fs::read_to_string(lf_home.join("config.yaml")).expect("read global config"),
@@ -1249,22 +1275,14 @@ asana:
         )
         .expect("write repo config");
 
-        let previous_lf_home = std::env::var_os("LF_HOME");
-        std::env::set_var("LF_HOME", &lf_home);
-
-        let result = (|| -> Result<(), LoadError> {
+        let _lf_home = LfHomeGuard::new(&lf_home);
+        (|| -> Result<(), LoadError> {
             let resolution =
                 load_config_resolution(Some(&repo))?.expect("resolved config should exist");
             resolution.persist_asana_team("team-42")?;
             Ok(())
-        })();
-
-        match previous_lf_home {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
-
-        result.expect("persist team succeeds");
+        })()
+        .expect("persist team succeeds");
 
         let global_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             &std::fs::read_to_string(lf_home.join("config.yaml")).expect("read global config"),

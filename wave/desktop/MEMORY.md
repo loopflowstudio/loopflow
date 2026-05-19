@@ -154,3 +154,7 @@
   `Early unexpected exit` / signal kill when no rendering environment is
   available. Treat that as an environment limitation after confirming
   `swift test --package-path swift` is green and recording the xcresult path.
+- `scratch/.pr-copy-ref` is a worktree handoff file, not a stable committed
+  invariant. If it is committed, the stored SHA will necessarily point at the
+  previous commit; refresh it uncommitted immediately before `lf op land` when
+  land needs cached PR copy.

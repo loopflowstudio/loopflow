@@ -6,6 +6,9 @@ cargo clippy -- -D warnings
 cargo test --all
 uv run pytest python/tests/ -q
 swift test --package-path swift
+tests/e2e/test_smoke.sh
+uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
+docker version && cargo test -p loopflow docker_
 uv run python scripts/verify_embedded_build_driver.py --skip-build
 ```
 

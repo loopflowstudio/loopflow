@@ -1,0 +1,3 @@
+path: demo
+
+This branch delivers a complete observable user flow: `lf op pair` prints a terminal QR and pairing URL, the iOS app gains a new setup screen with three pairing paths (Scan QR / Paste link / Sign in with Loopflow), deep-link handling routes `loopflow://pair` URLs into the existing connection stack, and WebSocket close 4401 surfaces a re-pair error state instead of a spinner. The smoke script validates the end-to-end path without a physical phone. All of these are things a user directly experiences — not internal plumbing. The structural choices (90-day token TTL, `mint_with_ttl`, `PairingPayload` in `LoopflowCore`) are implementation details behind an observable first-30-seconds experience. Demo is the right lens.

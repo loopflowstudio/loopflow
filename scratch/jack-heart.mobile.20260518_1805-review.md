@@ -16,7 +16,7 @@ Added the accountless remote-lfd pairing path for Loopflow mobile:
 - Plaintext is allowed only for Tailscale `100.64.0.0/10` hosts. Non-Tailscale hosts default to TLS and can carry a QR-provided certificate pin.
 - `loopflow://pair` reuses the existing registered app scheme instead of adding `lfd://`.
 - `auth.mode=studio` can run without studio credentials; the local token ledger remains available for accountless pairing while discovery stays disabled.
-- Gate polish changed duplicate pairing query fields from a Swift dictionary trap into a typed `invalidField` error.
+- Gate polish changed duplicate pairing query fields from a Swift dictionary trap into a typed `invalidField` error, and removed the `xxd`/shell pipeline from `--tls-url` fingerprint hashing.
 
 ## How it fits together
 
@@ -25,7 +25,7 @@ The host-side CLI and phone-side parser share one wire shape: `loopflow://pair?h
 ## Risks and bottlenecks
 
 - QR scanning needs a physical iPhone for full camera validation; Simulator coverage comes through paste/deep-link and the iOS build.
-- `--tls-url` shells out to `openssl`; hosts without `openssl`/`xxd` need to pass `--fingerprint` directly.
+- `--tls-url` still depends on the system `openssl` binary to fetch/convert the leaf certificate; hosts without `openssl` need to pass `--fingerprint` directly.
 - `EventService` currently maps `4401` to a re-pair message for all paths. Full silent studio rediscovery remains a follow-up.
 - Full Rust tests inherit `LF_RUN_ID` under wave sessions and fail two run-id-sensitive tests unless run with `env -u LF_RUN_ID`; TESTING.md now documents that local gate command.
 
@@ -41,11 +41,15 @@ The host-side CLI and phone-side parser share one wire shape: `loopflow://pair?h
 
 - `cargo fmt --check` — pass.
 - `cargo clippy -p loopflow -- -D warnings` — pass.
-- `cargo test -p loopflow pair --lib` — pass (11 tests selected by filter).
+- `env -u LF_RUN_ID cargo test -p loopflow pair --lib` — pass (12 tests selected by filter).
 - `env -u LF_RUN_ID cargo test --all` — pass (full Rust suite; unsetting run id is required inside wave sessions).
+- `uv run pytest python/tests/` — pass (137 tests).
 - `swift test --package-path swift` — pass (10 XCTest + 338 Swift Testing tests).
 - `swift test --package-path swift --filter PairingPayload` — pass (5 pairing tests).
 - `uv run python scripts/check_swift_multiplatform_boundaries.py` — pass.
 - `uv run python scripts/test_pairing_smoke.py --timeout 10` — pass (`pair_url_shape`, `paired_token_http`, `paired_token_websocket`).
 - `cd swift && xcodegen generate && xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` — pass.
+- `tests/e2e/test_smoke.sh` — pass.
+- `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` — pass (16 tests).
+- `cd swift && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -only-testing:ConcertoTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` — pass (338 Swift Testing tests). Full `ConcertoUITests` local run was interrupted after hanging in the runner on this machine; no branch-specific failure surfaced.
 

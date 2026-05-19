@@ -1,11 +1,13 @@
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use qrcode::render::unicode;
 use qrcode::QrCode;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::lfd::token_ledger::TokenLedger;
 use crate::ops::error::{OpsError, OpsResult};
@@ -242,25 +244,55 @@ fn normalize_fingerprint(value: &str) -> OpsResult<String> {
 fn fetch_tls_fingerprint(url: &str) -> OpsResult<String> {
     let parsed = reqwest::Url::parse(url)
         .map_err(|err| OpsError::Message(format!("invalid --tls-url: {err}")))?;
+    if parsed.scheme() != "https" {
+        return Err(OpsError::Message(
+            "--tls-url must be an https URL".to_string(),
+        ));
+    }
     let host = parsed
         .host_str()
         .ok_or_else(|| OpsError::Message("--tls-url requires a host".to_string()))?;
     let port = parsed.port_or_known_default().unwrap_or(443);
-    let command = format!(
-        "echo | openssl s_client -servername {host} -connect {host}:{port} 2>/dev/null | openssl x509 -outform DER | openssl dgst -sha256 -binary | xxd -p -c 256"
-    );
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let connect_host = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+
+    let s_client = Command::new("openssl")
+        .args(["s_client", "-servername", host, "-connect", &connect_host])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
         .output()
         .map_err(|err| OpsError::Message(format!("failed running openssl for --tls-url: {err}")))?;
-    if !output.status.success() {
+    if !s_client.status.success() || s_client.stdout.is_empty() {
         return Err(OpsError::Message(
             "failed fetching TLS certificate fingerprint".to_string(),
         ));
     }
-    let raw = String::from_utf8_lossy(&output.stdout);
-    normalize_fingerprint(raw.trim())
+
+    let mut x509 = Command::new("openssl")
+        .args(["x509", "-outform", "DER"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| OpsError::Message(format!("failed running openssl x509: {err}")))?;
+    if let Some(mut stdin) = x509.stdin.take() {
+        stdin.write_all(&s_client.stdout).map_err(|err| {
+            OpsError::Message(format!("failed passing certificate to openssl x509: {err}"))
+        })?;
+    }
+    let der = x509
+        .wait_with_output()
+        .map_err(|err| OpsError::Message(format!("failed reading openssl x509 output: {err}")))?;
+    if !der.status.success() || der.stdout.is_empty() {
+        return Err(OpsError::Message(
+            "failed parsing TLS certificate fingerprint".to_string(),
+        ));
+    }
+
+    Ok(format!("{:x}", Sha256::digest(&der.stdout)))
 }
 
 fn print_qr(url: &str, progress: &impl crate::ops::Progress) {
@@ -308,5 +340,11 @@ mod tests {
         assert!(is_tailscale_host("100.127.255.254"));
         assert!(!is_tailscale_host("100.128.0.1"));
         assert!(!is_tailscale_host("192.168.1.2"));
+    }
+
+    #[test]
+    fn tls_url_requires_https() {
+        let error = super::fetch_tls_fingerprint("http://lfd.example.com").unwrap_err();
+        assert!(error.to_string().contains("https URL"));
     }
 }

@@ -68,7 +68,9 @@
   resolution is `--host` else `tailscale ip -4`; plaintext is refused unless
   the encoded host is in `100.64.0.0/10`. Auto Tailscale pairing emits
   plaintext because lfd has no native TLS; explicit non-Tailscale hosts default
-  to TLS. Operator supplies cert pin via `--fingerprint` / `--tls-url`.
+  to TLS. Operator supplies cert pin via `--fingerprint` / `--tls-url`; as of
+  2026-05-19 `--tls-url` shells out only to `openssl` and hashes DER bytes
+  in-process (no `xxd`, no shell pipeline).
 - **Terminal QR rendering does not need `qrcode` image features.** As of
   2026-05-19, `rust/loopflow/Cargo.toml` uses
   `qrcode = { version = "0.14", default-features = false }`; enabling defaults

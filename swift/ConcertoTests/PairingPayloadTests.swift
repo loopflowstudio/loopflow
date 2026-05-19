@@ -33,6 +33,14 @@ struct PairingPayloadTests {
         }
     }
 
+    @Test("rejects duplicate query fields instead of trapping")
+    func rejectsDuplicateFields() {
+        let url = URL(string: "loopflow://pair?host=one&host=two&port=443&tls=true&token=token")!
+        #expect(throws: PairingPayloadError.invalidField("host")) {
+            _ = try PairingPayload(url: url)
+        }
+    }
+
     @Test("normalizes QR-provided certificate fingerprint")
     func normalizesFingerprint() throws {
         let fp = String(repeating: "a", count: 64)

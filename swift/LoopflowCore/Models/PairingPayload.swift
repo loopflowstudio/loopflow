@@ -14,9 +14,14 @@ public struct PairingPayload: Hashable, Sendable {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw PairingPayloadError.invalidURL
         }
-        let items = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
-            item.value.map { (item.name, $0) }
-        })
+        var items: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            guard let value = item.value else { continue }
+            guard items[item.name] == nil else {
+                throw PairingPayloadError.invalidField(item.name)
+            }
+            items[item.name] = value
+        }
 
         guard let host = items["host"]?.trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty else {
             throw PairingPayloadError.missingField("host")

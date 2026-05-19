@@ -82,6 +82,12 @@
 - **Run an iOS build for mobile UI changes.** `swift test --package-path swift`
   only built macOS here and missed iOS-only errors. The useful check was:
   `cd swift && xcodegen generate && xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`.
+- **Unset `LF_RUN_ID` for full Rust tests inside wave sessions.** As of
+  2026-05-18, `cargo test --all` inherits the active wave's `LF_RUN_ID`, which
+  breaks tests that intentionally exercise run-id behavior
+  (`journal::tests::terminal_run_events_clear_context_for_the_next_run`,
+  `ops::ingest::tests::ingest_prefers_bucketed_items`). Use
+  `env -u LF_RUN_ID cargo test --all` for local gate runs; CI is unaffected.
 
 ## Preferences
 

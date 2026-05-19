@@ -333,6 +333,8 @@ lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 lfq token revoke abc123   # revoke connection tokens by hash prefix
 lfq token revoke --all    # revoke all connection tokens
+lf op pair                # print a QR/link to pair Loopflow mobile over Tailscale
+lf op pair --host lfd.example.com --tls --tls-url https://lfd.example.com  # pair through a TLS proxy with a cert pin
 ```
 
 PM provider config:

@@ -44,12 +44,20 @@ do:
 `lf op pair` is the one new piece of host-side machinery. It:
 
 - ensures `auth.mode = studio` with a token ledger present,
-- mints a **pairing-class token** with a long TTL (see De-risking),
-- resolves the best reachable host: a Tailscale IP (`100.64.0.0/10`) if the
-  tailnet is up, else a configured public URL, else LAN address with a loud
-  warning,
-- captures the serving cert fingerprint when TLS terminates in front of lfd,
-- renders `lfd://pair?host=…&port=…&tls=…&token=…&fp=…` as a terminal QR.
+- mints a **long-lived pairing token** (fixed 90-day TTL — see Key decisions),
+- resolves the host explicitly, not heuristically: `--host <addr>` if given,
+  else the Tailscale IPv4 from `tailscale ip -4` if the CLI is present and
+  returns a `100.64.0.0/10` address, else **fail with an actionable message**
+  ("pass `--host` with a reachable address"). No silent LAN fallback — a LAN
+  address that doesn't survive leaving the network is the exact failure the
+  wave is built to avoid, so the command refuses rather than emit a QR that
+  works once and dies on the train.
+- accepts an optional `--fingerprint <sha256>` (or `--tls-url <url>` to fetch
+  and hash the leaf cert) for the reverse-proxy case. lfd itself serves no
+  TLS, so `lf op pair` cannot introspect a proxy it doesn't run; the operator
+  supplies the pin. Absent → `fp` omitted, phone falls back to TOFU.
+- renders `loopflow://pair?host=…&port=…&tls=…&token=…&fp=…` as a terminal QR
+  and prints the same URL as text.
 
 The phone decodes that payload, writes the token to Keychain keyed by
 `host:port` (existing `ConnectionSecretStore`), pins `fp` if present, builds a
@@ -58,6 +66,14 @@ services. Pinning the fingerprint *from the QR* is strictly better than
 trust-on-first-use over the network: the QR arrives over a trusted side channel
 (your own screen, in the room), so the phone never has to blindly trust a first
 TLS handshake.
+
+> **Scheme choice (decided headless, reversible):** the iOS bundle already
+> registers the `loopflow` URL scheme for the studio OAuth callback
+> (`Concerto/Info.plist:21-30`) and there is **no `onOpenURL` handler anywhere
+> yet** — deep-linking is greenfield regardless of scheme. Reusing
+> `loopflow://pair` over a new `lfd://` scheme avoids a second registered
+> scheme for zero functional loss. The smoke test drives this scheme via
+> `xcrun simctl openurl`.
 
 ## De-risking
 
@@ -82,21 +98,35 @@ TLS handshake.
 
 ## Key decisions
 
-1. **Pairing-class token, long sliding TTL.** Add a pairing token path to
-   `TokenLedger` (e.g. `mint_pairing` or a TTL parameter) with a 90-day TTL
-   that slides forward on each successful auth. Rationale: the phone is a
-   trusted personal device; re-pairing weekly is the failure the daily
-   experience explicitly rules out. Revocation still works (`POST
-   /v0/tokens/revoke` by hash prefix, `lfq token revoke`). Pairing tokens are
-   visibly distinct in the ledger so `lfq token revoke --all` and audit stay
-   meaningful.
+1. **Long-lived pairing token, fixed 90-day TTL — *not* sliding.**
+   *Reshaped from kickoff (sliding TTL → fixed) — see Open questions.*
+   Verification of `token_ledger.rs` showed: per-row `expires_at` already
+   exists (table schema, line 270-277), so a long TTL needs **no schema
+   change** — `mint_with_ttl(count, ttl)` (or `mint_pairing()`) inserts a row
+   with a far-future `expires_at` and is the entire core change. `validate()`
+   never bumps `expires_at` today, and the WS layer re-validates every 60s
+   (`ws.rs:82-104`); a *sliding* TTL would therefore mean a DB write per
+   connected phone per minute, for a benefit a fixed 90-day TTL already
+   delivers (the daily-experience bar is "connected tomorrow", which any
+   TTL > 1 day clears). Drop sliding. Revocation is unchanged and already
+   works (`POST /v0/tokens/revoke` by hash prefix → `ledger.revoke`;
+   `lfq token revoke` / `--all`). **Deferred:** a `token_kind` column to make
+   pairing tokens visually distinct in audit / `revoke --all`. It is a real
+   schema migration with no functional payoff for v1 (revoke-by-prefix and
+   revoke-all both already hit pairing tokens correctly). Add it only if audit
+   distinctness becomes a stated need.
 2. **`lf op pair` is the host-side entry point.** A new ops step/command, not a
    new daemon endpoint — it runs where the user already has a terminal,
    reuses ledger minting, and prints a QR. Side-channel by nature → belongs in
    `ops/`.
-3. **`lfd://pair?host&port&tls&token&fp` is the wire format.** One URL serves
-   QR, paste, and deep link. Parsing lives in `LoopflowCore` as pure Codable
-   logic with round-trip tests. `tls` defaults true; `fp` optional.
+3. **`loopflow://pair?host&port&tls&token&fp` is the wire format.** One URL
+   serves QR, paste, and deep link, reusing the already-registered `loopflow`
+   scheme (no second URL scheme to register; no `onOpenURL` handler exists yet
+   for *any* scheme, so the handler is new work either way). Parsing lives in
+   `LoopflowCore` as pure Codable logic with round-trip tests. `tls` defaults
+   true; `fp` optional. Per the DTO rule in CLAUDE.md, the parser does **not**
+   silently default a missing `tls` — absence is an explicit parse decision in
+   one place, not a `?? true` scattered at call sites.
 4. **TLS-by-default is a client policy with one explicit exception.** Default
    `useTLS=true`. Plaintext permitted *only* for `100.64.0.0/10` hosts
    (Tailscale, encrypted at L3 — mirrors `bin/lfd.rs` bind guard). Any other
@@ -114,10 +144,10 @@ TLS handshake.
 ## Scope
 
 **In scope:**
-- `lf op pair` host command: mint pairing token, resolve host, render QR + print the `lfd://pair?…` URL
-- Pairing-class token in `TokenLedger` (long sliding TTL) + revocation parity
+- `lf op pair` host command: mint pairing token, resolve host (`--host` / `tailscale ip -4` / fail — no LAN fallback), render QR + print the `loopflow://pair?…` URL
+- Long-lived pairing token in `TokenLedger` (fixed 90-day TTL via `mint_with_ttl`, no schema change) + revocation parity
 - iOS unified setup screen (`Platform/iOS/`): Scan QR / Paste link / Sign in with Loopflow
-- `lfd://pair` payload parsing + cert-fingerprint pin-from-QR in `LoopflowCore` (shared, tested)
+- `loopflow://pair` payload parsing + cert-fingerprint pin-from-QR in `LoopflowCore` (shared, tested)
 - Camera permission wiring (`NSCameraUsageDescription`) + deep-link handler
 - `scenePhase`-aware immediate reconnect; WS `4401` path-aware recovery
 - Three concrete connection error states with actionable UI
@@ -127,6 +157,8 @@ TLS handshake.
 - Wave list / roadmap / item rendering — `see-your-waves`, `see-wave-tasks`
 - Any write/build/land/chat operation (wave is view-only by charter)
 - Native rustls TLS termination inside lfd serve
+- Sliding/renewing token TTL and a `token_kind` audit column (deferred — see Key decisions 1)
+- Silent LAN-address fallback in `lf op pair` (refused by design)
 - Push notifications, background refresh, Android
 - mDNS/Bonjour LAN discovery
 
@@ -135,7 +167,7 @@ TLS handshake.
 A runnable script proves the end-to-end path without a physical phone:
 
 `scripts/test_pairing_smoke.py` — start lfd in studio mode, run the
-`lf op pair` codepath to mint a pairing token and emit the `lfd://pair?…`
+`lf op pair` codepath to mint a pairing token and emit the `loopflow://pair?…`
 URL, then drive the connection the way the phone would: parse the payload,
 `GET /v0/waves` with `Authorization: Bearer <token>`, open `/ws`, assert the
 `connected` snapshot arrives. Extend the existing
@@ -144,8 +176,8 @@ plumbing.
 
 Observable acceptance, mapped to the item's "Done when":
 - Single-screen setup, all three paths reach a connected state — iOS
-  Simulator via deep link (`xcrun simctl openurl … "lfd://pair?…"`), since the
-  Simulator has no camera
+  Simulator via deep link (`xcrun simctl openurl … "loopflow://pair?…"`),
+  since the Simulator has no camera
 - Token in Keychain — `ConnectionSecretStore` round-trip, survives app restart
 - TLS by default — non-Tailscale plaintext host is refused with `unreachable`/
   policy error, not silently downgraded
@@ -173,6 +205,39 @@ Full suite still green: `cargo test --all`, `swift test --package-path swift`,
   the long sliding TTL is the direct countermeasure to that exact failure.
 - **Scope exclusions** honor README "Not here": no build work, no editing, no
   native chat.
+
+## Open questions (need human judgment)
+
+Headless `review-design` made the executive calls below to keep momentum.
+Each is reversible and called out so the human can overrule in a real session.
+Implementation can proceed on the defaults; none of these block starting.
+
+1. **Fixed vs sliding token TTL.** Reshaped to a **fixed 90-day** TTL (no
+   sliding) because sliding costs a DB write per phone per minute against the
+   60s WS revalidation loop for a benefit a long fixed TTL already gives. If
+   the intent is genuinely "never re-pair as long as the phone is used at all"
+   rather than "don't re-pair for ~3 months", sliding is back on the table —
+   but then the per-revalidation write must be made cheap (e.g. bump
+   `expires_at` only when remaining life < half the TTL, not every tick).
+   **Default taken: fixed 90 days.**
+2. **Pairing-token audit distinctness.** Deferred the `token_kind` schema
+   column. Open question: does `lfq token revoke --all` / audit need to *show*
+   which tokens are phone-pairing vs studio-pool, or is "revoke works
+   correctly on all of them" enough for v1? **Default taken: deferred.**
+3. **`lf op pair` host resolution.** Chose `--host` → `tailscale ip -4` →
+   hard fail, with **no LAN fallback**. Open question: is a guarded LAN
+   address (printed with a loud "works only on this network" warning) ever
+   wanted for a deliberately local-only setup, or is refusing always correct?
+   **Default taken: refuse.**
+4. **Reverse-proxy fingerprint capture.** `lf op pair` cannot introspect a
+   TLS proxy it doesn't run, so the operator supplies `--fingerprint` /
+   `--tls-url`. Open question: is the expected deployment "lfd behind a known
+   proxy the operator can name", or should pairing actively fetch and hash the
+   leaf cert from the public URL itself? **Default taken: operator supplies;
+   `--tls-url` offered as the fetch-and-hash convenience.**
+5. **Deep-link scheme.** Reusing `loopflow://pair` over a new `lfd://`
+   scheme. Reversible; flagged only because the kickoff and prior smoke-test
+   wording assumed `lfd://`. **Default taken: `loopflow://pair`.**
 
 ## Measure
 

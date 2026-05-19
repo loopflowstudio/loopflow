@@ -41,12 +41,27 @@
   only from a reverse proxy/relay in front. Don't promise lfd-terminated TLS.
 - **No QR scanning anywhere** — only `AVCaptureDevice` for audio in
   `VoiceInputService`. iOS Simulator has no camera; the paste / deep-link
-  (`lfd://pair?…`) path is the headless-testable fallback and must exist.
+  path is the headless-testable fallback and must exist.
+  `NSCameraUsageDescription` is **absent** from `Concerto/Info.plist` — adding
+  it is required for the QR path.
 - **`EventService` has reconnect but no `scenePhase` and no `4401` handling** —
   device-sleep recovery and token-expiry UX are genuine gaps, not bugs in
   existing code.
 - Remote contract reference: `scripts/test_remote_smoke.py` (Bearer header,
   http→ws / https→wss, `connected` snapshot, `--insecure`/custom CA).
+- **TokenLedger has per-row `expires_at`** (`token_ledger.rs` schema
+  ~270-277): a long-lived pairing token needs **no schema change**, just a
+  `mint_with_ttl(count, ttl)`. Tokens are reusable; `Claimed` is pool
+  accounting, doesn't gate `validate()`. *Sliding* TTL is the trap — WS
+  re-validates every 60s (`ws.rs:82-104`) and `validate()` never bumps expiry,
+  so sliding = 1 DB write/phone/minute. Fixed 90-day TTL clears the
+  daily-experience bar without it. `token_kind` audit column deferred.
+- **iOS already registers the `loopflow` URL scheme** for studio OAuth
+  (`Concerto/Info.plist:21-30`) but has **no `onOpenURL` handler anywhere** —
+  deep-linking is greenfield. Reuse `loopflow://pair`; don't add `lfd://`.
+- **`lf op pair` can't auto-capture a TLS fingerprint** — lfd serves no TLS;
+  any cert lives in a separate proxy on another host. Operator supplies the
+  pin (`--fingerprint` / `--tls-url`); absent → phone TOFU.
 
 ## Preferences
 

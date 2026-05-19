@@ -29,6 +29,7 @@ Make Concerto's embedded terminal a first-class build-driving surface. Palette a
 - Startup reconcile handles tmux sessions that outlive lfd and rows whose tmux sessions disappeared while lfd was down.
 - Multiplexer panes store lfd session ids and attach through `RepoState.attachTerminalSession`; the old synthesized `lf-<waveId>-<paneId>` path is gone.
 - DTO fixtures pin the new create request and terminal-session response shape across Rust, Swift, and Python.
+- Gitignored `.lf/tmp/`: palette sessions write exit files there, so the runtime scratch directory must not be tracked.
 
 ## Not included
 

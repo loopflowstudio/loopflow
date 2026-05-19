@@ -15,6 +15,7 @@ Concerto's multiplexer terminal panes now bind to lfd terminal session ids (`ter
 - Renamed `PaneConfig.terminalSessionName` to `terminalSessionId` rather than preserving a compatibility shim. Old persisted layouts may lose terminal bindings once; new layouts are honest about the durable identity they store.
 - Kept client-side `TmuxSession` only for the workspace shell escape path. Multiplexer build terminals are daemon-owned.
 - Added DTO fixtures for both the new create request and the existing terminal-session response shape.
+- Gitignored `.lf/tmp/` and removed two stray `.exit` files that a prior run committed. Palette sessions write exit codes to `.lf/tmp/terminal-sessions/<id>.exit`, so that runtime directory must not be tracked.
 
 ## How it fits together
 

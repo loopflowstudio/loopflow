@@ -96,6 +96,10 @@ def start_lfd() -> subprocess.Popen:
     kill_existing_lfd()
     env = os.environ.copy()
     env["RUST_LOG"] = "loopflow=info"
+    # Self-contained smoke: this script exercises terminal-session lifecycle,
+    # not auth wiring. Pin local auth so it runs regardless of the host's
+    # lfd auth.mode (a studio-mode host otherwise blocks startup on a JWT).
+    env["LFD_AUTH_MODE"] = "local"
     proc = subprocess.Popen(
         [str(LFD_BIN), "serve"],
         cwd=REPO_ROOT,

@@ -47,6 +47,10 @@
   `tests/fixtures/dto/terminal_session.json` and
   `create_terminal_session_request.json` are asserted in Rust, Swift, and
   Python fixture tests.
+- **lfd readiness probes are split by route prefix.** `/health` is an
+  unauthenticated root route, while most API calls live under `/v0`. Validation
+  scripts that wait for local lfd should probe `http://127.0.0.1:2486/health`
+  instead of `/v0/status` (`/status` is root and auth-protected).
 
 ## Preferences
 
@@ -64,3 +68,7 @@
   duplicate existing ones, not re-litigating the approach. The approach held.
 - `cargo test -p loopflow dto_fixtures` filters by test name, not integration
   test file; use `cargo test -p loopflow --test dto_fixtures` to run that file.
+- Headless loopflow runs set `LF_RUN_ID`; Rust tests that assert generated
+  journal ids or branch-derived ingest claims must clear that environment
+  explicitly or full `cargo test -p loopflow` fails only under agent-driven
+  validation.

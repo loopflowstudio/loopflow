@@ -1,0 +1,1 @@
+desktop: launch embedded build flows through lfd terminals

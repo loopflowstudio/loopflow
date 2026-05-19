@@ -25,7 +25,8 @@ from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LFD_BIN = REPO_ROOT / "target" / "debug" / "lfd"
-BASE_URL = "http://127.0.0.1:2486/v0"
+ROOT_URL = "http://127.0.0.1:2486"
+BASE_URL = f"{ROOT_URL}/v0"
 
 
 def log(message: str) -> None:
@@ -64,6 +65,14 @@ def request(method: str, path: str, token: str, body: dict | None = None) -> dic
     return json.loads(payload) if payload else {}
 
 
+def health_ready() -> bool:
+    try:
+        with urllib.request.urlopen(f"{ROOT_URL}/health", timeout=2) as response:
+            return response.status == 200
+    except urllib.error.URLError:
+        return False
+
+
 def build_lfd() -> None:
     log("Building lfd…")
     result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT)
@@ -98,16 +107,15 @@ def start_lfd() -> subprocess.Popen:
     for _ in range(40):
         time.sleep(0.5)
         token = read_token()
-        if not token:
-            continue
-        try:
-            request("GET", "/status", token)
+        if token and health_ready():
             log("lfd ready")
             return proc
-        except SystemExit:
-            continue
-    output = proc.stdout.read() if proc.stdout else ""
     proc.terminate()
+    try:
+        output, _ = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        output, _ = proc.communicate(timeout=5)
     fail(f"lfd did not become ready\n{output[-2000:]}")
 
 

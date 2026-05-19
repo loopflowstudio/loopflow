@@ -22,7 +22,8 @@ pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use summary::Summary;
 pub use terminal_session::{
-    tmux_session_name, TerminalSession, TerminalSessionStatus, TMUX_TERMINAL_SOURCE,
+    tmux_session_name, TerminalSession, TerminalSessionStatus, PALETTE_TERMINAL_SOURCE,
+    TMUX_TERMINAL_SOURCE,
 };
 pub use trigger::{
     ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,

@@ -161,10 +161,10 @@ public final class MultiplexerStore {
         persist()
     }
 
-    public func terminalSessionNames(for waveId: String) -> [String] {
+    public func terminalSessionIds(for waveId: String) -> [String] {
         layout(for: waveId).allPanes.compactMap { pane in
             guard pane.type == .terminal else { return nil }
-            return pane.config.terminalSessionName
+            return pane.config.terminalSessionId
         }
     }
 
@@ -260,15 +260,7 @@ public final class MultiplexerStore {
     }
 
     private func normalizeConfig(_ config: PaneConfig, for waveId: String, paneId: String, type: PaneType) -> PaneConfig {
-        guard type == .terminal, config.terminalSessionName == nil else { return config }
-
-        var updatedConfig = config
-        updatedConfig.terminalSessionName = terminalSessionName(for: waveId, paneId: paneId)
-        return updatedConfig
-    }
-
-    private func terminalSessionName(for waveId: String, paneId: String) -> String {
-        "lf-\(waveId)-\(paneId)"
+        config
     }
 
     private func clearWaveState(_ waveId: String) {

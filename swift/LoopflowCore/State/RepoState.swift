@@ -684,9 +684,9 @@ public final class RepoState {
         guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
             return
         }
-        if pane.config.terminalSessionName != session.tmuxName {
+        if pane.config.terminalSessionId != session.id {
             var config = pane.config
-            config.terminalSessionName = session.tmuxName
+            config.terminalSessionId = session.id
             multiplexerStore.updatePaneConfig(pane.id, config: config, for: session.waveId)
         }
         markAutoPresentTerminal(for: session.waveId)
@@ -862,6 +862,22 @@ public final class RepoState {
         let session = try await waveService.cancelTerminalSession(id)
         terminalWorkspaceStore.upsert(session, select: false)
         return session
+    }
+
+    public func createTerminalSession(
+        waveId: String,
+        flow: String,
+        worktree: String,
+        agent: String
+    ) async throws -> TerminalSessionLaunchResponse {
+        let response = try await waveService.createTerminalSession(
+            waveId: waveId,
+            flow: flow,
+            worktree: worktree,
+            agent: agent
+        )
+        terminalWorkspaceStore.upsert(response.session, select: true)
+        return response
     }
 
     public func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {

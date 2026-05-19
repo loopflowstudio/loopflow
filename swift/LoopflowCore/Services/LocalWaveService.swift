@@ -651,6 +651,28 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parsedList(from: data, parse: Self.parseTerminalSessionFromJSON)
     }
 
+    public func createTerminalSession(
+        waveId: String,
+        flow: String,
+        worktree: String,
+        agent: String
+    ) async throws -> TerminalSessionLaunchResponse {
+        let request = try makeRequest(
+            terminalSessionURL(),
+            method: "POST",
+            body: [
+                "wave_id": waveId,
+                "flow": flow,
+                "worktree": worktree,
+                "agent": agent,
+            ],
+            contentType: "application/json"
+        )
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try parsedObject(from: data, parse: Self.parseTerminalSessionLaunchResponseFromJSON)
+    }
+
     public func getTerminalSession(_ id: String) async throws -> TerminalSession {
         let (data, response) = try await performGet(terminalSessionURL(id))
         try requireOKStatus(response, data: data)
@@ -1603,6 +1625,19 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             startedAt: parseDate(json["started_at"]),
             completedAt: parseDate(json["completed_at"])
         )
+    }
+
+    static func parseTerminalSessionLaunchResponseFromJSON(_ json: [String: Any]) -> TerminalSessionLaunchResponse? {
+        guard
+            let sessionJSON = json["session"] as? [String: Any],
+            let connectionJSON = json["connection"] as? [String: Any],
+            let session = parseTerminalSessionFromJSON(sessionJSON),
+            let connection = parseTerminalConnectionInfoFromJSON(connectionJSON)
+        else {
+            return nil
+        }
+
+        return TerminalSessionLaunchResponse(session: session, connection: connection)
     }
 
     static func parseTerminalConnectionInfoFromJSON(_ json: [String: Any]) -> TerminalConnectionInfo? {

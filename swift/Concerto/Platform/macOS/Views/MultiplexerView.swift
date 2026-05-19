@@ -112,7 +112,7 @@ private struct PaneContainerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: pane.type.displayName)
+            PaneHeader(title: paneTitle, detail: paneDetail)
             paneContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -155,20 +155,40 @@ private struct PaneContainerView: View {
     private var backgroundColor: Color {
         pane.type == .terminal ? LoopflowPalette.dark.background : palette.surface
     }
+
+    private var paneTitle: String {
+        pane.type.displayName
+    }
+
+    private var paneDetail: String? {
+        guard pane.type == .terminal,
+              let sessionId = pane.config.terminalSessionId,
+              let session = repoState.terminalWorkspaceStore.sessionsById[sessionId] else {
+            return nil
+        }
+        return session.agent
+    }
 }
 
 private struct PaneHeader: View {
     let title: String
+    let detail: String?
 
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack {
+        HStack(spacing: Spacing.sm) {
             Text(title)
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
                 .textCase(.uppercase)
                 .tracking(0.8)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary.opacity(0.75))
+                    .lineLimit(1)
+            }
             Spacer()
         }
         .padding(.horizontal, Spacing.md)
@@ -186,8 +206,17 @@ private struct TerminalPaneView: View {
 
     @Environment(RepoState.self) private var repoState
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
-    @State private var tmuxReady = false
+    @State private var connectionInfo: TerminalConnectionInfo?
     @State private var errorMessage: String?
+    @State private var isAttaching = false
+
+    private var terminalSessionId: String? {
+        pane.config.terminalSessionId
+    }
+
+    private var session: TerminalSession? {
+        terminalSessionId.flatMap { repoState.terminalWorkspaceStore.sessionsById[$0] }
+    }
 
     var body: some View {
         Group {
@@ -197,56 +226,68 @@ private struct TerminalPaneView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text(errorMessage)
                 )
-            } else if let worktreePath {
-                if tmuxReady {
+            } else if terminalSessionId == nil {
+                paneUnavailable(
+                    title: "No session",
+                    systemImage: "terminal",
+                    description: "Launch a flow from the command palette to bind this pane to an lfd terminal session."
+                )
+            } else if let session, session.status.isTerminal {
+                paneUnavailable(
+                    title: "Session ended",
+                    systemImage: "checkmark.circle",
+                    description: "Launch another flow to reuse this terminal pane."
+                )
+            } else if isAttaching {
+                ProgressView("Reattaching…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LoopflowPalette.dark.background)
+            } else if let connectionInfo {
+                if connectionInfo.usesLocalTmux {
                     GhosttyTerminalView(
-                        workingDirectory: worktreePath,
-                        argv: tmuxSession(for: worktreePath).attachCommand(),
+                        workingDirectory: connectionInfo.cwd,
+                        argv: ["tmux", "attach-session", "-t", connectionInfo.sessionName],
                         sessionId: pane.id,
                         manager: ghosttyManager
                     )
-                    // Rebuild the Ghostty surface when the pane is repointed
-                    // at a different tmux session (e.g. a new run starts).
-                    .id(pane.config.terminalSessionName ?? pane.id)
+                    .id(connectionInfo.sessionName)
                 } else {
-                    ProgressView("Starting tmux…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(LoopflowPalette.dark.background)
+                    paneUnavailable(
+                        title: "Remote tmux",
+                        systemImage: "network",
+                        description: "Attach through an external terminal for remote hosts."
+                    )
                 }
             } else {
-                paneUnavailable(
-                    title: "No worktree",
-                    systemImage: "folder.badge.questionmark",
-                    description: "Create a worktree for this wave to open a terminal pane."
-                )
+                ProgressView("Reattaching…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LoopflowPalette.dark.background)
             }
         }
-        .task(id: pane.config.terminalSessionName ?? pane.id) {
-            guard let worktreePath else { return }
-            tmuxReady = false
-            do {
-                try await tmuxSession(for: worktreePath).ensureBaseSession(launchCommand: pane.config.launchCommand)
-                clearLaunchCommandIfNeeded()
-                tmuxReady = true
-                errorMessage = nil
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+        .task(id: terminalSessionId ?? "empty") {
+            await attachIfNeeded()
         }
     }
 
-    private func tmuxSession(for worktreePath: String) -> TmuxSession {
-        TmuxSession(
-            sessionName: pane.config.terminalSessionName ?? "lf-\(waveId)-\(pane.id)",
-            worktreePath: worktreePath
-        )
-    }
-
-    private func clearLaunchCommandIfNeeded() {
-        guard pane.config.launchCommand != nil else { return }
-        var config = pane.config
-        config.launchCommand = nil
-        repoState.multiplexerStore.updatePaneConfig(pane.id, config: config, for: waveId)
+    private func attachIfNeeded() async {
+        guard let terminalSessionId else {
+            connectionInfo = nil
+            errorMessage = nil
+            isAttaching = false
+            return
+        }
+        isAttaching = true
+        do {
+            if session == nil {
+                await repoState.loadTerminalSession(id: terminalSessionId, select: false)
+            }
+            connectionInfo = try await repoState.attachTerminalSession(terminalSessionId)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+            connectionInfo = nil
+        }
+        isAttaching = false
     }
 }
 
@@ -1068,7 +1109,6 @@ private struct LaunchpadPaneView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
     @State private var selectedStep = "design"
-    @State private var prompt = ""
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: waveId)
@@ -1112,15 +1152,12 @@ private struct LaunchpadPaneView: View {
                         }
                         .pickerStyle(.menu)
 
-                        TextField("Prompt (optional)", text: $prompt, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-
                         HStack(spacing: Spacing.sm) {
                             launchButton("Launch lf session", icon: "sparkles") {
-                                launchInteractiveSession(worktreePath: worktreePath)
+                                launchPaletteSession(flow: selectedStep, worktreePath: worktreePath)
                             }
                             launchButton("Fresh shell", icon: "terminal") {
-                                launchTerminal(command: nil)
+                                replaceWithEmptyTerminal()
                             }
                         }
                     }
@@ -1175,25 +1212,39 @@ private struct LaunchpadPaneView: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
-    private func launchInteractiveSession(worktreePath: String) {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let session = InteractiveSession(
-            waveId: waveId,
-            step: selectedStep,
-            worktreePath: worktreePath,
-            prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
-        )
-        launchTerminal(command: session.command)
+    private func launchPaletteSession(flow: String, worktreePath: String) {
+        Task {
+            do {
+                let response = try await repoState.createTerminalSession(
+                    waveId: waveId,
+                    flow: flow,
+                    worktree: worktreePath,
+                    agent: selectedAgent
+                )
+                _ = repoState.multiplexerStore.replacePane(
+                    pane.id,
+                    with: .terminal,
+                    config: PaneConfig(terminalSessionId: response.session.id),
+                    for: waveId
+                )
+            } catch {
+                repoState.errorMessage = "Failed to launch terminal session: \(error.localizedDescription)"
+            }
+        }
     }
 
-    private func launchTerminal(command: String?) {
+    private var selectedAgent: String {
+        if let agent = wave?.agent, !agent.isEmpty {
+            return agent
+        }
+        return repoState.supportedHarnesses.first ?? "claude:opus"
+    }
+
+    private func replaceWithEmptyTerminal() {
         _ = repoState.multiplexerStore.replacePane(
             pane.id,
             with: .terminal,
-            config: PaneConfig(
-                terminalSessionName: pane.config.terminalSessionName,
-                launchCommand: command
-            ),
+            config: .empty,
             for: waveId
         )
     }

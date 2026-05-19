@@ -22,16 +22,16 @@ public enum PaneType: String, Codable, Sendable {
 
 public struct PaneConfig: Codable, Sendable, Equatable {
     public var filePath: String?
-    public var terminalSessionName: String?
+    public var terminalSessionId: String?
     public var launchCommand: String?
 
     public init(
         filePath: String? = nil,
-        terminalSessionName: String? = nil,
+        terminalSessionId: String? = nil,
         launchCommand: String? = nil
     ) {
         self.filePath = filePath
-        self.terminalSessionName = terminalSessionName
+        self.terminalSessionId = terminalSessionId
         self.launchCommand = launchCommand
     }
 

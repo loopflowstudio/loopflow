@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use loopflow::lfd::http::dto::{CreateTerminalSessionRequestDto, TerminalSessionDto};
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -38,4 +39,28 @@ fn session_unsupported_input_fixture_has_input_supported_false() {
     assert_eq!(session["status"], "failed");
     assert_eq!(session["input_supported"], false);
     assert!(session["ended_at"].is_string());
+}
+
+#[test]
+fn terminal_session_fixture_pins_palette_shape() {
+    let terminal_session: TerminalSessionDto =
+        serde_json::from_value(load_fixture("terminal_session.json"))
+            .expect("terminal session fixture should parse");
+    assert_eq!(terminal_session.object, "terminal_session");
+    assert_eq!(terminal_session.step, "ship");
+    assert_eq!(terminal_session.agent, "codex");
+    assert_eq!(terminal_session.source, "palette");
+    assert_eq!(terminal_session.status, "running");
+    assert_eq!(terminal_session.wave_run_id, None);
+    assert!(terminal_session.argv.contains(&"-m".to_string()));
+}
+
+#[test]
+fn create_terminal_session_request_fixture_pins_required_fields() {
+    let request: CreateTerminalSessionRequestDto =
+        serde_json::from_value(load_fixture("create_terminal_session_request.json"))
+            .expect("create request fixture should parse");
+    assert_eq!(request.flow, "ship");
+    assert_eq!(request.worktree, "/tmp/repo.Desktop");
+    assert_eq!(request.agent, "codex");
 }

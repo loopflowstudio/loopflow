@@ -55,3 +55,12 @@ noting for the DTO fixture author so the fixture key isn't bikeshed later.
 
 None of these block implementation. They're the seams where a human's intent
 would override the headless default. Absent correction, implement as assumed.
+
+## 2026-05-19 implementation notes
+
+- Implemented `source == "palette"` as the stay-alive discriminator.
+- Renamed the persisted pane field to `terminalSessionId`; old UserDefaults
+  layouts that only had `terminalSessionName` will decode with an empty terminal
+  binding and self-heal after the next launch.
+- Kept the create request field as `agent`, matching `TerminalSession.agent`;
+  the executor appends it to `lf` as `-m <agent>`.

@@ -9,8 +9,18 @@ enum QuoteAction {
 }
 
 struct SelectableAssistantTextView: UIViewRepresentable {
-    let text: String
+    let attributedText: AttributedString
     let onQuoteAction: (QuoteAction) -> Void
+
+    init(text: String, onQuoteAction: @escaping (QuoteAction) -> Void) {
+        self.attributedText = AttributedString(text)
+        self.onQuoteAction = onQuoteAction
+    }
+
+    init(attributedText: AttributedString, onQuoteAction: @escaping (QuoteAction) -> Void) {
+        self.attributedText = attributedText
+        self.onQuoteAction = onQuoteAction
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onQuoteAction: onQuoteAction)
@@ -19,21 +29,21 @@ struct SelectableAssistantTextView: UIViewRepresentable {
     func makeUIView(context: Context) -> SelectableTextView {
         let textView = SelectableTextView()
         textView.coordinator = context.coordinator
-        textView.applyStyledContent(text)
+        textView.applyAttributedContent(attributedText)
         return textView
     }
 
     func updateUIView(_ textView: SelectableTextView, context: Context) {
         context.coordinator.onQuoteAction = onQuoteAction
-        if textView.lastText != text {
-            textView.applyStyledContent(text)
+        if textView.lastText != attributedText {
+            textView.applyAttributedContent(attributedText)
         }
     }
 }
 
 final class SelectableTextView: UITextView {
     weak var coordinator: SelectableAssistantTextView.Coordinator?
-    var lastText: String = ""
+    var lastText = AttributedString()
 
     private static let emojis = reactionEmojis.map(\.emoji)
 
@@ -52,8 +62,14 @@ final class SelectableTextView: UITextView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func applyAttributedContent(_ content: AttributedString) {
+        lastText = content
+        attributedText = NSAttributedString(content)
+        invalidateIntrinsicContentSize()
+    }
+
     func applyStyledContent(_ markdown: String) {
-        lastText = markdown
+        lastText = AttributedString(markdown)
         attributedText = Self.styledAttributedString(from: markdown)
         invalidateIntrinsicContentSize()
     }

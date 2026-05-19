@@ -2,19 +2,25 @@
 import SwiftUI
 import LoopflowCore
 
-private final class MessageSegmentCache {
-    private var cachedContentLength = -1
-    private var cachedSegments: [MessageSegment] = []
+private final class MarkdownBlockCache {
+    private var cachedMessageId: UUID?
+    private var cachedFinalLength = -1
+    private var cachedBlocks: [MarkdownBlock] = []
 
-    func segments(for content: String) -> [MessageSegment] {
-        let contentLength = content.count
-        guard contentLength != cachedContentLength else {
-            return cachedSegments
+    func blocks(for message: SessionMessage, isStreaming: Bool) -> [MarkdownBlock] {
+        if isStreaming {
+            return parseStreamingMarkdownBlocks(message.content)
         }
 
-        cachedContentLength = contentLength
-        cachedSegments = parseMessageSegments(content)
-        return cachedSegments
+        let contentLength = message.content.count
+        guard cachedMessageId != message.id || cachedFinalLength != contentLength else {
+            return cachedBlocks
+        }
+
+        cachedMessageId = message.id
+        cachedFinalLength = contentLength
+        cachedBlocks = parseMarkdownBlocks(message.content)
+        return cachedBlocks
     }
 }
 
@@ -28,7 +34,7 @@ struct MessageRow: View {
     @State private var selectedQuote: String?
     @State private var replyDraft = ""
     @State private var selectionResetToken = 0
-    @State private var segmentCache = MessageSegmentCache()
+    @State private var blockCache = MarkdownBlockCache()
 
     var body: some View {
         if message.role == .system {
@@ -64,24 +70,22 @@ struct MessageRow: View {
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant {
-            let segments = segmentCache.segments(for: message.content)
+            let blocks = blockCache.blocks(for: message, isStreaming: showStreamingCursor)
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    switch segment {
-                    case .text(let text):
-                        SelectableAssistantMessageTextView(
-                            text: text,
-                            selectionResetToken: selectionResetToken
-                        ) { newSelection in
-                            selectedQuote = newSelection
-                            if newSelection == nil {
-                                replyDraft = ""
-                            }
+                AssistantMarkdownBlocksView(
+                    blocks: blocks,
+                    selectionResetToken: selectionResetToken,
+                    onSelectionChanged: { newSelection in
+                        selectedQuote = newSelection
+                        if newSelection == nil {
+                            replyDraft = ""
                         }
-                    case .code(let language, let codeContent):
-                        CodeBlockView(language: language, content: codeContent)
+                    },
+                    onQuoteReply: { selectedQuote = $0 },
+                    onEmojiReact: { selected, emoji in
+                        onQueueEntry(.emojiReact(quoted: selected, emoji: emoji))
                     }
-                }
+                )
 
                 if showStreamingCursor {
                     StreamingCursorView()
@@ -164,19 +168,25 @@ struct MessageRow: View {
 import SwiftUI
 import LoopflowCore
 
-private final class MessageSegmentCache {
-    private var cachedContentLength = -1
-    private var cachedSegments: [MessageSegment] = []
+private final class MarkdownBlockCache {
+    private var cachedMessageId: UUID?
+    private var cachedFinalLength = -1
+    private var cachedBlocks: [MarkdownBlock] = []
 
-    func segments(for content: String) -> [MessageSegment] {
-        let contentLength = content.count
-        guard contentLength != cachedContentLength else {
-            return cachedSegments
+    func blocks(for message: SessionMessage, isStreaming: Bool) -> [MarkdownBlock] {
+        if isStreaming {
+            return parseStreamingMarkdownBlocks(message.content)
         }
 
-        cachedContentLength = contentLength
-        cachedSegments = parseMessageSegments(content)
-        return cachedSegments
+        let contentLength = message.content.count
+        guard cachedMessageId != message.id || cachedFinalLength != contentLength else {
+            return cachedBlocks
+        }
+
+        cachedMessageId = message.id
+        cachedFinalLength = contentLength
+        cachedBlocks = parseMarkdownBlocks(message.content)
+        return cachedBlocks
     }
 }
 
@@ -190,7 +200,7 @@ struct MessageRow: View {
 
     @State private var composerQuote: String?
     @State private var replyDraft = ""
-    @State private var segmentCache = MessageSegmentCache()
+    @State private var blockCache = MarkdownBlockCache()
 
     var body: some View {
         if message.role == .system {
@@ -226,18 +236,17 @@ struct MessageRow: View {
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant {
-            let segments = segmentCache.segments(for: message.content)
+            let blocks = blockCache.blocks(for: message, isStreaming: showStreamingCursor)
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    switch segment {
-                    case .text(let text):
-                        SelectableAssistantTextView(text: text) { action in
-                            handleQuoteAction(action)
-                        }
-                    case .code(let language, let codeContent):
-                        CodeBlockView(language: language, content: codeContent)
+                AssistantMarkdownBlocksView(
+                    blocks: blocks,
+                    selectionResetToken: 0,
+                    onSelectionChanged: { _ in },
+                    onQuoteReply: { composerQuote = $0 },
+                    onEmojiReact: { selected, emoji in
+                        onQueueEntry(.emojiReact(quoted: selected, emoji: emoji))
                     }
-                }
+                )
 
                 if showStreamingCursor {
                     StreamingCursorView()

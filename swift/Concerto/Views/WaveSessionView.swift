@@ -468,6 +468,26 @@ struct CodeBlockView: View {
         horizontalSizeClass == .compact || isHovering
     }
 
+    private var highlightedContent: AttributedString {
+        var output = AttributedString()
+        for token in SyntaxHighlighter.tokens(for: content, language: language) {
+            var segment = AttributedString(token.text)
+            segment.foregroundColor = color(for: token.kind)
+            output.append(segment)
+        }
+        return output
+    }
+
+    private func color(for kind: SyntaxTokenKind) -> Color {
+        switch kind {
+        case .plain: return palette.text
+        case .keyword: return palette.accent
+        case .string: return .statusSuccess
+        case .comment: return palette.textSecondary
+        case .number: return .statusInfo
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
@@ -488,9 +508,8 @@ struct CodeBlockView: View {
             }
 
             ScrollView(.horizontal) {
-                Text(content)
+                Text(highlightedContent)
                     .font(Typography.code(13))
-                    .foregroundStyle(palette.text)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)
@@ -686,70 +705,6 @@ private struct ToolRunView: View {
             }
         }
     }
-}
-
-enum MessageSegment: Equatable {
-    case text(String)
-    case code(language: String?, content: String)
-}
-
-func parseMessageSegments(_ content: String) -> [MessageSegment] {
-    guard !content.isEmpty else { return [] }
-    guard content.contains("```") else { return [.text(content)] }
-
-    let lines = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-    var segments: [MessageSegment] = []
-    var textLines: [String] = []
-    var codeLines: [String] = []
-    var currentLanguage: String?
-    var inCodeBlock = false
-
-    func flushText() {
-        let value = textLines.joined(separator: "\n")
-        if !value.isEmpty {
-            segments.append(.text(value))
-        }
-        textLines.removeAll(keepingCapacity: true)
-    }
-
-    func flushCode() {
-        let value = codeLines.joined(separator: "\n")
-        segments.append(.code(language: currentLanguage, content: value))
-        codeLines.removeAll(keepingCapacity: true)
-        currentLanguage = nil
-    }
-
-    for rawLine in lines {
-        let line = String(rawLine)
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-        if inCodeBlock {
-            if trimmed == "```" {
-                flushCode()
-                inCodeBlock = false
-            } else {
-                codeLines.append(line)
-            }
-            continue
-        }
-
-        if trimmed.hasPrefix("```") {
-            flushText()
-            inCodeBlock = true
-            let suffix = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-            currentLanguage = suffix.isEmpty ? nil : String(suffix)
-        } else {
-            textLines.append(line)
-        }
-    }
-
-    if inCodeBlock {
-        flushCode()
-    } else {
-        flushText()
-    }
-
-    return segments.isEmpty ? [.text(content)] : segments
 }
 
 private func toggleMembership(_ id: UUID, in set: inout Set<UUID>) {

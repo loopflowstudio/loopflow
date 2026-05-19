@@ -53,6 +53,36 @@
   scripts that wait for local lfd should probe `http://127.0.0.1:2486/health`
   instead of `/v0/status` (`/status` is root and auth-protected).
 
+## Patterns (verified 2026-05-19, native-chat-ux M1 implementation)
+
+- **Assistant markdown parsing now lives in LoopflowCore.** The canonical model is
+  `MarkdownBlock` plus `parseMarkdownBlocks(_:)` /
+  `parseStreamingMarkdownBlocks(_:)` in
+  `swift/LoopflowCore/Models/MarkdownBlock.swift`. The old
+  `MessageSegment` / `parseMessageSegments` view-layer implementation was
+  deleted from `WaveSessionView.swift`; do not reintroduce a parallel parser in
+  Concerto views.
+- **Message rows use a split rich/final vs cheap/streaming path.**
+  `MarkdownBlockCache` in `swift/Concerto/Views/MessageRow.swift` caches
+  finalized assistant blocks by `(message.id, content.count)`. While
+  `showStreamingCursor` is true it bypasses that cache and calls the cheap
+  streaming parser, which preserves fence splitting but skips inline markdown
+  parsing and syntax highlighting.
+- **Assistant block rendering is centralized.**
+  `swift/Concerto/Views/AssistantMarkdownBlocksView.swift` renders paragraph,
+  heading, list, blockquote, code, diff, and rule blocks. `diff` / `patch`
+  fenced blocks route to the existing `DiffLinesView`; normal code blocks route
+  to `CodeBlockView`.
+- **Syntax highlighting is heuristic and in LoopflowCore.** `SyntaxHighlighter`
+  tokenizes the supported chat languages (swift, rust, python, shell, json,
+  yaml, toml, markdown, diff/patch) into token kinds. Concerto maps those token
+  kinds to palette colors in `CodeBlockView`; there is still no new Swift
+  package or JS/tree-sitter dependency.
+- **Selectable assistant text now accepts attributed content.** macOS
+  `SelectableAssistantMessageTextView` and iOS `SelectableAssistantTextView`
+  accept `AttributedString` so inline markdown can flow through the existing
+  quote/emoji selection affordances for paragraph blocks.
+
 ## Patterns (verified 2026-05-19, native-chat-ux review-design)
 
 - **Chat markdown parsing is in the view layer, not Core.** Current parser is

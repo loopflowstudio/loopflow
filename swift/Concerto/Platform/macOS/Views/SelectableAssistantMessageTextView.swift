@@ -3,9 +3,21 @@ import SwiftUI
 import AppKit
 
 struct SelectableAssistantMessageTextView: NSViewRepresentable {
-    let text: String
+    let text: AttributedString
     let selectionResetToken: Int
     let onSelectionChanged: (String?) -> Void
+
+    init(text: String, selectionResetToken: Int, onSelectionChanged: @escaping (String?) -> Void) {
+        self.text = AttributedString(text)
+        self.selectionResetToken = selectionResetToken
+        self.onSelectionChanged = onSelectionChanged
+    }
+
+    init(text: AttributedString, selectionResetToken: Int, onSelectionChanged: @escaping (String?) -> Void) {
+        self.text = text
+        self.selectionResetToken = selectionResetToken
+        self.onSelectionChanged = onSelectionChanged
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onSelectionChanged: onSelectionChanged)
@@ -14,16 +26,16 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
     func makeNSView(context: Context) -> AutosizingSelectableTextView {
         let textView = AutosizingSelectableTextView(frame: .zero, textContainer: nil)
         textView.delegate = context.coordinator
-        textView.string = text
+        textView.applyAttributedText(text)
         return textView
     }
 
     func updateNSView(_ nsView: AutosizingSelectableTextView, context: Context) {
         context.coordinator.onSelectionChanged = onSelectionChanged
 
-        if nsView.string != text {
-            nsView.string = text
-            nsView.invalidateIntrinsicContentSize()
+        if context.coordinator.currentText != text {
+            nsView.applyAttributedText(text)
+            context.coordinator.currentText = text
         }
 
         if context.coordinator.selectionResetToken != selectionResetToken {
@@ -38,6 +50,7 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onSelectionChanged: (String?) -> Void
         var selectionResetToken = 0
+        var currentText = AttributedString()
         var isResetting = false
 
         init(onSelectionChanged: @escaping (String?) -> Void) {
@@ -92,6 +105,11 @@ final class AutosizingSelectableTextView: NSTextView {
 
         font = NSFont(name: "Lato", size: 14) ?? .systemFont(ofSize: 14)
         textColor = .labelColor
+    }
+
+    func applyAttributedText(_ text: AttributedString) {
+        textStorage?.setAttributedString(NSAttributedString(text))
+        invalidateIntrinsicContentSize()
     }
 
     required init?(coder: NSCoder) {

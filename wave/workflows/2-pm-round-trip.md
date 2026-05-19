@@ -12,6 +12,7 @@ Pull, push, and export work for Asana. The configured team is the canonical wave
 - **Dependency sync** — `needs:` declarations on roadmap items round-trip with Asana dependency graphs
 - **Lifecycle sync** — PR opened / failed / merged triggers Asana comments and completion on the corresponding task
 - **Reset tooling** — `lf op pm delete-team` + scripted reset flow so a repo reorg can fully rebuild PM state in one command
+- **Strict mirror sync** — `lf op pm export --strict` / `pull --strict` make PM and `wave/` an exact mirror (deletes extras), not just a soft merge. The canonical-team change made Asana the wave-set source of truth; strict sync makes the item set match too
 
 ## Daily experience
 

@@ -37,7 +37,6 @@ class TestDTOFixtures:
         assert session.input_supported is False
         assert session.ended_at is not None
 
-
     def test_terminal_session_fixture_pins_palette_shape(self):
         session = _load("terminal_session.json")
         assert session["object"] == "terminal_session"

@@ -232,12 +232,6 @@ private struct TerminalPaneView: View {
                     systemImage: "terminal",
                     description: "Launch a flow from the command palette to bind this pane to an lfd terminal session."
                 )
-            } else if let session, session.status.isTerminal {
-                paneUnavailable(
-                    title: "Session ended",
-                    systemImage: "checkmark.circle",
-                    description: "Launch another flow to reuse this terminal pane."
-                )
             } else if isAttaching {
                 ProgressView("Reattaching…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

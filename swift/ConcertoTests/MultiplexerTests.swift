@@ -127,10 +127,7 @@ struct MultiplexerLayoutTests {
         let paneA = PaneState(
             id: "a",
             type: .terminal,
-            config: PaneConfig(
-                terminalSessionId: "lf-wave-a",
-                launchCommand: "lf design && lf op commit --push"
-            )
+            config: PaneConfig(terminalSessionId: "lf-wave-a")
         )
         let paneB = PaneState(id: "b", type: .markdown, config: PaneConfig(filePath: "wave/test/README.md"))
         let layout = LayoutNode.split(.horizontal, first: .leaf(paneA), second: .leaf(paneB), ratio: 0.6)
@@ -142,7 +139,6 @@ struct MultiplexerLayoutTests {
         #expect(decoded.allPanes[0].id == "a")
         #expect(decoded.allPanes[0].type == .terminal)
         #expect(decoded.allPanes[0].config.terminalSessionId == "lf-wave-a")
-        #expect(decoded.allPanes[0].config.launchCommand == "lf design && lf op commit --push")
         #expect(decoded.allPanes[1].id == "b")
         #expect(decoded.allPanes[1].config.filePath == "wave/test/README.md")
     }
@@ -207,7 +203,7 @@ struct MultiplexerStoreTests {
         #expect(store.layout(for: "wave-1").allPanes.first(where: { $0.type == .terminal })?.id == original.id)
     }
 
-    @Test("terminal split creates a second terminal with its own tmux session")
+    @Test("terminal split creates an unbound terminal")
     @MainActor
     func splitTerminalCreatesDistinctSession() {
         let store = makeStore()
@@ -301,14 +297,13 @@ struct MultiplexerStoreTests {
         let replacement = store.replacePane(
             launchpad.id,
             with: .terminal,
-            config: PaneConfig(launchCommand: "lf design && lf op commit --push"),
+            config: PaneConfig(terminalSessionId: "ts-new"),
             for: "wave-1"
         )
 
         #expect(replacement?.id == launchpad.id)
         #expect(replacement?.type == .terminal)
-        #expect(replacement?.config.terminalSessionId == nil)
-        #expect(replacement?.config.launchCommand == "lf design && lf op commit --push")
+        #expect(replacement?.config.terminalSessionId == "ts-new")
         #expect(store.layout(for: "wave-1").pane(for: launchpad.id)?.type == .terminal)
     }
 }

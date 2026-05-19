@@ -125,13 +125,6 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .filter(|branch| !branch.is_empty())
 }
 
-fn palette_terminal_env(wave_id: &LfdId, session_id: &LfdId) -> Vec<(String, String)> {
-    vec![
-        ("LFD_WAVE_ID".to_string(), wave_id.to_string()),
-        ("LFD_SESSION_ID".to_string(), session_id.to_string()),
-    ]
-}
-
 #[derive(Clone)]
 pub struct WaveExecutor {
     store: SharedStore,
@@ -291,9 +284,10 @@ impl WaveExecutor {
             agent: agent.to_string(),
             cwd: worktree.to_string(),
             argv: cmd,
-            env: palette_terminal_env(wave.id(), &session_id)
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
+            env: BTreeMap::from([
+                ("LFD_WAVE_ID".to_string(), wave.id().to_string()),
+                ("LFD_SESSION_ID".to_string(), session_id.to_string()),
+            ]),
             source: PALETTE_TERMINAL_SOURCE.to_string(),
             tmux_name: tmux_session_name(&format!("{branch}-{}", session_id.as_str())),
             status: TerminalSessionStatus::Pending,
@@ -337,13 +331,11 @@ impl WaveExecutor {
             }
             let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
             let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-            if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
-                if stored.complete(exit_code) {
-                    self.store.update_terminal_session(&stored).await?;
-                    self.event_hub
-                        .send(Event::terminal_session_updated(stored.clone()));
-                    completed += 1;
-                }
+            if self
+                .complete_terminal_session(&session.id, exit_code)
+                .await?
+            {
+                completed += 1;
             }
             let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         }
@@ -874,13 +866,8 @@ impl WaveExecutor {
 
         let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
 
-        if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
-            if stored.complete(exit_code) {
-                self.store.update_terminal_session(&stored).await?;
-                self.event_hub
-                    .send(Event::terminal_session_updated(stored.clone()));
-            }
-        }
+        self.complete_terminal_session(&session.id, exit_code)
+            .await?;
 
         let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
         Ok(exit_code)
@@ -908,14 +895,21 @@ impl WaveExecutor {
         }
 
         let exit_code = read_tmux_exit_code(exit_file).await?.unwrap_or(1);
-        if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
+        self.complete_terminal_session(&session.id, exit_code)
+            .await?;
+        Ok(exit_code)
+    }
+
+    async fn complete_terminal_session(&self, session_id: &LfdId, exit_code: i32) -> Result<bool> {
+        if let Some(mut stored) = self.store.get_terminal_session(session_id).await? {
             if stored.complete(exit_code) {
                 self.store.update_terminal_session(&stored).await?;
                 self.event_hub
                     .send(Event::terminal_session_updated(stored.clone()));
+                return Ok(true);
             }
         }
-        Ok(exit_code)
+        Ok(false)
     }
 
     #[cfg(test)]

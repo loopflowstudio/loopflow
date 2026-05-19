@@ -35,6 +35,14 @@
   `terminalSessionId`; default terminal panes no longer synthesize
   `lf-<waveId>-<paneId>`. A pane without a session id shows an empty-state until
   a palette launch binds it.
+- **Terminal pane config is now only durable identity, not launch intent.**
+  `PaneConfig.launchCommand` and multiplexer config normalization were removed
+  on 2026-05-19; palette launches create lfd terminal sessions directly and
+  then bind `terminalSessionId`.
+- **Palette sessions may be terminal in lfd while still attachable in tmux.**
+  A succeeded palette row means the flow exited and the pane dropped into a
+  shell, not necessarily that the tmux session is gone. Swift terminal panes
+  should still attach by session id instead of hiding terminal-status sessions.
 - **DTO fixtures now cover terminal sessions.** Fixtures in
   `tests/fixtures/dto/terminal_session.json` and
   `create_terminal_session_request.json` are asserted in Rust, Swift, and

@@ -184,8 +184,37 @@ jobs:
 
           main() {
             target=$(detect_target)
-            version="${1:-latest}"
             install_dir="$(resolve_install_dir)"
+            version="latest"
+
+            usage() {
+              echo "Usage: install.sh [--version <X>] [--no-interactive] [VERSION]" >&2
+            }
+
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                --version)
+                  if [ $# -lt 2 ]; then
+                    echo "--version requires a value" >&2
+                    usage
+                    exit 1
+                  fi
+                  version="$2"
+                  shift 2
+                  ;;
+                --version=)
+                  echo "--version requires a value" >&2
+                  usage
+                  exit 1
+                  ;;
+                --version=*) version="${1#--version=}"; shift ;;
+                # Accepted for back-compat: this installer only fetches binaries
+                # and is already non-interactive. Provider onboarding is `lfd install`.
+                --no-interactive) shift ;;
+                -*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+                *) version="$1"; shift ;;
+              esac
+            done
 
             if [ "$version" = "latest" ]; then
               url="https://github.com/$REPO/releases/latest/download/lf-$target.tar.gz"
@@ -202,7 +231,15 @@ jobs:
             }
             trap cleanup EXIT INT TERM
 
-            curl -fsSL "$url" | tar xz -C "$tmpdir"
+            # Download to a file first: piping curl into tar hides a failed
+            # download (no `pipefail` in POSIX sh), leaving a cryptic later error.
+            tarball="$tmpdir/lf.tar.gz"
+            if ! curl -fsSL "$url" -o "$tarball"; then
+              echo "Download failed: $url" >&2
+              echo "No release found for version '$version' ($target)." >&2
+              exit 1
+            fi
+            tar -xzf "$tarball" -C "$tmpdir"
 
             for bin in lf lfd; do
               src="$tmpdir/$bin"

@@ -296,7 +296,7 @@ curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/i
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
-First install guides you through connecting Claude, GitHub, and optional providers. Use `--no-interactive` to skip (CI, Docker, scripted installs).
+`install.sh` only downloads the `lf` and `lfd` binaries. To connect Claude, GitHub, and optional providers, run `lfd install`—add `--no-interactive` to skip the prompts (CI, Docker, scripted installs).
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 

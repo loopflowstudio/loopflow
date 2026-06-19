@@ -1,0 +1,1 @@
+installer: tolerate --no-interactive in shell installs

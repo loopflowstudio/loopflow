@@ -80,7 +80,8 @@ pub fn router(state: HttpState) -> Router {
         .route("/sessions", post(sessions::create_session_handler))
         .route(
             "/terminal-sessions",
-            get(terminal_sessions::list_terminal_sessions_handler),
+            get(terminal_sessions::list_terminal_sessions_handler)
+                .post(terminal_sessions::create_terminal_session_handler),
         )
         .route(
             "/terminal-sessions/{id}",

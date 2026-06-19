@@ -8,12 +8,12 @@ use tokio::process::Command;
 use tracing::warn;
 
 use crate::lfd::http::dto::{
-    terminal_connection_info_dto, terminal_session_dto, ListResponse, TerminalConnectionInfoDto,
-    TerminalSessionDto,
+    terminal_connection_info_dto, terminal_session_dto, CreateTerminalSessionRequestDto,
+    CreateTerminalSessionResponseDto, ListResponse, TerminalConnectionInfoDto, TerminalSessionDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Event, TerminalSession, TerminalSessionStatus};
 
@@ -29,6 +29,29 @@ pub struct ListTerminalSessionsQuery {
 #[derive(Debug, Deserialize)]
 pub struct CompleteTerminalSessionRequest {
     pub exit_code: i32,
+}
+
+pub async fn create_terminal_session_handler(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateTerminalSessionRequestDto>,
+) -> ApiResult<CreateTerminalSessionResponseDto> {
+    let wave_id = parse_lfd_id(&payload.wave_id, "invalid wave id")?;
+    let session = state
+        .executor
+        .launch_palette_terminal_session(&wave_id, &payload.flow, &payload.worktree, &payload.agent)
+        .await
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?;
+    let connection = terminal_connection_info_dto(&session, connection_host(&headers));
+    Ok(Json(CreateTerminalSessionResponseDto {
+        session: terminal_session_dto(session),
+        connection,
+    }))
 }
 
 pub async fn list_terminal_sessions_handler(

@@ -287,6 +287,20 @@ pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct CreateTerminalSessionRequestDto {
+    pub wave_id: String,
+    pub flow: String,
+    pub worktree: String,
+    pub agent: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateTerminalSessionResponseDto {
+    pub session: TerminalSessionDto,
+    pub connection: TerminalConnectionInfoDto,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TerminalConnectionInfoDto {
     pub session_name: String,
     pub host: String,

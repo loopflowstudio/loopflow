@@ -35,30 +35,6 @@ struct DTOFixtureTests {
         #expect(session.endedAt != nil)
     }
 
-
-    @Test("terminal session fixture parses palette shape")
-    func terminalSessionFixtureParsesPaletteShape() throws {
-        let json = try loadFixture("terminal_session.json")
-        let session = try #require(WaveService.parseTerminalSessionFromJSON(json))
-
-        #expect(session.step == "ship")
-        #expect(session.agent == "codex")
-        #expect(session.source == "palette")
-        #expect(session.status == .running)
-        #expect(session.waveRunId == nil)
-        #expect(session.argv.contains("-m"))
-    }
-
-    @Test("create terminal session request fixture keeps required keys")
-    func createTerminalSessionRequestFixtureHasRequiredKeys() throws {
-        let json = try loadFixture("create_terminal_session_request.json")
-
-        #expect(json["wave_id"] as? String == "lfdwave_01HNX7XYZ0AZ1B2C3D4E5F6G7H")
-        #expect(json["flow"] as? String == "ship")
-        #expect(json["worktree"] as? String == "/tmp/repo.Desktop")
-        #expect(json["agent"] as? String == "codex")
-    }
-
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
         let testFile = URL(fileURLWithPath: sourceFile)
         let fixtures = testFile

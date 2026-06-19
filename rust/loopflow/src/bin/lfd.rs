@@ -220,17 +220,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "session orphan recovery failed"),
     }
 
-    match executor.reconcile_terminal_sessions().await {
-        Ok(completed) if completed > 0 => {
-            tracing::info!(
-                count = completed,
-                "reconciled terminal sessions whose tmux sessions exited while lfd was down"
-            );
-        }
-        Ok(_) => {}
-        Err(err) => tracing::warn!(error = %err, "terminal session reconcile failed"),
-    }
-
     let loop_handles = scheduler.clone().start_loops(
         store.clone(),
         executor.clone(),

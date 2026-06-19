@@ -35,9 +35,9 @@ public final class MultiplexerStore {
     }
 
     public func defaultLayout(for wave: WaveViewModel) -> LayoutNode {
-        let roadmap = makePane(type: .roadmap)
-        let roadmapDetail = makePane(type: .roadmapDetail)
-        let terminal = makePane(type: .terminal)
+        let roadmap = makePane(type: .roadmap, for: wave.id)
+        let roadmapDetail = makePane(type: .roadmapDetail, for: wave.id)
+        let terminal = makePane(type: .terminal, for: wave.id)
 
         return .split(
             .horizontal,
@@ -69,7 +69,7 @@ public final class MultiplexerStore {
     // MARK: - Mutations
 
     public func setLayout(_ layout: LayoutNode, for waveId: String) {
-        layoutsByWave[waveId] = layout
+        layoutsByWave[waveId] = normalizeLayout(layout, for: waveId)
         reconcileFocus(for: waveId)
         persist()
     }
@@ -86,7 +86,7 @@ public final class MultiplexerStore {
         newPaneType: PaneType,
         for waveId: String
     ) -> PaneState {
-        let newPane = makePane(type: newPaneType)
+        let newPane = makePane(type: newPaneType, for: waveId)
         let updated = layout(for: waveId).splitting(paneId, axis: axis, newPane: newPane)
         layoutsByWave[waveId] = updated
         focusedPaneByWave[waveId] = newPane.id
@@ -113,7 +113,8 @@ public final class MultiplexerStore {
         let layout = layout(for: waveId)
         guard let pane = layout.pane(for: paneId) else { return }
 
-        layoutsByWave[waveId] = layout.updatingPane(pane.id, config: config)
+        let normalizedConfig = normalizeConfig(config, for: waveId, paneId: paneId, type: pane.type)
+        layoutsByWave[waveId] = layout.updatingPane(paneId, config: normalizedConfig)
         persist()
     }
 
@@ -129,7 +130,7 @@ public final class MultiplexerStore {
         let replacement = PaneState(
             id: paneId,
             type: newPaneType,
-            config: config
+            config: normalizeConfig(config, for: waveId, paneId: paneId, type: newPaneType)
         )
         layoutsByWave[waveId] = current.replacingPane(paneId, with: replacement)
         focusedPaneByWave[waveId] = paneId
@@ -160,10 +161,10 @@ public final class MultiplexerStore {
         persist()
     }
 
-    public func terminalSessionIds(for waveId: String) -> [String] {
+    public func terminalSessionNames(for waveId: String) -> [String] {
         layout(for: waveId).allPanes.compactMap { pane in
             guard pane.type == .terminal else { return nil }
-            return pane.config.terminalSessionId
+            return pane.config.terminalSessionName
         }
     }
 
@@ -207,7 +208,7 @@ public final class MultiplexerStore {
             return existing
         }
 
-        let layout = makeDefault()
+        let layout = normalizeLayout(makeDefault(), for: waveId)
         layoutsByWave[waveId] = layout
         return layout
     }
@@ -221,7 +222,7 @@ public final class MultiplexerStore {
             return
         }
 
-        layoutsByWave[waveId] = decoded
+        layoutsByWave[waveId] = normalizeLayout(decoded, for: waveId)
     }
 
     private func reconcileFocus(for waveId: String) {
@@ -241,11 +242,33 @@ public final class MultiplexerStore {
         return "multiplexer.\(suffix).\(repoKey)"
     }
 
-    private func makePane(type: PaneType) -> PaneState {
+    private func makePane(type: PaneType, for waveId: String) -> PaneState {
+        let paneId = UUID().uuidString
         return PaneState(
+            id: paneId,
             type: type,
-            config: .empty
+            config: normalizeConfig(.empty, for: waveId, paneId: paneId, type: type)
         )
+    }
+
+    private func normalizeLayout(_ layout: LayoutNode, for waveId: String) -> LayoutNode {
+        layout.allPanes.reduce(layout) { updatedLayout, pane in
+            let config = normalizeConfig(pane.config, for: waveId, paneId: pane.id, type: pane.type)
+            guard config != pane.config else { return updatedLayout }
+            return updatedLayout.updatingPane(pane.id, config: config)
+        }
+    }
+
+    private func normalizeConfig(_ config: PaneConfig, for waveId: String, paneId: String, type: PaneType) -> PaneConfig {
+        guard type == .terminal, config.terminalSessionName == nil else { return config }
+
+        var updatedConfig = config
+        updatedConfig.terminalSessionName = terminalSessionName(for: waveId, paneId: paneId)
+        return updatedConfig
+    }
+
+    private func terminalSessionName(for waveId: String, paneId: String) -> String {
+        "lf-\(waveId)-\(paneId)"
     }
 
     private func clearWaveState(_ waveId: String) {

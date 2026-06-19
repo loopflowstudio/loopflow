@@ -33,7 +33,7 @@ use crate::lfd::triggers::{
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Signal, TerminalSession,
     TerminalSessionStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
-    CI_FIX_FLOW, PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
+    CI_FIX_FLOW, TMUX_TERMINAL_SOURCE,
 };
 #[cfg(test)]
 use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
@@ -93,36 +93,6 @@ fn tmux_available() -> bool {
         .arg("-V")
         .output()
         .is_ok_and(|output| output.status.success())
-}
-
-async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    let status = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
-    Ok(status.success())
-}
-
-async fn read_tmux_exit_code(exit_file: PathBuf) -> Result<Option<i32>> {
-    tokio::task::spawn_blocking(move || {
-        std::fs::read_to_string(&exit_file)
-            .ok()
-            .and_then(|text| text.trim().parse::<i32>().ok())
-    })
-    .await
-    .map_err(|err| anyhow!("terminal exit file task failed: {err}"))
-}
-
-fn infer_branch_name(worktree: &str) -> Option<String> {
-    std::process::Command::new("git")
-        .args(["-C", worktree, "branch", "--show-current"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|branch| branch.trim().to_string())
-        .filter(|branch| !branch.is_empty())
 }
 
 #[derive(Clone)]
@@ -243,103 +213,6 @@ impl WaveExecutor {
 
     pub async fn recover_startup(&self) -> Result<StartupRecovery> {
         self.runner.recover_startup(&self.output).await
-    }
-
-    pub async fn launch_palette_terminal_session(
-        &self,
-        wave_id: &LfdId,
-        flow: &str,
-        worktree: &str,
-        agent: &str,
-    ) -> Result<TerminalSession> {
-        if self.disable_tmux || !tmux_available() {
-            return Err(anyhow!("tmux is required for palette terminal sessions"));
-        }
-        let wave = self
-            .store
-            .get_wave(wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("wave not found"))?;
-        let flow = flow.trim();
-        if flow.is_empty() {
-            return Err(anyhow!("flow is required"));
-        }
-        let agent = agent.trim();
-        if agent.is_empty() {
-            return Err(anyhow!("agent is required"));
-        }
-
-        let session_id = LfdId::new();
-        let mut cmd = build_lf_step_command(flow, false, &wave.direction, &wave.area, wave.name());
-        cmd.push("-m".to_string());
-        cmd.push(agent.to_string());
-
-        let branch = infer_branch_name(worktree)
-            .unwrap_or_else(|| format!("{}-{}", wave.name(), session_id));
-        let session = TerminalSession {
-            id: session_id.clone(),
-            wave_id: wave.id().clone(),
-            wave_run_id: None,
-            step: flow.to_string(),
-            agent: agent.to_string(),
-            cwd: worktree.to_string(),
-            argv: cmd,
-            env: BTreeMap::from([
-                ("LFD_WAVE_ID".to_string(), wave.id().to_string()),
-                ("LFD_SESSION_ID".to_string(), session_id.to_string()),
-            ]),
-            source: PALETTE_TERMINAL_SOURCE.to_string(),
-            tmux_name: tmux_session_name(&format!("{branch}-{}", session_id.as_str())),
-            status: TerminalSessionStatus::Pending,
-            attached_at: None,
-            started_at: None,
-            completed_at: None,
-            created_at: OffsetDateTime::now_utc(),
-            completion_token: None,
-        };
-        self.store.create_terminal_session(&session).await?;
-        self.event_hub
-            .send(Event::terminal_session_created(session.clone()));
-
-        let running = self.launch_tmux_terminal_session(session).await?;
-        self.spawn_palette_completion_watcher(running.clone());
-        Ok(running)
-    }
-
-    pub async fn reconcile_terminal_sessions(&self) -> Result<u32> {
-        let active = self
-            .store
-            .list_terminal_sessions(
-                None,
-                Some(&[
-                    TerminalSessionStatus::Pending,
-                    TerminalSessionStatus::Attached,
-                    TerminalSessionStatus::Running,
-                ]),
-            )
-            .await?;
-        let mut completed = 0;
-        for session in active {
-            if !session.is_tmux_backed() {
-                continue;
-            }
-            if tmux_session_exists(&session.tmux_name).await? {
-                if session.source == PALETTE_TERMINAL_SOURCE {
-                    self.spawn_palette_completion_watcher(session);
-                }
-                continue;
-            }
-            let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
-            let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-            if self
-                .complete_terminal_session(&session.id, exit_code)
-                .await?
-            {
-                completed += 1;
-            }
-            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
-        }
-        Ok(completed)
     }
 
     pub async fn ensure_wave_workspace(&self, wave: &Wave) -> Result<()> {
@@ -813,13 +686,8 @@ impl WaveExecutor {
             .map(|arg| shell_escape(arg))
             .collect::<Vec<_>>()
             .join(" ");
-        let tail = if session.source == PALETTE_TERMINAL_SOURCE {
-            r#"exec "${SHELL:-/bin/zsh}""#
-        } else {
-            r#"exit "$EXIT_CODE""#
-        };
         let shell_command = format!(
-            "mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; {tail}",
+            "mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; exit \"$EXIT_CODE\"",
             exit_dir = shell_escape(&exit_dir.display().to_string()),
             exit_file = shell_escape(&exit_file.display().to_string()),
         );
@@ -860,57 +728,39 @@ impl WaveExecutor {
     async fn wait_for_tmux_session_exit(&self, session: &TerminalSession) -> Result<i32> {
         let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
 
-        while tmux_session_exists(&session.tmux_name).await? {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-
-        let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-
-        self.complete_terminal_session(&session.id, exit_code)
-            .await?;
-
-        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
-        Ok(exit_code)
-    }
-
-    fn spawn_palette_completion_watcher(&self, session: TerminalSession) {
-        let executor = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = executor.wait_for_palette_session_completion(&session).await {
-                warn!(session_id = %session.id, error = %err, "palette terminal completion watcher failed");
-            }
-        });
-    }
-
-    async fn wait_for_palette_session_completion(&self, session: &TerminalSession) -> Result<i32> {
-        let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
         loop {
-            if std::fs::metadata(&exit_file).is_ok() {
-                break;
+            let status = Command::new("tmux")
+                .args(["has-session", "-t", &session.tmux_name])
+                .status()
+                .await;
+            match status {
+                Ok(status) if status.success() => {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                Ok(_) => break,
+                Err(err) => return Err(anyhow!("tmux session probe failed: {err}")),
             }
-            if !tmux_session_exists(&session.tmux_name).await? {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
-        let exit_code = read_tmux_exit_code(exit_file.clone()).await?.unwrap_or(1);
-        self.complete_terminal_session(&session.id, exit_code)
-            .await?;
-        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
-        Ok(exit_code)
-    }
+        let exit_code = tokio::task::spawn_blocking({
+            let exit_file = exit_file.clone();
+            move || std::fs::read_to_string(&exit_file).ok()
+        })
+        .await
+        .map_err(|err| anyhow!("terminal exit file task failed: {err}"))?
+        .and_then(|text| text.trim().parse::<i32>().ok())
+        .unwrap_or(1);
 
-    async fn complete_terminal_session(&self, session_id: &LfdId, exit_code: i32) -> Result<bool> {
-        if let Some(mut stored) = self.store.get_terminal_session(session_id).await? {
+        if let Some(mut stored) = self.store.get_terminal_session(&session.id).await? {
             if stored.complete(exit_code) {
                 self.store.update_terminal_session(&stored).await?;
                 self.event_hub
                     .send(Event::terminal_session_updated(stored.clone()));
-                return Ok(true);
             }
         }
-        Ok(false)
+
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&exit_file)).await;
+        Ok(exit_code)
     }
 
     #[cfg(test)]

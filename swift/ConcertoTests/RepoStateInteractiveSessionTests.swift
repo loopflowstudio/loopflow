@@ -134,7 +134,9 @@ struct RepoStateInteractiveSessionTests {
         }()
         #expect(seededPane != nil, "wave layout should seed a terminal pane")
         let paneId = seededPane?.id ?? ""
-        #expect(seededPane?.config.terminalSessionId == nil)
+        let defaultSessionName = seededPane?.config.terminalSessionName
+        #expect(defaultSessionName != nil)
+        #expect(defaultSessionName?.hasPrefix("lf-\(wave.id)") == true)
 
         let runSession = TerminalSession(
             id: "ts-run-1",
@@ -155,8 +157,8 @@ struct RepoStateInteractiveSessionTests {
         let updatedPane = state.multiplexerStore.pane(ofType: .terminal, for: wave.id)
         #expect(updatedPane?.id == paneId, "the same pane should be updated, not replaced")
         #expect(
-            updatedPane?.config.terminalSessionId == runSession.id,
-            "pane must attach to the run's lfd terminal session id"
+            updatedPane?.config.terminalSessionName == runSession.tmuxName,
+            "pane must attach to the run's tmux session, not the default"
         )
         #expect(
             state.consumeAutoPresentTerminal(for: wave.id),

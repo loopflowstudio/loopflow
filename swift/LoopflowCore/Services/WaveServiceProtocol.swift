@@ -49,12 +49,6 @@ public protocol WaveServiceProtocol: Sendable {
     func getAttention(_ id: String) async throws -> AttentionItem
     func markAttentionViewed(_ id: String) async throws -> AttentionItem
     func listTerminalSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [TerminalSession]
-    func createTerminalSession(
-        waveId: String,
-        flow: String,
-        worktree: String,
-        agent: String
-    ) async throws -> TerminalSessionLaunchResponse
     func getTerminalSession(_ id: String) async throws -> TerminalSession
     func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo
     func startTerminalSession(_ id: String) async throws -> TerminalSession

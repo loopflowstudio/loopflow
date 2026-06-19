@@ -101,13 +101,3 @@ public struct TerminalConnectionInfo: Sendable, Equatable {
         }
     }
 }
-
-public struct TerminalSessionLaunchResponse: Sendable, Equatable {
-    public let session: TerminalSession
-    public let connection: TerminalConnectionInfo
-
-    public init(session: TerminalSession, connection: TerminalConnectionInfo) {
-        self.session = session
-        self.connection = connection
-    }
-}

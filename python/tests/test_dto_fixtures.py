@@ -36,21 +36,3 @@ class TestDTOFixtures:
         assert session.status == "failed"
         assert session.input_supported is False
         assert session.ended_at is not None
-
-    def test_terminal_session_fixture_pins_palette_shape(self):
-        session = _load("terminal_session.json")
-        assert session["object"] == "terminal_session"
-        assert session["step"] == "ship"
-        assert session["agent"] == "codex"
-        assert session["source"] == "palette"
-        assert session["status"] == "running"
-        assert session["wave_run_id"] is None
-
-    def test_create_terminal_session_request_fixture_has_required_keys(self):
-        request = _load("create_terminal_session_request.json")
-        assert request == {
-            "wave_id": "lfdwave_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
-            "flow": "ship",
-            "worktree": "/tmp/repo.Desktop",
-            "agent": "codex",
-        }

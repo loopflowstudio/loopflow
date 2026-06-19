@@ -165,10 +165,6 @@ struct ContentView: View {
             let ide = IDEApp.cursor
             let remoteHost = repoState.repoTarget?.remoteHost
 
-            actions.append(PaletteAction("Run \(wave.configuredFlow) embedded", icon: "play.square", shortcut: "R") {
-                launchEmbeddedFlow(for: wave, worktreePath: worktreePath)
-            })
-
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
                 do {
                     try terminalLauncher.openTerminal(terminal, at: worktreePath, remoteHost: remoteHost)
@@ -380,37 +376,6 @@ struct ContentView: View {
         }
     }
 
-    private func launchEmbeddedFlow(for wave: WaveViewModel, worktreePath: String) {
-        let flow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
-        let agent = wave.agent?.isEmpty == false ? wave.agent! : (repoState.supportedHarnesses.first ?? "claude:opus")
-        Task {
-            do {
-                let response = try await repoState.createTerminalSession(
-                    waveId: wave.id,
-                    flow: flow,
-                    worktree: worktreePath,
-                    agent: agent
-                )
-                let targetPane = terminalPaneForLaunch(waveId: wave.id)
-                if let targetPane {
-                    var config = targetPane.config
-                    config.terminalSessionId = response.session.id
-                    repoState.multiplexerStore.updatePaneConfig(targetPane.id, config: config, for: wave.id)
-                    repoState.multiplexerStore.setFocusedPane(targetPane.id, for: wave.id)
-                }
-            } catch {
-                repoState.errorMessage = "Failed to run \(flow): \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func terminalPaneForLaunch(waveId: String) -> PaneState? {
-        if let focused = repoState.multiplexerStore.focusedPane(for: waveId), focused.type == .terminal {
-            return focused
-        }
-        return repoState.multiplexerStore.pane(ofType: .terminal, for: waveId)
-    }
-
     private func handleMultiplexerSplit(axis: SplitAxis) {
         guard let context = multiplexerContext() else { return }
 
@@ -426,8 +391,8 @@ struct ContentView: View {
         guard let context = multiplexerContext() else { return }
 
         if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
-           let sessionId = closedPane.config.terminalSessionId {
-            Task { _ = try? await repoState.cancelTerminalSession(sessionId) }
+           let sessionName = closedPane.config.terminalSessionName {
+            TmuxSessionRegistry.shared.killSession(named: sessionName)
         }
     }
 

@@ -6,7 +6,6 @@ use time::OffsetDateTime;
 use crate::lfd::id::LfdId;
 
 pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
-pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
 
 /// Build a human-readable tmux session name from the branch name.
 ///
@@ -108,10 +107,7 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn is_tmux_backed(&self) -> bool {
-        matches!(
-            self.source.as_str(),
-            TMUX_TERMINAL_SOURCE | PALETTE_TERMINAL_SOURCE
-        )
+        self.source == TMUX_TERMINAL_SOURCE
     }
 
     pub fn attach(&mut self) -> bool {

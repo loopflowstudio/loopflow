@@ -8,7 +8,7 @@ CI runs six test suites. All must pass before merging.
 # Run all checks (what CI runs)
 cargo fmt --check                      # Rust formatting
 cargo clippy -- -D warnings            # Rust lints (warnings = errors)
-env -u LF_RUN_ID cargo test --all      # Rust tests
+cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 swift test --package-path swift        # Swift package tests
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Concerto UI
@@ -82,13 +82,9 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
-env -u LF_RUN_ID cargo test --all
 cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
-
-Unset `LF_RUN_ID` when running Rust tests from inside an `lf` wave session.
-Some tests exercise run-id behavior directly and assume a clean environment.
 
 ## E2E Tests
 
@@ -115,7 +111,6 @@ uv run python scripts/concerto-dev.py run-debug     # build and launch lfd + Con
 uv run python scripts/concerto-dev.py run-ios        # build and launch in iOS Simulator
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 uv run python scripts/test_session.py               # session API smoke test (starts lfd)
-uv run python scripts/test_pairing_smoke.py         # lfd pairing-token + HTTP + WebSocket smoke
 uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture
 uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token "$LFD_AUTH_TOKEN" --repo /remote/repo/path  # remote TLS smoke (repo required on fresh hosts)
 ```

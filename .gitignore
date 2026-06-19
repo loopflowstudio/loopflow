@@ -21,7 +21,6 @@ swift/dist/
 .lf/journal/
 .lf/rlm/
 .lf/summaries/
-.lf/tmp/
 *.profraw
 *.actual.md
 .DS_Store

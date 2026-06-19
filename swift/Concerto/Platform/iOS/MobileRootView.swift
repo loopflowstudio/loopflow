@@ -32,7 +32,7 @@ struct MobileRootView: View {
     var body: some View {
         Group {
             if needsInitialSetup {
-                ConnectionSetupView()
+                DiscoveryView()
             } else if isPadLayout {
                 iPadLayout
             } else {
@@ -51,12 +51,6 @@ struct MobileRootView: View {
             guard phase == .active, !needsInitialSetup else { return }
             Task {
                 await repoState.checkConnectionHealth()
-            }
-        }
-        .onOpenURL { url in
-            guard url.scheme == "loopflow", url.host == "pair" else { return }
-            Task {
-                try? await repoState.connect(pairingURL: url, outputBuffer: outputBuffer)
             }
         }
         .preferredColorScheme(theme.preferredScheme)
@@ -85,7 +79,7 @@ struct MobileRootView: View {
             }
             .tag(1)
 
-            ConnectionSetupView()
+            DiscoveryView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -128,7 +122,7 @@ struct MobileRootView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            ConnectionSetupView()
+            DiscoveryView()
         }
         .onChange(of: selectedWaveId) { _, newValue in
             if newValue != nil {

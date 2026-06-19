@@ -85,18 +85,11 @@ impl TokenLedger {
     }
 
     pub async fn mint(&self, count: usize) -> Result<Vec<String>, TokenLedgerError> {
-        self.mint_with_ttl(count, self.ttl).await
-    }
-
-    pub async fn mint_with_ttl(
-        &self,
-        count: usize,
-        ttl: Duration,
-    ) -> Result<Vec<String>, TokenLedgerError> {
         if count == 0 {
             return Ok(Vec::new());
         }
 
+        let ttl = self.ttl;
         let minted = self
             .run_db(move |conn| {
                 let now = now_unix();
@@ -450,22 +443,6 @@ mod tests {
             .await
             .expect("validate claimed token reuse"));
         assert_eq!(ledger.available_count().await, 0);
-    }
-
-    #[tokio::test]
-    async fn mint_with_ttl_can_create_long_lived_pairing_tokens() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let ledger = TokenLedger::new(dir.path().join("ledger.db"))
-            .await
-            .expect("ledger");
-        let token = ledger
-            .mint_with_ttl(1, Duration::from_secs(90 * 24 * 60 * 60))
-            .await
-            .expect("mint")
-            .pop()
-            .expect("token");
-
-        assert!(ledger.validate(&token).await.expect("validate"));
     }
 
     #[tokio::test]

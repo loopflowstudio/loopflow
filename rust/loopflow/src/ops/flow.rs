@@ -274,7 +274,6 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
-        | OpsCommand::Pair { .. }
         | OpsCommand::Branches { .. }
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }

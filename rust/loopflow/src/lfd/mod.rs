@@ -87,9 +87,15 @@ async fn setup_studio_registration(
 ) {
     let local_token = load_or_create_session_token(&config.auth);
 
-    let jwt = self::credentials::load_jwt();
+    let Some(jwt) = self::credentials::load_jwt() else {
+        tracing::error!("auth.mode=studio requires a JWT in ~/.lf/credentials.json");
+        std::process::exit(1);
+    };
 
-    let path = connection_token_ledger_path(storage_config);
+    let path = match storage_config {
+        StorageConfig::Sqlite { path } => path.clone(),
+        StorageConfig::Postgres { .. } => crate::lfd::lf_home_dir().join("connection_tokens.db"),
+    };
     let ledger = TokenLedger::new(path.clone())
         .await
         .unwrap_or_else(|error| {
@@ -116,17 +122,6 @@ async fn setup_studio_registration(
 
     let mid = self::machine_id::machine_id();
     let machine_name = self::machine_id::machine_name();
-    let Some(jwt) = jwt else {
-        tracing::warn!(
-            "auth.mode=studio has no JWT in ~/.lf/credentials.json; studio discovery disabled, local connection-token ledger enabled for pairing"
-        );
-        let auth = AuthProvider::Studio {
-            local_token,
-            ledger,
-        };
-        return (auth, None, None);
-    };
-
     let base_url = &config.auth.base_url;
     let client =
         RegistrationClient::with_context_and_ledger(base_url, store, http_addr, ledger.clone());
@@ -181,14 +176,7 @@ fn load_or_create_session_token(auth: &AuthConfig) -> secrecy::SecretString {
     }
 }
 
-pub fn connection_token_ledger_path(storage_config: &StorageConfig) -> PathBuf {
-    match storage_config {
-        StorageConfig::Sqlite { path } => path.clone(),
-        StorageConfig::Postgres { .. } => lf_home_dir().join("connection_tokens.db"),
-    }
-}
-
-pub fn lf_home_dir() -> PathBuf {
+pub(crate) fn lf_home_dir() -> PathBuf {
     if let Ok(home) = std::env::var("LF_HOME") {
         return PathBuf::from(home);
     }

@@ -53,7 +53,7 @@ struct DiscoveryView: View {
 
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 44))
-                .foregroundStyle(Color.loopflowBurgundy)
+                .foregroundStyle(.loopflowBurgundy)
                 .accessibilityHidden(true)
 
             VStack(spacing: Spacing.sm) {

@@ -8,8 +8,8 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release.yml"); puts "
 
 Expected results from this branch:
 
-- shell installer regression tests: 7 passed
-- Python test suite: 146 passed
+- shell installer regression tests: 8 passed
+- Python test suite: 147 passed
 - `release.yml parsed`
 
 ## Intent

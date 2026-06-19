@@ -43,6 +43,6 @@ uv run pytest python/tests/
 Results:
 
 - `ruff`: passed
-- shell installer regression tests: 7 passed
+- shell installer regression tests: 8 passed
 - `release.yml` YAML parse: passed
-- Python test suite: 146 passed
+- Python test suite: 147 passed

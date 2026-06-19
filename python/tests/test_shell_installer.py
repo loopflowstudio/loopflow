@@ -99,6 +99,14 @@ def test_no_interactive_is_not_read_as_version(
     assert "releases/latest/download" in log
 
 
+def test_positional_version_builds_versioned_url(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(installer, ["0.9.9"], env)
+    assert result.returncode == 0, result.stderr
+    assert "download/v0.9.9/" in (tmp_path / "curl.log").read_text()
+
+
 def test_explicit_version_builds_versioned_url(
     installer: Path, env: dict[str, str], tmp_path: Path
 ) -> None:

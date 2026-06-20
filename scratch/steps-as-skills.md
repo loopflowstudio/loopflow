@@ -141,10 +141,12 @@ Frontmatter transform (loopflow step → `SKILL.md`):
 - Drop loopflow-only keys (`requires`, `produces`, `interactive`, `agent`,
   `action_style`) — or fold the useful ones into the body as a hint.
 
-Open: **provenance + safe cleanup.** We write into the user's `~/.claude` and
-`~/.agents`. Mark generated skills (frontmatter marker or a `loopflow/`
-sub-namespace) and prune stale ones; never clobber a user's own skill. Confirm
-before first global write.
+**Scope: global is fine.** Decided — sync all builtins to `~/.claude/skills` and
+`~/.agents/skills`; they show up in every project's session, and that's acceptable.
+No namespacing for now; **prune later** if the global menu gets noisy.
+
+Still needed: **provenance + safe cleanup.** Mark generated skills (a frontmatter
+marker) so a re-sync can prune stale ones without clobbering a user's own skill.
 
 ### 2. The seed — replace the assembled-prompt blob
 
@@ -173,13 +175,29 @@ then `codex exec` / `claude -p` a surface-stamped `/step` seed. Same shape as th
 interactive handoff; the surface preamble is the only difference. (Verified that
 `/step` fires under both headless execs.)
 
+**Flows are unchanged.** Flow orchestration stays the purview of Cadenza and the
+`lf` CLI — a flow is still loopflow chaining steps (`implement → compress → lint →
+gate`). The *only* thing this milestone changes is **where the interactive step
+runs**: inside a flow, an interactive step hands off to the vendor session (`/step`
+seed), a headless step `exec`s. Flows do **not** become skills. So `lf code` keeps
+running exactly as a flow; only its interactive steps relocate to the vendor.
+
 ### 5. Remove Directions
 
-- Delete the `direction` config field, wave-YAML key, `-d/--direction` flag,
-  `builtins/directions/`, the direction loader and prompt-injection path, the
-  `with_direction*` goldens (~43 non-test Rust refs).
-- Wave model becomes **area × flow**. Perspective → AGENTS.md (standing) or an
-  invoked skill (occasional).
+The `direction` machinery goes; the direction *text* survives, redistributed by
+where the perspective belongs:
+
+- **Most direction text → embedded into the relevant step-skills.** A perspective
+  that shapes how a particular step is done lives in that step's `SKILL.md` body.
+- **Some direction text → AGENTS.md.** Perspective that should be always-on for a
+  repo or wave (its standing point of view) lives in the agent doc.
+- Exact split is **TBD with concrete examples** (which directions go where) — a
+  design-review / build-time call, not pre-decided here.
+
+Machinery to delete: the `direction` config field, wave-YAML key, `-d/--direction`
+flag, `builtins/directions/`, the direction loader and prompt-injection path, the
+`with_direction*` goldens (~43 non-test Rust refs). Wave model becomes
+**area × flow**.
 
 ## Scope
 

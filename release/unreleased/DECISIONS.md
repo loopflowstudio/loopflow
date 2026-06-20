@@ -84,11 +84,22 @@ becomes **files on disk + a tiny seed**:
   scratch/ and wave/ on demand via file tools — we point, we do not dump.
 - **Directions are removed as a first-class concept.** A direction was a
   perspective fragment injected into the assembled prompt; with no assembled
-  prompt and a human (or a surface preamble) steering, it has no delivery vehicle.
-  A direction is a degenerate skill. Standing perspective for an autonomous wave
-  becomes a line in that wave's AGENTS.md; occasional perspective is an invoked
-  skill. The wave model simplifies from **area × direction × flow** to
-  **area × flow**.
+  prompt and a human (or surface preamble) steering, it has no delivery vehicle.
+  The machinery goes; the direction *text* survives, redistributed by where the
+  perspective belongs: **most embeds into the relevant step-skills** (perspective
+  that shapes how a step is done), **some moves to AGENTS.md** (always-on standing
+  point of view for a repo/wave). The exact split is worked out with concrete
+  examples at build time. The wave model simplifies from **area × direction ×
+  flow** to **area × flow**.
+- **Flows are unchanged; only the interactive session relocates.** Flow
+  orchestration stays the purview of Cadenza and the `lf` CLI — a flow is still
+  loopflow chaining steps. Flows do *not* become skills. Inside a flow, an
+  interactive step hands off to the vendor session (`/step` seed); a headless step
+  `exec`s. `lf code` still runs as a flow.
+- **Skill sync is global, prune later.** All builtin steps sync to
+  `~/.claude/skills` and `~/.agents/skills` — they appear in every project's
+  session, which is acceptable. No namespacing for now; prune if the menu gets
+  noisy. Generated skills carry a provenance marker so re-sync can prune safely.
 
 **Implications:**
 

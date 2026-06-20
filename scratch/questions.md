@@ -19,3 +19,8 @@ Current to the steps-as-skills milestone. See `steps-as-skills.md` for the plan.
 - **Auto-invocation is out of scope.** The seed is always explicit `/step`, so
   model-auto invocation by description is neither used nor tested. Revisit only if
   an autonomous wave must fire a perspective skill without naming it.
+- **Directions split — which text goes where.** Decided: machinery removed, text
+  survives — most embedded into the relevant step-skills, some into AGENTS.md
+  (standing perspective). Open: the per-direction assignment. Walk the ~8 builtin
+  directions (ux, infra, craft, ceo, creativity, scale, …) with concrete examples
+  and decide skill-vs-AGENTS.md for each.

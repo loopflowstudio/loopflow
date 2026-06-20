@@ -195,7 +195,12 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
-            prompt = skill_launch_seed(surface, step_name, message);
+            prompt = skill_launch_seed(
+                surface,
+                step_name,
+                message,
+                prepared.components.voice_doc.as_deref(),
+            );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
         } else {
@@ -227,8 +232,25 @@ fn should_launch_via_skill(step_name: &str) -> bool {
     !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
 }
 
-fn skill_launch_seed(surface: Surface, step_name: &str, message: Option<&str>) -> String {
+/// Build the launch seed for a `/step` handoff: the slash command, the surface
+/// preamble, and the ambient context the assembled prompt used to carry as a
+/// system prompt (voice + orientation). The step body itself loads from the
+/// synced skill on invoke, so this stays small enough for the GUI deep-link cap.
+fn skill_launch_seed(
+    surface: Surface,
+    step_name: &str,
+    message: Option<&str>,
+    voice: Option<&str>,
+) -> String {
     let mut seed = format!("/{step_name}\n\n{}", surface.instructions());
+    if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
+        seed.push_str("\n\n<lf:voice>\n");
+        seed.push_str(voice);
+        seed.push_str("\n</lf:voice>");
+    }
+    seed.push_str("\n\n<lf:orientation>\n");
+    seed.push_str(crate::engine::builtins::ORIENTATION_DOC.trim());
+    seed.push_str("\n</lf:orientation>");
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
         seed.push_str(message);
@@ -428,10 +450,28 @@ mod tests {
 
     #[test]
     fn skill_launch_seed_starts_with_slash_step_and_surface() {
-        let seed = skill_launch_seed(Surface::Headless, "implement", Some("build auth"));
+        let seed = skill_launch_seed(
+            Surface::Headless,
+            "implement",
+            Some("build auth"),
+            Some("Be terse."),
+        );
         assert!(seed.starts_with("/implement\n\n"));
         assert!(seed.contains("Run mode is headless"));
+        assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
+        assert!(seed.contains("<lf:orientation>"));
+        assert!(seed.contains("scratch/"));
         assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_omits_voice_and_message_when_absent() {
+        let seed = skill_launch_seed(Surface::Cli, "gate", None, None);
+        assert!(seed.starts_with("/gate\n\n"));
+        assert!(!seed.contains("<lf:voice>"));
+        assert!(!seed.contains("<lf:message>"));
+        // Orientation is always present — every handoff should read scratch/.
+        assert!(seed.contains("<lf:orientation>"));
     }
 
     #[test]

@@ -12,6 +12,11 @@ pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
 /// Bundled VOICE.md — default voice/tone guidance for agent output.
 pub const VOICE_DOC: &str = include_str!("builtins/VOICE.md");
 
+/// Bundled ORIENTATION.md — points a fresh session at scratch/, wave/, and the
+/// repo agent doc. Carried in the skill launch seed so a `/step` handoff keeps
+/// the orientation the assembled prompt used to inject.
+pub const ORIENTATION_DOC: &str = include_str!("builtins/ORIENTATION.md");
+
 /// Surface instruction prompts, one per surface variant.
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
 pub const SURFACE_CLI: &str = include_str!("builtins/surfaces/cli.md");

@@ -47,13 +47,20 @@ for headless and interactive, both surfaces, both vendors.
 2. **Seed swap** — the interactive launch path (`run.rs` `launch_prompt`) sends
    `"<surface preamble> /<step>"` instead of `built.prompt`; sync skills first.
    *(detail: §2)*
-3. **Ambient context → AGENTS.md/CLAUDE.md** — generate from VOICE.md + an
-   orientation block (read `scratch/<branch>.md`, `wave/<name>/`). *(detail: §3)*
+3. **Ambient context — voice + orientation in the seed.** *Done — committed.* The
+   `/step` launch seed now carries the resolved `<lf:voice>` doc and a new
+   `<lf:orientation>` block (read `scratch/`, `wave/<name>/`, the repo agent doc),
+   replacing what the cleared `system_prompt` dropped. The design's AGENTS.md route
+   was **not** taken — `CLAUDE.md`/`AGENTS.md` are symlinks to the human `STYLE.md`,
+   and orientation is branch-scoped; rationale in `questions.md`. *(detail: §3)*
 4. **Headless unification** — wave/flow headless runs pre-sync, then `exec` the
    `/step` seed; stop assembling the ~100KB prompt. *(detail: §4)*
 5. **Remove Directions** — `direction` config field + wave-YAML key, `-d/--direction`
    flag, `builtins/directions/`, the loader + prompt-injection path, the
-   `with_direction*` goldens (~43 non-test refs). *(detail: §5)*
+   `with_direction*` goldens. **Larger than estimated:** `direction` is a first-class
+   wave field threaded through DTOs, SQL migrations, HTTP routes, and the Rust/Python/
+   Swift mirrors (~580 Rust refs, not ~43) — a wire-format migration, not a flag
+   removal. Needs its own pass under the DTO fixture discipline (CLAUDE.md). *(detail: §5)*
 6. **Verify** — a `scripts/` sentinel-probe: sync a step, fire it under `claude -p`
    and `codex exec`, assert the step's effect.
 

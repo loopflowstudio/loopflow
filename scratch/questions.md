@@ -28,6 +28,19 @@ Current to the steps-as-skills milestone. See `steps-as-skills.md` for the plan.
   with `--global --yes` (or TTY confirmation) for `~/` writes. Launch-time sync uses
   repo-local skills only; this keeps first-run handoffs safe and still lets users opt
   into global builtins explicitly.
+- **Ambient context — voice + orientation in the seed, not AGENTS.md.** The
+  committed seed-swap clears `system_prompt`, which silently dropped the
+  `<lf:voice>` doc and the "read scratch/, wave/" orientation the assembled prompt
+  used to inject. The design table (§3) nominally placed these in AGENTS.md/CLAUDE.md
+  so the vendor auto-loads them. **Decided (headless call): carry them in the launch
+  seed instead.** Rationale: in this repo `CLAUDE.md` and `AGENTS.md` are symlinks to
+  the human-authored `STYLE.md`; writing a generated block through them mutates the
+  governing style guide (and orientation is branch-scoped, so it shouldn't live in a
+  committed doc anyway). The seed is the per-session channel — voice (~1.7KB) +
+  orientation stay well under the ~5KB GUI deep-link cap, touch no checked-in file,
+  and are fully reversible. New builtin `ORIENTATION.md` + `ORIENTATION_DOC`; voice
+  reuses the existing `resolve_voice_doc` chain via `components.voice_doc`. If we later
+  want auto-loaded ambient context, the swap to an agent-doc managed block is clean.
 - **External skill fallback.** `npx/*` and `rams/*` steps still use the assembled
   prompt path for now instead of `/step` seeds, because their source of truth is an
   already-vendor-specific skill cache and loopflow should not mirror it as a generated

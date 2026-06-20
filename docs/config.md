@@ -22,7 +22,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
-| Interactive launch surface | `--web` for headless steps | `session.launch: cli` |
+| Interactive launch surface | `--tui` / `--ide` | `session.launch: tui` |
 
 ## Context Assembly
 
@@ -75,7 +75,7 @@ Example repo config:
 agent: claude:opus
 
 session:
-  launch: cli
+  launch: tui
 
 direction: clarity
 
@@ -307,12 +307,12 @@ Pick where interactive handoffs open.
 
 ```yaml
 session:
-  launch: cli          # cli | ide
+  launch: tui          # tui | ide
 ```
 
-`cli` opens the vendor CLI/TUI in the current terminal. `ide` opens the Codex or
-Claude app by URL scheme and falls back to `cli` if no app handles the link.
-OpenCode is CLI-only.
+`tui` opens the vendor CLI/TUI in the current terminal. `ide` opens the Codex or
+Claude app by URL scheme and falls back to `tui` if no app handles the link.
+OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override this default.
 
 ### Branch Names
 

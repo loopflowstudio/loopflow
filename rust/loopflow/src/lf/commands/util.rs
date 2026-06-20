@@ -44,10 +44,10 @@ pub fn launch_session(
         if let Some(url) = launch.ide_url.as_deref() {
             match crate::engine::platform::open_url_checked(url) {
                 Ok(()) => return Ok(()),
-                Err(err) => eprintln!("Could not open vendor app ({err}); falling back to CLI."),
+                Err(err) => eprintln!("Could not open vendor app ({err}); falling back to TUI."),
             }
         } else if harness == "opencode" {
-            eprintln!("OpenCode has no standalone app; falling back to CLI.");
+            eprintln!("OpenCode has no standalone app; opening the TUI.");
         }
     }
 
@@ -204,9 +204,9 @@ mod tests {
     }
 
     #[test]
-    fn session_launch_cli_codex_sets_worktree_model_sandbox_and_prompt() {
+    fn session_launch_tui_codex_sets_worktree_model_sandbox_and_prompt() {
         let launch =
-            build_session_launch(LaunchTarget::Cli, "codex", Some("o3"), &path(), "fix it")
+            build_session_launch(LaunchTarget::Tui, "codex", Some("o3"), &path(), "fix it")
                 .expect("build launch");
 
         assert_eq!(
@@ -229,9 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn session_launch_cli_claude_runs_in_worktree_with_model_and_prompt() {
+    fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
         let launch = build_session_launch(
-            LaunchTarget::Cli,
+            LaunchTarget::Tui,
             "claude",
             Some("sonnet"),
             &path(),
@@ -251,9 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn session_launch_cli_opencode_sets_worktree_prompt_and_model() {
+    fn session_launch_tui_opencode_sets_worktree_prompt_and_model() {
         let launch = build_session_launch(
-            LaunchTarget::Cli,
+            LaunchTarget::Tui,
             "opencode",
             Some("moonshotai/kimi-k2"),
             &path(),

@@ -54,9 +54,13 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
-    /// Launch an interactive vendor session instead of running headless
+    /// Hand off to an interactive vendor session in the terminal (overrides session.launch)
+    #[arg(long, conflicts_with = "ide")]
+    pub tui: bool,
+
+    /// Hand off to an interactive vendor session in the vendor app (overrides session.launch)
     #[arg(long)]
-    pub web: bool,
+    pub ide: bool,
 
     /// Enable Chrome integration (Claude)
     #[arg(long)]

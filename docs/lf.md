@@ -87,7 +87,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `--web` | Launch an interactive vendor session using `session.launch` |
+| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 ## Browser Automation
 
@@ -109,7 +109,7 @@ lf ship -w feature-branch
 | `-a, --area PATH` | Area scope (paths to include in context) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--web` | Launch an interactive vendor session using `session.launch` |
+| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
@@ -172,12 +172,13 @@ lf debug -c    # include current clipboard text in the prompt
 ### Launch an interactive vendor session
 
 ```bash
-lf design                 # opens the vendor CLI for interactive steps
-lf gate --web             # launches an interactive session instead of a headless run
-lf : "fix the bug" --web -m codex
+lf design                 # interactive step → uses session.launch (default: tui)
+lf gate --tui             # force a terminal handoff for a normally-headless step
+lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
 
-Set `session.launch: ide` to open the Codex or Claude app instead of the CLI.
+`--tui` and `--ide` override the repo default. Set `session.launch: ide` in
+`.lf/config.yaml` to make the vendor app the default for interactive steps.
 
 ### External skills
 

@@ -134,7 +134,7 @@ fn default_true() -> bool {
 #[serde(rename_all = "lowercase")]
 pub enum LaunchTarget {
     #[default]
-    Cli,
+    Tui,
     Ide,
 }
 
@@ -621,7 +621,7 @@ pm:
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
-        assert_eq!(config.session.launch, LaunchTarget::Cli);
+        assert_eq!(config.session.launch, LaunchTarget::Tui);
         assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
         assert!(config.area.is_none());
@@ -631,7 +631,7 @@ pm:
     #[test]
     fn default_session_config() {
         let session = SessionConfig::default();
-        assert_eq!(session.launch, LaunchTarget::Cli);
+        assert_eq!(session.launch, LaunchTarget::Tui);
     }
 
     #[test]
@@ -747,13 +747,13 @@ interactive:
     }
 
     #[test]
-    fn config_from_yaml_session_launch_cli() {
+    fn config_from_yaml_session_launch_tui() {
         let yaml = r#"
 session:
-  launch: cli
+  launch: tui
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, LaunchTarget::Cli);
+        assert_eq!(config.session.launch, LaunchTarget::Tui);
     }
 
     #[test]

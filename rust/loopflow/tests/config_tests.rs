@@ -228,20 +228,20 @@ interactive:
 // =============================================================================
 
 #[test]
-fn config_session_launch_cli() {
+fn config_session_launch_tui() {
     let temp = TempDir::new().unwrap();
     write_config(
         temp.path(),
         r#"
 session:
-  launch: cli
+  launch: tui
 "#,
     );
 
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.session.launch, LaunchTarget::Cli);
+    assert_eq!(config.session.launch, LaunchTarget::Tui);
 }
 
 #[test]

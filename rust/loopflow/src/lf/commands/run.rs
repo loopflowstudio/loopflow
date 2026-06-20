@@ -2,8 +2,8 @@ use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
     prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
-    StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
+    PromptComponents, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -230,22 +230,20 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
-    if cli.web {
-        info!("launching vendor session");
-        launch_session(
-            built.config.session.launch,
-            &built.harness,
-            built.model.as_deref(),
-            &built.repo_root,
-            &built.prompt,
-        )?;
-        return Ok(());
-    }
+    // `--tui` / `--ide` force a handoff and override the repo default; an
+    // interactive step with neither flag uses `session.launch`.
+    let forced_target = if cli.ide {
+        Some(LaunchTarget::Ide)
+    } else if cli.tui {
+        Some(LaunchTarget::Tui)
+    } else {
+        None
+    };
 
-    if !built.process.auto {
+    if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
         launch_session(
-            built.config.session.launch,
+            forced_target.unwrap_or(built.config.session.launch),
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,

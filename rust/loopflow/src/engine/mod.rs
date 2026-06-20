@@ -14,6 +14,7 @@ pub mod launch;
 pub mod naming;
 pub mod platform;
 pub mod prompt;
+pub mod skills;
 pub mod stream;
 pub mod structured_reply;
 pub mod worktree;
@@ -50,6 +51,7 @@ pub use prompt::{
     GatherContextOpts, GatherSpec, GatheredContext, PromptComponents, PromptFormatMode,
     RenderedPrompt, Surface, DEFAULT_CONTEXT_BUDGET,
 };
+pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,
 };

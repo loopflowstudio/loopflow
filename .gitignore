@@ -21,6 +21,8 @@ swift/dist/
 .lf/journal/
 .lf/rlm/
 .lf/summaries/
+.claude/skills/
+.agents/skills/
 *.profraw
 *.actual.md
 .DS_Store

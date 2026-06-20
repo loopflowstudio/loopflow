@@ -4,6 +4,7 @@ use clap::Parser;
 
 use crate::engine::flow::Op;
 use crate::engine::git::{get_default_branch, sync_main};
+use crate::engine::{sync_skills, SkillSyncOptions};
 use crate::lf::{Cli, Commands, OpsCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -127,6 +128,21 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                     "working tree dirty; sync aborted".to_string(),
                 ));
             }
+            Ok(())
+        }
+        OpsCommand::SyncSkills {
+            global,
+            yes: _,
+            no_prune,
+        } => {
+            sync_skills(
+                repo,
+                &SkillSyncOptions {
+                    include_global: *global,
+                    prune: !*no_prune,
+                    global_home: None,
+                },
+            )?;
             Ok(())
         }
         OpsCommand::Next {

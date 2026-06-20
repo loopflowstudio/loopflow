@@ -3,7 +3,7 @@ use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
     prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
-    PromptComponents, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -12,7 +12,7 @@ use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Unified entry point for running steps, inline prompts, or interactive chat.
 ///
@@ -119,17 +119,19 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
+    let surface = if is_interactive {
+        Surface::Cli
+    } else {
+        Surface::Headless
+    };
+
     let prepared = prepare_launch_prompt(
         &config,
         LaunchPromptInput {
             repo_root: repo_root.clone(),
             step: step.map(|value| value.to_string()),
             resolved_step: discovered_step.clone(),
-            surface: if is_interactive {
-                Surface::Cli
-            } else {
-                Surface::Headless
-            },
+            surface,
             directions: cli.direction.clone(),
             area: cli
                 .area
@@ -165,7 +167,10 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .expect("prepare_launch_prompt always sets agent");
     let (harness, model) = parse_agent(&agent);
 
-    let step_name = step.map(|value| value.to_string());
+    let step_name = discovered_step
+        .as_ref()
+        .map(|step| step.name.clone())
+        .or_else(|| step.map(|value| value.to_string()));
     let log_name = step_name
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
@@ -180,22 +185,56 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     };
 
     let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
+    let mut agent_config = prepared.config;
+    let mut prompt = prepared.prompt;
+    if let Some(step_name) = step_name.as_deref() {
+        if should_launch_via_skill(step_name) {
+            let sync_start = Instant::now();
+            crate::engine::sync_skills(&repo_root, &SkillSyncOptions::default())?;
+            debug!(
+                elapsed_ms = sync_start.elapsed().as_millis(),
+                "synced vendor skills"
+            );
+            prompt = skill_launch_seed(surface, step_name, message);
+            agent_config.system_prompt.clear();
+            agent_config.task_prompt = prompt.clone();
+        } else {
+            warn!(
+                step = step_name,
+                "external skill step uses assembled prompt fallback"
+            );
+        }
+    }
 
     Ok(PromptBuild {
         repo_root,
         config,
-        agent_config: prepared.config,
+        agent_config,
         process,
         capabilities,
         components: prepared.components,
         breakdown: prepared.breakdown,
-        prompt: prepared.prompt,
+        prompt,
         harness,
         model,
         step_name,
         log_name,
         fast_path,
     })
+}
+
+fn should_launch_via_skill(step_name: &str) -> bool {
+    !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
+}
+
+fn skill_launch_seed(surface: Surface, step_name: &str, message: Option<&str>) -> String {
+    let mut seed = format!("/{step_name}\n\n{}", surface.instructions());
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+        seed.push_str("\n\n<lf:message>\n");
+        seed.push_str(message);
+        seed.push_str("\n</lf:message>");
+    }
+    seed
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
@@ -384,7 +423,23 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::split_step_args;
+    use super::{should_launch_via_skill, skill_launch_seed, split_step_args};
+    use crate::engine::Surface;
+
+    #[test]
+    fn skill_launch_seed_starts_with_slash_step_and_surface() {
+        let seed = skill_launch_seed(Surface::Headless, "implement", Some("build auth"));
+        assert!(seed.starts_with("/implement\n\n"));
+        assert!(seed.contains("Run mode is headless"));
+        assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
+    }
+
+    #[test]
+    fn external_skill_steps_keep_assembled_prompt_fallback() {
+        assert!(!should_launch_via_skill("npx/vercel-labs/deep-research"));
+        assert!(!should_launch_via_skill("rams/rams"));
+        assert!(should_launch_via_skill("implement"));
+    }
 
     #[test]
     fn split_step_args_handles_trailing_colon() {

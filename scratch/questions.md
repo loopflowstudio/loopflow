@@ -24,3 +24,11 @@ Current to the steps-as-skills milestone. See `steps-as-skills.md` for the plan.
   (standing perspective). Open: the per-direction assignment. Walk the ~8 builtin
   directions (ux, infra, craft, ceo, creativity, scale, …) with concrete examples
   and decide skill-vs-AGENTS.md for each.
+- **Global sync default.** Implemented `lf op sync-skills` as repo-local by default,
+  with `--global --yes` (or TTY confirmation) for `~/` writes. Launch-time sync uses
+  repo-local skills only; this keeps first-run handoffs safe and still lets users opt
+  into global builtins explicitly.
+- **External skill fallback.** `npx/*` and `rams/*` steps still use the assembled
+  prompt path for now instead of `/step` seeds, because their source of truth is an
+  already-vendor-specific skill cache and loopflow should not mirror it as a generated
+  skill until namespace semantics are designed.

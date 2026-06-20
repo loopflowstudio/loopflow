@@ -35,16 +35,20 @@ deletion cleanly.
 
 ### 2. Vendor-session launch (new functionality)
 
-`lf <step>` launches a new interactive session **in the vendor's own app**,
+`lf <step>` launches a new interactive session **in the vendor's own surface**,
 automatically, when configured. Terminal-first — a plain `lf` call does it;
-Concerto calls the same path. Three launch targets:
+Concerto calls the same path. Two launch targets, the only real distinction being
+terminal vs the vendor's standalone app:
 
-- **app** — open a new session in the Codex / Claude Code app
-- **embedded** — vendor TUI in a tmux pane (the kept embedded terminal)
-- **ide** — open the worktree in VS Code / Cursor / JetBrains with the vendor's
-  extension (not websites)
+- **cli** — vendor CLI/TUI in a terminal (`cd <wt> && codex/claude/opencode
+  "<prompt>"`). Renders wherever a terminal does: bare term, tmux, or Concerto's
+  embedded pane.
+- **ide** — the vendor's **standalone GUI app**, via its URL scheme: Codex
+  (`codex://threads/new?path=&prompt=`) and Claude Code (`claude://code/new?folder=&q=`,
+  the desktop app's "Code" tab — **not** `claude-cli://`, which opens the terminal CLI).
 
-opencode is **tui-only** for now.
+opencode is **cli-only** (no app). Cursor is **not** an `ide` target — it has no
+clean way to open its GUI at a worktree with a seeded prompt.
 
 ## Config shape (sketch)
 
@@ -52,40 +56,43 @@ Reuse the existing `agent: harness:model` knob; add a launch target.
 
 ```yaml
 # .lf/config.yaml
-agent: claude            # harness
+agent: codex             # harness
 session:
-  launch: app            # app | embedded | ide | tui
+  launch: cli            # cli | ide
 ```
 
-Per-surface defaults: bare terminal → vendor TUI in place; Concerto → embedded,
-with an explicit "open in app / open in IDE" action. The choice is explicit and
-cheap, not a heuristic.
+Per-surface defaults: bare terminal → `cli` in place; Concerto → `cli` in the
+embedded pane, with an explicit "open in app" action that fires `ide`. The choice
+is explicit and cheap, not a heuristic.
 
 The web-URL map in `lf/commands/util.rs` (`open_web_client`: claude.ai,
-chatgpt.com) is the wrong target and gets repurposed to app/IDE launch, atop
-`engine::platform::open_url`. (Correction after the spike: the `which("cursor")`
-check in `ops/mod.rs` is doctor-only and `IdeConfig` is parsed-but-unused — there
-is no `lf ide` launcher today, so the IDE path is greenfield.)
+chatgpt.com) is the wrong target and gets repurposed into a `launch_session`
+dispatcher atop `engine::platform::open_url`. (Per the spike: `IdeConfig` in
+`config.rs` is parsed-but-unused and `which("cursor")` in `ops/mod.rs` is
+doctor-only — there is no launcher today, so this is greenfield.)
 
 ## Open question — answered
 
-**What launch mechanism does each vendor expose?** Answered. Full findings and the
-resulting milestone design: `scratch/vendor-session-launch.md`. The short version:
+**What launch mechanism does each vendor expose, and does it auto-send the
+prompt?** Answered. Full findings and the resulting milestone design:
+`scratch/vendor-session-launch.md`. The short version:
 
-- **Vendor CLI** is the primitive and the only path that **auto-sends** the seed
-  prompt: `cd <wt> && claude "<p>"`, `codex -C <wt> "<p>"`, `opencode <wt>
-  --prompt`. Claude has no `--cwd` — must `cd`.
-- **App launch** is the vendor's **URL scheme** (`claude-cli://`, `codex://`),
+- **Vendor CLI** (`cd <wt> && codex/claude "<p>"`) opens the TUI with the prompt
+  **pre-filled, not sent** — auto-run is headless-only (`codex exec`, `claude -p`).
+  Claude has no `--cwd`; must `cd`. The lone interactive auto-send is opencode
+  `--prompt` (recent builds).
+- **App launch** is the vendor's **GUI URL scheme** (Codex `codex://threads/new`,
+  Claude `claude://code/new` — not `claude-cli://`, which is the terminal CLI),
   which **pre-fills but does not send**, and is **not** `open -a` (Electron drops
-  args). Version-gated; fall back to CLI.
-- **IDE launch** is the GUI CLI (`code -n`/`cursor -n`/`idea`): opens the worktree,
-  but no launcher also *starts* a session — extension self-activation is
-  best-effort.
-- **opencode is genuinely tui-only** — no app, no scheme.
+  args). Claude also gates each deep-linked folder behind a confirmation.
+- **opencode** has no app, no scheme → `cli` only. **Cursor** has no GUI
+  folder+prompt launch → excluded from `ide`.
 
-The asymmetry (CLI auto-sends, scheme pre-fills) is the load-bearing finding: it
-splits the config into "land in a running session" (`tui`/`embedded`) vs "land in
-the right place, prompt ready" (`app`/`ide`).
+The load-bearing correction: **interactive launches pre-fill — none auto-run** (bar
+opencode). The earlier "CLI auto-sends" claim was wrong, which collapses the old
+four-target split into two: `cli` (terminal) vs `ide` (standalone app). Both land
+you in the right place, prompt ready, one keypress to go — the honest shape for a
+take-over-and-review handoff.
 
 ## Staging
 

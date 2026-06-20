@@ -1,6 +1,8 @@
 import SwiftUI
 import CoreText
+#if os(macOS)
 import AppKit
+#endif
 import LoopflowCore
 
 extension AppearanceMode {

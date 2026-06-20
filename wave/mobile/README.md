@@ -15,7 +15,7 @@ Claude / Codex apps.
 
 ## What this retires
 
-- iOS target and `Platform/iOS/` (handled in the teardown branch)
+- Mobile pairing UI under `Platform/iOS/`
 - `lf op pair`, pairing tokens, remote-lfd-for-phone connection infra
 - The roadmap items: `remote-lfd-connection`, `see-your-waves`, `see-wave-tasks`
   (in git history)

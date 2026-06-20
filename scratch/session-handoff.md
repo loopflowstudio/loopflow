@@ -96,13 +96,17 @@ take-over-and-review handoff.
 
 ## Staging
 
-1. **This PR** — record decision, this design doc, archive mobile wave, reframe
-   desktop + workflows wave plans, **answer the launch-mechanism spike** (folded
-   into `scratch/vendor-session-launch.md`). No code.
-2. **Teardown** — own branch off the redone plan. Get the hosting strata out.
-3. **Build** — vendor-session launch, `lf`-first, then Concerto action. Design
-   ready in `scratch/vendor-session-launch.md`; residual unknowns are two
-   minute-long live checks, not a blocking spike.
+The original split was docs → teardown → build. This branch ended up taking the
+first executable slice too: remove mobile pairing and add the `lf`-first vendor
+session launcher. The remaining teardown is still separate.
+
+1. **This PR** — record the decision, archive/reframe the wave plans, remove
+   mobile pairing (`lf op pair`, QR/link parsing, pairing payloads), and ship
+   `session.launch` for CLI/app handoff from `lf`.
+2. **Teardown** — own branch for the larger hosting strata: native chat rendering
+   and `lfd/sessions/harness`.
+3. **Desktop consume** — Concerto adds explicit "open in app" UI on top of the
+   launcher while keeping the embedded terminal as the default frame.
 
 ## Wave moves (this PR)
 

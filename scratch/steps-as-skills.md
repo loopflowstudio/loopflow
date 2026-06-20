@@ -28,6 +28,14 @@ for headless and interactive, both surfaces, both vendors.
 - Decision recorded in `release/unreleased/DECISIONS.md`.
 - **Verified on-machine:** a synced `/step` fires under headless `claude -p` and
   `codex exec`, with the body loaded only on invoke (sentinel probe).
+- **Verified — `--ide` GUI path works** for both Claude (`claude://code/new`) and
+  Codex (`codex://threads/new`): the deep link opens the app and **pre-fills** the
+  seed. Pre-fill (not auto-send) is the **intended** shape — the human lands with
+  `/step` staged, reviews, and presses Enter to fire it; that *is* the
+  take-over-and-review handoff. The *only* failure mode observed was the prompt
+  getting **cut off** at the deep-link length cap (~5KB `q`). The `/step` seed is a
+  dozen characters, so the skills work removes the one blocker — the GUI mechanics
+  need no further change.
 
 **Remaining — this milestone, in build order:**
 

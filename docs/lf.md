@@ -87,7 +87,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `--web` | Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.) |
+| `--web` | Launch an interactive vendor session using `session.launch` |
 
 ## Browser Automation
 
@@ -109,7 +109,7 @@ lf ship -w feature-branch
 | `-a, --area PATH` | Area scope (paths to include in context) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--web` | Copy to clipboard and open web client |
+| `--web` | Launch an interactive vendor session using `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
@@ -169,12 +169,15 @@ lf implement -d ux,clarity
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Use web client instead of CLI
+### Launch an interactive vendor session
 
 ```bash
-lf gate --web      # copies to clipboard, opens claude.ai (or chatgpt.com for codex)
-lf : "fix the bug" --web -m codex    # opens chatgpt.com
+lf design                 # opens the vendor CLI for interactive steps
+lf gate --web             # launches an interactive session instead of a headless run
+lf : "fix the bug" --web -m codex
 ```
+
+Set `session.launch: ide` to open the Codex or Claude app instead of the CLI.
 
 ### External skills
 

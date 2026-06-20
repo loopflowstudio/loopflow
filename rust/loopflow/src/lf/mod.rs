@@ -54,7 +54,7 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
-    /// Copy prompt to clipboard and open web client
+    /// Launch an interactive vendor session instead of running headless
     #[arg(long)]
     pub web: bool,
 

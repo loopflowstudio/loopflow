@@ -5,7 +5,7 @@ use crate::engine::{
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
     StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
-use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
+use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
@@ -68,6 +68,7 @@ struct PromptBuild {
     breakdown: ContextBreakdown,
     prompt: String,
     harness: String,
+    model: Option<String>,
     step_name: Option<String>,
     log_name: String,
     fast_path: Option<String>,
@@ -162,7 +163,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .agent
         .clone()
         .expect("prepare_launch_prompt always sets agent");
-    let (harness, _model) = parse_agent(&agent);
+    let (harness, model) = parse_agent(&agent);
 
     let step_name = step.map(|value| value.to_string());
     let log_name = step_name
@@ -190,6 +191,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         breakdown: prepared.breakdown,
         prompt: prepared.prompt,
         harness,
+        model,
         step_name,
         log_name,
         fast_path,
@@ -229,10 +231,26 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     if cli.web {
-        info!("copying to clipboard and opening web client");
-        copy_to_clipboard(&built.prompt)?;
-        open_web_client(&built.harness)?;
-        println!("Copied to clipboard.");
+        info!("launching vendor session");
+        launch_session(
+            built.config.session.launch,
+            &built.harness,
+            built.model.as_deref(),
+            &built.repo_root,
+            &built.prompt,
+        )?;
+        return Ok(());
+    }
+
+    if !built.process.auto {
+        info!("launching interactive vendor session");
+        launch_session(
+            built.config.session.launch,
+            &built.harness,
+            built.model.as_deref(),
+            &built.repo_root,
+            &built.prompt,
+        )?;
         return Ok(());
     }
 

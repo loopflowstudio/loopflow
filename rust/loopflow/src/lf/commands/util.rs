@@ -1,5 +1,8 @@
-use anyhow::Result;
-use std::path::PathBuf;
+use anyhow::{anyhow, Result};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::engine::{check_cli_available, LaunchTarget};
 
 pub fn find_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
@@ -20,13 +23,329 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn open_web_client(backend: &str) -> Result<()> {
-    let url = match backend {
-        "claude" => "https://claude.ai/new",
-        "codex" => "https://chatgpt.com",
-        "gemini" => "https://aistudio.google.com/prompts/new_chat",
-        _ => "https://claude.ai/new",
-    };
-    crate::engine::platform::open_url(url);
-    Ok(())
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionCommand {
+    program: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SessionLaunch {
+    Cli(SessionCommand),
+    Ide {
+        url: String,
+        fallback: SessionCommand,
+    },
+}
+
+pub fn launch_session(
+    target: LaunchTarget,
+    harness: &str,
+    model: Option<&str>,
+    worktree: &Path,
+    prompt: &str,
+) -> Result<()> {
+    let launch = build_session_launch(target, harness, model, worktree, prompt)?;
+    match launch {
+        SessionLaunch::Cli(command) => {
+            if target == LaunchTarget::Ide && harness == "opencode" {
+                eprintln!("OpenCode has no standalone app; falling back to CLI.");
+            }
+            spawn_session_command(&command)
+        }
+        SessionLaunch::Ide { url, fallback } => {
+            match crate::engine::platform::open_url_checked(&url) {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    eprintln!("Could not open vendor app ({err}); falling back to CLI.");
+                    spawn_session_command(&fallback)
+                }
+            }
+        }
+    }
+}
+
+fn build_session_launch(
+    target: LaunchTarget,
+    harness: &str,
+    model: Option<&str>,
+    worktree: &Path,
+    prompt: &str,
+) -> Result<SessionLaunch> {
+    let worktree = absolute_path(worktree);
+    let command = build_session_command(harness, model, &worktree, prompt)?;
+    if target == LaunchTarget::Cli {
+        return Ok(SessionLaunch::Cli(command));
+    }
+
+    match harness {
+        "codex" => Ok(SessionLaunch::Ide {
+            url: format!(
+                "codex://threads/new?path={}&prompt={}",
+                percent_encode(&worktree.to_string_lossy()),
+                percent_encode(prompt)
+            ),
+            fallback: command,
+        }),
+        "claude" => Ok(SessionLaunch::Ide {
+            url: format!(
+                "claude://code/new?folder={}&q={}",
+                percent_encode(&worktree.to_string_lossy()),
+                percent_encode(prompt)
+            ),
+            fallback: command,
+        }),
+        "opencode" => Ok(SessionLaunch::Cli(command)),
+        _ => Err(anyhow!(
+            "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
+            harness
+        )),
+    }
+}
+
+fn build_session_command(
+    harness: &str,
+    model: Option<&str>,
+    worktree: &Path,
+    prompt: &str,
+) -> Result<SessionCommand> {
+    let cwd = worktree.to_path_buf();
+    let worktree_arg = worktree.to_string_lossy().to_string();
+    let mut args = Vec::new();
+
+    match harness {
+        "codex" => {
+            args.push("-C".to_string());
+            args.push(worktree_arg);
+            if let Some(model) = model {
+                args.push("-c".to_string());
+                args.push(format!("model=\"{model}\""));
+            }
+            args.push("--sandbox".to_string());
+            args.push("workspace-write".to_string());
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: "codex".to_string(),
+                args,
+                cwd,
+            })
+        }
+        "claude" => {
+            if let Some(model) = model {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: "claude".to_string(),
+                args,
+                cwd,
+            })
+        }
+        "opencode" => {
+            args.push(worktree_arg);
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
+            if let Some(model) = model {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
+            Ok(SessionCommand {
+                program: "opencode".to_string(),
+                args,
+                cwd,
+            })
+        }
+        _ => Err(anyhow!(
+            "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
+            harness
+        )),
+    }
+}
+
+fn spawn_session_command(command: &SessionCommand) -> Result<()> {
+    if !check_cli_available(&command.program) {
+        return Err(anyhow!(
+            "'{}' CLI not found. Run `lf op doctor` to check dependencies.",
+            command.program
+        ));
+    }
+
+    let status = Command::new(&command.program)
+        .args(&command.args)
+        .current_dir(&command.cwd)
+        .env_remove("LOOPFLOW_DIRECTIVE_FILE")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("GEMINI_API_KEY")
+        .status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("session launcher exited with status {status}"))
+    }
+}
+
+fn absolute_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path() -> PathBuf {
+        PathBuf::from("/tmp/loop flow")
+    }
+
+    #[test]
+    fn session_launch_cli_codex_sets_worktree_model_sandbox_and_prompt() {
+        let launch =
+            build_session_launch(LaunchTarget::Cli, "codex", Some("o3"), &path(), "fix it")
+                .expect("build launch");
+
+        assert_eq!(
+            launch,
+            SessionLaunch::Cli(SessionCommand {
+                program: "codex".to_string(),
+                args: vec![
+                    "-C".to_string(),
+                    "/tmp/loop flow".to_string(),
+                    "-c".to_string(),
+                    "model=\"o3\"".to_string(),
+                    "--sandbox".to_string(),
+                    "workspace-write".to_string(),
+                    "fix it".to_string(),
+                ],
+                cwd: path(),
+            })
+        );
+    }
+
+    #[test]
+    fn session_launch_cli_claude_runs_in_worktree_with_model_and_prompt() {
+        let launch = build_session_launch(
+            LaunchTarget::Cli,
+            "claude",
+            Some("sonnet"),
+            &path(),
+            "fix it",
+        )
+        .expect("build launch");
+
+        assert_eq!(
+            launch,
+            SessionLaunch::Cli(SessionCommand {
+                program: "claude".to_string(),
+                args: vec![
+                    "--model".to_string(),
+                    "sonnet".to_string(),
+                    "fix it".to_string(),
+                ],
+                cwd: path(),
+            })
+        );
+    }
+
+    #[test]
+    fn session_launch_cli_opencode_sets_worktree_prompt_and_model() {
+        let launch = build_session_launch(
+            LaunchTarget::Cli,
+            "opencode",
+            Some("moonshotai/kimi-k2"),
+            &path(),
+            "fix it",
+        )
+        .expect("build launch");
+
+        assert_eq!(
+            launch,
+            SessionLaunch::Cli(SessionCommand {
+                program: "opencode".to_string(),
+                args: vec![
+                    "/tmp/loop flow".to_string(),
+                    "--prompt".to_string(),
+                    "fix it".to_string(),
+                    "--model".to_string(),
+                    "moonshotai/kimi-k2".to_string(),
+                ],
+                cwd: path(),
+            })
+        );
+    }
+
+    #[test]
+    fn session_launch_ide_codex_builds_scheme_with_encoded_path_and_prompt() {
+        let launch =
+            build_session_launch(LaunchTarget::Ide, "codex", None, &path(), "fix & test\nnow")
+                .expect("build launch");
+
+        match launch {
+            SessionLaunch::Ide { url, fallback } => {
+                assert_eq!(
+                    url,
+                    "codex://threads/new?path=%2Ftmp%2Floop%20flow&prompt=fix%20%26%20test%0Anow"
+                );
+                assert_eq!(fallback.program, "codex");
+            }
+            SessionLaunch::Cli(_) => panic!("expected ide launch"),
+        }
+    }
+
+    #[test]
+    fn session_launch_ide_claude_builds_code_scheme_with_encoded_folder_and_prompt() {
+        let launch = build_session_launch(
+            LaunchTarget::Ide,
+            "claude",
+            None,
+            &path(),
+            "fix & test\nnow",
+        )
+        .expect("build launch");
+
+        match launch {
+            SessionLaunch::Ide { url, fallback } => {
+                assert_eq!(
+                    url,
+                    "claude://code/new?folder=%2Ftmp%2Floop%20flow&q=fix%20%26%20test%0Anow"
+                );
+                assert_eq!(fallback.program, "claude");
+            }
+            SessionLaunch::Cli(_) => panic!("expected ide launch"),
+        }
+    }
+
+    #[test]
+    fn session_launch_ide_opencode_falls_back_to_cli_shape() {
+        let launch = build_session_launch(LaunchTarget::Ide, "opencode", None, &path(), "fix it")
+            .expect("build launch");
+
+        match launch {
+            SessionLaunch::Cli(command) => assert_eq!(command.program, "opencode"),
+            SessionLaunch::Ide { .. } => panic!("expected cli launch"),
+        }
+    }
 }

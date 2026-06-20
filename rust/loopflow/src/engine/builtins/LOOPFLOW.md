@@ -174,6 +174,8 @@ Everything in `.lf/` overrides builtins. User-global `~/.lf/` sits between repo 
 ```yaml
 # .lf/config.yaml
 agent: claude:sonnet              # default model (harness:model)
+session:
+  launch: cli                     # interactive handoff surface: "cli" or "ide"
 direction: [clarity, care]        # default directions for all steps
 area: src/                        # default area scope
 pr: true                          # auto-create PR after push

@@ -1,0 +1,173 @@
+# Steps as Skills: the handoff execution model
+
+Build plan for **this branch** (session-handoff). The `--tui`/`--ide` launcher
+already committed here is non-functional on its own: it seeds loopflow's assembled
+prompt, which the vendor TUIs truncate and the GUI deep links can't carry. The
+launcher only becomes real once steps are exposed as vendor **Skills** and the
+seed shrinks to `/step` — so the two ship together, not as separate branches.
+Turns the converged thesis — *loopflow stops assembling prompts; steps become
+vendor Skills* — into a buildable milestone. The load-bearing assumption (a synced
+`/step` fires under headless exec) is **verified on-machine**, both vendors. See
+`release/unreleased/DECISIONS.md` (2026-06-19, "Run steps as vendor Skills").
+
+## Problem
+
+The first vendor-session launcher passed loopflow's ~100KB assembled prompt to the
+vendor CLI as a positional argument. Every path to "inject our context at launch"
+is walled off:
+
+- **argv / TUI limits** — a single argument caps at 128KB on Linux; vendor TUI
+  composers truncate far below. The seed arrived cut off mid-document.
+- **system-prompt policy** — Claude's subscription auth flags system prompts that
+  name competitor agents. loopflow's context is wall-to-wall "Codex / OpenCode /
+  Gemini", so `--append-system-prompt-file` is poisoned for the Claude harness.
+- **GUI deep links** — `claude://code/new` and `codex://threads/new` accept no
+  system-prompt parameter and cap the user seed at ~5KB.
+
+Meanwhile both vendors converged on the same primitive for reusable instructions:
+**Skills** (the open `SKILL.md` standard). A step is already a markdown instruction
+file — the same shape as a skill. So we stop fighting the launch channel and put
+the work on disk where every surface reads it.
+
+## The model: files on disk + a tiny seed
+
+The old assembled prompt decomposes into exactly three homes. Only the third
+travels through the launch channel, and it stays small.
+
+| Home | On disk | Loaded | Carries |
+|---|---|---|---|
+| **AGENTS.md / CLAUDE.md** | yes | vendor auto-loads, always-on | repo conventions, voice, orientation, wave-standing perspective |
+| **Skills** (`.claude/skills`, `.agents/skills`) | yes | progressive — name+desc up front, body on `/invoke` | step bodies |
+| **The seed** | no | typed into the session | `"<surface preamble> /step"` |
+
+### Verified
+
+| Surface | Seed | Result |
+|---|---|---|
+| `claude -p "/lfprobe"` | explicit slash | emitted a sentinel that existed only in the skill body |
+| `codex exec "/lfprobe"` | explicit slash | `sed`'d `SKILL.md` on invoke, then emitted the sentinel |
+
+Both discovered the skill from project-local dirs and ran the body under headless
+exec. Codex's visible read confirms progressive disclosure: 80 synced steps cost
+~80 index lines, not 80 bodies — headless included.
+
+## Expose / invoke — the 2×2
+
+Both vendors, both surfaces, read the same on-disk `SKILL.md` and pull the body
+only on invoke. The surface axis nearly collapses; the seams are small.
+
+| | Claude TUI | Claude GUI | Codex TUI | Codex GUI |
+|---|---|---|---|---|
+| Explicit | `/step` | `/step` or + → Skills | `/step` | `/step` |
+| Reads on-disk skills | ✅ | ✅ | ✅ | ✅ |
+| Body in context until invoked | no | no | no | no |
+
+**The only real seams the sync must encode:**
+
+1. **Path dialect** — Claude `.claude/skills/<step>/SKILL.md`; Codex
+   `.agents/skills/<step>/SKILL.md`. ×{repo, global} = four targets.
+2. **Context knob** — Claude emits set `disable-model-invocation: true`
+   (explicit-only, zero index cost); Codex has no per-skill switch but auto-caps
+   its index (~2% / 8KB), so no action needed there.
+3. **Ignore deprecated single-file forms** — Claude `commands/*.md`, Codex
+   `~/.codex/prompts/*.md`. Both superseded by Skills.
+
+## Approach
+
+### 1. The sync — `lf op sync-skills` (name TBD)
+
+Transform every resolved step (builtin + `~/.lf/steps/` + `.lf/steps/`) into a
+`SKILL.md` and write to the four targets:
+
+| Step scope | Claude target | Codex target |
+|---|---|---|
+| global (`~/.lf/steps`, builtins) | `~/.claude/skills/<step>/SKILL.md` | `~/.agents/skills/<step>/SKILL.md` |
+| repo (`.lf/steps`) | `<repo>/.claude/skills/<step>/SKILL.md` | `<repo>/.agents/skills/<step>/SKILL.md` |
+
+Frontmatter transform (loopflow step → `SKILL.md`):
+
+- `description` ← the step's one-line summary (the line after frontmatter).
+- body ← the step body, unchanged.
+- Claude emit adds `disable-model-invocation: true`.
+- Drop loopflow-only keys (`requires`, `produces`, `interactive`, `agent`,
+  `action_style`) — or fold the useful ones into the body as a hint.
+
+Open: **provenance + safe cleanup.** We write into the user's `~/.claude` and
+`~/.agents`. Mark generated skills (frontmatter marker or a `loopflow/`
+sub-namespace) and prune stale ones; never clobber a user's own skill. Confirm
+before first global write.
+
+### 2. The seed — replace the assembled-prompt blob
+
+The interactive launch path (the `--tui`/`--ide` work already in this branch)
+stops sending `built.prompt`. It sends `"<surface preamble> /<step>"`:
+
+- **surface preamble** ← the surface doc (cli / headless / concerto_*), the one
+  per-run modifier. Small. Headless carries "never ask, decide, note ambiguity in
+  `scratch/questions.md`"; cli carries "ask and wait."
+- **`/<step>`** ← the step name. The skill body does the rest.
+
+### 3. Ambient context → AGENTS.md / CLAUDE.md
+
+A generation step (or `lf init` / sync) writes loopflow's always-on context into
+the repo's agent doc:
+
+- **VOICE.md** (from `.lf/voice.md` or builtin) — communication style.
+- **Orientation** — "Before any step, read `scratch/<branch>.md` (this PR's design
+  + notes) and `wave/<name>/` (roadmap)." We point; the agent reads on demand.
+- **Wave-standing perspective** — the line that used to be a direction.
+
+### 4. Unify headless onto the same model
+
+Headless wave/flow runs stop assembling a ~100KB prompt. They pre-sync skills,
+then `codex exec` / `claude -p` a surface-stamped `/step` seed. Same shape as the
+interactive handoff; the surface preamble is the only difference. (Verified that
+`/step` fires under both headless execs.)
+
+### 5. Remove Directions
+
+- Delete the `direction` config field, wave-YAML key, `-d/--direction` flag,
+  `builtins/directions/`, the direction loader and prompt-injection path, the
+  `with_direction*` goldens (~43 non-test Rust refs).
+- Wave model becomes **area × flow**. Perspective → AGENTS.md (standing) or an
+  invoked skill (occasional).
+
+## Scope
+
+- **In:** the steps→`SKILL.md` sync (4 targets, frontmatter transform,
+  `disable-model-invocation` on Claude, provenance + prune); the seed change
+  (`/step` + surface preamble) replacing the assembled blob; ambient context →
+  AGENTS.md/CLAUDE.md (voice + orientation); Directions removal; headless
+  unification onto the skills seed.
+- **Out:** model-*auto* skill invocation by description (the seed is always
+  explicit `/step`; auto is unproven and off the critical path). Concerto "open in
+  app" UI. The larger `lfd/sessions/harness` / native-chat teardown (separate
+  branch). Session resume.
+
+## De-risking
+
+| Question | Finding | Impact |
+|---|---|---|
+| Does a synced `/step` fire under headless exec? | **Yes**, both vendors (sentinel-in-body probe). | The whole unification stands. |
+| Does the body stay out of context until invoked? | **Yes** — Codex read `SKILL.md` on invoke; both vendors do progressive disclosure. | 80 steps ≠ 80 bodies in context. |
+| Skill path per vendor? | Claude `.claude/skills`, Codex `.agents/skills`; both repo + global. | Four sync targets. |
+| Can we inject context as a system prompt? | **No** for Claude — competitor-mention auth block; and GUI deep links take no system-prompt param. | Context lives on disk (AGENTS.md + skills), never the system prompt. |
+| Auto-invocation by description, headless? | **Untested.** Not needed — seed is explicit. | Revisit only if a wave must auto-fire a perspective. |
+| Global-skill scope (`~/.claude/skills`) headless? | Tested project-local (the relevant case); global is the same mechanism per vendor docs, not separately verified. | Low risk; confirm during build. |
+
+## Done when
+
+- `lf op sync-skills` writes every step as a `SKILL.md` to the four targets, with
+  Claude emits explicit-only and generated skills marked + prunable.
+- `lf <step>` (interactive) opens the worktree and seeds `"<surface> /<step>"`;
+  the vendor session runs the step from its synced skill.
+- A headless wave run pre-syncs and `exec`s the same `/step` seed — no assembled
+  prompt.
+- `VOICE.md` + orientation live in AGENTS.md/CLAUDE.md; the agent reads scratch/
+  and wave/ on demand.
+- Directions are gone; the wave model is area × flow; CI green without
+  `with_direction` goldens.
+
+Verify with a script under `scripts/` that syncs a step, fires it under
+`claude -p` and `codex exec`, and asserts the step's effect — the same
+sentinel-probe shape that de-risked this design.

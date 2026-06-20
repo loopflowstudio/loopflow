@@ -10,6 +10,47 @@ vendor Skills* — into a buildable milestone. The load-bearing assumption (a sy
 `/step` fires under headless exec) is **verified on-machine**, both vendors. See
 `release/unreleased/DECISIONS.md` (2026-06-19, "Run steps as vendor Skills").
 
+## Goal
+
+Loopflow stops assembling prompts for handoffs. Steps become vendor **Skills** on
+disk; the launch seed shrinks to `"<surface preamble> /step"`. One execution model
+for headless and interactive, both surfaces, both vendors.
+
+## Status
+
+**Done — committed on this branch (do not redo):**
+
+- `--tui`/`--ide` launcher + `session.launch: tui | ide` config (selects the
+  *surface*). Builds, clippy-clean, tests pass.
+- `--web` removed; `LaunchTarget::Cli` renamed to `Tui`; docs updated.
+- Native agent-doc dedup confirmed working in the launcher
+  (`drop_native_instruction_docs` strips `CLAUDE.md`/`AGENTS.md` + symlink targets).
+- Decision recorded in `release/unreleased/DECISIONS.md`.
+- **Verified on-machine:** a synced `/step` fires under headless `claude -p` and
+  `codex exec`, with the body loaded only on invoke (sentinel probe).
+
+**Remaining — this milestone, in build order:**
+
+1. **Skill sync** — a `lf op sync-skills` (name TBD): each resolved step →
+   `SKILL.md` into four targets (`.claude/skills` + `.agents/skills`, repo +
+   global). Frontmatter transform; `disable-model-invocation: true` on Claude
+   emits; provenance marker + prune of stale generated skills; confirm before the
+   first global (`~/`) write. *(detail: §1)*
+2. **Seed swap** — the interactive launch path (`run.rs` `launch_prompt`) sends
+   `"<surface preamble> /<step>"` instead of `built.prompt`; sync skills first.
+   *(detail: §2)*
+3. **Ambient context → AGENTS.md/CLAUDE.md** — generate from VOICE.md + an
+   orientation block (read `scratch/<branch>.md`, `wave/<name>/`). *(detail: §3)*
+4. **Headless unification** — wave/flow headless runs pre-sync, then `exec` the
+   `/step` seed; stop assembling the ~100KB prompt. *(detail: §4)*
+5. **Remove Directions** — `direction` config field + wave-YAML key, `-d/--direction`
+   flag, `builtins/directions/`, the loader + prompt-injection path, the
+   `with_direction*` goldens (~43 non-test refs). *(detail: §5)*
+6. **Verify** — a `scripts/` sentinel-probe: sync a step, fire it under `claude -p`
+   and `codex exec`, assert the step's effect.
+
+The numbered detail for each remaining item is in **Approach** below.
+
 ## Problem
 
 The first vendor-session launcher passed loopflow's ~100KB assembled prompt to the

@@ -40,13 +40,19 @@ Step discovery still resolves the same loopflow step names. Before launching a n
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all
-uv run pytest python/tests/
+.venv/bin/pytest python/tests/
 tests/e2e/test_smoke.sh
-uv run python scripts/verify_skill_sync.py
-uv run python scripts/check_vendor_session_launch.py
+.venv/bin/python scripts/verify_skill_sync.py
+.venv/bin/python scripts/check_vendor_session_launch.py
 swift test --package-path swift
-uv run python scripts/check_swift_multiplatform_boundaries.py
+.venv/bin/python scripts/check_swift_multiplatform_boundaries.py
+cargo test -p loopflow skill
+cargo test -p loopflow launch_prompt
+cargo test -p loopflow golden_prompt
 ```
 
-All passed locally on 2026-06-20. `scripts/verify_skill_sync.py --live` was not rerun during gate; the non-live probe verified generated files, and the branch notes record prior live Claude/Codex sentinel verification.
+Passed in this gate on 2026-06-20. `uv run ...` could not start in the managed sandbox because uv first hit a denied cache path under `~/.cache`, then panicked in macOS dynamic-store initialization when moved to a workspace cache; the repo-supported activated `.venv` path was used for Python checks instead.
+
+`cargo test --all` and `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` were attempted. Both are blocked in this sandbox by `PermissionDenied` on local listener creation (`127.0.0.1:0` / Unix listener); `cargo test --all` reached 918 passed, 2 ignored, then 53 listener-binding tests failed, and the API e2e suite failed during `LfdRuntime` port reservation. Re-run those two commands in a normal local or CI environment before landing.
+
+`scripts/verify_skill_sync.py --live` was not rerun during gate; the non-live probe verified generated files, and the branch notes record prior live Claude/Codex sentinel verification.

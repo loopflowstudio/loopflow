@@ -3,19 +3,11 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-/// Bundled LOOPFLOW.md system documentation.
-pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
-
 /// Bundled RLM.md — recursive language model instructions for agents.
 pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
 
 /// Bundled VOICE.md — default voice/tone guidance for agent output.
 pub const VOICE_DOC: &str = include_str!("builtins/VOICE.md");
-
-/// Bundled ORIENTATION.md — points a fresh session at scratch/, wave/, and the
-/// repo agent doc. Carried in the skill launch seed so a `/step` handoff keeps
-/// the orientation the assembled prompt used to inject.
-pub const ORIENTATION_DOC: &str = include_str!("builtins/ORIENTATION.md");
 
 /// Surface instruction prompts, one per surface variant.
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");

@@ -4,6 +4,19 @@ produces: scratch/polish-priorities.md
 ---
 Survey your area's rough edges. What would make it feel more finished?
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Scope
 
 The included context defines your area of responsibility. Polish within that scope. If given `src/cli/`, focus on CLI polish—help text, error messages, user flows. Don't audit unrelated areas. Own your area's quality.

@@ -311,7 +311,6 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
-    pub loopflow_doc: Option<String>,
     /// Voice/tone guidance — resolved from user ~/.lf/ > repo .lf/ > builtin.
     pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
@@ -467,11 +466,10 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         .map(|guard| guard.clone())
         .unwrap_or_default();
 
-    let mut breakdown = ContextBreakdown::default();
-
-    if let Some(ref doc) = components.loopflow_doc {
-        breakdown.system_tokens = count_tokens(doc);
-    }
+    let mut breakdown = ContextBreakdown {
+        system_tokens: count_tokens(crate::engine::builtins::RLM_DOC),
+        ..Default::default()
+    };
 
     if let Some(ref step) = components.step {
         if let Some(ref content) = step.content {
@@ -734,9 +732,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Load bundled LOOPFLOW.md (system instructions, always included)
-    let loopflow_doc = Some(crate::engine::builtins::LOOPFLOW_DOC.to_string());
-
     // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md > builtin
     let voice_doc = resolve_voice_doc(repo_root);
 
@@ -753,7 +748,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
-        loopflow_doc,
         voice_doc,
         message: opts.message.clone(),
         diff_tier,
@@ -1624,20 +1618,14 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: loopflow instructions, RLM, voice, surface.
+/// third-party app classifiers: RLM, voice, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    if let Some(ref doc) = components.loopflow_doc {
-        parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
-    }
-
-    if components.loopflow_doc.is_some() {
-        parts.push(format!(
-            "<lf:rlm>\n{}\n</lf:rlm>",
-            crate::engine::builtins::RLM_DOC
-        ));
-    }
+    parts.push(format!(
+        "<lf:rlm>\n{}\n</lf:rlm>",
+        crate::engine::builtins::RLM_DOC
+    ));
 
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
@@ -2172,9 +2160,12 @@ mod tests {
             ..Default::default()
         };
 
-        // Set budget to only fit docs, not summaries
+        // Set budget to only fit docs, not summaries (system sections are a
+        // mandatory floor, so add them to the budget).
+        let system = count_tokens(crate::engine::builtins::RLM_DOC);
         let doc_tokens = count_tokens("Doc content");
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), doc_tokens + 5);
+        let trimmed =
+            trim_context_with_breakdown(GatheredContext(components), system + doc_tokens + 5);
 
         assert!(trimmed.components().summaries.is_empty());
         assert_eq!(trimmed.components().docs.len(), 1);
@@ -2206,7 +2197,8 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens("x")
+        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
+            + count_tokens("x")
             + count_tokens("Summary should survive after wave memory is dropped")
             + 1;
         let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
@@ -2284,7 +2276,10 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens("x") + count_tokens(scratch_content) + 1;
+        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
+            + count_tokens("x")
+            + count_tokens(scratch_content)
+            + 1;
         let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
 
         assert_eq!(trimmed.components().docs.len(), 1);
@@ -2667,7 +2662,6 @@ mod tests {
         let components = PromptComponents {
             surface: Surface::Headless,
             wave: Some("rust".to_string()),
-            loopflow_doc: Some("Loopflow instructions".to_string()),
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
@@ -2695,8 +2689,8 @@ mod tests {
 
         let prompt = render_full_prompt(components);
 
-        // Verify order: loopflow -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
-        let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
+        // Verify order: system (rlm) -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
+        let rlm_pos = prompt.find("<lf:rlm>").unwrap();
         let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
@@ -2705,7 +2699,7 @@ mod tests {
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
         let step_pos = prompt.find("<lf:step:implement>").unwrap();
 
-        assert!(loopflow_pos < auto_pos);
+        assert!(rlm_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);

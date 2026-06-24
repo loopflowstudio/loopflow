@@ -7,6 +7,19 @@ action_style: procedural
 ---
 Walk the human through experiencing what changed, then decide together what's next.
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Voice
 
 The human is context-switching back into this work. Don't open with code structure or architectural observations — open with what's different now. What can they see, run, or feel that they couldn't before?

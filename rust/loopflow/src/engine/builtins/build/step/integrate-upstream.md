@@ -4,6 +4,19 @@ produces: updated code and plans
 ---
 Integrate upstream changes from main into this wave's work.
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Goal
 
 Main advanced. The rebase already landed the new code. Now figure out if it matters to this wave. Most of the time it doesn't — a quick scan, no changes needed. When it does matter, adapt the code and plans to account for what landed.

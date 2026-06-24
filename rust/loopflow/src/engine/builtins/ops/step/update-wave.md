@@ -4,6 +4,19 @@ produces: wave/<wave>/ (updated or deleted), scratch/ (folded files removed)
 ---
 Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Goal
 
 `wave/<wave>/` is planning scaffolding — it tracks what's left to build, not what's been built. This step is the only writer. Whether you're creating a wave from analysis, cleaning up after a build, or reconciling both at once:

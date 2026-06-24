@@ -4,6 +4,19 @@ produces: scratch/synthesis.md
 ---
 Combine multiple perspectives into one coherent result.
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Context
 
 Multiple agents worked on the same task with different directions. Their outputs are available as drafts. Your job is to synthesize them—find the signal, resolve conflicts, produce one unified output.

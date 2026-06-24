@@ -123,3 +123,51 @@ becomes **files on disk + a tiny seed**:
 - **Symlinked agent docs** (`CLAUDE.md`/`AGENTS.md` → `STYLE.md`) are already
   deduped by the launcher; the `lf-prompt` discrepancy was the only place the
   triple-count appeared.
+
+## 2026-06-24 — Ambient context moves to disk; one seed path, harness-aware sigil
+
+**Context:** The skills milestone (2026-06-19) routed both interactive and headless
+named-step runs through the `/step` seed but carried the always-on context (the
+`LOOPFLOW.md` operating manual, the orientation header) in the seed or as an
+injected system doc. Two things were off. First, `LOOPFLOW.md` was injected into
+every session as product context even though it's loopflow's own operating manual,
+and the orientation header was a seed-level afterthought disconnected from the
+steps that actually depend on `scratch/`. Second, the seed hard-coded a `/step`
+invocation for every vendor, but Codex's interactive composer reserves `/` for
+built-in commands — skills fire there with `$step`.
+
+**Decision:**
+
+- **Both surfaces keep the `/step` seed.** Skills fire under `claude -p` and
+  `codex exec` (re-verified on-machine, sentinel probe), so headless stays on the
+  seed too — it is *not* sent back to the assembled prompt. The seed must carry the
+  surface run-mode preamble for both: the headless warning ("no user present,
+  decide and keep moving, note ambiguity in `scratch/questions.md`") and the cli
+  "ask and wait" line. `surface.instructions()` already supplies this.
+- **Harness-aware invocation sigil.** `skill_launch_seed` emits `$step` for Codex
+  and `/step` for Claude. `$` works in *both* Codex paths (exec and the interactive
+  composer); `/` only works in `codex exec`, not the composer. Claude uses `/`
+  everywhere.
+- **`LOOPFLOW.md` leaves the product.** The operating manual is no longer injected
+  into any prompt; its content moves into loopflow's own agent doc (`STYLE.md`, which
+  `CLAUDE.md`/`AGENTS.md` symlink to), auto-loaded by the vendor only when working on
+  loopflow. `LOOPFLOW_DOC` and the `loopflow_doc` prompt field are deleted; `RLM`
+  becomes the unconditional system section.
+- **Orientation embeds into the steps that need it.** The orientation block (read
+  `scratch/`, `wave/`, the agent doc) is embedded directly into the body of every
+  step that references `scratch/` (all 37 — build, govern, ops), so it travels with
+  the skill instead of riding the seed. Dropped from `skill_launch_seed`;
+  `ORIENTATION.md` deleted.
+
+**Implications:**
+
+- The 2026-06-19 "headless and interactive unify onto one execution model" line
+  holds — they share both the skills *and* the seed path. The only per-surface
+  difference is the run-mode preamble; the only per-harness difference is the sigil.
+- User repos no longer receive the loopflow operating manual as ambient context.
+  Operational knowledge now comes from the step bodies (skills) plus the repo's own
+  agent doc. Acceptable: the manual is loopflow-specific, and a `git`-managed agent
+  doc is the right home for it.
+- Orientation is duplicated across 37 step files (no include mechanism for step
+  `.md`). That duplication is the cost of "embedded in the relevant steps"; re-run
+  the embed if the set of scratch-dependent steps changes.

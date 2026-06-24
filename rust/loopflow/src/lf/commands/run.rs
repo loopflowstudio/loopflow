@@ -187,6 +187,10 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
+    // Both headless and interactive runs hand off via the `/step` skill seed —
+    // skills fire under `claude -p` / `codex exec`, verified on-machine. The seed
+    // carries the surface run-mode preamble (`surface.instructions()`), so the
+    // headless warning ("no user present, decide and keep moving") still lands.
     if let Some(step_name) = step_name.as_deref() {
         if should_launch_via_skill(step_name) {
             let sync_start = Instant::now();
@@ -196,6 +200,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 "synced vendor skills"
             );
             prompt = skill_launch_seed(
+                &harness,
                 surface,
                 step_name,
                 message,
@@ -232,25 +237,28 @@ fn should_launch_via_skill(step_name: &str) -> bool {
     !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
 }
 
-/// Build the launch seed for a `/step` handoff: the slash command, the surface
-/// preamble, and the ambient context the assembled prompt used to carry as a
-/// system prompt (voice + orientation). The step body itself loads from the
-/// synced skill on invoke, so this stays small enough for the GUI deep-link cap.
+/// Build the launch seed for a `/step` handoff: the skill invocation, the surface
+/// run-mode preamble, and the voice doc. Orientation now lives in the step
+/// bodies themselves, and the step body loads from the synced skill on invoke,
+/// so this stays small enough for the GUI deep-link cap.
+///
+/// The invocation sigil is harness-specific: Codex's interactive composer
+/// reserves `/` for built-in commands, so skills fire with `$name` there (and
+/// `$` works in `codex exec` too). Claude uses `/name` everywhere.
 fn skill_launch_seed(
+    harness: &str,
     surface: Surface,
     step_name: &str,
     message: Option<&str>,
     voice: Option<&str>,
 ) -> String {
-    let mut seed = format!("/{step_name}\n\n{}", surface.instructions());
+    let sigil = if harness == "codex" { '$' } else { '/' };
+    let mut seed = format!("{sigil}{step_name}\n\n{}", surface.instructions());
     if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
         seed.push_str("\n\n<lf:voice>\n");
         seed.push_str(voice);
         seed.push_str("\n</lf:voice>");
     }
-    seed.push_str("\n\n<lf:orientation>\n");
-    seed.push_str(crate::engine::builtins::ORIENTATION_DOC.trim());
-    seed.push_str("\n</lf:orientation>");
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
         seed.push_str(message);
@@ -451,6 +459,7 @@ mod tests {
     #[test]
     fn skill_launch_seed_starts_with_slash_step_and_surface() {
         let seed = skill_launch_seed(
+            "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
@@ -459,19 +468,26 @@ mod tests {
         assert!(seed.starts_with("/implement\n\n"));
         assert!(seed.contains("Run mode is headless"));
         assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
-        assert!(seed.contains("<lf:orientation>"));
-        assert!(seed.contains("scratch/"));
+        // Orientation now lives in the step body, not the seed.
+        assert!(!seed.contains("<lf:orientation>"));
         assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
     }
 
     #[test]
+    fn skill_launch_seed_uses_dollar_sigil_for_codex() {
+        // Codex's interactive composer reserves `/` for built-in commands, so
+        // skills fire with `$name`.
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None);
+        assert!(seed.starts_with("$gate\n\n"));
+    }
+
+    #[test]
     fn skill_launch_seed_omits_voice_and_message_when_absent() {
-        let seed = skill_launch_seed(Surface::Cli, "gate", None, None);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, None);
         assert!(seed.starts_with("/gate\n\n"));
         assert!(!seed.contains("<lf:voice>"));
         assert!(!seed.contains("<lf:message>"));
-        // Orientation is always present — every handoff should read scratch/.
-        assert!(seed.contains("<lf:orientation>"));
+        assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]

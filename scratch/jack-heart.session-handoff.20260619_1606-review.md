@@ -7,6 +7,7 @@ Added the vendor-session handoff path for loopflow steps:
 - `lf --tui` / `lf --ide` and `session.launch: tui | ide` choose whether interactive handoffs open in the terminal vendor TUI or the native vendor app.
 - `lf op sync-skills` mirrors resolved steps into repo-local `.claude/skills` and `.agents/skills` by default, with opt-in global sync through `--global --yes` or an interactive confirmation.
 - Named steps pre-sync repo-local skills and launch with a compact vendor skill seed: `/step` for Claude, `$step` for Codex. The seed carries only surface run-mode instructions, voice, and message context; the step body and branch orientation load from the synced skill.
+- Forced handoff flags (`--tui` / `--ide`) now mark the run as interactive before the seed is built, so normally-headless steps like `gate` open with CLI surface instructions instead of the headless “no user present” preamble.
 - The loopflow operating manual moved out of assembled prompts and into this repo's agent doc (`STYLE.md`, reached through the `CLAUDE.md` / `AGENTS.md` symlinks). `LOOPFLOW_DOC`, `ORIENTATION_DOC`, and seed-level orientation were removed.
 - Headless flow ops can run `op: sync-skills`, and the verification script creates a probe step, syncs it, and optionally invokes Claude/Codex live.
 - Deprecated mobile pairing surfaces were removed in favor of the discovery/setup flow.
@@ -39,34 +40,28 @@ Step discovery still resolves the same loopflow step names. Before launching a n
 
 ## Validation
 
+Passed during this gate on 2026-06-24:
+
 ```bash
 cargo fmt --all -- --check
-cargo test -p loopflow launch_prompt
-cargo test -p loopflow golden_prompt
-cargo test -p loopflow context_tests
-cargo test -p loopflow skill
-```
-
-Passed during this gate on 2026-06-24.
-
-```bash
+cargo test -p loopflow
+cargo test --all
 cargo clippy --all-targets -- -D warnings
+cargo test -p loopflow docker_
 uv run python scripts/verify_skill_sync.py
+uv run python scripts/check_vendor_session_launch.py
+uv run pytest python/tests/
+tests/e2e/test_smoke.sh
+uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
+swift test --package-path swift
+uv run python scripts/check_swift_multiplatform_boundaries.py
 ```
-
-Passed during this gate on 2026-06-24.
 
 Previously passed in this branch gate on 2026-06-20:
 
 ```bash
-.venv/bin/pytest python/tests/
-tests/e2e/test_smoke.sh
 .venv/bin/python scripts/verify_skill_sync.py
 .venv/bin/python scripts/check_vendor_session_launch.py
-swift test --package-path swift
-.venv/bin/python scripts/check_swift_multiplatform_boundaries.py
 ```
-
-`cargo test --all` and `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` were attempted in the earlier gate. Both were blocked in that sandbox by `PermissionDenied` on local listener creation (`127.0.0.1:0` / Unix listener); `cargo test --all` reached 918 passed, 2 ignored, then 53 listener-binding tests failed, and the API e2e suite failed during `LfdRuntime` port reservation. Re-run those two commands in a normal local or CI environment before landing.
 
 `scripts/verify_skill_sync.py --live` was not rerun during gate; the non-live probe verifies generated files, and the branch notes record prior live Claude/Codex sentinel verification.

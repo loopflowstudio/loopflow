@@ -106,16 +106,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         debug!(s.name, s.interactive, "discovered step");
     }
 
-    let is_interactive = cli.interactive
-        || (!cli.batch
-            && (discovered_step
-                .as_ref()
-                .and_then(|s| s.interactive)
-                .unwrap_or(false)
-                || step
-                    .map(|s| config.interactive.contains(&s.to_string()))
-                    .unwrap_or(false)
-                || (step.is_none() && message.is_none())));
+    let is_interactive = is_interactive_run(cli, &config, discovered_step.as_ref(), step, message);
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
@@ -231,6 +222,26 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         log_name,
         fast_path,
     })
+}
+
+fn is_interactive_run(
+    cli: &Cli,
+    config: &Config,
+    discovered_step: Option<&crate::engine::Step>,
+    step: Option<&str>,
+    message: Option<&str>,
+) -> bool {
+    cli.tui
+        || cli.ide
+        || cli.interactive
+        || (!cli.batch
+            && (discovered_step
+                .and_then(|step| step.interactive)
+                .unwrap_or(false)
+                || step
+                    .map(|step_name| config.interactive.contains(&step_name.to_string()))
+                    .unwrap_or(false)
+                || (step.is_none() && message.is_none())))
 }
 
 fn should_launch_via_skill(step_name: &str) -> bool {
@@ -453,8 +464,34 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_launch_via_skill, skill_launch_seed, split_step_args};
-    use crate::engine::Surface;
+    use super::{is_interactive_run, should_launch_via_skill, skill_launch_seed, split_step_args};
+    use crate::engine::{Config, Step, Surface};
+    use crate::lf::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn forced_session_handoff_counts_as_interactive() {
+        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
+        let config = Config::default();
+
+        assert!(is_interactive_run(&cli, &config, None, Some("gate"), None));
+    }
+
+    #[test]
+    fn interactive_step_counts_as_interactive_without_force_flag() {
+        let cli = Cli::parse_from(["lf", "design"]);
+        let config = Config::default();
+        let mut step = Step::named("design");
+        step.interactive = Some(true);
+
+        assert!(is_interactive_run(
+            &cli,
+            &config,
+            Some(&step),
+            Some("design"),
+            None
+        ));
+    }
 
     #[test]
     fn skill_launch_seed_starts_with_slash_step_and_surface() {

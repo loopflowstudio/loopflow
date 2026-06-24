@@ -11,10 +11,11 @@ surfaces that expose all of that coherently.
    and report lifecycle without human babysitting
 3. **`pm-round-trip`** (p2) — provider state mirrors wave and PR reality,
    including dependencies and reset tooling
-4. **`vendor-session-launch`** (p2) — `lf` launches a new interactive session
-   in the vendor CLI or app, config-driven and terminal-first
-5. **`governance-surfaces`** (p2) — runboard, portfolio, calibration, beat
+4. **`governance-surfaces`** (p2) — runboard, portfolio, calibration, beat
    programming, and release controls read from one engine-backed model
+5. **`remove-directions`** (p3) — retire the `direction` wire field once steps
+   are vendor Skills; redistribute its perspective text into step-skills and
+   agent docs
 
 ## Not here
 
@@ -29,6 +30,11 @@ surfaces that expose all of that coherently.
   good if the underlying data contracts are good
 - Several tasks unlock each other: PM round-trip and scheduling pressure the
   build loop
-- `vendor-session-launch` is gated by what each vendor exposes to launch a
-  session — use the answered spike in `scratch/vendor-session-launch.md`
+- Vendor skill handoff shipped, but a few assumptions still ride on vendor
+  runtime behavior outside this repo: global skill discovery (`~/.claude/skills`,
+  `~/.agents/skills`) is structurally verified but not live-probed globally, and
+  namespaced invocation (`/gstack/office-hours`, `$gstack/office-hours`) assumes
+  both vendors accept nested skill dirs. Re-check before relying on either as a
+  primary path. `npx/*` and `rams/*` stay on the assembled-prompt fallback until
+  external skill namespace semantics are designed.
 - Scheduled automation is only useful if the outputs stay reviewable and calm

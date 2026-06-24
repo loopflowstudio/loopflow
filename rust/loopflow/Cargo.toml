@@ -40,7 +40,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 rand = "0.10"
 once_cell = "1"
 regex = "1"
-qrcode = { version = "0.14", default-features = false }
 
 # --- Dependencies from loopflow-ops ---
 sha2 = "0.10"
@@ -68,7 +67,7 @@ hmac = "0.12"
 humantime = "2"
 ipnet = "2"
 reqwest = { version = "0.13", features = ["blocking", "json"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1"] }

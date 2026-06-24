@@ -41,8 +41,6 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Concerto uses the microphone for voice-to-text input.</string>
-    <key>NSCameraUsageDescription</key>
-    <string>Concerto uses the camera to scan lfd pairing QR codes.</string>
     <key>OSAScriptingDefinition</key>
     <string>Concerto.sdef</string>
 </dict>

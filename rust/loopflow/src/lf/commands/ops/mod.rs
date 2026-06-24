@@ -5,7 +5,10 @@ use crate::engine::worktrees::{
     create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
     wave_name_from_worktree_and_main, worktree_path,
 };
-use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, Surface};
+use crate::engine::{
+    prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
+    SkillSyncOptions, Surface,
+};
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
@@ -16,10 +19,10 @@ use crate::lf::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, list_branch_candidates,
-    next_branch, pair_lfd, prune_branches, rebase_with_recovery, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
+    next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
+    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
     BranchListOptions, BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions,
-    PairOptions, PrOptions, Progress, RebaseOptions, RotationResult,
+    PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -66,6 +69,11 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             &progress,
         ),
         OpsCommand::Sync => sync_current(),
+        OpsCommand::SyncSkills {
+            global,
+            yes,
+            no_prune,
+        } => sync_skills_cmd(*global, *yes, !*no_prune),
         OpsCommand::Next {
             create_pr,
             no_rebase,
@@ -97,31 +105,6 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
             ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
         },
-        OpsCommand::Pair {
-            host,
-            port,
-            tls,
-            no_tls,
-            fingerprint,
-            tls_url,
-        } => {
-            let tls = match (*tls, *no_tls) {
-                (true, false) => Some(true),
-                (false, true) => Some(false),
-                _ => None,
-            };
-            pair_lfd(
-                &PairOptions {
-                    host: host.clone(),
-                    port: *port,
-                    tls,
-                    fingerprint: fingerprint.clone(),
-                    tls_url: tls_url.clone(),
-                },
-                &progress,
-            )?;
-            Ok(())
-        }
         OpsCommand::Ingest { wave, item } => {
             ingest_cmd(wave.as_deref(), item.as_deref(), &progress)
         }
@@ -255,6 +238,38 @@ fn open_pr(
         Err(err) => return Err(err.into()),
     };
     println!("{}", result.url);
+    Ok(())
+}
+
+fn sync_skills_cmd(include_global: bool, yes: bool, prune: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    if include_global && !yes {
+        if !std::io::stdin().is_terminal() {
+            return Err(anyhow!(
+                "global skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
+            ));
+        }
+        let progress = CliProgress;
+        if !progress
+            .confirm("Write loopflow-generated skills under ~/.claude/skills and ~/.agents/skills?")
+        {
+            return Err(anyhow!("global skill sync cancelled"));
+        }
+    }
+
+    let report = sync_skills(
+        &repo_root,
+        &SkillSyncOptions {
+            include_global,
+            prune,
+            global_home: None,
+        },
+    )?;
+    println!(
+        "synced skills ({} written, {} pruned)",
+        report.written.len(),
+        report.pruned.len()
+    );
     Ok(())
 }
 

@@ -4,6 +4,19 @@ produces: scratch/<branch>.md
 ---
 Perform root cause analysis on a bug fix. What systemic issues allowed this bug to exist?
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Philosophy
 
 **Keep asking why until you feel resistance.** That resistance—"we'd have to change how we think about this"—is where the real fix lives.

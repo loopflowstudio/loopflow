@@ -54,9 +54,13 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
-    /// Copy prompt to clipboard and open web client
+    /// Hand off to an interactive vendor session in the terminal (overrides session.launch)
+    #[arg(long, conflicts_with = "ide")]
+    pub tui: bool,
+
+    /// Hand off to an interactive vendor session in the vendor app (overrides session.launch)
     #[arg(long)]
-    pub web: bool,
+    pub ide: bool,
 
     /// Enable Chrome integration (Claude)
     #[arg(long)]
@@ -201,6 +205,19 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
+    /// Sync loopflow steps into vendor Skills directories
+    #[command(name = "sync-skills")]
+    SyncSkills {
+        /// Also write global vendor skill directories under ~/
+        #[arg(long = "global")]
+        global: bool,
+        /// Confirm global writes without prompting
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+        /// Keep stale loopflow-generated skills
+        #[arg(long = "no-prune")]
+        no_prune: bool,
+    },
     /// Create next iteration branch
     Next {
         #[arg(short = 'c', long = "create-pr")]
@@ -243,28 +260,6 @@ pub enum OpsCommand {
     Release {
         #[command(subcommand)]
         cmd: ReleaseCommand,
-    },
-
-    /// Pair a phone with a remote lfd by printing a QR/deep link
-    Pair {
-        /// Reachable host for the phone. Defaults to `tailscale ip -4`.
-        #[arg(long = "host")]
-        host: Option<String>,
-        /// lfd port to encode in the pairing link
-        #[arg(long = "port", default_value_t = 2486)]
-        port: u16,
-        /// Force TLS in the pairing link
-        #[arg(long = "tls", conflicts_with = "no_tls")]
-        tls: bool,
-        /// Force plaintext. Only allowed for Tailscale 100.64.0.0/10 hosts.
-        #[arg(long = "no-tls", conflicts_with = "tls")]
-        no_tls: bool,
-        /// SHA-256 certificate fingerprint to pin on the phone
-        #[arg(long = "fingerprint")]
-        fingerprint: Option<String>,
-        /// HTTPS URL whose leaf certificate should be hashed for pinning
-        #[arg(long = "tls-url", conflicts_with = "fingerprint")]
-        tls_url: Option<String>,
     },
     /// Pick next wave item and move to scratch/
     Ingest {

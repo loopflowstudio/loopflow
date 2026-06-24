@@ -2,17 +2,17 @@ use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
     prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
-    StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
+    PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
-use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
+use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Unified entry point for running steps, inline prompts, or interactive chat.
 ///
@@ -68,6 +68,7 @@ struct PromptBuild {
     breakdown: ContextBreakdown,
     prompt: String,
     harness: String,
+    model: Option<String>,
     step_name: Option<String>,
     log_name: String,
     fast_path: Option<String>,
@@ -105,30 +106,23 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         debug!(s.name, s.interactive, "discovered step");
     }
 
-    let is_interactive = cli.interactive
-        || (!cli.batch
-            && (discovered_step
-                .as_ref()
-                .and_then(|s| s.interactive)
-                .unwrap_or(false)
-                || step
-                    .map(|s| config.interactive.contains(&s.to_string()))
-                    .unwrap_or(false)
-                || (step.is_none() && message.is_none())));
+    let is_interactive = is_interactive_run(cli, &config, discovered_step.as_ref(), step, message);
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
+    let surface = if is_interactive {
+        Surface::Cli
+    } else {
+        Surface::Headless
+    };
+
     let prepared = prepare_launch_prompt(
         &config,
         LaunchPromptInput {
             repo_root: repo_root.clone(),
             step: step.map(|value| value.to_string()),
             resolved_step: discovered_step.clone(),
-            surface: if is_interactive {
-                Surface::Cli
-            } else {
-                Surface::Headless
-            },
+            surface,
             directions: cli.direction.clone(),
             area: cli
                 .area
@@ -162,9 +156,12 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .agent
         .clone()
         .expect("prepare_launch_prompt always sets agent");
-    let (harness, _model) = parse_agent(&agent);
+    let (harness, model) = parse_agent(&agent);
 
-    let step_name = step.map(|value| value.to_string());
+    let step_name = discovered_step
+        .as_ref()
+        .map(|step| step.name.clone())
+        .or_else(|| step.map(|value| value.to_string()));
     let log_name = step_name
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
@@ -179,21 +176,106 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     };
 
     let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
+    let mut agent_config = prepared.config;
+    let mut prompt = prepared.prompt;
+    // Both headless and interactive runs hand off via the vendor skill seed —
+    // skills fire under `claude -p` / `codex exec`, verified on-machine. The seed
+    // carries the surface run-mode preamble (`surface.instructions()`), so the
+    // headless warning ("no user present, decide and keep moving") still lands.
+    if let Some(step_name) = step_name.as_deref() {
+        if should_launch_via_skill(step_name) {
+            let sync_start = Instant::now();
+            crate::engine::sync_skills(&repo_root, &SkillSyncOptions::default())?;
+            debug!(
+                elapsed_ms = sync_start.elapsed().as_millis(),
+                "synced vendor skills"
+            );
+            prompt = skill_launch_seed(
+                &harness,
+                surface,
+                step_name,
+                message,
+                prepared.components.voice_doc.as_deref(),
+            );
+            agent_config.system_prompt.clear();
+            agent_config.task_prompt = prompt.clone();
+        } else {
+            warn!(
+                step = step_name,
+                "external skill step uses assembled prompt fallback"
+            );
+        }
+    }
 
     Ok(PromptBuild {
         repo_root,
         config,
-        agent_config: prepared.config,
+        agent_config,
         process,
         capabilities,
         components: prepared.components,
         breakdown: prepared.breakdown,
-        prompt: prepared.prompt,
+        prompt,
         harness,
+        model,
         step_name,
         log_name,
         fast_path,
     })
+}
+
+fn is_interactive_run(
+    cli: &Cli,
+    config: &Config,
+    discovered_step: Option<&crate::engine::Step>,
+    step: Option<&str>,
+    message: Option<&str>,
+) -> bool {
+    cli.tui
+        || cli.ide
+        || cli.interactive
+        || (!cli.batch
+            && (discovered_step
+                .and_then(|step| step.interactive)
+                .unwrap_or(false)
+                || step
+                    .map(|step_name| config.interactive.contains(&step_name.to_string()))
+                    .unwrap_or(false)
+                || (step.is_none() && message.is_none())))
+}
+
+fn should_launch_via_skill(step_name: &str) -> bool {
+    !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
+}
+
+/// Build the launch seed for a vendor skill handoff: the skill invocation, the surface
+/// run-mode preamble, and the voice doc. Orientation now lives in the step
+/// bodies themselves, and the step body loads from the synced skill on invoke,
+/// so this stays small enough for the GUI deep-link cap.
+///
+/// The invocation sigil is harness-specific: Codex's interactive composer
+/// reserves `/` for built-in commands, so skills fire with `$name` there (and
+/// `$` works in `codex exec` too). Claude uses `/name` everywhere.
+fn skill_launch_seed(
+    harness: &str,
+    surface: Surface,
+    step_name: &str,
+    message: Option<&str>,
+    voice: Option<&str>,
+) -> String {
+    let sigil = if harness == "codex" { '$' } else { '/' };
+    let mut seed = format!("{sigil}{step_name}\n\n{}", surface.instructions());
+    if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
+        seed.push_str("\n\n<lf:voice>\n");
+        seed.push_str(voice);
+        seed.push_str("\n</lf:voice>");
+    }
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+        seed.push_str("\n\n<lf:message>\n");
+        seed.push_str(message);
+        seed.push_str("\n</lf:message>");
+    }
+    seed
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
@@ -228,11 +310,25 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
-    if cli.web {
-        info!("copying to clipboard and opening web client");
-        copy_to_clipboard(&built.prompt)?;
-        open_web_client(&built.harness)?;
-        println!("Copied to clipboard.");
+    // `--tui` / `--ide` force a handoff and override the repo default; an
+    // interactive step with neither flag uses `session.launch`.
+    let forced_target = if cli.ide {
+        Some(LaunchTarget::Ide)
+    } else if cli.tui {
+        Some(LaunchTarget::Tui)
+    } else {
+        None
+    };
+
+    if forced_target.is_some() || !built.process.auto {
+        info!("launching interactive vendor session");
+        launch_session(
+            forced_target.unwrap_or(built.config.session.launch),
+            &built.harness,
+            built.model.as_deref(),
+            &built.repo_root,
+            &built.prompt,
+        )?;
         return Ok(());
     }
 
@@ -368,7 +464,75 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::split_step_args;
+    use super::{is_interactive_run, should_launch_via_skill, skill_launch_seed, split_step_args};
+    use crate::engine::{Config, Step, Surface};
+    use crate::lf::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn forced_session_handoff_counts_as_interactive() {
+        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
+        let config = Config::default();
+
+        assert!(is_interactive_run(&cli, &config, None, Some("gate"), None));
+    }
+
+    #[test]
+    fn interactive_step_counts_as_interactive_without_force_flag() {
+        let cli = Cli::parse_from(["lf", "design"]);
+        let config = Config::default();
+        let mut step = Step::named("design");
+        step.interactive = Some(true);
+
+        assert!(is_interactive_run(
+            &cli,
+            &config,
+            Some(&step),
+            Some("design"),
+            None
+        ));
+    }
+
+    #[test]
+    fn skill_launch_seed_starts_with_slash_step_and_surface() {
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            Some("build auth"),
+            Some("Be terse."),
+        );
+        assert!(seed.starts_with("/implement\n\n"));
+        assert!(seed.contains("Run mode is headless"));
+        assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
+        // Orientation now lives in the step body, not the seed.
+        assert!(!seed.contains("<lf:orientation>"));
+        assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_uses_dollar_sigil_for_codex() {
+        // Codex's interactive composer reserves `/` for built-in commands, so
+        // skills fire with `$name`.
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None);
+        assert!(seed.starts_with("$gate\n\n"));
+    }
+
+    #[test]
+    fn skill_launch_seed_omits_voice_and_message_when_absent() {
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, None);
+        assert!(seed.starts_with("/gate\n\n"));
+        assert!(!seed.contains("<lf:voice>"));
+        assert!(!seed.contains("<lf:message>"));
+        assert!(!seed.contains("<lf:orientation>"));
+    }
+
+    #[test]
+    fn external_skill_steps_keep_assembled_prompt_fallback() {
+        assert!(!should_launch_via_skill("npx/vercel-labs/deep-research"));
+        assert!(!should_launch_via_skill("rams/rams"));
+        assert!(should_launch_via_skill("implement"));
+    }
 
     #[test]
     fn split_step_args_handles_trailing_colon() {

@@ -125,29 +125,24 @@ impl<'de> Deserialize<'de> for AutopruneConfig {
     }
 }
 
-/// IDE configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IdeConfig {
-    #[serde(default = "default_true")]
-    pub warp: bool,
-    #[serde(default = "default_true")]
-    pub cursor: bool,
-    #[serde(default)]
-    pub workspace: Option<String>,
-}
-
 fn default_true() -> bool {
     true
 }
 
-impl Default for IdeConfig {
-    fn default() -> Self {
-        Self {
-            warp: true,
-            cursor: true,
-            workspace: None,
-        }
-    }
+/// Where interactive sessions launch.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchTarget {
+    #[default]
+    Tui,
+    Ide,
+}
+
+/// Interactive session launch configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionConfig {
+    #[serde(default)]
+    pub launch: LaunchTarget,
 }
 
 /// Release configuration.
@@ -239,9 +234,9 @@ pub struct Config {
     #[serde(default)]
     pub exclude: Vec<String>,
 
-    /// IDE configuration
+    /// Interactive session launch configuration
     #[serde(default)]
-    pub ide: IdeConfig,
+    pub session: SessionConfig,
 
     /// Tasks that default to interactive mode
     #[serde(default)]
@@ -351,7 +346,7 @@ impl Default for Config {
             land: default_land(),
             context: Vec::new(),
             exclude: Vec::new(),
-            ide: IdeConfig::default(),
+            session: SessionConfig::default(),
             interactive: Vec::new(),
             lfdocs: true,
             diff: false,
@@ -626,6 +621,7 @@ pm:
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
+        assert_eq!(config.session.launch, LaunchTarget::Tui);
         assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
         assert!(config.area.is_none());
@@ -633,11 +629,9 @@ pm:
     }
 
     #[test]
-    fn default_ide_config() {
-        let ide = IdeConfig::default();
-        assert!(ide.warp);
-        assert!(ide.cursor);
-        assert!(ide.workspace.is_none());
+    fn default_session_config() {
+        let session = SessionConfig::default();
+        assert_eq!(session.launch, LaunchTarget::Tui);
     }
 
     #[test]
@@ -753,32 +747,23 @@ interactive:
     }
 
     #[test]
-    fn config_from_yaml_ide_settings() {
+    fn config_from_yaml_session_launch_tui() {
         let yaml = r#"
-ide:
-  warp: false
-  cursor: true
-  workspace: myproject.code-workspace
+session:
+  launch: tui
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(!config.ide.warp);
-        assert!(config.ide.cursor);
-        assert_eq!(
-            config.ide.workspace,
-            Some("myproject.code-workspace".to_string())
-        );
+        assert_eq!(config.session.launch, LaunchTarget::Tui);
     }
 
     #[test]
-    fn config_from_yaml_ide_partial() {
+    fn config_from_yaml_session_launch_ide() {
         let yaml = r#"
-ide:
-  cursor: false
+session:
+  launch: ide
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(config.ide.warp); // default true
-        assert!(!config.ide.cursor);
-        assert!(config.ide.workspace.is_none());
+        assert_eq!(config.session.launch, LaunchTarget::Ide);
     }
 
     #[test]

@@ -511,29 +511,6 @@ mod tests {
         std::fs::write(wave_dir.join(name), contents).expect("write wave file");
     }
 
-    struct RunIdEnvGuard(Option<String>);
-
-    impl RunIdEnvGuard {
-        fn remove() -> Self {
-            let previous = std::env::var(LF_RUN_ID_ENV).ok();
-            std::env::remove_var(LF_RUN_ID_ENV);
-            Self(previous)
-        }
-    }
-
-    impl Drop for RunIdEnvGuard {
-        fn drop(&mut self) {
-            if let Some(previous) = self.0.take() {
-                std::env::set_var(LF_RUN_ID_ENV, previous);
-            }
-        }
-    }
-
-    fn without_run_id<T>(run: impl FnOnce() -> T) -> T {
-        let _guard = RunIdEnvGuard::remove();
-        run()
-    }
-
     #[test]
     fn parse_wave_item_filename_parses_bucketed_files() {
         let item = parse_wave_item_filename("2-setup.md").expect("bucketed item");
@@ -613,40 +590,38 @@ mod tests {
 
     #[test]
     fn ingest_prefers_bucketed_items() {
-        without_run_id(|| {
-            let (dir, wave_dir) = init_test_wave();
-            let repo = dir.path();
+        let (dir, wave_dir) = init_test_wave();
+        let repo = dir.path();
 
-            write_wave_file(&wave_dir, "README.md", "# Test");
-            write_wave_file(&wave_dir, "01-legacy.md", "# Legacy");
-            write_wave_file(&wave_dir, "2-next.md", "# Next");
-            write_wave_file(&wave_dir, "1-broken.md", "# Broken");
+        write_wave_file(&wave_dir, "README.md", "# Test");
+        write_wave_file(&wave_dir, "01-legacy.md", "# Legacy");
+        write_wave_file(&wave_dir, "2-next.md", "# Next");
+        write_wave_file(&wave_dir, "1-broken.md", "# Broken");
 
-            let result = ingest(
-                repo,
-                &IngestOptions {
-                    wave: Some("test-wave".to_string()),
-                    item: None,
-                },
-                &NullProgress,
-            )
-            .expect("ingest succeeds");
+        let result = ingest(
+            repo,
+            &IngestOptions {
+                wave: Some("test-wave".to_string()),
+                item: None,
+            },
+            &NullProgress,
+        )
+        .expect("ingest succeeds");
 
-            assert_eq!(result.wave, "test-wave");
-            assert_eq!(result.slug, "broken");
-            assert!(result.dest.ends_with("scratch/test-wave-broken.md"));
-            assert!(result.dest.exists());
-            assert!(!wave_dir.join("1-broken.md").exists());
-            assert!(wave_dir.join("2-next.md").exists());
-            assert!(wave_dir.join("01-legacy.md").exists());
-            let document = RoadmapItemDocument::parse(
-                &std::fs::read_to_string(&result.dest).expect("read scratch item"),
-            )
-            .expect("parse scratch item");
-            assert_eq!(document.frontmatter.status.as_deref(), Some("in-progress"));
-            assert_eq!(document.frontmatter.claimed_by.as_deref(), Some("main"));
-            assert!(document.frontmatter.claimed_at.is_some());
-        });
+        assert_eq!(result.wave, "test-wave");
+        assert_eq!(result.slug, "broken");
+        assert!(result.dest.ends_with("scratch/test-wave-broken.md"));
+        assert!(result.dest.exists());
+        assert!(!wave_dir.join("1-broken.md").exists());
+        assert!(wave_dir.join("2-next.md").exists());
+        assert!(wave_dir.join("01-legacy.md").exists());
+        let document = RoadmapItemDocument::parse(
+            &std::fs::read_to_string(&result.dest).expect("read scratch item"),
+        )
+        .expect("parse scratch item");
+        assert_eq!(document.frontmatter.status.as_deref(), Some("in-progress"));
+        assert_eq!(document.frontmatter.claimed_by.as_deref(), Some("main"));
+        assert!(document.frontmatter.claimed_at.is_some());
     }
 
     #[test]

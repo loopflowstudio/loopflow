@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{load_config, load_config_or_default};
+use loopflow::engine::{load_config, load_config_or_default, LaunchTarget};
 use support::with_clean_home;
 use tempfile::TempDir;
 
@@ -224,46 +224,41 @@ interactive:
 }
 
 // =============================================================================
-// IDE settings
+// Session launch
 // =============================================================================
 
 #[test]
-fn config_ide_cursor_enabled() {
+fn config_session_launch_tui() {
     let temp = TempDir::new().unwrap();
     write_config(
         temp.path(),
         r#"
-ide:
-  cursor: true
-  warp: false
+session:
+  launch: tui
 "#,
     );
 
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert!(config.ide.cursor);
-    assert!(!config.ide.warp);
+    assert_eq!(config.session.launch, LaunchTarget::Tui);
 }
 
 #[test]
-fn config_ide_workspace() {
+fn config_session_launch_ide() {
     let temp = TempDir::new().unwrap();
     write_config(
         temp.path(),
         r#"
-ide:
-  workspace: "project.code-workspace"
+session:
+  launch: ide
 "#,
     );
 
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(
-        config.ide.workspace,
-        Some("project.code-workspace".to_string())
-    );
+    assert_eq!(config.session.launch, LaunchTarget::Ide);
 }
 
 // =============================================================================

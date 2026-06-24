@@ -4,6 +4,19 @@ produces: scratch/<branch>.md
 ---
 Read the review. Write a design doc to address it.
 
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
 ## Scope
 
 The included context defines your area of responsibility. Address issues within that scope. If the review mentions problems outside your area, note them but don't design fixes for them—stay focused on what you own.

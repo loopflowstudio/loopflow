@@ -790,36 +790,3 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
     let prompt = render_prompt(components);
     assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
 }
-
-#[test]
-fn loopflow_doc_always_included() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    write_step(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
-        message: None,
-        surface: Surface::Headless,
-        directions: vec![],
-        files: vec![],
-        sources: vec![], // Even with lfdocs=false
-        area: None,
-        wave: None,
-        related_repos: Vec::new(),
-    })
-    .unwrap();
-
-    // LOOPFLOW.md should always be present
-    assert!(
-        components.loopflow_doc.is_some(),
-        "LOOPFLOW.md should always be included"
-    );
-    assert!(
-        !components.loopflow_doc.as_ref().unwrap().is_empty(),
-        "LOOPFLOW.md should have content"
-    );
-}

@@ -30,10 +30,8 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 /// - `"studio"`: registered with studio for discovery. Local token on
 ///   loopback, connection tokens validated locally for remote clients.
 ///   Connection tokens are session credentials: valid from mint until expiry
-///   (1 hour by default, or longer for explicit pairing tokens) or
-///   revocation. lfd mints tokens and can send them to studio, which
-///   distributes them to mobile clients. Without studio credentials, the same
-///   local ledger still supports accountless pairing. Validation is local (no
+///   (1 hour) or revocation. lfd mints tokens and sends them to studio,
+///   which distributes them to mobile clients. Validation is local (no
 ///   round-trip to studio on connect).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthMode {

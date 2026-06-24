@@ -14,6 +14,7 @@ pub mod launch;
 pub mod naming;
 pub mod platform;
 pub mod prompt;
+pub mod skills;
 pub mod stream;
 pub mod structured_reply;
 pub mod worktree;
@@ -25,7 +26,9 @@ pub use agent::{
     AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
-pub use config::{load_config, load_config_or_default, parse_agent, Config};
+pub use config::{
+    load_config, load_config_or_default, parse_agent, Config, LaunchTarget, SessionConfig,
+};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{
     advance_cursor_after_wait, current_flow_parents, current_step, xor_verdict_path,
@@ -48,6 +51,7 @@ pub use prompt::{
     GatherContextOpts, GatherSpec, GatheredContext, PromptComponents, PromptFormatMode,
     RenderedPrompt, Surface, DEFAULT_CONTEXT_BUDGET,
 };
+pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,
 };

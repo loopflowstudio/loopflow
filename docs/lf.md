@@ -87,7 +87,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `--web` | Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.) |
+| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 ## Browser Automation
 
@@ -109,7 +109,7 @@ lf ship -w feature-branch
 | `-a, --area PATH` | Area scope (paths to include in context) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--web` | Copy to clipboard and open web client |
+| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
@@ -169,12 +169,16 @@ lf implement -d ux,clarity
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Use web client instead of CLI
+### Launch an interactive vendor session
 
 ```bash
-lf gate --web      # copies to clipboard, opens claude.ai (or chatgpt.com for codex)
-lf : "fix the bug" --web -m codex    # opens chatgpt.com
+lf design                 # interactive step → uses session.launch (default: tui)
+lf gate --tui             # force a terminal handoff for a normally-headless step
+lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
+
+`--tui` and `--ide` override the repo default. Set `session.launch: ide` in
+`.lf/config.yaml` to make the vendor app the default for interactive steps.
 
 ### External skills
 

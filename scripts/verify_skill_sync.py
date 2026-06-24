@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify loopflow step-to-Skill sync and optional live vendor slash invocation."""
+"""Verify loopflow step-to-Skill sync and optional live vendor invocation."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def maybe_run_live(repo: Path, live: bool) -> None:
 
     probes = [
         ("claude", ["claude", "-p", "/lfprobe"]),
-        ("codex", ["codex", "exec", "/lfprobe"]),
+        ("codex", ["codex", "exec", "$lfprobe"]),
     ]
     for name, cmd in probes:
         if shutil.which(cmd[0]) is None:

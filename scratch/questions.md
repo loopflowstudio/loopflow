@@ -1,47 +1,8 @@
 # Open questions / assumptions
 
-Current to the steps-as-skills milestone. See `steps-as-skills.md` for the plan.
+Current to the steps-as-skills milestone. Resolved decisions live in `steps-as-skills.md` and `release/unreleased/DECISIONS.md`; keep this file for assumptions that still need reviewer attention.
 
-- **Skill provenance + cleanup.** Generated skills are written into the user's
-  `~/.claude/skills` and `~/.agents/skills`. How do we mark them as
-  loopflow-generated (frontmatter marker? a `loopflow/` sub-namespace?) so we can
-  prune stale ones without clobbering a user's own skills? Assume: a marker +
-  prune-by-marker, and confirm before the first global write.
-- **Sync trigger.** When does the sync run — on every launch (always fresh, small
-  cost), an explicit `lf op sync-skills`, or a watch? Assume: sync-on-launch for
-  correctness, plus an explicit command for setup/debugging.
-- **`description` source.** Using the step's one-line summary (first line after
-  frontmatter) as the skill `description`. Confirm every builtin step has a usable
-  summary line; backfill where missing.
-- **Headless skill scope.** Verified project-local skills fire under headless exec;
-  global (`~/.claude/skills`, `~/.agents/skills`) is the same vendor mechanism but
-  not separately verified headless. Confirm during build.
-- **Auto-invocation is out of scope.** The seed is always explicit `/step`, so
-  model-auto invocation by description is neither used nor tested. Revisit only if
-  an autonomous wave must fire a perspective skill without naming it.
-- **Directions split — which text goes where.** Decided: machinery removed, text
-  survives — most embedded into the relevant step-skills, some into AGENTS.md
-  (standing perspective). Open: the per-direction assignment. Walk the ~8 builtin
-  directions (ux, infra, craft, ceo, creativity, scale, …) with concrete examples
-  and decide skill-vs-AGENTS.md for each.
-- **Global sync default.** Implemented `lf op sync-skills` as repo-local by default,
-  with `--global --yes` (or TTY confirmation) for `~/` writes. Launch-time sync uses
-  repo-local skills only; this keeps first-run handoffs safe and still lets users opt
-  into global builtins explicitly.
-- **Ambient context — voice + orientation in the seed, not AGENTS.md.** The
-  committed seed-swap clears `system_prompt`, which silently dropped the
-  `<lf:voice>` doc and the "read scratch/, wave/" orientation the assembled prompt
-  used to inject. The design table (§3) nominally placed these in AGENTS.md/CLAUDE.md
-  so the vendor auto-loads them. **Decided (headless call): carry them in the launch
-  seed instead.** Rationale: in this repo `CLAUDE.md` and `AGENTS.md` are symlinks to
-  the human-authored `STYLE.md`; writing a generated block through them mutates the
-  governing style guide (and orientation is branch-scoped, so it shouldn't live in a
-  committed doc anyway). The seed is the per-session channel — voice (~1.7KB) +
-  orientation stay well under the ~5KB GUI deep-link cap, touch no checked-in file,
-  and are fully reversible. New builtin `ORIENTATION.md` + `ORIENTATION_DOC`; voice
-  reuses the existing `resolve_voice_doc` chain via `components.voice_doc`. If we later
-  want auto-loaded ambient context, the swap to an agent-doc managed block is clean.
-- **External skill fallback.** `npx/*` and `rams/*` steps still use the assembled
-  prompt path for now instead of `/step` seeds, because their source of truth is an
-  already-vendor-specific skill cache and loopflow should not mirror it as a generated
-  skill until namespace semantics are designed.
+- **Global vendor discovery.** Repo-local skills are structurally verified and have been live-probed for Claude/Codex. Global sync writes the same shape under `~/.claude/skills` and `~/.agents/skills`, but live global discovery still depends on each vendor's runtime behavior outside this repo.
+- **Namespaced skill invocation.** Builtin namespaced steps sync into nested skill directories. Assume vendors accept `/gstack/office-hours` for Claude and `$gstack/office-hours` for Codex; re-check before relying on namespaced app handoffs as the primary path.
+- **External skill fallback.** `npx/*` and `rams/*` steps still use the assembled prompt path, because their source of truth is already vendor-specific skill cache content and loopflow should not mirror it as a generated skill until namespace semantics are designed.
+- **Directions removal is deferred.** `direction` is still a first-class wave/config/DTO field. Removing it is a separate migration under the DTO fixture discipline, not part of this PR.

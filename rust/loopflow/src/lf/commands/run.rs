@@ -187,7 +187,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
-    // Both headless and interactive runs hand off via the `/step` skill seed —
+    // Both headless and interactive runs hand off via the vendor skill seed —
     // skills fire under `claude -p` / `codex exec`, verified on-machine. The seed
     // carries the surface run-mode preamble (`surface.instructions()`), so the
     // headless warning ("no user present, decide and keep moving") still lands.
@@ -237,7 +237,7 @@ fn should_launch_via_skill(step_name: &str) -> bool {
     !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
 }
 
-/// Build the launch seed for a `/step` handoff: the skill invocation, the surface
+/// Build the launch seed for a vendor skill handoff: the skill invocation, the surface
 /// run-mode preamble, and the voice doc. Orientation now lives in the step
 /// bodies themselves, and the step body loads from the synced skill on invoke,
 /// so this stays small enough for the GUI deep-link cap.

@@ -4,17 +4,18 @@ Build plan for **this branch** (session-handoff). The `--tui`/`--ide` launcher
 already committed here is non-functional on its own: it seeds loopflow's assembled
 prompt, which the vendor TUIs truncate and the GUI deep links can't carry. The
 launcher only becomes real once steps are exposed as vendor **Skills** and the
-seed shrinks to `/step` — so the two ship together, not as separate branches.
+seed shrinks to a vendor skill invocation — so the two ship together, not as separate branches.
 Turns the converged thesis — *loopflow stops assembling prompts; steps become
 vendor Skills* — into a buildable milestone. The load-bearing assumption (a synced
-`/step` fires under headless exec) is **verified on-machine**, both vendors. See
+skill fires under headless exec) is **verified on-machine**, both vendors. See
 `release/unreleased/DECISIONS.md` (2026-06-19, "Run steps as vendor Skills").
 
 ## Goal
 
 Loopflow stops assembling prompts for handoffs. Steps become vendor **Skills** on
-disk; the launch seed shrinks to `"<surface preamble> /step"`. One execution model
-for headless and interactive, both surfaces, both vendors.
+disk; the launch seed shrinks to a surface preamble plus the vendor skill
+invocation. One execution model for headless and interactive, both surfaces, both
+vendors.
 
 ## Status
 
@@ -26,14 +27,15 @@ for headless and interactive, both surfaces, both vendors.
 - Native agent-doc dedup confirmed working in the launcher
   (`drop_native_instruction_docs` strips `CLAUDE.md`/`AGENTS.md` + symlink targets).
 - Decision recorded in `release/unreleased/DECISIONS.md`.
-- **Verified on-machine:** a synced `/step` fires under headless `claude -p` and
-  `codex exec`, with the body loaded only on invoke (sentinel probe).
+- **Verified on-machine:** synced skills fire under headless `claude -p` and
+  `codex exec`, with the body loaded only on invoke (sentinel probe). Claude uses
+  `/step`; Codex handoffs use `$step`.
 - **Verified — `--ide` GUI path works** for both Claude (`claude://code/new`) and
   Codex (`codex://threads/new`): the deep link opens the app and **pre-fills** the
   seed. Pre-fill (not auto-send) is the **intended** shape — the human lands with
-  `/step` staged, reviews, and presses Enter to fire it; that *is* the
+  the skill invocation staged, reviews, and presses Enter to fire it; that *is* the
   take-over-and-review handoff. The *only* failure mode observed was the prompt
-  getting **cut off** at the deep-link length cap (~5KB `q`). The `/step` seed is a
+  getting **cut off** at the deep-link length cap (~5KB `q`). The skill seed is a
   dozen characters, so the skills work removes the one blocker — the GUI mechanics
   need no further change.
 
@@ -45,22 +47,19 @@ for headless and interactive, both surfaces, both vendors.
    emits; provenance marker + prune of stale generated skills; confirm before the
    first global (`~/`) write. *(detail: §1)*
 2. **Seed swap** — the interactive launch path (`run.rs` `launch_prompt`) sends
-   `"<surface preamble> /<step>"` instead of `built.prompt`; sync skills first.
-   *(detail: §2)*
-3. **Ambient context — voice + orientation in the seed.** *Done — committed.* The
-   `/step` launch seed now carries the resolved `<lf:voice>` doc and a new
-   `<lf:orientation>` block (read `scratch/`, `wave/<name>/`, the repo agent doc),
-   replacing what the cleared `system_prompt` dropped. The design's AGENTS.md route
-   was **not** taken — `CLAUDE.md`/`AGENTS.md` are symlinks to the human `STYLE.md`,
-   and orientation is branch-scoped; rationale in `questions.md`. *(detail: §3)*
+   a harness-specific skill invocation (`/<step>` for Claude, `$<step>` for Codex)
+   instead of `built.prompt`; sync skills first. *(detail: §2)*
+3. **Ambient context on disk and in skills.** *Done — committed.* The loopflow
+   operating manual moved into this repo's agent doc (`STYLE.md`, reached through
+   `CLAUDE.md`/`AGENTS.md` symlinks), and branch orientation is embedded directly in
+   the step bodies that need it. The launch seed carries only surface instructions,
+   voice, and message context. *(detail: §3)*
 4. **Headless unification** — wave/flow headless runs pre-sync, then `exec` the
-   `/step` seed; stop assembling the ~100KB prompt. *(detail: §4)*
-5. **Remove Directions** — `direction` config field + wave-YAML key, `-d/--direction`
-   flag, `builtins/directions/`, the loader + prompt-injection path, the
-   `with_direction*` goldens. **Larger than estimated:** `direction` is a first-class
-   wave field threaded through DTOs, SQL migrations, HTTP routes, and the Rust/Python/
-   Swift mirrors (~580 Rust refs, not ~43) — a wire-format migration, not a flag
-   removal. Needs its own pass under the DTO fixture discipline (CLAUDE.md). *(detail: §5)*
+   skill seed; stop assembling the ~100KB prompt. *(detail: §4)*
+5. **Remove Directions** — deferred. `direction` is a first-class wave field threaded
+   through DTOs, SQL migrations, HTTP routes, and the Rust/Python/Swift mirrors
+   (~580 Rust refs, not ~43) — a wire-format migration, not a flag removal. It needs
+   its own pass under the DTO fixture discipline. *(detail: §5)*
 6. **Verify** — a `scripts/` sentinel-probe: sync a step, fire it under `claude -p`
    and `codex exec`, assert the step's effect.
 
@@ -92,9 +91,9 @@ travels through the launch channel, and it stays small.
 
 | Home | On disk | Loaded | Carries |
 |---|---|---|---|
-| **AGENTS.md / CLAUDE.md** | yes | vendor auto-loads, always-on | repo conventions, voice, orientation, wave-standing perspective |
-| **Skills** (`.claude/skills`, `.agents/skills`) | yes | progressive — name+desc up front, body on `/invoke` | step bodies |
-| **The seed** | no | typed into the session | `"<surface preamble> /step"` |
+| **AGENTS.md / CLAUDE.md** | yes | vendor auto-loads, always-on | repo conventions and any repo-owned operating manual |
+| **Skills** (`.claude/skills`, `.agents/skills`) | yes | progressive — name+desc up front, body on invoke | step bodies and branch orientation |
+| **The seed** | no | typed into the session | `"<surface preamble> /step"` for Claude, `"<surface preamble> $step"` for Codex |
 
 ### Verified
 
@@ -114,7 +113,7 @@ only on invoke. The surface axis nearly collapses; the seams are small.
 
 | | Claude TUI | Claude GUI | Codex TUI | Codex GUI |
 |---|---|---|---|---|
-| Explicit | `/step` | `/step` or + → Skills | `/step` | `/step` |
+| Explicit | `/step` | `/step` or + → Skills | `$step` handoff (`/step` also works in exec) | `$step` |
 | Reads on-disk skills | ✅ | ✅ | ✅ | ✅ |
 | Body in context until invoked | no | no | no | no |
 
@@ -158,71 +157,74 @@ marker) so a re-sync can prune stale ones without clobbering a user's own skill.
 ### 2. The seed — replace the assembled-prompt blob
 
 The interactive launch path (the `--tui`/`--ide` work already in this branch)
-stops sending `built.prompt`. It sends `"<surface preamble> /<step>"`:
+stops sending `built.prompt`. It sends a harness-specific skill invocation plus the
+surface preamble: `/<step>` for Claude and `$<step>` for Codex.
 
 - **surface preamble** ← the surface doc (cli / headless / concerto_*), the one
   per-run modifier. Small. Headless carries "never ask, decide, note ambiguity in
   `scratch/questions.md`"; cli carries "ask and wait."
-- **`/<step>`** ← the step name. The skill body does the rest.
+- **`/<step>` or `$<step>`** ← the step name. The skill body does the rest.
 
-### 3. Ambient context → AGENTS.md / CLAUDE.md
+### 3. Ambient context → agent docs + step bodies
 
-A generation step (or `lf init` / sync) writes loopflow's always-on context into
-the repo's agent doc:
+The always-on context now has two homes:
 
-- **VOICE.md** (from `.lf/voice.md` or builtin) — communication style.
-- **Orientation** — "Before any step, read `scratch/<branch>.md` (this PR's design
-  + notes) and `wave/<name>/` (roadmap)." We point; the agent reads on demand.
-- **Wave-standing perspective** — the line that used to be a direction.
+- **Repo operating manual** — loopflow's own operating rules live in `STYLE.md`,
+  which `CLAUDE.md` / `AGENTS.md` symlink to. User repos no longer receive
+  `LOOPFLOW.md` as injected product context.
+- **Branch orientation** — the "read `scratch/`, matching `wave/`, and the repo
+  agent doc" block is embedded in the step bodies that need it, so it loads with
+  the skill.
+
+The launch seed still carries the resolved voice doc because voice is per-session
+ambient guidance and stays small enough for GUI deep links.
 
 ### 4. Unify headless onto the same model
 
 Headless wave/flow runs stop assembling a ~100KB prompt. They pre-sync skills,
-then `codex exec` / `claude -p` a surface-stamped `/step` seed. Same shape as the
+then `codex exec` / `claude -p` a surface-stamped skill seed. Same shape as the
 interactive handoff; the surface preamble is the only difference. (Verified that
-`/step` fires under both headless execs.)
+skill invocation fires under both headless execs.)
 
 **Flows are unchanged.** Flow orchestration stays the purview of Cadenza and the
 `lf` CLI — a flow is still loopflow chaining steps (`implement → compress → lint →
 gate`). The *only* thing this milestone changes is **where the interactive step
-runs**: inside a flow, an interactive step hands off to the vendor session (`/step`
+runs**: inside a flow, an interactive step hands off to the vendor session (skill
 seed), a headless step `exec`s. Flows do **not** become skills. So `lf code` keeps
 running exactly as a flow; only its interactive steps relocate to the vendor.
 
 ### 5. Remove Directions
 
-The `direction` machinery goes; the direction *text* survives, redistributed by
-where the perspective belongs:
+Deferred. The `direction` machinery is a DTO/config/wave migration, not a cleanup
+inside this handoff PR. The direction *text* can still survive later, redistributed
+by where the perspective belongs:
 
 - **Most direction text → embedded into the relevant step-skills.** A perspective
   that shapes how a particular step is done lives in that step's `SKILL.md` body.
 - **Some direction text → AGENTS.md.** Perspective that should be always-on for a
   repo or wave (its standing point of view) lives in the agent doc.
-- Exact split is **TBD with concrete examples** (which directions go where) — a
-  design-review / build-time call, not pre-decided here.
 
-Machinery to delete: the `direction` config field, wave-YAML key, `-d/--direction`
-flag, `builtins/directions/`, the direction loader and prompt-injection path, the
-`with_direction*` goldens (~43 non-test Rust refs). Wave model becomes
-**area × flow**.
+Machinery to delete in that later pass: the `direction` config field, wave-YAML
+key, `-d/--direction` flag, `builtins/directions/`, the direction loader and
+prompt-injection path, DTO fixtures, SQL migrations, and Swift/Python mirrors.
 
 ## Scope
 
 - **In:** the steps→`SKILL.md` sync (4 targets, frontmatter transform,
-  `disable-model-invocation` on Claude, provenance + prune); the seed change
-  (`/step` + surface preamble) replacing the assembled blob; ambient context →
-  AGENTS.md/CLAUDE.md (voice + orientation); Directions removal; headless
-  unification onto the skills seed.
-- **Out:** model-*auto* skill invocation by description (the seed is always
-  explicit `/step`; auto is unproven and off the critical path). Concerto "open in
-  app" UI. The larger `lfd/sessions/harness` / native-chat teardown (separate
-  branch). Session resume.
+  `disable-model-invocation` on Claude, provenance + prune); the harness-aware
+  skill seed replacing the assembled blob; ambient context moved to agent docs and
+  step bodies; headless unification onto the skills seed.
+- **Out:** model-*auto* skill invocation by description (the seed is always an
+  explicit skill invocation; auto is unproven and off the critical path). Direction
+  DTO/config removal. Flow-as-skill conversion. Concerto "open in app" UI. The
+  larger `lfd/sessions/harness` / native-chat teardown (separate branch). Session
+  resume.
 
 ## De-risking
 
 | Question | Finding | Impact |
 |---|---|---|
-| Does a synced `/step` fire under headless exec? | **Yes**, both vendors (sentinel-in-body probe). | The whole unification stands. |
+| Does a synced skill invocation fire under headless exec? | **Yes**, both vendors (sentinel-in-body probe). | The whole unification stands. |
 | Does the body stay out of context until invoked? | **Yes** — Codex read `SKILL.md` on invoke; both vendors do progressive disclosure. | 80 steps ≠ 80 bodies in context. |
 | Skill path per vendor? | Claude `.claude/skills`, Codex `.agents/skills`; both repo + global. | Four sync targets. |
 | Can we inject context as a system prompt? | **No** for Claude — competitor-mention auth block; and GUI deep links take no system-prompt param. | Context lives on disk (AGENTS.md + skills), never the system prompt. |
@@ -233,14 +235,15 @@ flag, `builtins/directions/`, the direction loader and prompt-injection path, th
 
 - `lf op sync-skills` writes every step as a `SKILL.md` to the four targets, with
   Claude emits explicit-only and generated skills marked + prunable.
-- `lf <step>` (interactive) opens the worktree and seeds `"<surface> /<step>"`;
-  the vendor session runs the step from its synced skill.
-- A headless wave run pre-syncs and `exec`s the same `/step` seed — no assembled
+- `lf <step>` (interactive) opens the worktree and seeds the harness-specific
+  skill invocation (`/<step>` for Claude, `$<step>` for Codex); the vendor session
+  runs the step from its synced skill.
+- A headless wave run pre-syncs and `exec`s the same skill seed — no assembled
   prompt.
-- `VOICE.md` + orientation live in AGENTS.md/CLAUDE.md; the agent reads scratch/
-  and wave/ on demand.
-- Directions are gone; the wave model is area × flow; CI green without
-  `with_direction` goldens.
+- Loopflow's operating manual lives in this repo's agent doc; orientation lives in
+  step bodies; the agent reads scratch/ and wave/ on demand.
+- Direction removal has a separate migration plan; this PR keeps direction DTOs and
+  config intact.
 
 Verify with a script under `scripts/` that syncs a step, fires it under
 `claude -p` and `codex exec`, and asserts the step's effect — the same

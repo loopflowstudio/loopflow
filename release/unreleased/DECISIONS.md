@@ -219,3 +219,50 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Target `mini-heart` at `100.96.227.95` as the first maintained Loopflow `lfd` cron host. Local clients use Tailscale HTTP on `http://100.96.227.95:2486` with bearer-token auth first; Caddy/TLS remains available for later public or polished access. Concerto, `lfq`, Codex, and Claude sessions should point at that host rather than a studio control plane.
 
 **Implications:** Setup scripts and docs optimize for Mac Mini + Tailscale. Secrets stay in Doppler or host-local env, agent credentials are made available to the Mini executor, and remote repo paths are paths on the Mini. Cadenza remains cheap and product-specific: one prod server, regular/hotfix releases, and local/TestFlight clients pointed at prod unless a deliberate staging need appears.
+
+## 2026-06-29 — Portfolio projects get tiers: Sections shape, priority-field guts
+
+**Context:** Concerto's portfolio was a flat grid of repo cards sorted by
+`lastOpened`, with no notion of how alive or important a project is. The real
+portfolio isn't flat — it has bands: Core (Cadenza, Loopflow), an Active side
+project (Hootro), Future (Silencio, Manabot), and Deprecated (Studio, winding
+down to open-source + per-project Doppler deployment). The ask was to make the
+portfolio experience reflect that — "priorities for projects, not tasks."
+
+**Decision:** Introduce **four hardcoded, ordered tiers** — Core, Active,
+Future, Deprecated — as the portfolio's primary structure. A project's rank is
+*(tier, position-in-tier)*: the tier is a coarse ordered group, position within
+a tier is manually set via drag-and-drop.
+
+- **Sections, not a priority field — at the product layer.** We deliberately
+  take Asana's *Sections* model (visible ordered groups) and skip the
+  schema-backed priority field it later evolved into. With a fixed tier set the
+  field's flexibility buys nothing; sections read more clearly.
+- **Normalized model, priority field in the guts.** The data model is
+  normalized: a `PortfolioRepo` references a tier by `tierId` and carries a
+  `priority: Double`; tier metadata (name, order) lives once in a `PortfolioTier`
+  table. Rank `= (tier.order, priority)`, exposed through one `orderedRepos`
+  accessor that *every* surface consumes — dashboard sections and the add-repo
+  typeahead share one sort, so ordering is a model property, not a per-view
+  quirk. `priority` is a `Double` so drag-drop slots a card at the midpoint of
+  its neighbors without renumbering the rest.
+- **Drag-and-drop is MVP**, not a follow-up. Cards are draggable; cards and
+  section containers are drop targets; every drop funnels through one `reorder`
+  call that sets `tierId` + midpoint `priority`.
+
+**Implications:**
+
+- **Configurable tiers are a natural next step, not a rewrite.** Tiers are
+  modeled as a data table seeded with the 4 constants. Making them user-editable
+  = move that table into stored config + add CRUD; the repo model and the
+  `orderedRepos`/`reorder` plumbing don't change. We chose this shape precisely
+  to keep that door open.
+- **`PortfolioRepo` is local UI state, not a wire DTO** (Swift/UserDefaults
+  only). The DTO no-defaults rule doesn't apply; the legacy-decode default
+  (`tierId → "active"`) is an allowed UX choice. Existing portfolios migrate
+  into the Active tier on first load, nothing lost.
+- **`lastOpened` is demoted** from primary sort to a final tiebreak inside
+  `orderedRepos`. Nothing in the portfolio path may re-sort by it again, or it
+  clobbers the priority order.
+- **Studio's deprecation is now portfolio-visible**, consistent with the call to
+  shut down global/Studio infra and have each project own its deployment.

@@ -7,6 +7,11 @@ lf op release run patch
 find release -maxdepth 2 -type f | sort
 ```
 
+```bash
+scripts/pull-local-bin.sh    # pull default branch, build lf/lfd, install to ~/.local/bin
+cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
+```
+
 Use `release/` to keep the rationale and notes for each shipped version close to the code.
 
 | Path | What it does |
@@ -15,6 +20,16 @@ Use `release/` to keep the rationale and notes for each shipped version close to
 | `release/vX.Y.Z/DECISIONS.md` | Archived copy of that ledger for one shipped version |
 | `release/vX.Y.Z/NOTES.md` | Archived copy of the release notes generated for that version |
 | `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
+
+## Automation rhythm
+
+| Cadence | Workflow | What it does | Ships? |
+|---------|----------|--------------|--------|
+| Nightly | `Packages (nightly)` | Runs the regression tier, builds every native `lf`/`lfd` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
+| Weekly | `Regression (weekly auto-release)` | Runs nightly package verification, bumps patch when commits landed since the last tag, tags, and dispatches `Release` | Yes |
+| Local | `scripts/pull-local-bin.sh` | Fast dev-machine update: pull, release-build, atomically copy `lf`/`lfd` into the local bin dir | Local only |
+
+Nightly packages prove release artifacts while keeping deployment out of the loop. Weekly release reuses that package gate before publishing.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

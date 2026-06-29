@@ -1,0 +1,19 @@
+# Copy to /etc/systemd/system/loopflow-server.service and edit WorkingDirectory.
+[Unit]
+Description=Loopflow self-hosted cron server
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/loopflow
+Environment=LOOPFLOW_SECRETS=doppler
+EnvironmentFile=-/etc/loopflow-server.env
+ExecStart=/opt/loopflow/deploy/loopflow-server.sh up
+ExecStop=/opt/loopflow/deploy/loopflow-server.sh down
+RemainAfterExit=yes
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

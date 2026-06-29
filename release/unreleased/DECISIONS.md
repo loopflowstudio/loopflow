@@ -171,3 +171,27 @@ built-in commands — skills fire there with `$step`.
 - Orientation is duplicated across 37 step files (no include mechanism for step
   `.md`). That duplication is the cost of "embedded in the relevant steps"; re-run
   the embed if the set of scratch-dependent steps changes.
+
+## 2026-06-29 — Self-hosted loopflow is the default automation shape
+
+**Context:** Release and cron automation had been drifting toward a private studio-hosted deployment model, with Terraform and secret handling living outside this repo. The release server needs to be inspectable, reproducible, and maintainable from loopflow itself, whether it runs on a Mac mini, Tailscale host, Fly.io, or cloud VM.
+
+**Decision:** Loopflow automation is self-hosted by default. The public repo carries the runnable container and deployment shape; Doppler supplies secrets; studio discovery is optional rather than the assumed path. Nightly package verification proves artifacts without deploying, weekly release is the automated publishing cadence, and local dev machines get a single `scripts/pull-local-bin.sh` update path.
+
+**Implications:** Container mode uses local bearer-token auth unless explicitly configured for studio. Deployment docs and compose defaults must avoid hidden global-host assumptions. Infrastructure config can be committed when it contains topology and mechanics, but credentials stay in Doppler or local env files.
+
+## 2026-06-29 — Hashimoto-style review is a standing quality ritual
+
+**Context:** Loopflow's core work benefits from a specific review posture: operationally boring, API-centered, skeptical of needless abstraction, and clear about what breaks under real use.
+
+**Decision:** Every unit of work gets a Mitchell Hashimoto-style simulated code review before it is considered done. The point is not impersonation; it is a concrete quality lens for simplicity, operations, API shape, docs, and deletable complexity.
+
+**Implications:** Agents should either fix findings immediately or record them in PR notes. Rubber-stamp review theater does not satisfy the ritual.
+
+## 2026-06-29 — Loopflow and Cadenza share one release cadence
+
+**Context:** Loopflow's release automation should not become a one-off snowflake while Cadenza drifts onto a separate schedule. Both projects need the same operational rhythm, even though their artifacts and signing requirements differ.
+
+**Decision:** Loopflow and Cadenza use carbon-copy nightly and weekly schedules: nightly package verification at `0 9 * * *` UTC without deployment, and weekly release at `0 12 * * 0` UTC gated by the same package verification. Repo-specific parameters live inside each repo's workflow body.
+
+**Implications:** Changing the cadence means changing both repositories together. Cadenza does not inherit Loopflow's Rust package matrix, and Loopflow does not inherit Cadenza's signing-sensitive TestFlight path; only the rhythm and gate semantics are shared.

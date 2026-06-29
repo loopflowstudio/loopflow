@@ -389,10 +389,7 @@ impl RawLfdConfig {
         let profile = ModeProfile::for_mode(self.mode);
         self.executor.limits.validate()?;
 
-        let mut auth = self.auth;
-        if self.mode == Mode::Container && auth.mode == AuthMode::Local && auth.token.is_none() {
-            auth.mode = AuthMode::Studio;
-        }
+        let auth = self.auth;
 
         Ok(LfdConfig {
             mode: self.mode,
@@ -978,7 +975,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.mode, AuthMode::Studio);
+        assert_eq!(resolved.auth.mode, AuthMode::Local);
     }
 
     #[test]

@@ -1,19 +1,18 @@
 # Production override for remote deployment.
 # Usage: docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 #
-# Adds Caddy for TLS termination on top of the default container/studio stack.
+# Adds Caddy for TLS termination on top of the self-hosted container stack.
 
 services:
   caddy:
     image: caddy:2-alpine
     environment:
       LF_DOMAIN: "${LF_DOMAIN:-localhost}"
-      LF_TLS_MODE: "${LF_TLS_MODE:-internal}"
     ports:
       - "443:443"
       - "80:80"
     volumes:
-      - ../deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${CADDYFILE:-../deploy/Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     depends_on:
       lfd:

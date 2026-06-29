@@ -1,0 +1,57 @@
+name: Packages (nightly)
+
+on:
+  schedule:
+    # 09:00 UTC daily — after the regression tier has had a chance to catch
+    # live-daemon failures, before US work hours.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  regression:
+    uses: ./.github/workflows/regression-daily.yml
+
+  native-packages:
+    needs: regression
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-packages-${{ matrix.target }}
+      - name: Build package binaries
+        run: cargo build --release --target ${{ matrix.target }} -p loopflow --bin lf --bin lfd
+      - name: Package binaries
+        run: |
+          set -euo pipefail
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf lfd
+      - name: Smoke test package
+        run: |
+          set -euo pipefail
+          mkdir package-smoke
+          tar -xzf lf-${{ matrix.target }}.tar.gz -C package-smoke
+          package-smoke/lf --version
+          package-smoke/lfd --version
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nightly-${{ matrix.target }}
+          path: lf-${{ matrix.target }}.tar.gz
+          retention-days: 14

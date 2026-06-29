@@ -295,6 +295,7 @@ lf research -d ceo
 
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+scripts/pull-local-bin.sh    # dev checkout → ~/.local/bin
 ```
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.

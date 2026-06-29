@@ -294,6 +294,20 @@ If a test requires elaborate mock setup, it's usually a sign that either:
 
 **No factory patterns.** Factory traits, abstract factories, and provider registries are almost always over-engineering. A function or a closure does the same job without the ceremony. If you need runtime dispatch, use an enum or a function pointer — not a trait with one method and one real implementation.
 
+# Review Ritual
+
+Run a Mitchell Hashimoto-style simulated code review for each unit of work before calling it done. Use the spirit, not cosplay: simple interfaces, boring operational behavior, clear ownership, docs that match the code, and no abstraction that exists only to feel flexible.
+
+Ask hard questions:
+
+- Can this be explained in one screen?
+- Does the API map to the real thing, or to our implementation accident?
+- What breaks at 2 a.m., and will the logs say why?
+- Is this dependency, config knob, or compatibility shim earning its keep?
+- Would deleting code make the system more true?
+
+Record concrete findings in the PR notes or fix them immediately. Do not perform theater; the review earns its place only when it changes the work.
+
 # Pre-Commit Checklist
 
 Before committing, verify:

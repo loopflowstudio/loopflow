@@ -41,12 +41,10 @@ need a real runtime to notice.
 4. Link the bug: leading docstring names the fix commit or PR so future
    readers know *why* this specific shape matters.
 
-## Weekly auto-release
+## Nightly packages and weekly auto-release
 
-When the regression suite is green on Sundays, the
-[`weekly-release.yml`](../../.github/workflows/weekly-release.yml) workflow
-bumps the patch version, appends a stub to `RELEASE_NOTES.md`, and commits.
-`auto-tag.yml` picks up that commit and cuts the tag.
+[`nightly-packages.yml`](../../.github/workflows/nightly-packages.yml) runs this suite before building the native `lf`/`lfd` tarballs. It extracts each package and runs `lf --version` and `lfd --version`. Artifacts are uploaded for inspection only; nothing is deployed.
 
-A failing regression test blocks the auto-release — no partial or unverified
-cuts.
+When package verification is green on Sundays, [`weekly-release.yml`](../../.github/workflows/weekly-release.yml) bumps the patch version, appends a stub to `RELEASE_NOTES.md`, commits to `main`, tags the commit, and dispatches the release workflow.
+
+A failing regression test blocks package verification and auto-release — no partial or unverified cuts.

@@ -3,6 +3,8 @@
 }
 
 {$LF_DOMAIN:localhost} {
+	tls internal
+
 	@websocket {
 		header Connection *Upgrade*
 		header Upgrade websocket

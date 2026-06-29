@@ -14,6 +14,7 @@ swift test --package-path swift        # Swift package tests
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Concerto UI
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v  # API smoke + concurrent-client broadcast checks (live lfd HTTP)
+uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
 
 Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
@@ -101,6 +102,17 @@ Long-running workflow tests for `lf op`:
 tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
+
+## Nightly Package Tests
+
+`.github/workflows/nightly-packages.yml` builds the same native `lf`/`lfd` tarballs as the release workflow after the regression tier passes. Each runner extracts its tarball and runs:
+
+```bash
+package-smoke/lf --version
+package-smoke/lfd --version
+```
+
+Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.
 
 ## Validation Scripts
 

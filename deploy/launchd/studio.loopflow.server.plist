@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Copy to ~/Library/LaunchAgents/ and edit the repo path. Runs every 5 minutes to keep the Docker stack up on a Mac mini. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>studio.loopflow.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jack/src/loopflow/deploy/loopflow-server.sh</string>
+    <string>up</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LOOPFLOW_SECRETS</key>
+    <string>doppler</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/loopflow-server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/loopflow-server.err.log</string>
+</dict>
+</plist>

@@ -27,10 +27,10 @@ lfd serve
 
 ### Container
 
-Use container mode for remote or shared hosts.
+Use container mode for self-hosted remote or shared hosts.
 
 - Storage: postgres
-- Auth: studio
+- Auth: local bearer token by default
 - Executor: Docker
 - Config: set `mode: container`, then install or run `lfd`
 
@@ -148,9 +148,9 @@ LFD_HTTP_TRUSTED_PROXY_CIDRS
 mode: native # native (default) or container
 
 auth:
-  mode: local # tuning knob within the selected shape
-  token: bundled-session-token # optional override for embedded launches
-  base_url: https://auth.loopflow.studio # used by studio mode
+  mode: local # default, self-hosted bearer-token auth
+  token: bundled-session-token # set from Doppler or env for remote hosts
+  base_url: https://auth.loopflow.studio # only used when opting into studio mode
 
 executor:
   image: loopflow/agent:latest
@@ -188,7 +188,7 @@ http_security:
 
 `executor.sandbox` was removed. If that key is still present in old config, `lfd` fails fast and tells you to delete it.
 
-In container mode, `auth.mode=local` without an explicit `auth.token` is promoted to `studio` so the blessed remote shape stays coherent.
+Container mode stays self-hosted by default. Set `LFD_AUTH_TOKEN` from Doppler or another secret store for remote hosts. Opt into `auth.mode: studio` only when using studio discovery.
 
 ### Credential mounts
 

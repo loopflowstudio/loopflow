@@ -53,6 +53,7 @@ jobs:
   build-dmg:
     needs: [build-native]
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,8 +81,10 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
       - name: Build, sign, and notarize DMG
-        run: python3 scripts/release-concerto.py
+        timeout-minutes: 35
+        run: python3 -u scripts/release-concerto.py
       - name: Upload DMG to R2
+        timeout-minutes: 5
         run: |
           uv run --with boto3 python3 - <<'SCRIPT'
           import boto3, os

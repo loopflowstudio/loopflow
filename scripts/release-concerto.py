@@ -24,16 +24,38 @@ REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 
 
-def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, check=check)
+def run(
+    cmd: list[str],
+    cwd: Path | None = None,
+    check: bool = True,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess:
+    print(f"$ {' '.join(cmd)}", flush=True)
+    try:
+        return subprocess.run(cmd, cwd=cwd, check=check, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        print(f"Timed out after {timeout}s: {' '.join(cmd)}", flush=True)
+        raise RuntimeError(f"command timed out after {timeout}s") from exc
 
 
-def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+def run_capture(
+    cmd: list[str],
+    cwd: Path | None = None,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess:
+    print(f"$ {' '.join(cmd)}", flush=True)
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        print(f"Timed out after {timeout}s: {' '.join(cmd)}", flush=True)
+        raise RuntimeError(f"command timed out after {timeout}s") from exc
 
 
 def _detect_signing_identity() -> str | None:
-    result = run_capture(["security", "find-identity", "-v", "-p", "codesigning"])
+    result = run_capture(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        timeout=15,
+    )
     for line in result.stdout.splitlines():
         if "Developer ID Application" in line:
             start = line.find('"')
@@ -57,8 +79,8 @@ def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = Non
     if entitlements and entitlements.exists():
         cmd += ["--entitlements", str(entitlements)]
     cmd.append(str(app_path))
-    print(f"Signing with: {identity}")
-    result = run(cmd, check=False)
+    print(f"Signing with: {identity}", flush=True)
+    result = run(cmd, check=False, timeout=5 * 60)
     return result.returncode
 
 
@@ -68,7 +90,10 @@ def _notarize_dmg(dmg_path: Path) -> int:
     issuer = os.environ.get("NOTARY_ISSUER")
 
     if not all([key, key_id, issuer]):
-        print("Skipping notarization (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER not set)")
+        print(
+            "Skipping notarization (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER not set)",
+            flush=True,
+        )
         return 0
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".p8", delete=False) as f:
@@ -76,7 +101,7 @@ def _notarize_dmg(dmg_path: Path) -> int:
         key_path = f.name
 
     try:
-        print("Submitting for notarization...")
+        print("Submitting for notarization...", flush=True)
         result = run(
             [
                 "xcrun",
@@ -92,12 +117,17 @@ def _notarize_dmg(dmg_path: Path) -> int:
                 "--wait",
             ],
             check=False,
+            timeout=30 * 60,
         )
         if result.returncode != 0:
             return result.returncode
 
-        print("Stapling notarization ticket...")
-        result = run(["xcrun", "stapler", "staple", str(dmg_path)], check=False)
+        print("Stapling notarization ticket...", flush=True)
+        result = run(
+            ["xcrun", "stapler", "staple", str(dmg_path)],
+            check=False,
+            timeout=5 * 60,
+        )
         return result.returncode
     finally:
         os.unlink(key_path)
@@ -107,7 +137,7 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
     cargo_cmd = ["cargo", "build", "--release", "--bin", "lf", "--bin", "lfd"]
     bin_dir = REPO_ROOT / "target" / "release"
 
-    result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
+    result = run(cargo_cmd, cwd=REPO_ROOT, check=False, timeout=20 * 60)
     if result.returncode != 0:
         raise RuntimeError("Failed to build bundled lf/lfd binaries")
 
@@ -119,9 +149,14 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
 
 
 def release() -> int:
-    print("Building Concerto release...")
+    print("Building Concerto release...", flush=True)
 
-    result = run(["swift", "build", "-c", "release"], cwd=SWIFT_DIR, check=False)
+    result = run(
+        ["swift", "build", "-c", "release"],
+        cwd=SWIFT_DIR,
+        check=False,
+        timeout=20 * 60,
+    )
     if result.returncode != 0:
         return result.returncode
 
@@ -148,7 +183,7 @@ def release() -> int:
     for bundle in build_dir.glob("*.bundle"):
         shutil.copytree(bundle, app_dir / "Resources" / bundle.name)
 
-    print(f"Created dist/{app_name}.app")
+    print(f"Created dist/{app_name}.app", flush=True)
 
     # Codesign
     identity = _detect_signing_identity()
@@ -161,7 +196,10 @@ def release() -> int:
             return rc
     else:
         print("No Developer ID found — signing ad-hoc (DMG will trigger Gatekeeper)")
-        run(["codesign", "--force", "--deep", "--sign", "-", str(dist_dir / f"{app_name}.app")])
+        run(
+            ["codesign", "--force", "--deep", "--sign", "-", str(dist_dir / f"{app_name}.app")],
+            timeout=5 * 60,
+        )
 
     # Create DMG
     dmg_path = dist_dir / f"{app_name}.dmg"
@@ -200,7 +238,7 @@ def release() -> int:
             str(dmg_path),
             str(dmg_staging),
         ]
-        result = run(cmd, check=False)
+        result = run(cmd, check=False, timeout=10 * 60)
         if result.returncode not in (0, 2):
             shutil.rmtree(dmg_staging)
             return result.returncode
@@ -218,23 +256,27 @@ def release() -> int:
                 "-format",
                 "UDZO",
                 str(dmg_path),
-            ]
+            ],
+            timeout=10 * 60,
         )
 
     shutil.rmtree(dmg_staging)
 
     # Sign and notarize the DMG
     if identity:
-        run(["codesign", "--force", "--sign", identity, "--timestamp", str(dmg_path)])
+        run(
+            ["codesign", "--force", "--sign", identity, "--timestamp", str(dmg_path)],
+            timeout=5 * 60,
+        )
         rc = _notarize_dmg(dmg_path)
         if rc != 0:
-            print("Notarization failed")
+            print("Notarization failed", flush=True)
             return rc
 
     print()
-    print("Release built:")
-    print(f"  App: dist/{app_name}.app")
-    print(f"  DMG: {dmg_path}")
+    print("Release built:", flush=True)
+    print(f"  App: dist/{app_name}.app", flush=True)
+    print(f"  DMG: {dmg_path}", flush=True)
     return 0
 
 

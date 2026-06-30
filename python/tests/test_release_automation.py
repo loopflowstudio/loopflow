@@ -399,3 +399,30 @@ def test_release_schedule_contract_covers_loopflow_and_cadenza():
     assert "bump_patch_version.sh" not in commands
     assert "git push origin HEAD:main" not in commands
     assert "gh workflow run release.yml" not in commands
+
+
+def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
+    release = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    build_dmg = release["jobs"]["build-dmg"]
+    steps = build_dmg["steps"]
+    commands = "\n".join(step.get("run", "") for step in steps)
+    script = (ROOT / "scripts/release-concerto.py").read_text()
+
+    assert build_dmg["timeout-minutes"] == "45"
+    assert "python3 -u scripts/release-concerto.py" in commands
+    assert any(
+        step.get("name") == "Build, sign, and notarize DMG"
+        and step.get("timeout-minutes") == "35"
+        for step in steps
+    )
+    assert any(
+        step.get("name") == "Upload DMG to R2" and step.get("timeout-minutes") == "5"
+        for step in steps
+    )
+    assert "timeout=30 * 60" in script
+    assert "notarytool" in script
+    assert "Timed out after" in script
+    assert "flush=True" in script

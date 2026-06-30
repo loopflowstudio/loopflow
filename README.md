@@ -324,31 +324,30 @@ lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf op auth status   # local provider auth for lf steps and ops
 lf op auth asana    # connect Asana locally for `lf op` / step integrations
-lf op auth notion   # connect Notion locally for `lf op` / step integrations
-lf op auth linear  # connect Linear locally for `lf op` / step integrations
-lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
+lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # connect Linear with OAuth
-lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 ```
 
-PM provider config:
+PM config (Asana is the only provider):
 
 ```yaml
 # .lf/config.yaml
+asana:
+  workspace: "1234567890"   # optional: pin workspace when you have multiple
+  default_team: "9876543210"  # optional: team for new wave projects
+```
+
+A wave is PM-enabled when its `wave/<name>/<name>.yaml` carries an `asana_project`:
+
+```yaml
+# wave/engbot/engbot.yaml
 pm:
-  provider: notion
-notion:
-  parent_page: 32af8f99-...  # optional: reuse an existing parent page/teamspace
-  title_property: Name        # optional schema overrides
-  status_property: Status
-  done_value: Done
-  priority_property: Priority
+  asana_project: "1201234567890"
 ```
 
 ```bash

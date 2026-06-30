@@ -126,19 +126,15 @@ def test_auth_status_table_shows_expiry_details() -> None:
     assert "refresh in" in rendered
 
 
-def test_auth_status_table_shows_new_pm_providers() -> None:
+def test_auth_status_table_shows_pm_provider() -> None:
     statuses = [
         AuthProviderStatus.model_validate({"provider": "asana", "status": "none"}),
-        AuthProviderStatus.model_validate({"provider": "linear", "status": "active"}),
-        AuthProviderStatus.model_validate({"provider": "notion", "status": "active"}),
     ]
     console = Console(record=True, width=220)
     console.print(_auth_status_table(statuses))
     rendered = console.export_text()
 
     assert "Asana" in rendered
-    assert "Linear" in rendered
-    assert "Notion" in rendered
 
 
 def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
@@ -157,10 +153,8 @@ def test_auth_status_table_does_not_mark_pm_api_keys_as_metered() -> None:
 
 def test_pm_providers_do_not_support_api_key_configure() -> None:
     assert _provider_api_key_config("asana") is None
-    assert _provider_api_key_config("linear") is None
-    assert _provider_api_key_config("notion") is None
-    assert _pm_oauth_configure_error("linear") == (
-        "Linear requires OAuth. Run 'lf op auth linear' to connect."
+    assert _pm_oauth_configure_error("asana") == (
+        "Asana requires OAuth. Run 'lf op auth asana' to connect."
     )
 
 

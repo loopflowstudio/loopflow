@@ -1345,7 +1345,6 @@ lfq auth claude
 lfq auth codex
 lfq auth zen
 lfq auth asana
-lfq auth linear
 lfq auth disconnect <provider>
 lfq auth configure <provider>
 

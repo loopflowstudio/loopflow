@@ -16,7 +16,7 @@ Flow:
     4. Run ``lf op pm init --all`` to bootstrap fresh projects.
     5. Run ``lf op pm push-diff --all`` to populate items.
 
-Only Asana is implemented at the moment. Linear/Notion raise on --provider.
+Asana is the only PM provider.
 """
 
 import argparse

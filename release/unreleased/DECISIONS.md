@@ -212,10 +212,10 @@ built-in commands — skills fire there with `$step`.
 
 **Implications:** Release work is no longer incidental workflow plumbing. Changes to schedules, deploy shape, Doppler assumptions, or cross-repo parity should update the release wave metadata and include a Mitchell Hashimoto simulated review when they ship.
 
-## 2026-06-29 — Mac Mini is the first maintained Loopflow host
+## 2026-06-29 — First maintained Loopflow host is private
 
-**Context:** The release automation goal needs one real self-hosted `lfd` server, not a generic cloud abstraction. The Mac Mini already sits on the tailnet and is the cheapest useful cron host once it is online.
+**Context:** The release automation goal needs one real self-hosted `lfd` server, not a generic cloud abstraction. The first target is a private tailnet host, but public repo metadata should not expose personal hostnames or tailnet addresses.
 
-**Decision:** Target `mini-heart` at `100.96.227.95` as the first maintained Loopflow `lfd` cron host. Local clients use Tailscale HTTP on `http://100.96.227.95:2486` with bearer-token auth first; Caddy/TLS remains available for later public or polished access. Concerto, `lfq`, Codex, and Claude sessions should point at that host rather than a studio control plane.
+**Decision:** Target a private Tailscale-connected host as the first maintained Loopflow `lfd` cron host. Local clients use Tailscale HTTP with bearer-token auth first; Caddy/TLS remains available for later public or polished access. Concerto, `lfq`, Codex, and Claude sessions should point at that host rather than a studio control plane. Host-specific names, addresses, users, and tokens stay in local env, Doppler, or private machine config.
 
-**Implications:** Setup scripts and docs optimize for Mac Mini + Tailscale. Secrets stay in Doppler or host-local env, agent credentials are made available to the Mini executor, and remote repo paths are paths on the Mini. Cadenza remains cheap and product-specific: one prod server, regular/hotfix releases, and local/TestFlight clients pointed at prod unless a deliberate staging need appears.
+**Implications:** Setup scripts and docs optimize for a private Tailscale host without committing personal topology. Secrets stay in Doppler or host-local env, agent credentials are made available to the private executor, and remote repo paths are paths on that host. Cadenza remains cheap and product-specific: one prod server, regular/hotfix releases, and local/TestFlight clients pointed at prod unless a deliberate staging need appears.

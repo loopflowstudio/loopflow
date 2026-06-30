@@ -118,8 +118,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
         text=True,
         capture_output=True,
     )
-    mini_client_help = subprocess.run(
-        [str(ROOT / "deploy/setup-mini-client.sh"), "--help"],
+    private_client_help = subprocess.run(
+        [str(ROOT / "deploy/setup-private-client.sh"), "--help"],
         check=True,
         text=True,
         capture_output=True,
@@ -131,9 +131,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "bootstrap-cron-host.sh [--repo PATH]" in bootstrap_help.stderr
     assert "--host auto|linux|mac" in bootstrap_help.stderr
     assert "--no-wave" in bootstrap_help.stderr
-    assert "setup-mini-client.sh" in mini_client_help.stderr
-    assert "--token-file PATH" in mini_client_help.stderr
-    assert "--no-concerto" in mini_client_help.stderr
+    assert "setup-private-client.sh" in private_client_help.stderr
+    assert "--token-file PATH" in private_client_help.stderr
+    assert "--no-concerto" in private_client_help.stderr
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
@@ -145,16 +145,15 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "/etc/loopflow-server.env" in readme
     assert "loopflow-server-update.timer" in readme
     assert "lfq create root /opt/loopflow" in readme
-    assert "deploy/MAC_MINI.md" in readme
+    assert "deploy/PRIVATE_HOST.md" in readme
     assert "claude,codex,ssh" in readme
 
-    mini_readme = (ROOT / "deploy/MAC_MINI.md").read_text()
-    assert "100.96.227.95" in mini_readme
-    assert "http://100.96.227.95:2486" in mini_readme
-    assert "deploy/setup-mini-client.sh --token" in mini_readme
-    assert "cursor --remote ssh-remote+jack@100.96.227.95" in mini_readme
-    assert "code --remote ssh-remote+jack@100.96.227.95" in mini_readme
-    assert "LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh" in mini_readme
+    private_readme = (ROOT / "deploy/PRIVATE_HOST.md").read_text()
+    assert "<tailscale-host-or-ip>" in private_readme
+    assert "http://<tailscale-host-or-ip>:2486" in private_readme
+    assert "deploy/setup-private-client.sh --host" in private_readme
+    assert "ssh-remote+$LFD_SSH_USER@$LFD_HOST" in private_readme
+    assert "LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh" in private_readme
 
     compose = (ROOT / "docker/docker-compose.yml").read_text()
     assert "LFD_AUTH_MODE" not in compose
@@ -182,12 +181,12 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "lfq create root" in bootstrap
     assert "install -m 0600" in bootstrap
 
-    mini_client = (ROOT / "deploy/setup-mini-client.sh").read_text()
-    assert "100.96.227.95" in mini_client
-    assert "LFD_URL" in mini_client
-    assert "loopflow.connection.token" in mini_client
-    assert "concerto.connectionSettings.v2" in mini_client
-    assert "alias mini='ssh" in mini_client
+    private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
+    assert "Host is required. Pass --host or set LFD_HOST." in private_client
+    assert "LFD_URL" in private_client
+    assert "loopflow.connection.token" in private_client
+    assert "concerto.connectionSettings.v2" in private_client
+    assert "alias lfdhost='ssh" in private_client
 
     service = (ROOT / "deploy/systemd/loopflow-server.service").read_text()
     assert "ExecStart=/opt/loopflow/deploy/loopflow-server.sh up" in service

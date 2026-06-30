@@ -2,61 +2,60 @@
 
 ## What was implemented
 
-Added a `goal/` prompt primitive and a `goal` field on waves. Goals resolve from
-repo-local files, user files, then builtins, and a wave with `goal: <name>` runs
-the rendered goal prompt as its primary loop body.
+Added `goal` as the loop body for waves and tightened it into the decided
+contract: every wave record now has a required `goal` string, defaulting to
+`ship-roadmap`, and lfd always renders that goal when launching a wave run.
 
-The wave DTO mirrors now carry `goal` through Rust, Python, Swift, and the shared
-fixture. lfd persists the field, accepts it on create/update/run overrides, and
-renders goal runs with available-flow and roadmap context.
+Goal prompt files resolve from repo `.lf/goals/`, then user `~/.lf/goals/`, then
+builtins. Singular `.lf/goal/` and repo-root `goal/` are intentionally ignored.
 
-The goals wave roadmap was added under `wave/goals/`, and the top-level wave docs
-now show `goal: ship-roadmap` in wave config examples.
+IDE handoffs now use `Surface::Ide`, so `lf <step> --ide` sends the target agent
+only the task seed, without loopflow's `<lf:voice>` block or run-mode surface
+instructions.
 
 ## Key choices
 
-- Goal resolution mirrors step/flow builtin registration: builtins live under
-  category directories, while repo-local `goal/<name>.md` can override the
-  builtin `ship-roadmap` goal.
-- Goal text stays as prompt prose. Metrics and success criteria live in the
-  prompt, not in a new config struct.
-- A goal run uses `lf : <rendered prompt>` instead of inventing a separate runner.
-  That keeps the first primitive small and reuses the existing launch path.
-- Goals replace only the standing primary loop body. Explicit flow overrides from
-  manual runs, crons, and triggers still run the requested flow.
-- `goal` stays explicit in the wave JSON contract. A wave without a goal
-  serializes `"goal": null` instead of omitting the field, matching the Python
-  required-nullable mirror.
-- Missing goals now surface as `goal not found` instead of falling through as
-  `step not found`.
+- Keep `primary_flow` as the default flow a goal can dispatch; it is no longer a
+  fallback loop body.
+- Keep update and run-override DTO fields optional, because `None` means "do not
+  change this field." The canonical wave record and wire DTO require `goal`.
+- Backfill existing database rows to `ship-roadmap` and enforce `NOT NULL`
+  instead of carrying nullable compatibility.
+- Resolve goals through `.lf/goals/` only. The previous singular and repo-root
+  paths were removed rather than kept as shims.
+- Treat IDE launches as interactive handoffs owned by the host agent, not as
+  loopflow-controlled interactive sessions.
 
 ## How it fits together
 
-`Wave.goal` is stored with the wave row and exposed through HTTP DTOs. When lfd
-executes a wave run, `build_wave_run_command` chooses the goal path only when the
-run snapshot still names the wave's primary flow: load goal, render it with flow
-names and `wave/<name>` as the roadmap handle, then launch `lf` with an inline
-prompt. Runs without a goal, or runs with an explicit flow override, keep the
-existing flow execution path.
+`Wave.goal` is persisted in the waves table and exposed through Rust, Python,
+Swift, and the shared fixture. `build_wave_run_command` loads `wave.goal()`,
+renders it with available flows and the `wave/<name>` roadmap handle, and
+launches the rendered prompt through the existing inline `lf : ...` path.
+
+Prompt assembly carries a `Surface` enum. `Surface::Ide` is selected before
+prompt preparation when `--ide` is present, and both full prompt rendering and
+skill-launch seeds omit voice and surface text for that variant.
 
 ## Risks and bottlenecks
 
-- Goal prompts are passed as a single inline CLI argument. That is fine for the
-  current small builtins, but very large repo-authored goals could eventually hit
-  argv-size limits.
-- The primitive coexists with existing `direction` plumbing in this branch. The
-  roadmap says goal supersedes direction, but the full removal is outside this
-  first cut.
+- Goal prompts still travel as a single inline CLI argument. That is acceptable
+  for the current builtin and expected repo goals, but very large goals could
+  eventually hit argv-size limits.
+- `primary_flow` remains in the model as a dispatch default. Its semantics are
+  now narrower, so later UI/docs work should avoid presenting it as the loop
+  body.
 - Concerto UI validation was skipped in this headless gate because no rendering
-  environment is available. Swift package tests cover the shared model and
-  service contract, but not the full Xcode UI runner.
+  environment is available. Swift package tests cover the model and service
+  contract, but not the full Xcode UI runner.
 
 ## What's not included
 
+- No `prepare_goal_launch` launcher or full Looping Agent session bootstrap.
 - No Asana live-roadmap integration.
 - No hosted long-running lfd/Ghostty backend.
-- No budget/spend cap enforcement.
-- No full removal of direction fields or flags.
+- No budget or spend-cap enforcement.
+- No deletion of `primary_flow`.
 
 ## Validation
 
@@ -64,10 +63,13 @@ existing flow execution path.
 - `cargo clippy -- -D warnings` passed.
 - `cargo test --all` passed.
 - `uv run pytest python/tests/` passed: 152 tests.
-- `swift test --package-path swift` passed: 336 Swift Testing tests plus 5 XCTest tests.
+- `swift test --package-path swift` passed: 5 XCTest tests and 336 Swift Testing
+  tests.
 - `tests/e2e/test_smoke.sh` passed.
-- `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` passed: 16 tests.
+- `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v`
+  passed: 16 tests.
 - `uv run pytest tests/regression/ -v` passed: 4 tests.
-- `docker version && cargo test -p loopflow docker_` passed: 11 docker-filtered tests.
-- Concerto Xcode UI test was not run in this gate because the session has no
-  rendering environment.
+- `docker version` passed.
+- `cargo test -p loopflow docker_` passed: 11 docker-filtered tests.
+- Concerto Xcode UI test was not run because this headless gate has no rendering
+  environment.

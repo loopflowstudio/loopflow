@@ -1,1 +1,1 @@
-lfd: add goal prompt primitive
+lfd: make goals the wave loop body

@@ -151,14 +151,16 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "--token-file PATH" in private_client_help.stderr
     assert "--no-concerto" in private_client_help.stderr
     assert "native-lfd-host.sh" in native_host_help.stderr
-    assert "install|update|restart|status|logs|health" in native_host_help.stderr
+    assert "install|install-update-agent|update|restart|status|logs|health" in native_host_help.stderr
     assert "LFD_HTTP_ADDR=0.0.0.0:2486" in native_host_help.stderr
+    assert "LFD_AUTH_TOKEN_FILE=~/.lf/lfd-token" in native_host_help.stderr
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
     assert "deploy/COSTS.md" in readme
     assert "$100/month" in readme
     assert "openssl rand -hex 32" in readme
+    assert "com.loopflow.lfd.update" in readme
     assert "leave `LF_TLS_MODE` empty" in readme
     assert "Mac mini + Tailscale" in readme
     assert "bootstrap-cron-host.sh" in readme
@@ -174,6 +176,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "http://<tailscale-host-or-ip>:2486" in private_readme
     assert "deploy/setup-private-client.sh --host" in private_readme
     assert "deploy/native-lfd-host.sh install" in private_readme
+    assert "deploy/native-lfd-host.sh install-update-agent" in private_readme
+    assert "com.loopflow.lfd.update" in private_readme
     assert "Docker Desktop is not required for the native service" in private_readme
     assert "ssh-remote+$LFD_SSH_USER@$LFD_HOST" in private_readme
     assert "LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh" in private_readme
@@ -212,7 +216,13 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "scripts/pull-local-bin.sh" in native_host
     assert "install --force" in native_host
     assert "launchctl kickstart -k" in native_host
-    assert "LFD_AUTH_TOKEN is required for native private lfd host management" in native_host
+    assert "StartCalendarInterval" in native_host
+    assert '"Hour": 4' in native_host
+    assert '"Minute": 30' in native_host
+    assert '"LFD_AUTH_TOKEN_FILE": token_file' in native_host
+    assert 'printf \'%s\\n\' "$LFD_AUTH_TOKEN" > "$token_file"' in native_host
+    assert 'chmod 0600 "$token_file"' in native_host
+    assert "LFD_AUTH_TOKEN or readable LFD_AUTH_TOKEN_FILE is required for native private lfd host management" in native_host
 
     private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
     assert "Host is required. Pass --host or set LFD_HOST." in private_client

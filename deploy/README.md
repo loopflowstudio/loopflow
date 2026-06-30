@@ -72,7 +72,7 @@ deploy/bootstrap-cron-host.sh --host linux
 
 Use Doppler for maintained hosts. On Linux the bootstrap writes `/etc/loopflow-server.env` with `0600` permissions so systemd can reach either `DOPPLER_TOKEN` or host-local fallback secrets. On macOS it writes the same launch environment into `~/Library/LaunchAgents/loopflow.server.plist`; prefer a Doppler service token over embedding long-lived provider credentials there.
 
-The update timer refreshes Linux hosts nightly. The macOS launch agent checks the stack every five minutes. Keep local dev binaries fresh with `scripts/pull-local-bin.sh`; server restarts should be predictable.
+The Linux update timer refreshes container hosts nightly. The native macOS private-host path installs `com.loopflow.lfd.update`, which refreshes the repo, rebuilds local binaries, and restarts `lfd` at 04:30 host-local time. Keep local dev binaries fresh with `scripts/pull-local-bin.sh`; server restarts should be predictable.
 
 ## Manual Linux service install
 
@@ -88,6 +88,19 @@ sudo systemctl enable --now loopflow-server-update.timer
 ```
 
 ## Manual Mac mini + Tailscale install
+
+```bash
+export LFD_HTTP_ADDR=0.0.0.0:2486
+export LFD_AUTH_TOKEN=$(openssl rand -hex 32)
+mkdir -p ~/.lf
+printf '%s\n' "$LFD_AUTH_TOKEN" > ~/.lf/lfd-token
+chmod 600 ~/.lf/lfd-token
+deploy/native-lfd-host.sh install
+```
+
+The native install does not require Docker Desktop. It installs the `com.loopflow.lfd` service and `com.loopflow.lfd.update` nightly update agent.
+
+Use the Docker Compose launchd path only when you explicitly want the container stack:
 
 ```bash
 mkdir -p ~/Library/LaunchAgents

@@ -241,9 +241,11 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.primary_flow.clone()))
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
-    let goal = goal
-        .or_else(|| wave_config.as_ref().and_then(|c| c.goal.clone()))
-        .and_then(|value| trimmed_non_empty(Some(&value)))
+    let config_goal = wave_config
+        .as_ref()
+        .and_then(|config| config.goal.as_deref());
+    let goal = trimmed_non_empty(goal.as_deref())
+        .or_else(|| trimmed_non_empty(config_goal))
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
     let cron_defs = requested_crons
@@ -630,10 +632,8 @@ pub async fn update_wave_handler(
     if let Some(flow) = payload.flow {
         wave.primary_flow = flow;
     }
-    if let Some(goal) = payload.goal {
-        if let Some(goal) = trimmed_non_empty(Some(&goal)) {
-            wave.goal = goal;
-        }
+    if let Some(goal) = trimmed_non_empty(payload.goal.as_deref()) {
+        wave.goal = goal;
     }
     if let Some(direction) = payload.direction {
         wave.direction = direction;
@@ -787,10 +787,8 @@ async fn start_wave_run(
     if let Some(overrides) = overrides {
         flow_override = overrides.flow;
         roadmap_item = overrides.roadmap_item;
-        if let Some(goal) = overrides.goal {
-            if let Some(goal) = trimmed_non_empty(Some(&goal)) {
-                wave.goal = goal;
-            }
+        if let Some(goal) = trimmed_non_empty(overrides.goal.as_deref()) {
+            wave.goal = goal;
         }
         if let Some(direction) = overrides.direction {
             wave.direction = direction;

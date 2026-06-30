@@ -255,6 +255,17 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     load_flow_inner(name, repo, true)
 }
 
+pub fn available_flow_names(repo: &Path) -> Vec<String> {
+    let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect();
+    collect_flow_names(&repo.join(".lf/flows"), None, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
 pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
     if let Ok(goal_path) = find_goal_path(name, repo) {
         let prompt = fs::read_to_string(goal_path)?;
@@ -549,6 +560,37 @@ fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<Pat
 
 fn markdown_path(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}.md"))
+}
+
+fn collect_flow_names(dir: &Path, prefix: Option<&str>, names: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && prefix.is_none() {
+            let Some(child_prefix) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            collect_flow_names(&path, Some(child_prefix), names);
+            continue;
+        }
+
+        if !path
+            .extension()
+            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+        {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        match prefix {
+            Some(prefix) => names.push(format!("{prefix}/{stem}")),
+            None => names.push(stem.to_string()),
+        }
+    }
 }
 
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {

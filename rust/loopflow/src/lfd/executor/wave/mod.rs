@@ -125,51 +125,6 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .filter(|branch| !branch.is_empty())
 }
 
-fn available_flow_names(repo: &Path) -> Vec<String> {
-    let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
-        .into_iter()
-        .map(ToOwned::to_owned)
-        .collect();
-    let flow_dir = repo.join(".lf/flows");
-    if let Ok(entries) = std::fs::read_dir(flow_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let Some(prefix) = path.file_name().and_then(|name| name.to_str()) else {
-                    continue;
-                };
-                if let Ok(children) = std::fs::read_dir(&path) {
-                    for child in children.flatten() {
-                        let child_path = child.path();
-                        if child_path
-                            .extension()
-                            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
-                        {
-                            if let Some(stem) =
-                                child_path.file_stem().and_then(|name| name.to_str())
-                            {
-                                names.push(format!("{prefix}/{stem}"));
-                            }
-                        }
-                    }
-                }
-                continue;
-            }
-            if path
-                .extension()
-                .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
-            {
-                if let Some(stem) = path.file_stem().and_then(|name| name.to_str()) {
-                    names.push(stem.to_string());
-                }
-            }
-        }
-    }
-    names.sort();
-    names.dedup();
-    names
-}
-
 fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
     if let Some(goal_name) = wave.goal() {
         let repo = Path::new(&run.worktree);
@@ -177,7 +132,7 @@ fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, St
         let prompt = crate::engine::render_goal(
             &goal,
             &crate::engine::GoalRenderContext {
-                flows: available_flow_names(repo),
+                flows: crate::engine::available_flow_names(repo),
                 roadmap: format!("wave/{}", wave.name()),
             },
         );

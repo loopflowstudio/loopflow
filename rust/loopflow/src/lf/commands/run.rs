@@ -351,13 +351,20 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote prompt log"
     );
 
+    // Skill-launched steps clear the system prompt (the seed carries everything
+    // in the task prompt). Don't write or pass a context file in that case: codex
+    // treats an empty `model_instructions_file` as an error.
     let context_file_start = Instant::now();
-    let context_file = Some(write_prompt_log(
-        &built.repo_root,
-        &built.agent_config.system_prompt,
-        &format!("{}.context", built.log_name),
-        None,
-    )?);
+    let context_file = if built.agent_config.system_prompt.trim().is_empty() {
+        None
+    } else {
+        Some(write_prompt_log(
+            &built.repo_root,
+            &built.agent_config.system_prompt,
+            &format!("{}.context", built.log_name),
+            None,
+        )?)
+    };
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"

@@ -385,14 +385,25 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
     Ok(output.status.success())
 }
 
-/// Reset `worktree` to `target_ref`, stashing and popping any dirty state so
-/// local-only work is preserved rather than silently overwritten.
+/// Reset `worktree` to `target_ref`, preserving genuine local-only edits.
+///
+/// Dirty state is stashed before the hard reset. The stash is only popped back
+/// when the dirty paths are disjoint from the paths the reset itself rewrites
+/// (`HEAD..target_ref`). Popping a stash across an *overlapping* reset — e.g.
+/// when the default branch just absorbed a merge that rewrote the same files —
+/// does a 3-way merge that can silently resurrect stale content and revert the
+/// merged work. When the paths overlap we leave the edits in a named stash for
+/// deliberate recovery rather than corrupt the freshly-synced tree.
 fn reset_worktree_to(worktree: &Path, target_ref: &str) -> Result<bool, GitError> {
     let status = run_git(worktree, &["status", "--porcelain"])?;
-    let dirty =
-        status.status.success() && !String::from_utf8_lossy(&status.stdout).trim().is_empty();
+    let dirty_paths = if status.status.success() {
+        porcelain_paths(&String::from_utf8_lossy(&status.stdout))
+    } else {
+        Vec::new()
+    };
 
-    if dirty {
+    let mut stashed = false;
+    if !dirty_paths.is_empty() {
         let stash = run_git(
             worktree,
             &[
@@ -403,7 +414,8 @@ fn reset_worktree_to(worktree: &Path, target_ref: &str) -> Result<bool, GitError
                 "sync_main: auto-stash",
             ],
         )?;
-        if !stash.status.success() {
+        stashed = stash.status.success();
+        if !stashed {
             // Stash can fail during a conflicted merge or with odd index state.
             // Log and continue — the reset will clear the bad state.
             tracing::warn!(
@@ -414,20 +426,77 @@ fn reset_worktree_to(worktree: &Path, target_ref: &str) -> Result<bool, GitError
         }
     }
 
+    // Capture what the reset will rewrite while HEAD still points at the old tip.
+    let changed = changed_paths(worktree, target_ref);
+
     let reset = run_git(worktree, &["reset", "--hard", target_ref])?;
     let ok = reset.status.success();
 
-    if dirty {
-        let pop = run_git(worktree, &["stash", "pop"])?;
-        if !pop.status.success() {
+    if stashed {
+        if dirty_paths.iter().any(|p| changed.contains(p)) {
             tracing::warn!(
-                "sync_main: stash pop failed in {}; stash preserved",
+                "sync_main: {} had local edits to paths the default branch also \
+                 rewrote; left them in a stash (\"sync_main: auto-stash\") rather than \
+                 popping over the synced tree. Recover with `git stash pop`.",
                 worktree.display()
             );
+        } else {
+            let pop = run_git(worktree, &["stash", "pop"])?;
+            if !pop.status.success() {
+                tracing::warn!(
+                    "sync_main: stash pop failed in {}; stash preserved",
+                    worktree.display()
+                );
+            }
         }
     }
 
     Ok(ok)
+}
+
+/// Paths reported by `git status --porcelain`, including both sides of a rename.
+fn porcelain_paths(output: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in output.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let rest = &line[3..];
+        match rest.split_once(" -> ") {
+            Some((from, to)) => {
+                paths.push(unquote_path(from));
+                paths.push(unquote_path(to));
+            }
+            None => paths.push(unquote_path(rest)),
+        }
+    }
+    paths
+}
+
+/// Paths that differ between the worktree's current `HEAD` and `target_ref`.
+/// Returns empty on any git failure — callers treat "unknown" as "no overlap".
+fn changed_paths(worktree: &Path, target_ref: &str) -> Vec<String> {
+    let Ok(output) = run_git(worktree, &["diff", "--name-only", "HEAD", target_ref]) else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn unquote_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    trimmed
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {

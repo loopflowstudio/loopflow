@@ -52,7 +52,27 @@ The script uses Doppler automatically when the Doppler CLI is configured or `DOP
 
 Public hosts leave `LF_TLS_MODE` empty and use `deploy/Caddyfile`, letting Caddy request public ACME certificates. Private or Tailscale-only hosts set `LF_TLS_MODE=internal`; the deploy script mounts `deploy/Caddyfile.internal` for Caddy's internal CA.
 
-## Linux host
+## Bootstrap cron host
+
+`bootstrap-cron-host.sh` is the one-command host setup. It installs the host service, starts `lfd`, waits for health, and creates or shows the root wave on the self-hosted daemon.
+
+```bash
+export LF_DOMAIN='lfd.example.com'
+export LF_TLS_MODE=internal
+export LFD_AUTH_TOKEN=$(openssl rand -hex 32)
+
+# Mac mini / Tailscale
+deploy/bootstrap-cron-host.sh --host mac
+
+# Linux host
+deploy/bootstrap-cron-host.sh --host linux
+```
+
+Use Doppler for maintained hosts. On Linux the bootstrap writes `/etc/loopflow-server.env` with `0600` permissions so systemd can reach either `DOPPLER_TOKEN` or host-local fallback secrets. On macOS it writes the same launch environment into `~/Library/LaunchAgents/loopflow.server.plist`; prefer a Doppler service token over embedding long-lived provider credentials there.
+
+The update timer refreshes Linux hosts nightly. The macOS launch agent checks the stack every five minutes. Keep local dev binaries fresh with `scripts/pull-local-bin.sh`; server restarts should be predictable.
+
+## Manual Linux service install
 
 ```bash
 sudo install -m 0600 /dev/null /etc/loopflow-server.env
@@ -65,22 +85,20 @@ sudo systemctl enable --now loopflow-server.service
 sudo systemctl enable --now loopflow-server-update.timer
 ```
 
-The update timer refreshes the server nightly. Keep local dev binaries fresh with `scripts/pull-local-bin.sh`; server restarts should be predictable.
-
-## Mac mini + Tailscale
+## Manual Mac mini + Tailscale install
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
 cp deploy/launchd/loopflow.server.plist ~/Library/LaunchAgents/
 plutil -replace ProgramArguments.0 -string "$PWD/deploy/loopflow-server.sh" ~/Library/LaunchAgents/loopflow.server.plist
-launchctl load ~/Library/LaunchAgents/loopflow.server.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/loopflow.server.plist
 ```
 
-Use `LF_TLS_MODE=internal` for a Tailscale-only hostname; the deploy script mounts `deploy/Caddyfile.internal`. Leave `LF_TLS_MODE` empty for public ACME and it uses `deploy/Caddyfile`. Docker Desktop must be running; the launch agent keeps the stack up every five minutes.
+Use `LF_TLS_MODE=internal` for a Tailscale-only hostname; the deploy script mounts `deploy/Caddyfile.internal`. Leave `LF_TLS_MODE` empty for public ACME and it uses `deploy/Caddyfile`. Docker Desktop must be running.
 
-## Enable repo crons
+## Enable repo crons manually
 
-Create waves on the self-hosted daemon from the host or from a trusted client:
+The bootstrap script does this when `lfq` is installed. To do it by hand from the host or a trusted client:
 
 ```bash
 export LFD_URL=https://lfd.example.com

@@ -26,9 +26,9 @@ dependencies = ["httpx>=0.27", "pydantic>=2.0", "typer>=0.9", "rich>=14.0", "pyy
 dev = ["boto3", "hatchling", "pytest>=8.0", "ruff>=0.8", "websockets>=13.0"]
 
 [project.urls]
-Homepage = "https://loopflowstudio.github.io/loopflow/"
+Homepage = "https://loopflow.studio/"
 Repository = "https://github.com/loopflowstudio/loopflow"
-Documentation = "https://loopflowstudio.github.io/loopflow/"
+Documentation = "https://loopflow.studio/docs"
 Issues = "https://github.com/loopflowstudio/loopflow/issues"
 
 [project.scripts]

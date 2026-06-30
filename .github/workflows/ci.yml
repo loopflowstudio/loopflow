@@ -46,6 +46,15 @@ jobs:
       - name: Run Python tests
         run: uv run pytest python/tests/
 
+  website-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Run website tests
+        run: uv run python dev.py test
+        working-directory: website
+
   e2e-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -301,6 +310,7 @@ jobs:
       - scratch-clear
       - rust-test
       - python-test
+      - website-test
       - e2e-smoke
       - docker-smoke
       - swift-test
@@ -311,6 +321,7 @@ jobs:
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
           PYTHON_TEST: ${{ needs.python-test.result }}
+          WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
           DOCKER_SMOKE: ${{ needs.docker-smoke.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
@@ -338,6 +349,7 @@ jobs:
           check_result "scratch-clear" "$SCRATCH_CLEAR"
           check_result "rust-test" "$RUST_TEST"
           check_result "python-test" "$PYTHON_TEST"
+          check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
           check_result "docker-smoke" "$DOCKER_SMOKE"
           check_result "swift-test" "$SWIFT_TEST"

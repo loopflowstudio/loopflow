@@ -1,0 +1,10 @@
+flow: ship-wave
+mode: manual
+workers: 0
+area:
+- website/
+- docs/
+- .github/workflows/
+direction:
+- clarity
+- care

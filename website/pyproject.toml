@@ -1,0 +1,38 @@
+[project]
+name = "website"
+version = "0.1.0"
+description = "Loopflow Studio website"
+requires-python = ">=3.11"
+dependencies = [
+    "python-fasthtml>=0.6.0",
+    "python-multipart>=0.0.12",
+    "pyyaml>=6.0",
+    "uvicorn[standard]>=0.32.0",
+    "psycopg2-binary>=2.9.0",
+    "resend>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-playwright>=0.4.0",
+    "axe-playwright-python>=0.1.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["main.py"]
+
+[tool.ruff]
+extend = "../pyproject.toml"
+
+[tool.ruff.lint.per-file-ignores]
+# FastHTML idioms: `from fasthtml.common import *` (F403/F405) and repeated
+# `@rt(...)  def get():` route handlers (F811). E501 on the page builders is
+# almost all unbreakable string literals — inline SVG/HTML, SQL, prose content.
+"main.py" = ["F403", "F405", "F811", "E501"]
+"internal_pages.py" = ["F403", "F405", "E501"]
+"db.py" = ["E501"]

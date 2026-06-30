@@ -17,7 +17,6 @@ It supersedes the already-removed `direction`.
 /// A prompt run in a loop. The looping primitive.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Goal {
-    pub name: String,
     pub prompt: String, // markdown body; metric/target encoded in the prose
 }
 

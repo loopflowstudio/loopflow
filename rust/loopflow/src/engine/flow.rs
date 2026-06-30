@@ -134,7 +134,6 @@ pub struct Flow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Goal {
-    pub name: String,
     pub prompt: String,
 }
 
@@ -244,17 +243,13 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
 pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
     if let Ok(goal_path) = find_goal_path(name, repo) {
         let prompt = fs::read_to_string(goal_path)?;
-        return Ok(Goal {
-            name: name.to_string(),
-            prompt,
-        });
+        return Ok(Goal { prompt });
     }
 
     if let Some(key) = crate::engine::builtins::resolve_builtin_goal(name) {
         let prompt = crate::engine::builtins::get_builtin_goal(key)
             .expect("resolve_builtin_goal returned a known key");
         return Ok(Goal {
-            name: key.to_string(),
             prompt: prompt.to_string(),
         });
     }
@@ -1521,14 +1516,12 @@ mod tests {
         fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
 
         let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
-        assert_eq!(goal.name, "ship-roadmap");
         assert_eq!(goal.prompt, "Repo goal prompt.");
     }
 
     #[test]
     fn render_goal_includes_flow_and_roadmap_context() {
         let goal = Goal {
-            name: "drive".to_string(),
             prompt: "Drive the work.".to_string(),
         };
         let rendered = render_goal(

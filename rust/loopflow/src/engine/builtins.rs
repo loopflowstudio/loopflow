@@ -179,11 +179,6 @@ pub fn builtin_flow_names() -> Vec<&'static str> {
     BUILTIN_FLOWS.keys().copied().collect()
 }
 
-/// List of all built-in goal names.
-pub fn builtin_goal_names() -> Vec<&'static str> {
-    BUILTIN_GOALS.keys().copied().collect()
-}
-
 /// Iterate over all built-in flows as (name, yaml_content) pairs.
 pub fn builtin_flow_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
     BUILTIN_FLOWS.iter().map(|(k, v)| (*k, *v))

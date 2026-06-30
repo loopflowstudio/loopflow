@@ -1,0 +1,37 @@
+# Monthly automation spend guardrail.
+# Card/bank transactions are the source of truth; provider APIs are advisory.
+monthly_budget_usd: "100.00"
+currency: USD
+source_of_truth: mercury_company_card
+projection: true
+vendors:
+  - name: aws
+    label: AWS
+    match:
+      - amazon web services
+      - aws
+  - name: fly
+    label: Fly.io
+    match:
+      - fly.io
+      - flyio
+      - fly io
+  - name: claude
+    label: Claude / Anthropic
+    match:
+      - anthropic
+      - claude
+  - name: codex
+    label: Codex / OpenAI
+    match:
+      - openai
+      - chatgpt
+      - codex
+  - name: opencode
+    label: OpenCode
+    match:
+      - opencode
+  - name: doppler
+    label: Doppler
+    match:
+      - doppler

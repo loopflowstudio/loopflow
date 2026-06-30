@@ -219,3 +219,11 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Target a private Tailscale-connected host as the first maintained Loopflow `lfd` cron host. Local clients use Tailscale HTTP with bearer-token auth first; Caddy/TLS remains available for later public or polished access. Concerto, `lfq`, Codex, and Claude sessions should point at that host rather than a studio control plane. Host-specific names, addresses, users, and tokens stay in local env, Doppler, or private machine config.
 
 **Implications:** Setup scripts and docs optimize for a private Tailscale host without committing personal topology. Secrets stay in Doppler or host-local env, agent credentials are made available to the private executor, and remote repo paths are paths on that host. Cadenza remains cheap and product-specific: one prod server, regular/hotfix releases, and local/TestFlight clients pointed at prod unless a deliberate staging need appears.
+
+## 2026-06-30 — Spend over $100/month is the next human blocker
+
+**Context:** Release automation needs to keep moving without checking in for every reversible step, but cloud hosts and agent providers can create open-ended spend.
+
+**Decision:** Continue autonomous release-infra iteration until actual or projected automation spend would exceed $100/month. Card/bank transactions are the source of truth; AWS, Fly.io, Claude/Anthropic, OpenAI/Codex, OpenCode, Doppler, and release-host services should use the company card when the vendor supports card billing.
+
+**Implications:** Cost tracking is part of release infrastructure, not bookkeeping after the fact. Provider dashboards can warn early, but the monthly budget gate is enforced from transaction exports/API data. Spending above the threshold requires human approval before proceeding.

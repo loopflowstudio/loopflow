@@ -12,6 +12,7 @@ struct PortfolioRepo: Codable, Identifiable, Hashable {
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }
     var displayName: String { url.lastPathComponent }
+    var tier: PortfolioTier { PortfolioTier.find(tierId) }
 
     init(path: String, lastOpened: Date, tierId: String, priority: Double) {
         self.path = path

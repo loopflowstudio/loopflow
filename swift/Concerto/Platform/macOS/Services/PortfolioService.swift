@@ -11,8 +11,8 @@ final class PortfolioService {
 
     var orderedRepos: [PortfolioRepo] {
         repos.sorted { lhs, rhs in
-            let lhsTier = PortfolioTier.find(lhs.tierId)
-            let rhsTier = PortfolioTier.find(rhs.tierId)
+            let lhsTier = lhs.tier
+            let rhsTier = rhs.tier
             if lhsTier.order != rhsTier.order {
                 return lhsTier.order < rhsTier.order
             }
@@ -45,7 +45,7 @@ final class PortfolioService {
 
         let active = PortfolioTier.default
         let priority = repos
-            .filter { PortfolioTier.find($0.tierId).id == active.id }
+            .filter { $0.tier.id == active.id }
             .map(\.priority)
             .min()
             .map { $0 - 1 } ?? 0
@@ -62,7 +62,7 @@ final class PortfolioService {
 
     func reposByTier() -> [(tier: PortfolioTier, repos: [PortfolioRepo])] {
         let grouped = Dictionary(grouping: orderedRepos) { repo in
-            PortfolioTier.find(repo.tierId).id
+            repo.tier.id
         }
         return PortfolioTier.all.map { tier in
             (tier, grouped[tier.id] ?? [])
@@ -109,7 +109,7 @@ final class PortfolioService {
                 PortfolioRepo(
                     path: path,
                     lastOpened: entry.lastOpened,
-                    tierId: PortfolioTier.find(entry.tierId).id,
+                    tierId: entry.tier.id,
                     priority: entry.priority
                 )
             )

@@ -233,7 +233,7 @@ struct PortfolioWindow: View {
 
     private func moveRepo(_ repo: PortfolioRepo, to tier: PortfolioTier) {
         let targetRepos = portfolioService.orderedRepos
-            .filter { PortfolioTier.find($0.tierId).id == tier.id && $0.path != repo.path }
+            .filter { $0.tier.id == tier.id && $0.path != repo.path }
         portfolioService.reorder(repo.path, into: tier, above: targetRepos.last, below: nil)
     }
 
@@ -413,7 +413,7 @@ struct PortfolioRepoCard: View {
                         Button(tier.displayName) {
                             onMoveRepoToTier(tier)
                         }
-                        .disabled(tier.id == repo.tierId)
+                        .disabled(tier.id == repo.tier.id)
                     }
                 } label: {
                     Label("Move to tier", systemImage: "tray.and.arrow.down")

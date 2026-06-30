@@ -23,7 +23,7 @@ struct PortfolioServiceTests {
         #expect(service.orderedRepos.count == 2)
         #expect(service.orderedRepos[0].path == repoB.normalizedFilePath)
         #expect(service.orderedRepos[1].path == repoA.normalizedFilePath)
-        #expect(service.orderedRepos.allSatisfy { $0.tierId == PortfolioTier.default.id })
+        #expect(service.orderedRepos.allSatisfy { $0.tier.id == PortfolioTier.default.id })
     }
 
     @Test("removeRepo updates stored list")
@@ -68,7 +68,7 @@ struct PortfolioServiceTests {
         let service = PortfolioService(defaults: defaults, key: key)
 
         #expect(service.orderedRepos.map(\.path) == [repoB.normalizedFilePath, repoA.normalizedFilePath])
-        #expect(service.orderedRepos.allSatisfy { $0.tierId == PortfolioTier.default.id })
+        #expect(service.orderedRepos.allSatisfy { $0.tier.id == PortfolioTier.default.id })
     }
 
     @Test("reposByTier returns all tiers in fixed order")

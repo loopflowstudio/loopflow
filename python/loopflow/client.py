@@ -128,7 +128,6 @@ class Client:
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
 
-
     def usage_summary(
         self,
         group_by: str = "wave",

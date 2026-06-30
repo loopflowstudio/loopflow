@@ -228,8 +228,6 @@ class TestClientResponses:
             client.providers()
         client.close()
 
-
-
     def test_waves_parses_list(self):
         def handler(request):
             return httpx.Response(200, json={"object": "list", "data": [WAVE_MINIMAL]})

@@ -137,9 +137,7 @@ def test_unknown_flag_fails_clearly(installer: Path, env: dict[str, str]) -> Non
     assert "Usage:" in result.stderr
 
 
-def test_download_failure_aborts_without_cryptic_error(
-    installer: Path, tmp_path: Path
-) -> None:
+def test_download_failure_aborts_without_cryptic_error(installer: Path, tmp_path: Path) -> None:
     """A failed download must abort loudly, not leak a confusing `cp` error."""
     stub_dir = tmp_path / "stub"
     _write_stubs(stub_dir)

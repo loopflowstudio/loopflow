@@ -2772,6 +2772,15 @@ mod tests {
         run_store_basic_suite(&store).await;
     }
 
+    #[tokio::test]
+    async fn sqlite_health_check_succeeds() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        store.health_check().await.expect("sqlite health check");
+    }
+
     // When lfd restarts, `fail_orphaned_runs` marks in-flight runs as Failed.
     // Without also resetting the wave's own status, the wave stays visually
     // "running" — the Concerto sidebar and buttons stay disabled forever even

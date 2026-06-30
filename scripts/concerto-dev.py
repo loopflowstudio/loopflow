@@ -240,7 +240,7 @@ def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], 
     env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
     print("Building lfd...")
-    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    result = run(["cargo", "build", "--locked", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         raise RuntimeError("Failed to build lfd")
 
@@ -766,7 +766,7 @@ def _lfd_docker() -> int:
     os.environ["GRPC_VERBOSITY"] = "ERROR"
 
     print("Building lfd...")
-    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    result = run(["cargo", "build", "--locked", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         return result.returncode
 
@@ -793,7 +793,7 @@ def _lfd_native() -> int:
     env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
 
     print("Building lfd...")
-    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    result = run(["cargo", "build", "--locked", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         return result.returncode
 
@@ -967,10 +967,10 @@ def _install_dev_app() -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
     if profile == "release":
-        cargo_cmd = ["cargo", "build", "--release", "--bin", "lf", "--bin", "lfd"]
+        cargo_cmd = ["cargo", "build", "--locked", "--release", "--bin", "lf", "--bin", "lfd"]
         bin_dir = REPO_ROOT / "target" / "release"
     else:
-        cargo_cmd = ["cargo", "build", "--bin", "lf", "--bin", "lfd"]
+        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf", "--bin", "lfd"]
         bin_dir = REPO_ROOT / "target" / "debug"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False)

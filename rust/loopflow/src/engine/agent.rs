@@ -1097,6 +1097,21 @@ mod tests {
     }
 
     #[test]
+    fn build_codex_command_without_context_file_omits_model_instructions() {
+        // Skill launches pass no context file (empty system prompt). Codex rejects
+        // an empty `model_instructions_file`, so the flag must be absent entirely.
+        let launch = default_launch();
+        let process = ProcessConfig {
+            context_file: None,
+            ..Default::default()
+        };
+        let cmd = build_codex_command(&launch, &process, None);
+        assert!(!cmd
+            .iter()
+            .any(|arg| arg.contains("model_instructions_file")));
+    }
+
+    #[test]
     fn build_opencode_command_auto() {
         let process = ProcessConfig {
             auto: true,

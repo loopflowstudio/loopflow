@@ -352,12 +352,20 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     );
 
     let context_file_start = Instant::now();
-    let context_file = Some(write_prompt_log(
-        &built.repo_root,
-        &built.agent_config.system_prompt,
-        &format!("{}.context", built.log_name),
-        None,
-    )?);
+    // Skill launches clear the system prompt — the vendor auto-loads its own
+    // native instruction doc (AGENTS.md / CLAUDE.md), so there's nothing to hand
+    // off as a context file. Codex rejects an empty `model_instructions_file`, so
+    // only write and pass the file when the system prompt actually has content.
+    let context_file = if built.agent_config.system_prompt.trim().is_empty() {
+        None
+    } else {
+        Some(write_prompt_log(
+            &built.repo_root,
+            &built.agent_config.system_prompt,
+            &format!("{}.context", built.log_name),
+            None,
+        )?)
+    };
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"

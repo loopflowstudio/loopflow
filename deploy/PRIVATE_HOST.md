@@ -32,7 +32,7 @@ ssh "$LFD_SSH_USER@$LFD_HOST"
 
 If the CLI shim is stale, call the app binary directly. Local machines may have stale Tailscale shims after app renames or reinstalls.
 
-## Bootstrap lfd on the host
+## Bootstrap native lfd on the host
 
 On the host:
 
@@ -41,12 +41,10 @@ mkdir -p ~/src
 git clone https://github.com/loopflowstudio/loopflow.git ~/src/loopflow
 cd ~/src/loopflow
 
-export LF_DOMAIN="$LFD_HOST"
-export LF_TLS_MODE=internal
+export LFD_HTTP_ADDR=0.0.0.0:2486
 export LFD_AUTH_TOKEN=$(openssl rand -hex 32)
-export LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh
 
-deploy/bootstrap-cron-host.sh --host mac
+deploy/native-lfd-host.sh install
 ```
 
 Use Doppler for maintained secrets once the host is reachable:
@@ -57,7 +55,7 @@ doppler secrets set LFD_AUTH_TOKEN="$LFD_AUTH_TOKEN"
 doppler secrets set LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh
 ```
 
-The launch agent keeps the stack up. Docker Desktop must be running.
+The launch agent keeps native `lfd` up. Docker Desktop is not required for the native service. Use `deploy/bootstrap-cron-host.sh` only when you explicitly want the Docker Compose stack.
 
 ## Configure this Mac as a client
 
@@ -115,10 +113,10 @@ On the host:
 
 ```bash
 cd ~/src/loopflow
-deploy/loopflow-server.sh status
-deploy/loopflow-server.sh logs
-deploy/loopflow-server.sh update
-launchctl print gui/$(id -u)/loopflow.server
+deploy/native-lfd-host.sh status
+deploy/native-lfd-host.sh logs
+deploy/native-lfd-host.sh update
+launchctl print gui/$(id -u)/com.loopflow.lfd
 ```
 
 From this Mac:
@@ -126,5 +124,5 @@ From this Mac:
 ```bash
 source ~/.lf/private-host.env
 lfq list
-ssh "$LFD_SSH_USER@$LFD_HOST" 'cd ~/src/loopflow && deploy/loopflow-server.sh status'
+ssh "$LFD_SSH_USER@$LFD_HOST" 'cd ~/src/loopflow && deploy/native-lfd-host.sh status'
 ```

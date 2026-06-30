@@ -1,0 +1,7 @@
+.env
+.pytest_cache/
+.ruff_cache/
+.sesskey
+.venv/
+__pycache__/
+tests/

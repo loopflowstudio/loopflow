@@ -124,6 +124,12 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
         text=True,
         capture_output=True,
     )
+    native_host_help = subprocess.run(
+        [str(ROOT / "deploy/native-lfd-host.sh"), "--help"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
 
     assert "up|update|down|status|logs|health" in help_result.stderr
     assert "LOOPFLOW_SECRETS=auto|doppler|env" in help_result.stderr
@@ -134,6 +140,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "setup-private-client.sh" in private_client_help.stderr
     assert "--token-file PATH" in private_client_help.stderr
     assert "--no-concerto" in private_client_help.stderr
+    assert "native-lfd-host.sh" in native_host_help.stderr
+    assert "install|update|restart|status|logs|health" in native_host_help.stderr
+    assert "LFD_HTTP_ADDR=0.0.0.0:2486" in native_host_help.stderr
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
@@ -154,6 +163,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "<tailscale-host-or-ip>" in private_readme
     assert "http://<tailscale-host-or-ip>:2486" in private_readme
     assert "deploy/setup-private-client.sh --host" in private_readme
+    assert "deploy/native-lfd-host.sh install" in private_readme
+    assert "Docker Desktop is not required for the native service" in private_readme
     assert "ssh-remote+$LFD_SSH_USER@$LFD_HOST" in private_readme
     assert "LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh" in private_readme
 
@@ -186,6 +197,12 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert '"DOCKER_HOST"' in bootstrap
     assert "lfq create root" in bootstrap
     assert "install -m 0600" in bootstrap
+
+    native_host = (ROOT / "deploy/native-lfd-host.sh").read_text()
+    assert "scripts/pull-local-bin.sh" in native_host
+    assert "install --force" in native_host
+    assert "launchctl kickstart -k" in native_host
+    assert "LFD_AUTH_TOKEN is required for native private lfd host management" in native_host
 
     private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
     assert "Host is required. Pass --host or set LFD_HOST." in private_client

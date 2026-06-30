@@ -235,3 +235,11 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Treat the goal as one release system with explicit measures: nightly package verification green, weekly release gated by that verification, local refresh as one command, self-hosted cron host reachable and observable, and automation/runtime spend under $100/month. Loopflow owns the primitives and cron host; Cadenza mirrors the cadence and proves the product-repo deployment shape. Secrets stay in Doppler or host-local env; private host details stay out of public repos.
 
 **Implications:** The next Loopflow work should prioritize local `lf`/`lfd` refresh and the self-hosted cron host before adding more product-specific deployment features. Any attempt to introduce a global studio-hosted default server is out of scope unless explicitly re-decided. Cost above $100/month is the next true human blocker.
+
+## 2026-06-30 — Mac private cron hosts use native lfd first
+
+**Context:** Bringing up the private Mac host exposed Docker Desktop assumptions that make the container stack a poor first step on macOS: launchd PATH, Docker Desktop context, credential helper behavior, and slow first-run image builds. Native `lfd` already supports launchd, remote bind, and bearer-token auth, and it became healthy with fewer moving parts.
+
+**Decision:** Use native launchd `lfd` as the default Mac private cron-host path. Keep Docker Compose as an explicit self-hosted/container option, especially for Linux or hosts that need container isolation, but do not block the Mac private host on it.
+
+**Implications:** The Mac host runbook centers on `deploy/native-lfd-host.sh`. Secure remote execution still needs a containerized executor story, but daemon availability, wave scheduling, and remote API access should not wait for Docker Compose first-run polish.

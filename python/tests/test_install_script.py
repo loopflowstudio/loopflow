@@ -182,3 +182,32 @@ def test_stage_binaries_errors_on_missing_cargo_output(
 
     with pytest.raises(install.StageError, match="expected build artifact missing"):
         install._stage_binaries(tmp_path / "local-bin")
+
+
+def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) -> None:
+    local_bin = tmp_path / "local-bin"
+    local_bin.mkdir()
+    (local_bin / "lf").write_text("lf")
+    (local_bin / "lfd").write_text("lfd")
+    (local_bin / "Loopflow.app" / "Contents").mkdir(parents=True)
+    (local_bin / "Loopflow.app" / "Contents" / "marker").write_text("new app")
+
+    install_dir = tmp_path / "bin"
+    install_dir.mkdir()
+    (install_dir / "lf").write_text("old lf")
+    (install_dir / "lfd").write_text("old lfd")
+
+    applications = tmp_path / "Applications"
+    (applications / "Loopflow.app").mkdir(parents=True)
+    (applications / "Loopflow.app" / "old").write_text("old app")
+    (applications / "Loopflow Concerto.app").mkdir()
+
+    install._promote(local_bin, install_dir, applications_dir=applications)
+
+    assert (install_dir / "lf").is_symlink()
+    assert (install_dir / "lf").readlink() == local_bin / "lf"
+    assert (install_dir / "lfd").is_symlink()
+    assert (install_dir / "lfd").readlink() == local_bin / "lfd"
+    assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
+    assert not (applications / "Loopflow.app" / "old").exists()
+    assert not (applications / "Loopflow Concerto.app").exists()

@@ -133,6 +133,18 @@ pub struct Flow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Goal {
+    pub name: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalRenderContext {
+    pub flows: Vec<String>,
+    pub roadmap: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteStep {
     pub step: Step,
     pub flow_parents: Vec<String>,
@@ -227,6 +239,46 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     load_flow_inner(name, repo, true)
+}
+
+pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
+    if let Ok(goal_path) = find_goal_path(name, repo) {
+        let prompt = fs::read_to_string(goal_path)?;
+        return Ok(Goal {
+            name: name.to_string(),
+            prompt,
+        });
+    }
+
+    if let Some(key) = crate::engine::builtins::resolve_builtin_goal(name) {
+        let prompt = crate::engine::builtins::get_builtin_goal(key)
+            .expect("resolve_builtin_goal returned a known key");
+        return Ok(Goal {
+            name: key.to_string(),
+            prompt: prompt.to_string(),
+        });
+    }
+
+    Err(LoadError::GoalNotFound(name.to_string()))
+}
+
+pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
+    let flows = if ctx.flows.is_empty() {
+        "No flows are available.".to_string()
+    } else {
+        ctx.flows
+            .iter()
+            .map(|flow| format!("- {flow}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n</lf:goal-context>",
+        goal.prompt.trim(),
+        flows,
+        ctx.roadmap
+    )
 }
 
 /// Like `load_flow`, but resolves only exact-name matches in the builtin
@@ -553,6 +605,48 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError::StepNotFound(name.to_string()))
+}
+
+fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    if let Some((prefix, goal_name)) = name.split_once('/') {
+        let repo_ns = markdown_path(&repo.join(".lf/goals").join(prefix), goal_name);
+        if repo_ns.exists() {
+            return Ok(repo_ns);
+        }
+        let repo_singular_ns = markdown_path(&repo.join(".lf/goal").join(prefix), goal_name);
+        if repo_singular_ns.exists() {
+            return Ok(repo_singular_ns);
+        }
+        if let Some(home) = home_dir() {
+            let home_ns = markdown_path(&home.join(".lf/goals").join(prefix), goal_name);
+            if home_ns.exists() {
+                return Ok(home_ns);
+            }
+            let home_singular_ns = markdown_path(&home.join(".lf/goal").join(prefix), goal_name);
+            if home_singular_ns.exists() {
+                return Ok(home_singular_ns);
+            }
+        }
+    }
+
+    if let Some(path) = first_existing_path([
+        markdown_path(&repo.join(".lf/goals"), name),
+        markdown_path(&repo.join(".lf/goal"), name),
+        markdown_path(&repo.join("goal"), name),
+    ]) {
+        return Ok(path);
+    }
+
+    if let Some(home) = home_dir() {
+        if let Some(path) = first_existing_path([
+            markdown_path(&home.join(".lf/goals"), name),
+            markdown_path(&home.join(".lf/goal"), name),
+        ]) {
+            return Ok(path);
+        }
+    }
+
+    Err(LoadError::GoalNotFound(name.to_string()))
 }
 
 fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
@@ -1417,6 +1511,38 @@ mod tests {
         let step = load_step("mystep", tmp.path()).unwrap();
         assert_eq!(step.name, "mystep");
         assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_goal_finds_repo_goal_override() {
+        let tmp = TempDir::new().unwrap();
+        let goals_dir = tmp.path().join("goal");
+        fs::create_dir_all(&goals_dir).unwrap();
+        fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
+
+        let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
+        assert_eq!(goal.name, "ship-roadmap");
+        assert_eq!(goal.prompt, "Repo goal prompt.");
+    }
+
+    #[test]
+    fn render_goal_includes_flow_and_roadmap_context() {
+        let goal = Goal {
+            name: "drive".to_string(),
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: vec!["build".to_string(), "qa".to_string()],
+                roadmap: "wave/goals".to_string(),
+            },
+        );
+
+        assert!(rendered.contains("Drive the work."));
+        assert!(rendered.contains("- build"));
+        assert!(rendered.contains("- qa"));
+        assert!(rendered.contains("wave/goals"));
     }
 
     #[test]

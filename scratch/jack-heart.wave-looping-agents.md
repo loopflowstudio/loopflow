@@ -64,3 +64,29 @@ and runs it as the iteration body.
 
 Not quantitative — this is a primitive + wiring change. Coverage is proven by
 the override test and the loop-body smoke test, not a benchmark.
+
+---
+
+# Added later — address after the initial primitive lands
+
+Doesn't block the primitive. Pick it up once `goal/` resolves, round-trips, and
+drives a loop iteration.
+
+## Looping agents delegate; they don't hand-write code
+
+The **LOOPFLOW operating prompt** (the universal Wave orchestration contract
+woven into every looping session's initial prompt — see `wave/goals/README.md`)
+must instruct the looping, goal-seeking agent to **avoid writing code itself**.
+Its job is orchestration, not implementation: read roadmap/metrics → pick the
+next move → **dispatch an `lf` flow or `lf` step** that hands the actual edits to
+a subagent. Writing code inline is the exception (a trivial fix not worth a
+subagent), never the default.
+
+Beyond fire-and-forget dispatch, the looping agent can hold **interactive
+sessions** with its subagents — using the interactive agent APIs to open a
+session, steer it, answer its questions, and read its results back, then carry
+that into the next move. The loop "communicates" with subagents through these
+sessions rather than doing the work in its own context.
+
+The loop is the *head*, the flow is the *hands*: keep the loop's transcript about
+*decisions*, and let scoped subagents own the diffs.

@@ -21,6 +21,7 @@ def test_wave_fixture_parses():
     assert wave.id == "wave_abc123"
     assert wave.name == "engbot"
     assert wave.primary_flow == "build"
+    assert wave.goal == "ship-roadmap"
     assert wave.mode == "loop"
     assert wave.status == "running"
     assert wave.iteration == 3

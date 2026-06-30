@@ -383,6 +383,33 @@ pub(crate) fn build_lf_step_command(
     cmd
 }
 
+pub(crate) fn build_lf_inline_command(
+    prompt: &str,
+    batch: bool,
+    directions: &[String],
+    area: &[String],
+    wave_name: &str,
+) -> Vec<String> {
+    let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
+    if batch {
+        cmd.push("-b".to_string());
+    }
+    cmd.push("--no-direction".to_string());
+    for direction in directions {
+        cmd.push("-d".to_string());
+        cmd.push(direction.clone());
+    }
+    for scope in area {
+        cmd.push("-a".to_string());
+        cmd.push(scope.clone());
+    }
+    cmd.push("-w".to_string());
+    cmd.push(wave_name.to_string());
+    cmd.push(":".to_string());
+    cmd.push(prompt.to_string());
+    cmd
+}
+
 /// Commit any remaining changes, push, and create a draft PR.
 /// Returns the PR info if successful, None if skipped or failed.
 pub(crate) fn auto_create_pr(

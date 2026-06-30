@@ -233,6 +233,7 @@ impl SqliteStore {
                 wave.workers as i64,
                 wave.mode().as_str(),
                 wave.primary_flow(),
+                wave.goal(),
             ],
         )?;
         Ok(())

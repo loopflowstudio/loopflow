@@ -85,6 +85,8 @@ pub struct WaveDto {
     pub repo: String,
     pub mode: String,
     pub primary_flow: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

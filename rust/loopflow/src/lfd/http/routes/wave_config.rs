@@ -46,6 +46,7 @@ impl WavePmConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct WaveConfig {
     pub flow: Option<String>,
+    pub goal: Option<String>,
     pub mode: Option<String>,
     pub primary_flow: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,

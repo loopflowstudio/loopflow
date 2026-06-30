@@ -233,6 +233,7 @@ pub struct Wave {
     pub repo: String,
     pub mode: WaveMode,
     pub primary_flow: String,
+    pub goal: Option<String>,
     #[serde(default)]
     pub crons: Vec<WaveCron>,
     pub direction: Vec<String>,
@@ -259,6 +260,7 @@ impl Wave {
             repo,
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: None,
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
@@ -288,6 +290,10 @@ impl Wave {
 
     pub fn primary_flow(&self) -> &String {
         &self.primary_flow
+    }
+
+    pub fn goal(&self) -> Option<&str> {
+        self.goal.as_deref()
     }
 
     pub fn direction(&self) -> &Vec<String> {

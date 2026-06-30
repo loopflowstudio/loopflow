@@ -35,6 +35,13 @@ fn main() {
         "BUILTIN_FLOWS",
         &out_dir.join("builtin_flows.rs"),
     );
+    generate_kind_map(
+        &builtins_dir,
+        "goal",
+        "md",
+        "BUILTIN_GOALS",
+        &out_dir.join("builtin_goals.rs"),
+    );
 
     generate_category_map(
         &builtins_dir,

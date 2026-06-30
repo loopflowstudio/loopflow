@@ -228,6 +228,7 @@ impl PostgresStore {
             let workers = wave.workers as i32;
             let mode = wave.mode().as_str();
             let primary_flow = wave.primary_flow();
+            let goal = wave.goal();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -245,6 +246,7 @@ impl PostgresStore {
                         &workers,
                         &mode,
                         &primary_flow.as_str(),
+                        &goal,
                     ],
                 )
                 .await?;

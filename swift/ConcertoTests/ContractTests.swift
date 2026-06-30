@@ -33,6 +33,7 @@ struct ContractTests {
         #expect(wave.id == "wave_abc123")
         #expect(wave.name == "engbot")
         #expect(wave.flow == "build")
+        #expect(wave.goal == "ship-roadmap")
         #expect(wave.status == .running)
         #expect(wave.iteration == 3)
         #expect(wave.direction == ["ux", "clarity"])

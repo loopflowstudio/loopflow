@@ -40,8 +40,8 @@ use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_lf_step_command, cleanup_run_worktree,
-    is_active_wave_run_status, is_ephemeral_worktree_path,
+    advance_branch, auto_create_pr, build_lf_inline_command, build_lf_step_command,
+    cleanup_run_worktree, is_active_wave_run_status, is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -123,6 +123,84 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty())
+}
+
+fn available_flow_names(repo: &Path) -> Vec<String> {
+    let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect();
+    let flow_dir = repo.join(".lf/flows");
+    if let Ok(entries) = std::fs::read_dir(flow_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let Some(prefix) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if let Ok(children) = std::fs::read_dir(&path) {
+                    for child in children.flatten() {
+                        let child_path = child.path();
+                        if child_path
+                            .extension()
+                            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+                        {
+                            if let Some(stem) =
+                                child_path.file_stem().and_then(|name| name.to_str())
+                            {
+                                names.push(format!("{prefix}/{stem}"));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if path
+                .extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+            {
+                if let Some(stem) = path.file_stem().and_then(|name| name.to_str()) {
+                    names.push(stem.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
+    if let Some(goal_name) = wave.goal() {
+        let repo = Path::new(&run.worktree);
+        let goal = crate::engine::load_goal(goal_name, repo)?;
+        let prompt = crate::engine::render_goal(
+            &goal,
+            &crate::engine::GoalRenderContext {
+                flows: available_flow_names(repo),
+                roadmap: format!("wave/{}", wave.name()),
+            },
+        );
+        let cmd = build_lf_inline_command(
+            &prompt,
+            true,
+            &run.snapshot.direction,
+            &run.snapshot.area,
+            wave.name(),
+        );
+        return Ok((cmd, format!("goal:{goal_name}")));
+    }
+
+    Ok((
+        build_lf_step_command(
+            &run.snapshot.flow,
+            true,
+            &run.snapshot.direction,
+            &run.snapshot.area,
+            wave.name(),
+        ),
+        run.snapshot.flow.clone(),
+    ))
 }
 
 #[derive(Clone)]
@@ -436,19 +514,13 @@ impl WaveExecutor {
 
         let session_id = LfdId::new();
         let env = flow_step_env(wave.id(), &run.id, Some(&session_id));
-        let cmd = build_lf_step_command(
-            &run.snapshot.flow,
-            true,
-            &run.snapshot.direction,
-            &run.snapshot.area,
-            wave.name(),
-        );
+        let (cmd, terminal_step) = build_wave_run_command(&wave, &run)?;
         let tmux_managed = !self.disable_tmux && tmux_available();
         let terminal_session = TerminalSession {
             id: session_id.clone(),
             wave_id: wave.id().clone(),
             wave_run_id: Some(run.id.clone()),
-            step: run.snapshot.flow.clone(),
+            step: terminal_step.clone(),
             agent: "lf".to_string(),
             cwd: run.worktree.clone(),
             argv: cmd.clone(),
@@ -485,7 +557,7 @@ impl WaveExecutor {
                     repo: run.snapshot.repo.clone(),
                     worktree: run.worktree.clone(),
                     step: crate::engine::flow::ConcreteStep {
-                        step: crate::engine::flow::Step::named(&run.snapshot.flow),
+                        step: crate::engine::flow::Step::named(&terminal_step),
                         flow_parents: Vec::new(),
                     },
                     agent: "lf".to_string(),
@@ -1188,6 +1260,7 @@ mod tests {
     use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     struct MockRunner;
@@ -1200,6 +1273,28 @@ mod tests {
             _cwd: &Path,
             _context: super::super::AgentRunContext,
         ) -> Result<i32> {
+            Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturingRunner {
+        cmd: Mutex<Option<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl AgentExecutor for CapturingRunner {
+        async fn run(
+            &self,
+            cmd: Vec<String>,
+            _cwd: &Path,
+            _context: super::super::AgentRunContext,
+        ) -> Result<i32> {
+            *self.cmd.lock().expect("capture mutex poisoned") = Some(cmd);
             Ok(0)
         }
 
@@ -1222,6 +1317,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
+            goal: None,
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1280,6 +1376,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
+            goal: None,
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1384,6 +1481,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_wave_run_with_goal_runs_rendered_goal_prompt() {
+        let repo = TestRepo::new();
+        let goals_dir = repo.path().join("goal");
+        std::fs::create_dir_all(&goals_dir).expect("create goal dir");
+        std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
+            .expect("write goal");
+        std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("create flows dir");
+        std::fs::write(repo.path().join(".lf/flows/custom.yaml"), "- implement\n")
+            .expect("write flow");
+
+        let db_path = repo.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store"),
+        );
+        let scheduler = Arc::new(crate::lfd::scheduler::Scheduler::new(1));
+        let event_hub = EventHub::new(16);
+        let runner = Arc::new(CapturingRunner {
+            cmd: Mutex::new(None),
+        });
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            OutputHub::new(1024, repo.path().join("output")),
+            event_hub,
+            runner.clone(),
+        );
+
+        let mut wave = make_wave(
+            "goal-wave",
+            repo.path(),
+            "ship-roadmap",
+            WaveStatus::Running,
+        );
+        wave.mode = WaveMode::Manual;
+        wave.goal = Some("drive".to_string());
+        store.create_wave(&wave).await.expect("create wave");
+
+        let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
+        run.target_branch = "goal-branch".to_string();
+        store.update_wave_run(&run).await.expect("update run");
+
+        executor.execute(&run.id).await.expect("execute run");
+
+        let cmd = runner
+            .cmd
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone()
+            .expect("runner command");
+        assert!(cmd.iter().any(|arg| arg == ":"));
+        let prompt = cmd.last().expect("inline prompt should be last arg");
+        assert!(prompt.contains("Execute the custom goal body."));
+        assert!(prompt.contains("- custom"));
+        assert!(prompt.contains("wave/goal-wave"));
+    }
+
+    #[tokio::test]
     async fn execute_starts_listen_wave_on_completion() {
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
@@ -1406,6 +1562,7 @@ mod tests {
             repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
+            goal: None,
             crons: Vec::new(),
             direction: vec![],
             area: vec![],

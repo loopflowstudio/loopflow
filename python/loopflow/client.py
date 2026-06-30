@@ -173,12 +173,14 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
+        goal: Optional[str] = None,
     ) -> Wave:
         body = {
             "repo": repo,
             "name": name,
             **_compact_dict(
                 flow=flow,
+                goal=goal,
                 crons=crons,
                 direction=direction,
                 area=area,
@@ -196,9 +198,11 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
+        goal: Optional[str] = None,
     ) -> Wave:
         body = _compact_dict(
             flow=flow,
+            goal=goal,
             crons=crons,
             direction=direction,
             area=area,
@@ -247,8 +251,9 @@ class Client:
         flow: Optional[str] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
+        goal: Optional[str] = None,
     ) -> dict[str, Any]:
-        body = _compact_dict(flow=flow, direction=direction, area=area)
+        body = _compact_dict(flow=flow, goal=goal, direction=direction, area=area)
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
     def add_trigger(

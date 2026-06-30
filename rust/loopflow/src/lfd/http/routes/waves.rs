@@ -100,6 +100,7 @@ pub struct CreateWaveRequest {
     repo: String,
     name: Option<String>,
     flow: Option<String>,
+    goal: Option<String>,
     crons: Option<Vec<WaveCronDef>>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
@@ -115,6 +116,7 @@ pub struct CreateWaveRequest {
 pub struct UpdateWaveRequest {
     name: Option<String>,
     flow: Option<String>,
+    goal: Option<String>,
     crons: Option<Vec<WaveCronDef>>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
@@ -130,6 +132,7 @@ pub struct RunWaveRequest {
     area: Option<Vec<String>>,
     direction: Option<Vec<String>>,
     flow: Option<String>,
+    goal: Option<String>,
     roadmap_item: Option<String>,
 }
 
@@ -193,6 +196,7 @@ pub async fn create_wave_handler(
         repo,
         name: requested_name,
         flow,
+        goal,
         crons: requested_crons,
         direction,
         area,
@@ -237,6 +241,9 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.primary_flow.clone()))
         .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
+    let goal = goal
+        .or_else(|| wave_config.as_ref().and_then(|c| c.goal.clone()))
+        .and_then(|value| trimmed_non_empty(Some(&value)));
     let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
     let cron_defs = requested_crons
         .or_else(|| wave_config.as_ref().and_then(|c| c.crons.clone()))
@@ -249,6 +256,7 @@ pub async fn create_wave_handler(
         repo,
         mode,
         primary_flow,
+        goal,
         crons: Vec::new(),
         direction,
         area,
@@ -621,6 +629,9 @@ pub async fn update_wave_handler(
     if let Some(flow) = payload.flow {
         wave.primary_flow = flow;
     }
+    if let Some(goal) = payload.goal {
+        wave.goal = trimmed_non_empty(Some(&goal));
+    }
     if let Some(direction) = payload.direction {
         wave.direction = direction;
     }
@@ -773,6 +784,9 @@ async fn start_wave_run(
     if let Some(overrides) = overrides {
         flow_override = overrides.flow;
         roadmap_item = overrides.roadmap_item;
+        if let Some(goal) = overrides.goal {
+            wave.goal = trimmed_non_empty(Some(&goal));
+        }
         if let Some(direction) = overrides.direction {
             wave.direction = direction;
         }
@@ -1571,6 +1585,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: None,
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
@@ -1796,6 +1811,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("build".to_string()),
+                goal: None,
                 crons: None,
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["src/".to_string()]),
@@ -1837,6 +1853,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -1863,6 +1880,7 @@ mod tests {
                 area: None,
                 direction: None,
                 flow: Some("design".to_string()),
+                goal: None,
                 roadmap_item: None,
             }),
         )
@@ -1910,6 +1928,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -1931,6 +1950,7 @@ mod tests {
                 area: None,
                 direction: None,
                 flow: Some("build".to_string()),
+                goal: None,
                 roadmap_item: Some("1-something.md".to_string()),
             })),
         )
@@ -1973,6 +1993,7 @@ mod tests {
                 repo: repo.clone(),
                 name: Some("designer".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -1992,6 +2013,7 @@ mod tests {
                 area: None,
                 direction: None,
                 flow: Some("build".to_string()),
+                goal: None,
                 roadmap_item: Some("does-not-exist.md".to_string()),
             })),
         )
@@ -2025,6 +2047,7 @@ mod tests {
                 repo,
                 name: Some("designer".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -2056,6 +2079,7 @@ mod tests {
                 repo,
                 name: Some("designer".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -2091,6 +2115,7 @@ mod tests {
                 repo,
                 name: Some("designer".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -2213,6 +2238,7 @@ mod tests {
                 repo: repo_a.clone(),
                 name: Some("wave-a".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -2230,6 +2256,7 @@ mod tests {
                 repo: repo_b.clone(),
                 name: Some("wave-b".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,
@@ -2273,6 +2300,7 @@ mod tests {
                 repo,
                 name: Some("before".to_string()),
                 flow: Some("ship-roadmap".to_string()),
+                goal: None,
                 crons: None,
                 direction: Some(vec!["infra".to_string()]),
                 area: Some(vec!["src/".to_string()]),
@@ -2330,6 +2358,7 @@ mod tests {
                 repo,
                 name: Some("delete-me".to_string()),
                 flow: None,
+                goal: None,
                 crons: None,
                 direction: None,
                 area: None,

@@ -354,9 +354,9 @@ def _worktree_wave_name(repo_root: Path, worktree: Path) -> str | None:
     return suffix or None
 
 
-def _seed_waves_from_wave_dir() -> None:
+def _seed_waves_from_wave_dir(repo: Path = REPO_ROOT) -> None:
     """Bootstrap paused waves from wave/ and connect matching sibling worktrees."""
-    wave_dir = REPO_ROOT / "wave"
+    wave_dir = repo / "wave"
     if not wave_dir.is_dir():
         return
 
@@ -369,15 +369,15 @@ def _seed_waves_from_wave_dir() -> None:
     import loopflow.api as loopflow
 
     try:
-        existing = {w.name: w for w in loopflow.waves(repo=str(REPO_ROOT))}
+        existing = {w.name: w for w in loopflow.waves(repo=str(repo))}
     except Exception:
         print("Warning: could not list waves from lfd, skipping wave seed")
         return
 
     worktree_by_wave = {
         wave_name: path
-        for path in _list_worktree_paths(REPO_ROOT)
-        if (wave_name := _worktree_wave_name(REPO_ROOT, path)) is not None
+        for path in _list_worktree_paths(repo)
+        if (wave_name := _worktree_wave_name(repo, path)) is not None
     }
 
     created = 0
@@ -388,7 +388,7 @@ def _seed_waves_from_wave_dir() -> None:
             if wave_name not in existing:
                 loopflow.create_wave(
                     wave_name,
-                    repo=str(REPO_ROOT),
+                    repo=str(repo),
                     status="paused",
                 )
                 created += 1
@@ -429,8 +429,10 @@ def _print_run_debug_checklist() -> None:
     print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
 
 
-def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
-    """Build and run with stdout visible."""
+def cmd_run_debug(
+    with_lfd: bool = False, docker_lfd: bool = False, repo: Path = REPO_ROOT
+) -> int:
+    """Build and run with stdout visible. `repo` is the repo the app opens."""
     lfd_process: subprocess.Popen[str] | None = None
     lfd_log: TextIO | None = None
 
@@ -458,7 +460,7 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
             return 1
 
     if with_lfd:
-        _seed_waves_from_wave_dir()
+        _seed_waves_from_wave_dir(repo)
 
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
@@ -478,7 +480,7 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
     app_exit = run_app_bundle_with_log(
         DEV_APP,
         CONCERTO_STREAM_LOG,
-        args=["--repo", str(REPO_ROOT)],
+        args=["--repo", str(repo)],
     )
 
     if lfd_process is not None:
@@ -1242,6 +1244,12 @@ def main() -> int:
                 action="store_true",
                 help="Reserved for future container lfd support with --with-lfd",
             )
+            sub.add_argument(
+                "--repo",
+                type=lambda p: Path(p).expanduser().resolve(),
+                default=REPO_ROOT,
+                help="Repo the app opens on launch (default: this checkout)",
+            )
         if name == "run-ios":
             sub.add_argument(
                 "--device",
@@ -1271,7 +1279,7 @@ def main() -> int:
         return func(docker=args.docker, kill=args.kill)
     if args.command == "run-debug":
         with_lfd = args.with_lfd
-        return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd)
+        return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd, repo=args.repo)
     if args.command == "run-ios":
         return func(device=args.device)
     if args.command == "setup":

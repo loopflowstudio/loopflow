@@ -77,11 +77,30 @@ things: save current image → `flyctl deploy` → smoke-test `loopflow.studio/`
 - Add the docs-materialize step before deploy.
 - Path filter: trigger on `website/**`, `docs/**`, and the workflow file.
 
-Secrets to add to the **loopflow** repo (manual, Jack — outside this PR):
-- `FLY_DEPLOY_TOKEN_WEBSITE_PROD` (fly deploy token)
+**Secrets come from Doppler, not GitHub.** Mirror `release.yml`: the only
+GitHub secret is `DOPPLER_TOKEN_PRD` (already present). The studio workflow's
+`secrets.FLY_DEPLOY_TOKEN_WEBSITE_PROD` becomes a Doppler-injected env var.
 
-Fly app secrets stay on fly (unchanged): `WEBSITE_DB_URL`, `RESEND_API_KEY`,
-`FIGMA_TOKEN`, session key.
+```yaml
+- name: Fetch secrets
+  uses: dopplerhq/secrets-fetch-action@v2.0.0
+  with:
+    doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
+    inject-env-vars: true
+    doppler-project: loopflow
+    doppler-config: prd
+```
+
+After that step, `FLY_API_TOKEN` (deploy token), `WEBSITE_DB_URL`,
+`RESEND_API_KEY`, and `FIGMA_TOKEN` are env vars. `flyctl deploy` reads
+`FLY_API_TOKEN` natively. The app's runtime secrets are synced Doppler → fly at
+deploy with `flyctl secrets set --stage` (no extra restart; the deploy picks
+them up), so Doppler stays the single source of truth — no `fly secrets`
+managed by hand.
+
+Prereq (Jack, outside this PR): confirm the website's keys live in Doppler
+`loopflow/prd` — `FLY_API_TOKEN`, `WEBSITE_DB_URL`, `RESEND_API_KEY`,
+`FIGMA_TOKEN`, and the FastHTML session key.
 
 ## Public-exposure check
 

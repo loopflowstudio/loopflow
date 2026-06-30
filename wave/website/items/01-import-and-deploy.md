@@ -27,5 +27,8 @@ canonical `docs/`.
 
 ## Out of band (Jack, not in PR)
 
-- Add `FLY_DEPLOY_TOKEN_WEBSITE_PROD` to the loopflow repo secrets.
+- Confirm the website keys are in Doppler `loopflow/prd` (`FLY_API_TOKEN`,
+  `WEBSITE_DB_URL`, `RESEND_API_KEY`, `FIGMA_TOKEN`, session key). Deploy pulls
+  them via the existing `DOPPLER_TOKEN_PRD` GitHub secret — nothing new in
+  GitHub secrets.
 - Disable Pages in repo settings once the site's `/docs` is live.

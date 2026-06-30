@@ -138,6 +138,10 @@ Define the capability in shared code, implement it in platform shell code.
 
 Concerto launches into a portfolio window instead of a single welcome panel:
 
+- Repos render under fixed tiers: **Core**, **Active**, **Future**, and **Deprecated**
+- Drag repo cards between tiers or within a tier to set manual portfolio order
+- Use a repo card's context menu to move it to another tier without dragging
+- New and legacy repos start in **Active**; existing portfolio data is preserved
 - Each repo appears as a card with live wave status, blocked count, and diff totals
 - Click a wave to open that repo window and focus the selected wave
 - Use the `+` card to scan `~/src` and add another main git worktree

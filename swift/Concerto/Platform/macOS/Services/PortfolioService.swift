@@ -73,8 +73,8 @@ final class PortfolioService {
         let normalizedPath = movedPath.normalizedFilePath
         guard let movedIndex = repos.firstIndex(where: { $0.path == normalizedPath }) else { return }
 
-        let validAbove = above?.path == normalizedPath ? nil : above
-        let validBelow = below?.path == normalizedPath ? nil : below
+        let validAbove = validNeighbor(above, in: tier, excluding: normalizedPath)
+        let validBelow = validNeighbor(below, in: tier, excluding: normalizedPath)
         repos[movedIndex].tierId = tier.id
         repos[movedIndex].priority = priority(above: validAbove, below: validBelow)
         saveRepos()
@@ -116,6 +116,15 @@ final class PortfolioService {
         }
 
         return normalized
+    }
+
+    private func validNeighbor(
+        _ repo: PortfolioRepo?,
+        in tier: PortfolioTier,
+        excluding movedPath: String
+    ) -> PortfolioRepo? {
+        guard let repo, repo.path != movedPath, repo.tier.id == tier.id else { return nil }
+        return repo
     }
 
     private func priority(above: PortfolioRepo?, below: PortfolioRepo?) -> Double {

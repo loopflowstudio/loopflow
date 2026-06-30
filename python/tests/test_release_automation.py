@@ -112,16 +112,28 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
         text=True,
         capture_output=True,
     )
+    bootstrap_help = subprocess.run(
+        [str(ROOT / "deploy/bootstrap-cron-host.sh"), "--help"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
 
     assert "up|update|down|status|logs|health" in help_result.stderr
     assert "LOOPFLOW_SECRETS=auto|doppler|env" in help_result.stderr
     assert "LFD_AUTH_TOKEN=..." in help_result.stderr
+    assert "bootstrap-cron-host.sh [--repo PATH]" in bootstrap_help.stderr
+    assert "--host auto|linux|mac" in bootstrap_help.stderr
+    assert "--no-wave" in bootstrap_help.stderr
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
     assert "openssl rand -hex 32" in readme
     assert "leave `LF_TLS_MODE` empty" in readme
     assert "Mac mini + Tailscale" in readme
+    assert "bootstrap-cron-host.sh" in readme
+    assert "one-command host setup" in readme
+    assert "/etc/loopflow-server.env" in readme
     assert "loopflow-server-update.timer" in readme
     assert "lfq create root /opt/loopflow" in readme
 
@@ -143,6 +155,13 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "LFD_AUTH_TOKEN is required for self-hosted remote execution" in script
     assert '(cd "$repo" && doppler run -- "$@")' in script
     assert 'export CADDYFILE="$repo/deploy/Caddyfile.internal"' in script
+
+    bootstrap = (ROOT / "deploy/bootstrap-cron-host.sh").read_text()
+    assert "is required for cron-host bootstrap" in bootstrap
+    assert "systemctl enable --now loopflow-server.service" in bootstrap
+    assert "launchctl bootstrap" in bootstrap
+    assert "lfq create root" in bootstrap
+    assert "install -m 0600" in bootstrap
 
     service = (ROOT / "deploy/systemd/loopflow-server.service").read_text()
     assert "ExecStart=/opt/loopflow/deploy/loopflow-server.sh up" in service

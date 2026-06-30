@@ -1,6 +1,6 @@
 # Self-hosted deploy
 
-Run your own `lfd` cron host. Use `deploy/MAC_MINI.md` for the first maintained Tailscale host; use the generic Docker/Caddy path below for public or non-Mac hosts.
+Run your own `lfd` cron host. Use `deploy/PRIVATE_HOST.md` for the first maintained Tailscale host; use the generic Docker/Caddy path below for public or non-private hosts.
 
 ```bash
 git clone https://github.com/loopflowstudio/loopflow.git /opt/loopflow

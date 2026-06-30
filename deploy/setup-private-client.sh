@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Configure this Mac to use the Mac Mini self-hosted lfd over Tailscale.
-# Stores the lfq environment in ~/.lf/mini.env and seeds Concerto's remote
+# Configure this Mac to use a private self-hosted lfd over Tailscale.
+# Stores the lfq environment in ~/.lf/private-host.env and seeds Concerto's remote
 # connection + Keychain token for the same host.
 
 set -euo pipefail
 
 usage() {
     cat >&2 <<'USAGE'
-Usage: setup-mini-client.sh [options]
+Usage: setup-private-client.sh [options]
 
 Options:
-  --host HOST        Mac Mini Tailscale IP or MagicDNS name (default: 100.96.227.95)
+  --host HOST        Tailscale IP or MagicDNS name. Defaults to LFD_HOST if set.
   --ssh-user USER    SSH user for the mini alias (default: jack)
   --port PORT        lfd port (default: 2486)
   --https           Use https://HOST:PORT instead of http://HOST:PORT
   --token TOKEN      lfd bearer token. Defaults to LFD_TOKEN or LFD_AUTH_TOKEN.
   --token-file PATH  Read bearer token from PATH.
-  --env-file PATH    Write shell exports here (default: ~/.lf/mini.env)
+  --env-file PATH    Write shell exports here (default: ~/.lf/private-host.env)
   --no-concerto      Do not seed Concerto UserDefaults/Keychain.
   --verify           Run lfq status after writing local config.
   -h, --help         Show this help.
@@ -25,13 +25,13 @@ The env file contains secrets and is written with 0600 permissions.
 USAGE
 }
 
-host="100.96.227.95"
-ssh_user="jack"
+host="${LFD_HOST:-}"
+ssh_user="${LFD_SSH_USER:-${USER:-}}"
 port="2486"
 use_tls=0
 token="${LFD_TOKEN:-${LFD_AUTH_TOKEN:-}}"
 token_file=""
-env_file="$HOME/.lf/mini.env"
+env_file="$HOME/.lf/private-host.env"
 configure_concerto=1
 verify=0
 
@@ -119,6 +119,16 @@ if [[ -z "$token" ]]; then
     exit 1
 fi
 
+if [[ -z "$host" ]]; then
+    echo "Host is required. Pass --host or set LFD_HOST." >&2
+    exit 1
+fi
+
+if [[ -z "$ssh_user" ]]; then
+    echo "SSH user is required. Pass --ssh-user or set LFD_SSH_USER." >&2
+    exit 1
+fi
+
 if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
     echo "invalid port: $port" >&2
     exit 1
@@ -133,9 +143,10 @@ url="$scheme://$host:$port"
 mkdir -p "$(dirname "$env_file")"
 tmp="$(mktemp)"
 cat > "$tmp" <<EOF_ENV
-# Source this file to point lfq and other loopflow clients at the Mac Mini lfd.
-export MINI=$host
-alias mini='ssh $ssh_user@\$MINI'
+# Source this file to point lfq and other loopflow clients at the private lfd host.
+export LFD_HOST=$host
+export LFD_SSH_USER=$ssh_user
+alias lfdhost='ssh \$LFD_SSH_USER@\$LFD_HOST'
 export LFD_URL=$url
 export LFD_TOKEN=$token
 EOF_ENV
@@ -170,7 +181,7 @@ fi
 
 echo "wrote $env_file"
 echo "lfd url: $url"
-echo "ssh alias: source $env_file && mini"
+echo "ssh alias: source $env_file && lfdhost"
 if [[ "$configure_concerto" -eq 1 ]]; then
     echo "seeded Concerto remote connection for $host:$port"
 fi

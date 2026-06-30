@@ -1,6 +1,6 @@
 # Self-hosted deploy
 
-Run your own `lfd` cron host behind Caddy TLS.
+Run your own `lfd` cron host. Use `deploy/MAC_MINI.md` for the first maintained Tailscale host; use the generic Docker/Caddy path below for public or non-Mac hosts.
 
 ```bash
 git clone https://github.com/loopflowstudio/loopflow.git /opt/loopflow
@@ -126,7 +126,7 @@ deploy/loopflow-server.sh logs
 curl -f http://127.0.0.1:${LFD_PORT:-2486}/health
 ```
 
-Need agent credentials inside execution containers? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,ssh` in Doppler or `.env` instead of editing compose volume lines.
+Need agent credentials inside execution containers? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
 
 Common failures:
 

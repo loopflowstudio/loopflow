@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build and install loopflow locally.
 
-    install.py                  # build and install everything
-    install.py --service        # also install/restart lfd as a launchd service
-    install.py --skip wheel     # skip a build stage (wheel|cargo|swift)
-    install.py -n               # dry run
+    install.py local            # build this worktree into local-bin/
+    install.py local --use      # promote this worktree onto PATH and /Applications
+    install.py local --service  # also install/restart lfd as a launchd service
+    install.py local --skip swift
+    install.py local -n         # dry run
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
@@ -22,10 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typer
+from bundle_version import read_release_version, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
 APPLICATIONS_DIR = Path("/Applications")
+LOCAL_BIN = ROOT / "local-bin"
+APP_NAME = "Loopflow"
+LEGACY_APP_NAME = "Loopflow Concerto"
 BUILD_STAGES = ("wheel", "cargo", "swift")
 
 
@@ -57,14 +62,11 @@ class BundleSpec:
         return tuple(self.macos_dir / executable.name for executable in self.executables)
 
 
-def default_bundle_spec(
-    root: Path = ROOT,
-    applications_dir: Path = APPLICATIONS_DIR,
-) -> BundleSpec:
+def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     swift = root / "swift"
     cargo_release = root / "target" / "release"
     return BundleSpec(
-        app_path=applications_dir / "Loopflow Concerto.app",
+        app_path=root / "local-bin" / f"{APP_NAME}.app",
         executables=(
             swift / ".build" / "release" / "Concerto",
             cargo_release / "lf",
@@ -237,19 +239,41 @@ def _install_wheel() -> None:
     _run_or_raise(["uv", "tool", "install", "--force", "--reinstall", wheel], "tool")
 
 
-def _install_binaries() -> Path:
-    install_dir = _resolve_install_dir()
-    install_dir.mkdir(parents=True, exist_ok=True)
+def _stage_binaries(local_bin: Path) -> None:
+    """Copy freshly built lf/lfd into this worktree's local-bin/."""
+    local_bin.mkdir(parents=True, exist_ok=True)
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):
-        _atomic_install(built / name, install_dir / name)
-    return install_dir
+        _atomic_install(built / name, local_bin / name)
+
+
+def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
+    """Make this worktree's build the active one.
+
+    Symlinks lf/lfd from the resolved bin dir to local-bin/ (so rebuilds take
+    effect with no extra step) and copies Loopflow.app into /Applications.
+    """
+    install_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("lf", "lfd"):
+        link = install_dir / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(local_bin / name)
+
+    app_dst = applications_dir / f"{APP_NAME}.app"
+    if app_dst.exists():
+        shutil.rmtree(app_dst)
+    # Drop the pre-rename bundle so /Applications doesn't keep two copies.
+    legacy = applications_dir / f"{LEGACY_APP_NAME}.app"
+    if legacy.exists():
+        shutil.rmtree(legacy)
+    shutil.copytree(local_bin / f"{APP_NAME}.app", app_dst, symlinks=True)
 
 
 # --- Concerto bundle ---
 
 
-def _install_concerto(spec: BundleSpec) -> None:
+def _install_concerto(spec: BundleSpec, version: str) -> None:
     if spec.app_path.exists():
         shutil.rmtree(spec.app_path)
 
@@ -259,7 +283,9 @@ def _install_concerto(spec: BundleSpec) -> None:
     for executable in spec.executables:
         _atomic_install(executable, spec.macos_dir / executable.name)
 
-    shutil.copy(spec.info_plist, spec.contents_dir / spec.info_plist.name)
+    installed_plist = spec.contents_dir / spec.info_plist.name
+    shutil.copy(spec.info_plist, installed_plist)
+    stamp_bundle_version(installed_plist, version)
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
@@ -388,67 +414,89 @@ def _report_path_collisions(install_dir: Path) -> None:
 app = typer.Typer(help="Build and install loopflow locally.", add_completion=False)
 
 
+@app.callback()
+def _root() -> None:
+    """Build and install loopflow locally."""
+
+
 @app.command()
 def local(
+    use: bool = typer.Option(
+        False, "--use", help="Promote this build: symlink lf/lfd onto PATH and install the app"
+    ),
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
     service: bool = typer.Option(
-        False, "--service", help="Install/restart lfd as a launchd service after local install"
+        False, "--service", help="Install/restart lfd as a launchd service (implies --use)"
     ),
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
 ) -> None:
-    """Build and install locally (no publish)."""
+    """Build this worktree into local-bin/; --use makes it the active build."""
+    use = use or service
     skip_set = set(skip)
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
 
+    # The wheel (lfq) is a global tool; only build it when promoting.
+    if not use:
+        skip_set.add("wheel")
+
     spec = default_bundle_spec()
     install_dir = _resolve_install_dir()
+    version = read_release_version(ROOT)
 
     if dry_run:
         planned = [s for s in BUILD_STAGES if s not in skip_set] or ["(nothing)"]
         typer.echo(f"Would build in parallel: {', '.join(planned)}")
-        typer.echo("Would install wheel with uv pip install + uv tool install")
-        typer.echo(f"Would install lf/lfd to {install_dir}")
-        typer.echo(f"Would install {spec.app_path}")
+        typer.echo(f"Would stage lf/lfd + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
         executable_names = ", ".join(path.name for path in spec.executables)
         typer.echo(f"  Contents/MacOS/: {executable_names}")
-        typer.echo(
-            "Would install/restart lfd service"
-            if service
-            else "Would skip lfd service install/restart (pass --service to enable)"
-        )
+        if use:
+            typer.echo(f"Would promote: symlink lf/lfd into {install_dir}")
+            typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
+            typer.echo("Would install wheel with uv pip install + uv tool install")
+            typer.echo(
+                "Would install/restart lfd service"
+                if service
+                else "Would skip lfd service install/restart (pass --service to enable)"
+            )
+        else:
+            typer.echo("Would not promote (pass --use to symlink onto PATH and install the app)")
         return
 
     total_start = time.monotonic()
     try:
         _run_parallel_builds(skip_set)
 
-        typer.echo("Installing wheel...")
-        _install_wheel()
-        typer.echo("Wheel installed.")
+        typer.echo(f"Staging lf/lfd + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
+        _stage_binaries(LOCAL_BIN)
+        _install_concerto(spec, version)
+        typer.echo(f"Built {spec.app_path}")
 
-        typer.echo(f"Installing lf/lfd to {install_dir}...")
-        install_dir = _install_binaries()
-        typer.echo(f"Installed lf/lfd to {install_dir}")
-        _report_path_collisions(install_dir)
+        if use:
+            typer.echo("Installing wheel...")
+            _install_wheel()
+            typer.echo("Wheel installed.")
 
-        typer.echo(f"Installing {spec.app_path}...")
-        _install_concerto(spec)
-        typer.echo(f"Installed {spec.app_path}")
+            typer.echo(f"Promoting this worktree (symlinking lf/lfd into {install_dir})...")
+            _promote(LOCAL_BIN, install_dir)
+            typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
+            _report_path_collisions(install_dir)
 
-        if service:
-            _restart_lfd()
+            if service:
+                _restart_lfd()
+            else:
+                typer.echo("Skipping lfd service install/restart. Pass --service to enable.")
         else:
-            typer.echo("Skipping lfd service install/restart. Pass --service to enable.")
+            typer.echo(f"\nBuilt into {LOCAL_BIN}. Run with --use to make it the active build.")
     except StageError as exc:
         typer.echo(f"install failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     elapsed = time.monotonic() - total_start
-    typer.echo(f"\nTotal install time: {elapsed:.1f}s")
+    typer.echo(f"\nTotal time: {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from bundle_version import read_release_version, stamp_bundle_version
+
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 
@@ -123,7 +125,8 @@ def release() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    app_name = "Loopflow Concerto"
+    app_name = "Loopflow"
+    version = read_release_version(REPO_ROOT)
     dist_dir = SWIFT_DIR / "dist"
     app_dir = dist_dir / f"{app_name}.app" / "Contents"
 
@@ -135,6 +138,7 @@ def release() -> int:
     build_dir = SWIFT_DIR / ".build" / "release"
     shutil.copy(build_dir / "Concerto", app_dir / "MacOS")
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
+    stamp_bundle_version(app_dir / "Info.plist", version)
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
@@ -160,7 +164,7 @@ def release() -> int:
         run(["codesign", "--force", "--deep", "--sign", "-", str(dist_dir / f"{app_name}.app")])
 
     # Create DMG
-    dmg_path = dist_dir / "LoopflowConcerto.dmg"
+    dmg_path = dist_dir / f"{app_name}.dmg"
     dmg_staging = dist_dir / "dmg_staging"
     dmg_staging.mkdir()
     shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app")

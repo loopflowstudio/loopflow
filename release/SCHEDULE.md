@@ -16,10 +16,17 @@ Each repo should carry these files with carbon-copy cadence:
 ```text
 .github/workflows/nightly-packages.yml   # same schedule; repo-specific package test body
 .github/workflows/weekly-release.yml     # same schedule; calls nightly package verification before publishing
-scripts/pull-local-bin.sh                # or repo-equivalent local updater
+scripts/install.py                       # single local build entry: lf + lfd + desktop app -> per-worktree local-bin/
+scripts/pull-local-bin.sh                # or repo-equivalent CLI-only local updater
 deploy/loopflow-server.sh                # or repo-equivalent self-hosted cron runner
 deploy/systemd/* / deploy/launchd/*      # host keep-alive/update units
 ```
+
+The desktop app is a first-class release artifact, not a side build. The
+publishing workflow ships the signed app (`Loopflow.dmg`) next to the `lf`/`lfd`
+tarballs, and the app's bundle version is stamped from the release tag so it
+never drifts from the CLI. The single local build entry produces the CLI and the
+app together into a per-worktree `local-bin/`.
 
 Loopflow and Cadenza both carry the scheduled release workflow pair. Each repo replaces only the commands that are truly product-specific: Rust package targets for Loopflow; server image, Swift app build, signing-sensitive publish choices, and release manifests for Cadenza. Loopflow also carries the self-hosted cron-server shape because it is the automation host; product repos can copy that layer when they need repo-local services.
 

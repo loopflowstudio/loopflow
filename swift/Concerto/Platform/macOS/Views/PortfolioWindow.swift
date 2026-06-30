@@ -19,26 +19,31 @@ struct PortfolioWindow: View {
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: Spacing.lg)]
 
     private var repoPaths: [String] {
-        portfolioService.repos.map(\.path)
+        portfolioService.orderedRepos.map(\.path)
     }
 
     var body: some View {
         ZStack {
             ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.lg) {
-                    ForEach(portfolioService.repos) { repo in
-                        if let state = repoStates[repo.path] {
-                            PortfolioRepoCard(
-                                repoState: state,
-                                onSelectWave: selectWave,
-                                onOpenRepo: openRepo,
-                                onRemoveRepo: portfolioService.removeRepo
-                            )
-                        }
+                LazyVStack(alignment: .leading, spacing: Spacing.xxl) {
+                    ForEach(portfolioService.reposByTier(), id: \.tier.id) { section in
+                        PortfolioTierSection(
+                            tier: section.tier,
+                            repos: section.repos,
+                            columns: columns,
+                            repoStates: repoStates,
+                            onSelectWave: selectWave,
+                            onOpenRepo: openRepo,
+                            onRemoveRepo: portfolioService.removeRepo,
+                            onReorder: portfolioService.reorder,
+                            onMoveRepoToTier: moveRepo
+                        )
                     }
 
-                    AddRepoCard {
-                        isShowingTypeahead = true
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.lg) {
+                        AddRepoCard {
+                            isShowingTypeahead = true
+                        }
                     }
                 }
                 .padding(Spacing.xxl)
@@ -110,7 +115,7 @@ struct PortfolioWindow: View {
     }
 
     private func ensureRepoStates() {
-        let desiredRepos = portfolioService.repos
+        let desiredRepos = portfolioService.orderedRepos
         let desiredPaths = Set(desiredRepos.map(\.path))
 
         let stalePaths = repoStates.keys.filter { !desiredPaths.contains($0) }
@@ -193,7 +198,7 @@ struct PortfolioWindow: View {
                 $0.repo.normalizedFilePath
             }
 
-            for repo in portfolioService.repos {
+            for repo in portfolioService.orderedRepos {
                 repoStates[repo.path]?.applyConnectedWaves(grouped[repo.path] ?? [])
             }
 
@@ -226,6 +231,12 @@ struct PortfolioWindow: View {
         openWindow(id: "repo", value: repoURL)
     }
 
+    private func moveRepo(_ repo: PortfolioRepo, to tier: PortfolioTier) {
+        let targetRepos = portfolioService.orderedRepos
+            .filter { PortfolioTier.find($0.tierId).id == tier.id && $0.path != repo.path }
+        portfolioService.reorder(repo.path, into: tier, above: targetRepos.last, below: nil)
+    }
+
     private func selectWave(_ waveId: String, _ repoURL: URL) {
         openRepo(repoURL)
         postWaveSelection(waveId: waveId, repoURL: repoURL)
@@ -247,19 +258,104 @@ struct PortfolioWindow: View {
     }
 }
 
+private struct PortfolioTierSection: View {
+    let tier: PortfolioTier
+    let repos: [PortfolioRepo]
+    let columns: [GridItem]
+    let repoStates: [String: PortfolioRepoState]
+    let onSelectWave: (String, URL) -> Void
+    let onOpenRepo: (URL) -> Void
+    let onRemoveRepo: (URL) -> Void
+    let onReorder: (String, PortfolioTier, PortfolioRepo?, PortfolioRepo?) -> Void
+    let onMoveRepoToTier: (PortfolioRepo, PortfolioTier) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text(tier.displayName)
+                .font(Typography.sectionTitle(22))
+                .foregroundStyle(Color.loopflowBurgundy)
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.lg) {
+                ForEach(repos) { repo in
+                    if let state = repoStates[repo.path] {
+                        PortfolioRepoCard(
+                            repo: repo,
+                            repoState: state,
+                            onSelectWave: onSelectWave,
+                            onOpenRepo: onOpenRepo,
+                            onRemoveRepo: onRemoveRepo,
+                            onMoveRepoToTier: { destination in
+                                onMoveRepoToTier(repo, destination)
+                            }
+                        )
+                        .draggable(repo.path)
+                        .dropDestination(for: String.self) { items, location in
+                            guard let movedPath = items.first,
+                                  movedPath.normalizedFilePath != repo.path else {
+                                return false
+                            }
+                            let slot = slot(around: repo, beforeTarget: location.y < 110, movedPath: movedPath)
+                            onReorder(movedPath, tier, slot.above, slot.below)
+                            return true
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
+            .padding(Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(Color.black.opacity(repos.isEmpty ? 0.08 : 0.02))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(Color.loopflowBurgundy.opacity(repos.isEmpty ? 0.28 : 0.08), lineWidth: 1)
+                    )
+            )
+            .dropDestination(for: String.self) { items, _ in
+                guard let movedPath = items.first else { return false }
+                let targetRepos = repos.filter { $0.path != movedPath.normalizedFilePath }
+                onReorder(movedPath, tier, targetRepos.last, nil)
+                return true
+            }
+        }
+    }
+
+    private func slot(
+        around target: PortfolioRepo,
+        beforeTarget: Bool,
+        movedPath: String
+    ) -> (above: PortfolioRepo?, below: PortfolioRepo?) {
+        let ordered = repos.filter { $0.path != movedPath.normalizedFilePath }
+        guard let targetIndex = ordered.firstIndex(where: { $0.path == target.path }) else {
+            return (ordered.last, nil)
+        }
+
+        if beforeTarget {
+            let above = targetIndex > 0 ? ordered[targetIndex - 1] : nil
+            return (above, target)
+        }
+
+        let belowIndex = targetIndex + 1
+        let below = belowIndex < ordered.count ? ordered[belowIndex] : nil
+        return (target, below)
+    }
+}
+
 struct PortfolioRepoCard: View {
+    let repo: PortfolioRepo
     let repoState: PortfolioRepoState
     let onSelectWave: (String, URL) -> Void
     let onOpenRepo: (URL) -> Void
     var onRemoveRepo: ((URL) -> Void)? = nil
+    var onMoveRepoToTier: ((PortfolioTier) -> Void)? = nil
 
     var body: some View {
         Button {
-            onOpenRepo(repoState.repo.url)
+            onOpenRepo(repo.url)
         } label: {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 HStack(spacing: Spacing.sm) {
-                    Text(repoState.repo.displayName)
+                    Text(repo.displayName)
                         .font(Typography.sectionTitle(18))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -311,9 +407,22 @@ struct PortfolioRepoCard: View {
                 )
         )
         .contextMenu {
+            if let onMoveRepoToTier {
+                Menu {
+                    ForEach(PortfolioTier.all) { tier in
+                        Button(tier.displayName) {
+                            onMoveRepoToTier(tier)
+                        }
+                        .disabled(tier.id == repo.tierId)
+                    }
+                } label: {
+                    Label("Move to tier", systemImage: "tray.and.arrow.down")
+                }
+            }
+
             if let onRemoveRepo {
                 Button(role: .destructive) {
-                    onRemoveRepo(repoState.repo.url)
+                    onRemoveRepo(repo.url)
                 } label: {
                     Label("Remove from portfolio", systemImage: "trash")
                 }
@@ -329,7 +438,7 @@ struct PortfolioRepoCard: View {
     @ViewBuilder
     private func waveRow(_ wave: WaveViewModel) -> some View {
         Button {
-            onSelectWave(wave.id, repoState.repo.url)
+            onSelectWave(wave.id, repo.url)
         } label: {
             HStack(spacing: Spacing.sm) {
                 Circle()

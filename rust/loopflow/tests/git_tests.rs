@@ -264,3 +264,54 @@ fn sync_main_from_feature_preserves_dirty_work_on_main() {
         "main worktree should have fast-forwarded to origin/main"
     );
 }
+
+/// Local edits to paths the default branch *rewrote* must not be popped back
+/// over the synced tree — a 3-way merge there silently resurrects stale files
+/// and reverts the merged work. The edits are preserved in a stash instead.
+#[test]
+fn sync_main_does_not_revert_rewritten_paths() {
+    let repo = TestRepo::new();
+    let bare = repo.bare_path().to_path_buf();
+
+    // Main commits `old.txt`, then origin/main rewrites that area: delete
+    // `old.txt`, add `new.txt` (mirrors a wave recut landing on main).
+    std::fs::write(repo.path().join("old.txt"), "v1").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-m", "add old.txt"]);
+    git(repo.path(), &["push", "origin", "main"]);
+
+    let pusher = tempfile::TempDir::new().unwrap();
+    git(pusher.path(), &["clone", bare.to_str().unwrap(), "."]);
+    git(pusher.path(), &["config", "user.email", "t@t"]);
+    git(pusher.path(), &["config", "user.name", "t"]);
+    std::fs::remove_file(pusher.path().join("old.txt")).unwrap();
+    std::fs::write(pusher.path().join("new.txt"), "v2").unwrap();
+    git(pusher.path(), &["add", "-A"]);
+    git(
+        pusher.path(),
+        &["commit", "-m", "recut: old.txt -> new.txt"],
+    );
+    git(pusher.path(), &["push", "origin", "main"]);
+
+    // Dirty edit on main to the very path the recut rewrote.
+    std::fs::write(repo.path().join("old.txt"), "local wip").unwrap();
+
+    let feature = repo.create_wave_worktree("myfeature");
+    sync_main(&feature, "main").unwrap();
+
+    // The synced tree wins: old.txt is gone, new.txt present. No silent revert.
+    assert!(
+        !repo.path().join("old.txt").exists(),
+        "old.txt must stay deleted; the stash must not be popped over the recut"
+    );
+    assert!(
+        repo.path().join("new.txt").exists(),
+        "main worktree should have synced to origin/main"
+    );
+    // The local edit is not lost — it's preserved in a stash for recovery.
+    let stash_list = git(repo.path(), &["stash", "list"]);
+    assert!(
+        stash_list.contains("sync_main: auto-stash"),
+        "local edit should be preserved in a stash, got: {stash_list:?}"
+    );
+}

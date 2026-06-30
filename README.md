@@ -214,7 +214,7 @@ Flows can include mechanical ops items directly:
 | `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream → op: pm pull |
 
-`deploy` lands the branch, then syncs PM state when there is PM work to do. `sync` rebases and pulls PM state for the current branch's wave. That default-branch refresh is safe from sibling worktrees and restores dirty local edits on the checked-out default branch before the flow continues. On branches with no PM-enabled wave, or no `wave/<name>/` changes, the PM step in either flow exits cleanly.
+`deploy` lands the branch, then syncs PM state when there is PM work to do. `sync` rebases and pulls PM state for the current branch's wave. That default-branch refresh is safe from sibling worktrees: it stashes any dirty edits on the checked-out default branch, syncs, then restores them — but only when those edits don't touch paths the sync itself rewrote. If they collide (e.g. the branch just absorbed a merge over the same files), the edits stay in a `sync_main: auto-stash` stash instead of being merged back, so a sync can never silently revert just-landed work. On branches with no PM-enabled wave, or no `wave/<name>/` changes, the PM step in either flow exits cleanly.
 
 ## Release artifacts
 

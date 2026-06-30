@@ -44,6 +44,50 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert not any(term in commands for term in forbidden)
 
 
+def test_bump_patch_version_handles_more_than_fifty_commits(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Cargo.toml").write_text('[package]\nname = "loopflow"\nversion = "1.2.3"\n')
+    (repo / "pyproject.toml").write_text('[project]\nname = "loopflow"\nversion = "1.2.3"\n')
+    (repo / "RELEASE_NOTES.md").write_text("# v1.2.3\n\nPrevious release.\n")
+    scripts = repo / "scripts"
+    scripts.mkdir()
+    script = scripts / "bump_patch_version.sh"
+    script.write_text((ROOT / "scripts/bump_patch_version.sh").read_text())
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+
+    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "release: v1.2.3"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "tag", "v1.2.3"], cwd=repo, check=True)
+
+    for index in range(55):
+        (repo / "change.txt").write_text(f"{index}\n")
+        subprocess.run(["git", "add", "change.txt"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"change {index}"],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+    result = subprocess.run(
+        [str(script), "v1.2.3", "55"],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    notes = (repo / "RELEASE_NOTES.md").read_text()
+    assert "next=1.2.4" in result.stdout
+    assert '# v1.2.4' in notes
+    assert "Weekly auto-release with 55 commits since `v1.2.3`." in notes
+    assert notes.count("- change ") == 50
+
+
 def test_pull_local_bin_builds_and_installs_binaries(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

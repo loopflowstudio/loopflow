@@ -54,7 +54,7 @@ tmp=$(mktemp)
     if [ -n "$last_tag" ]; then
         printf 'Weekly auto-release with %s commits since `%s`.\n\n' "$commit_count" "$last_tag"
         printf '## Commits\n\n'
-        git log "$last_tag..HEAD" --pretty=format:'- %s' | head -50
+        git log "$last_tag..HEAD" --max-count=50 --pretty=format:'- %s'
         printf '\n\n'
     else
         printf 'Weekly auto-release.\n\n'

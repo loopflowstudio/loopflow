@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<'USAGE'
-Usage: native-lfd-host.sh [--repo PATH] [--install-dir PATH] <install|install-update-agent|update|restart|status|logs|health>
+Usage: native-lfd-host.sh [--repo PATH] [--install-dir PATH] <install|install-update-agent|update|restart|status|logs|health|serve>
 
 Commands:
   install              Build/install lf+lfd, install launchd service/update agent, and wait for health
@@ -16,6 +16,7 @@ Commands:
   status               Show launchd service/update-agent state and local daemon status
   logs                 Tail native lfd launchd logs
   health               Check local daemon health and authenticated status when token is available
+  serve                Internal launchd entrypoint; load token file and exec lfd serve
 
 Environment:
   LFD_HTTP_ADDR=0.0.0.0:2486      listen address for remote/private clients
@@ -53,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             install_dir="${1#--install-dir=}"
             shift
             ;;
-        install|install-update-agent|update|restart|status|logs|health)
+        install|install-update-agent|update|restart|status|logs|health|serve)
             command="$1"
             shift
             ;;
@@ -136,12 +137,48 @@ wait_for_health() {
 }
 
 install_service() {
-    require_token
+    ensure_token_file
     if [[ ! -x "$lfd_bin" ]]; then
         echo "missing lfd binary: $lfd_bin" >&2
         exit 1
     fi
-    LFD_HTTP_ADDR="$http_addr" LFD_AUTH_TOKEN="$LFD_AUTH_TOKEN" "$lfd_bin" install --force
+    mkdir -p "$(dirname "$plist")" "$log_dir"
+    chmod 700 "$HOME/.lf" "$log_dir" 2>/dev/null || true
+    python3 - "$plist" "$script_path" "$repo" "$install_dir" "$http_addr" "$token_file" "$log_out" <<'PY'
+import os
+import plistlib
+import sys
+from pathlib import Path
+
+plist_path, script_path, repo, install_dir, http_addr, token_file, log_path = sys.argv[1:]
+data = {
+    "Label": "com.loopflow.lfd",
+    "ProgramArguments": [
+        script_path,
+        "--repo",
+        repo,
+        "--install-dir",
+        install_dir,
+        "serve",
+    ],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "ThrottleInterval": 10,
+    "ExitTimeOut": 30,
+    "StandardOutPath": log_path,
+    "StandardErrorPath": log_path,
+    "EnvironmentVariables": {
+        "PATH": os.environ.get("PATH", ""),
+        "LFD_HTTP_ADDR": http_addr,
+        "LFD_AUTH_TOKEN_FILE": token_file,
+    },
+}
+Path(plist_path).write_bytes(plistlib.dumps(data))
+PY
+    chmod 0600 "$plist"
+    launchctl bootout "$(service_target)" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/$(id -u)" "$plist"
+    echo "installed: $plist"
 }
 
 install_update_agent() {
@@ -234,5 +271,9 @@ case "$command" in
         ;;
     health)
         health
+        ;;
+    serve)
+        require_token
+        exec "$lfd_bin" serve
         ;;
 esac

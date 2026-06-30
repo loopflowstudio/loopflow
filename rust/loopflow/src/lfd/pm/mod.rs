@@ -1,12 +1,8 @@
 pub mod asana;
 mod asana_html;
-pub mod linear;
-pub mod notion;
-pub mod notion_blocks;
 
 use std::time::Duration;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -73,40 +69,10 @@ impl PriorityBucket {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PmProviderKind {
-    Asana,
-    Linear,
-    Notion,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmConfig {
-    pub provider: PmProviderKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asana_project: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_project: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notion_project: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmProject {
     pub id: String,
     pub name: String,
-}
-
-impl PmConfig {
-    pub fn project_for(&self, provider: PmProviderKind) -> Option<&str> {
-        match provider {
-            PmProviderKind::Asana => self.asana_project.as_deref(),
-            PmProviderKind::Linear => self.linear_project.as_deref(),
-            PmProviderKind::Notion => self.notion_project.as_deref(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,27 +130,6 @@ pub enum PmError {
 
 pub type PmResult<T> = Result<T, PmError>;
 
-#[async_trait]
-pub trait PmProvider: Send + Sync {
-    async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
-    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
-    async fn init_project(&self, _project_id: &str) -> PmResult<()> {
-        Ok(())
-    }
-    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
-    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
-    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;
-    async fn complete_item(&self, item_id: &str) -> PmResult<()>;
-    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()>;
-    /// Claim an item: assign to the API token owner and set the working branch.
-    ///
-    /// Providers that support it should verify the assignment stuck (optimistic
-    /// concurrency). Return `Err` if another worker claimed the item first.
-    /// Providers without verification (Notion) treat claiming as best-effort
-    /// notification — duplicates are caught at PR time.
-    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()>;
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RoadmapItemFrontmatter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -199,10 +144,6 @@ pub struct RoadmapItemFrontmatter {
     pub claimed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asana_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notion_id: Option<String>,
 }
 
 impl RoadmapItemFrontmatter {
@@ -213,32 +154,6 @@ impl RoadmapItemFrontmatter {
             && self.claimed_by.is_none()
             && self.claimed_at.is_none()
             && self.asana_id.is_none()
-            && self.linear_id.is_none()
-            && self.notion_id.is_none()
-    }
-
-    pub fn id_for(&self, provider: PmProviderKind) -> Option<&str> {
-        match provider {
-            PmProviderKind::Asana => self.asana_id.as_deref(),
-            PmProviderKind::Linear => self.linear_id.as_deref(),
-            PmProviderKind::Notion => self.notion_id.as_deref(),
-        }
-    }
-
-    pub fn set_id(&mut self, provider: PmProviderKind, id: String) {
-        match provider {
-            PmProviderKind::Asana => self.asana_id = Some(id),
-            PmProviderKind::Linear => self.linear_id = Some(id),
-            PmProviderKind::Notion => self.notion_id = Some(id),
-        }
-    }
-
-    pub fn clear_id(&mut self, provider: PmProviderKind) {
-        match provider {
-            PmProviderKind::Asana => self.asana_id = None,
-            PmProviderKind::Linear => self.linear_id = None,
-            PmProviderKind::Notion => self.notion_id = None,
-        }
     }
 
     pub fn set_priority_rank(&mut self, rank: u32) {
@@ -485,40 +400,18 @@ mod tests {
     #[test]
     fn pm_item_update_text_update_preserves_name_and_description() {
         let update = PmItemUpdate {
-            name: Some("Ship Linear".to_string()),
-            description: Some("Build the GraphQL client".to_string()),
+            name: Some("Ship the client".to_string()),
+            description: Some("Build the API client".to_string()),
             rank: Some(1),
         };
 
         assert_eq!(
             update.text_update(),
             Some(PmTextUpdate {
-                name: Some("Ship Linear"),
-                description: Some("Build the GraphQL client"),
+                name: Some("Ship the client"),
+                description: Some("Build the API client"),
             })
         );
-    }
-
-    #[test]
-    fn roadmap_item_frontmatter_clear_id_removes_selected_provider_only() {
-        let mut frontmatter = RoadmapItemFrontmatter {
-            asana_id: Some("asa-1".to_string()),
-            linear_id: Some("lin-1".to_string()),
-            notion_id: Some("not-1".to_string()),
-            ..RoadmapItemFrontmatter::default()
-        };
-
-        frontmatter.clear_id(PmProviderKind::Asana);
-        assert_eq!(frontmatter.asana_id, None);
-        assert_eq!(frontmatter.linear_id.as_deref(), Some("lin-1"));
-        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
-
-        frontmatter.clear_id(PmProviderKind::Linear);
-        assert_eq!(frontmatter.linear_id, None);
-        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
-
-        frontmatter.clear_id(PmProviderKind::Notion);
-        assert_eq!(frontmatter.notion_id, None);
     }
 
     #[test]

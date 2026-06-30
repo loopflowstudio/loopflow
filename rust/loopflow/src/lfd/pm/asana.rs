@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -9,7 +8,7 @@ use tracing::warn;
 use crate::engine::config::AsanaConfig;
 use crate::lfd::pm::asana_html::{asana_html_to_markdown, markdown_to_asana_html};
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProvider, PmResult, PriorityBucket,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmResult, PriorityBucket,
     RATE_LIMIT_RETRIES,
 };
 
@@ -44,7 +43,7 @@ impl AsanaClient {
     }
 
     #[cfg(test)]
-    fn with_base_url(token: String, config: AsanaConfig, base_url: String) -> Self {
+    pub(crate) fn with_base_url(token: String, config: AsanaConfig, base_url: String) -> Self {
         Self {
             client: reqwest::Client::new(),
             token,
@@ -340,15 +339,14 @@ impl AsanaClient {
     }
 }
 
-#[async_trait]
-impl PmProvider for AsanaClient {
-    async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
+impl AsanaClient {
+    pub async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let workspace = self.resolve_workspace().await?;
         let team = self.resolve_team_for_project_bootstrap(&workspace).await?;
         self.create_project_for_team(&team, name, description).await
     }
 
-    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
+    pub async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
         let path = format!("/teams/{team_id}/projects");
         let response: AsanaResponse<Vec<AsanaProjectNode>> = self
             .send_json(|| self.request(Method::GET, &path, &[("opt_fields", "name")]))
@@ -363,13 +361,13 @@ impl PmProvider for AsanaClient {
             .collect())
     }
 
-    async fn init_project(&self, project_id: &str) -> PmResult<()> {
+    pub async fn init_project(&self, project_id: &str) -> PmResult<()> {
         self.ensure_working_branch_field_for_project(project_id)
             .await
             .map(|_| ())
     }
 
-    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
+    pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         let path = format!("/projects/{project_id}/tasks");
         let mut offset = None;
         let mut items = Vec::new();
@@ -405,7 +403,7 @@ impl PmProvider for AsanaClient {
         }
     }
 
-    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
+    pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
         let priority_field = self.ensure_priority_field_for_project(project_id).await?;
         let priority_field_id = priority_field.gid.clone();
         let priority_option_id = priority_field
@@ -430,7 +428,7 @@ impl PmProvider for AsanaClient {
         Ok(response.data.gid)
     }
 
-    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
+    pub async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
         let Some(update) = update.text_update() else {
             return Ok(());
         };
@@ -454,7 +452,7 @@ impl PmProvider for AsanaClient {
         Ok(())
     }
 
-    async fn complete_item(&self, item_id: &str) -> PmResult<()> {
+    pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         let body = AsanaRequest {
             data: UpdateTaskRequest::completed(),
         };
@@ -465,7 +463,7 @@ impl PmProvider for AsanaClient {
         Ok(())
     }
 
-    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
+    pub async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
         let request = AsanaRequest {
             data: CreateStoryRequest { text: body },
         };
@@ -476,7 +474,7 @@ impl PmProvider for AsanaClient {
         Ok(())
     }
 
-    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
+    pub async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()> {
         let me: AsanaResponse<AsanaGid> = self
             .send_json(|| self.request(Method::GET, "/users/me", &[("opt_fields", "gid")]))
             .await?;

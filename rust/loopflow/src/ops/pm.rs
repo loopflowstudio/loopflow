@@ -9,11 +9,8 @@ use crate::engine::git::{
 };
 use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
-use crate::lfd::pm::linear::LinearClient;
-use crate::lfd::pm::notion::NotionClient;
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProvider, PmProviderKind, RoadmapItemDocument,
-    RoadmapItemFrontmatter,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, RoadmapItemDocument, RoadmapItemFrontmatter,
 };
 use crate::lfd::store::open_store;
 use crate::ops::error::{OpsError, OpsResult};
@@ -31,7 +28,6 @@ pub struct PmInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmInitResult {
     pub wave: String,
-    pub provider: PmProviderKind,
     pub project_id: String,
     pub linked: usize,
     pub created: Vec<String>,
@@ -69,7 +65,6 @@ pub struct PmPullOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmPullResult {
     pub wave: String,
-    pub provider: PmProviderKind,
     pub project_id: String,
     pub local_removed: usize,
     pub local_written: usize,
@@ -83,7 +78,6 @@ pub struct PmExportOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmExportResult {
     pub wave: String,
-    pub provider: PmProviderKind,
     pub project_id: String,
     pub created: usize,
     pub updated: usize,
@@ -98,7 +92,6 @@ pub struct PmPushDiffOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmPushDiffResult {
     pub wave: String,
-    pub provider: PmProviderKind,
     pub project_id: String,
     pub created: usize,
     pub updated: usize,
@@ -112,7 +105,6 @@ pub struct PmStatusOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmProviderStatus {
-    pub provider: PmProviderKind,
     pub project_id: String,
     pub local_total: usize,
     pub linked: usize,
@@ -133,10 +125,9 @@ pub struct PmStatusResult {
 
 // ── Provider construction ───────────────────────────────────────────
 
-/// Resolved PM context for a wave: the provider client, provider kind, and project ID (if any).
+/// Resolved PM context for a wave: the Asana client and project ID (if any).
 pub(crate) struct PmContext {
-    pub client: Box<dyn PmProvider>,
-    pub provider: PmProviderKind,
+    pub client: AsanaClient,
     pub project: String,
 }
 
@@ -144,77 +135,30 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
+async fn build_client(repo: &Path) -> OpsResult<AsanaClient> {
     let config = load_config_or_default(Some(repo));
-    let wave_pm = read_wave_pm_config(repo, wave);
-    wave_pm
-        .as_ref()
-        .and_then(|pm| pm.provider)
-        .or_else(|| config.pm.as_ref().map(|pm| pm.provider))
-        .ok_or_else(|| {
-            OpsError::Message(
-                "No PM provider configured. Set `pm.provider` in .lf/config.yaml or wave config."
-                    .to_string(),
-            )
-        })
+    let token = resolve_provider_token("asana").await?;
+    Ok(AsanaClient::new(token, config.asana.clone()))
 }
 
-async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<Box<dyn PmProvider>> {
-    let config = load_config_or_default(Some(repo));
-    let client: Box<dyn PmProvider> = match provider {
-        PmProviderKind::Asana => {
-            let token = resolve_provider_token("asana").await?;
-            Box::new(AsanaClient::new(token, config.asana.clone()))
-        }
-        PmProviderKind::Linear => {
-            let token = resolve_provider_token("linear").await?;
-            Box::new(LinearClient::new(token, config.linear.team.clone()))
-        }
-        PmProviderKind::Notion => {
-            let token = resolve_provider_token("notion").await?;
-            Box::new(NotionClient::new(token, config.notion.clone()))
-        }
-    };
-    Ok(client)
-}
-
-pub(crate) async fn build_provider(
-    repo: &Path,
-    wave: &str,
-    provider: PmProviderKind,
-) -> OpsResult<PmContext> {
-    let wave_pm = read_wave_pm_config(repo, wave);
-    let project = wave_pm
-        .as_ref()
-        .and_then(|pm| pm.project_for(provider))
-        .unwrap_or("")
-        .to_string();
-    let client = build_client(repo, provider).await?;
-    Ok(PmContext {
-        client,
-        provider,
-        project,
-    })
-}
-
-pub(crate) async fn build_wave_provider(repo: &Path, wave: &str) -> OpsResult<PmContext> {
-    let provider = resolve_provider(repo, wave)?;
-    build_provider(repo, wave, provider).await
+pub(crate) async fn build_provider(repo: &Path, wave: &str) -> OpsResult<PmContext> {
+    let project = read_wave_pm_config(repo, wave)
+        .and_then(|pm| pm.project().map(str::to_string))
+        .unwrap_or_default();
+    let client = build_client(repo).await?;
+    Ok(PmContext { client, project })
 }
 
 pub(crate) fn wave_pm_is_enabled(repo: &Path, wave: &str) -> bool {
-    resolve_provider(repo, wave).ok().is_some_and(|provider| {
-        read_wave_pm_config(repo, wave)
-            .and_then(|pm| pm.project_for(provider).map(str::to_string))
-            .is_some()
-    })
+    read_wave_pm_config(repo, wave)
+        .and_then(|pm| pm.project().map(str::to_string))
+        .is_some()
 }
 
 fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     if ctx.project.trim().is_empty() {
         return Err(OpsError::Message(format!(
-            "wave/{wave}/{wave}.yaml is missing a project id for {:?}",
-            ctx.provider
+            "wave/{wave}/{wave}.yaml is missing an asana_project id"
         )));
     }
     Ok(())
@@ -299,14 +243,6 @@ fn read_local_roadmap_items(wave_dir: &Path) -> OpsResult<Vec<LocalRoadmapItem>>
     Ok(items)
 }
 
-fn project_key(provider: PmProviderKind) -> &'static str {
-    match provider {
-        PmProviderKind::Asana => "asana_project",
-        PmProviderKind::Linear => "linear_project",
-        PmProviderKind::Notion => "notion_project",
-    }
-}
-
 fn yaml_string(value: &str) -> serde_yaml_ng::Value {
     serde_yaml_ng::Value::String(value.to_string())
 }
@@ -344,29 +280,13 @@ fn update_wave_pm_yaml(
     Ok(())
 }
 
-pub(crate) fn write_pm_provider_to_wave_yaml(
-    repo: &Path,
-    wave: &str,
-    provider: PmProviderKind,
-) -> OpsResult<()> {
-    update_wave_pm_yaml(repo, wave, |pm_map| {
-        pm_map.insert(
-            yaml_string("provider"),
-            serde_yaml_ng::to_value(provider)
-                .map_err(|err| OpsError::Message(format!("failed to encode pm provider: {err}")))?,
-        );
-        Ok(())
-    })
-}
-
 pub(crate) fn write_pm_project_to_wave_yaml(
     repo: &Path,
     wave: &str,
-    provider: PmProviderKind,
     project_id: &str,
 ) -> OpsResult<()> {
     update_wave_pm_yaml(repo, wave, |pm_map| {
-        pm_map.insert(yaml_string(project_key(provider)), yaml_string(project_id));
+        pm_map.insert(yaml_string("asana_project"), yaml_string(project_id));
         Ok(())
     })
 }
@@ -396,9 +316,6 @@ async fn pm_init_async(
         )));
     }
 
-    let provider_kind = resolve_provider(repo, &wave)?;
-    write_pm_provider_to_wave_yaml(repo, &wave, provider_kind)?;
-
     let (project_name, description) = read_wave_project_metadata(repo, &wave)?;
     let mut local_items = read_local_roadmap_items(&wave_dir)?;
     let bootstrap = BootstrapArgs {
@@ -410,7 +327,7 @@ async fn pm_init_async(
         progress,
     };
 
-    let ctx = build_provider(repo, &wave, provider_kind).await?;
+    let ctx = build_provider(repo, &wave).await?;
     let rw_result = bootstrap_read_write_provider(&bootstrap, &mut local_items, ctx).await?;
 
     let commit_message = format!("lf pm: bootstrap {wave}");
@@ -426,7 +343,6 @@ async fn pm_init_async(
 
     Ok(PmInitResult {
         wave,
-        provider: rw_result.provider,
         project_id: rw_result.project_id,
         linked: rw_result.linked,
         created: rw_result.created_local,
@@ -455,10 +371,9 @@ async fn pm_status_async(
 
     let mut results = Vec::new();
     for wave in waves {
-        let provider_kind = match resolve_provider(repo, &wave) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
+        if !wave_pm_is_enabled(repo, &wave) {
+            continue;
+        }
         let wave_dir = repo.join("wave").join(&wave);
         let local_items = if wave_dir.is_dir() {
             read_local_roadmap_items(&wave_dir)?
@@ -471,11 +386,11 @@ async fn pm_status_async(
             .map(|title| normalize_title(&title))
             .collect::<HashSet<_>>();
 
-        let ctx = build_provider(repo, &wave, provider_kind).await?;
+        let ctx = build_provider(repo, &wave).await?;
         if ctx.project.trim().is_empty() {
             continue;
         }
-        progress.status(&format!("checking {:?} for wave/{wave}", provider_kind));
+        progress.status(&format!("checking asana for wave/{wave}"));
         let remote_items = ctx
             .client
             .list_items(&ctx.project)
@@ -483,7 +398,7 @@ async fn pm_status_async(
             .map_err(pm_to_ops)?;
         let linked_ids = local_items
             .iter()
-            .filter_map(|item| item.doc.frontmatter.id_for(provider_kind))
+            .filter_map(|item| item.doc.frontmatter.asana_id.as_deref())
             .collect::<HashSet<_>>();
         let remote_only = remote_items
             .iter()
@@ -496,7 +411,6 @@ async fn pm_status_async(
         results.push(PmWaveStatus {
             wave,
             status: PmProviderStatus {
-                provider: provider_kind,
                 project_id: ctx.project,
                 local_total: local_items.len(),
                 linked: linked_ids.len(),
@@ -511,7 +425,6 @@ async fn pm_status_async(
 
 #[derive(Debug, Clone)]
 struct BootstrapResult {
-    provider: PmProviderKind,
     project_id: String,
     linked: usize,
     created_local: Vec<String>,
@@ -555,25 +468,25 @@ async fn bootstrap_read_write_provider(
     for (index, local_item) in local_items.iter_mut().enumerate() {
         let local_title = local_item.title();
         let local_key = normalize_title(&local_title);
-        if let Some(pm_id) = local_item.doc.frontmatter.id_for(ctx.provider) {
+        if let Some(pm_id) = local_item.doc.frontmatter.asana_id.as_deref() {
             if let Some(remote_item) = remote_by_id.get(pm_id) {
                 matched_remote_ids.insert(remote_item.id.clone());
-                apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
+                apply_remote_match(args.wave_dir, local_item, remote_item, false)?;
                 continue;
             }
         }
 
         if let Some(remote_item) = remote_by_title.remove(&local_key) {
             matched_remote_ids.insert(remote_item.id.clone());
-            apply_remote_match(args.wave_dir, local_item, ctx.provider, remote_item, false)?;
+            apply_remote_match(args.wave_dir, local_item, remote_item, false)?;
             continue;
         }
 
         pending_remote_creates.push((index, local_title));
     }
 
-    // Both supported PM providers append new items, so create from the bottom up
-    // to preserve the local roadmap order.
+    // Asana appends new items, so create from the bottom up to preserve the
+    // local roadmap order.
     for (index, local_title) in pending_remote_creates.into_iter().rev() {
         create_remote_for_local_item(
             args.wave_dir,
@@ -590,14 +503,13 @@ async fn bootstrap_read_write_provider(
             continue;
         }
         let filename = next_remote_filename(args.wave_dir, remote_item.rank, &remote_item.name);
-        write_remote_item(&args.wave_dir.join(&filename), remote_item, ctx.provider)?;
+        write_remote_item(&args.wave_dir.join(&filename), remote_item)?;
         created_local.push(filename);
     }
 
     Ok(BootstrapResult {
-        provider: ctx.provider,
         project_id,
-        linked: count_linked_items(local_items, ctx.provider) + created_local.len(),
+        linked: count_linked_items(local_items) + created_local.len(),
         created_local,
     })
 }
@@ -611,23 +523,17 @@ async fn ensure_project(
     progress: &(impl Progress + ?Sized),
 ) -> OpsResult<String> {
     if !ctx.project.trim().is_empty() {
-        progress.status(&format!(
-            "using existing {:?} project {}",
-            ctx.provider, ctx.project
-        ));
+        progress.status(&format!("using existing asana project {}", ctx.project));
         return Ok(ctx.project.clone());
     }
 
-    progress.status(&format!(
-        "creating {:?} project for wave/{wave}",
-        ctx.provider
-    ));
+    progress.status(&format!("creating asana project for wave/{wave}"));
     let project_id = ctx
         .client
         .create_project(project_name, description)
         .await
         .map_err(pm_to_ops)?;
-    write_pm_project_to_wave_yaml(repo, wave, ctx.provider, &project_id)?;
+    write_pm_project_to_wave_yaml(repo, wave, &project_id)?;
     Ok(project_id)
 }
 
@@ -667,14 +573,10 @@ fn require_wave_dir(repo: &Path, wave: &str) -> OpsResult<PathBuf> {
 fn apply_remote_match(
     wave_dir: &Path,
     local_item: &mut LocalRoadmapItem,
-    provider: PmProviderKind,
     remote_item: &PmItem,
     update_body: bool,
 ) -> OpsResult<()> {
-    local_item
-        .doc
-        .frontmatter
-        .set_id(provider, remote_item.id.clone());
+    local_item.doc.frontmatter.asana_id = Some(remote_item.id.clone());
     if update_body {
         local_item.doc.body = render_remote_body(remote_item);
     }
@@ -700,14 +602,14 @@ async fn create_remote_for_local_item(
         )
         .await
         .map_err(pm_to_ops)?;
-    local_item.doc.frontmatter.set_id(ctx.provider, pm_id);
+    local_item.doc.frontmatter.asana_id = Some(pm_id);
     write_local_item(wave_dir, local_item)
 }
 
-fn count_linked_items(items: &[LocalRoadmapItem], provider: PmProviderKind) -> usize {
+fn count_linked_items(items: &[LocalRoadmapItem]) -> usize {
     items
         .iter()
-        .filter(|item| item.doc.frontmatter.id_for(provider).is_some())
+        .filter(|item| item.doc.frontmatter.asana_id.is_some())
         .count()
 }
 
@@ -734,7 +636,6 @@ fn next_item_filename(
 fn overwrite_local_wave_from_remote(
     wave_dir: &Path,
     remote_items: &[PmItem],
-    provider: PmProviderKind,
 ) -> OpsResult<usize> {
     let local_files = list_wave_items(wave_dir)?;
     let removed = local_files.len();
@@ -748,7 +649,7 @@ fn overwrite_local_wave_from_remote(
             !used_filenames.contains(filename)
         });
         used_filenames.insert(filename.clone());
-        write_remote_item(&wave_dir.join(filename), remote_item, provider)?;
+        write_remote_item(&wave_dir.join(filename), remote_item)?;
     }
 
     Ok(removed)
@@ -791,18 +692,11 @@ async fn pm_import_async(
     options: &PmImportOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmImportResult> {
-    // Get the provider from global config (no wave context yet)
-    let config = load_config_or_default(Some(repo));
-    let provider_kind = config.pm.as_ref().map(|pm| pm.provider).ok_or_else(|| {
-        OpsError::Message(
-            "No PM provider configured. Set `pm.provider` in .lf/config.yaml.".to_string(),
-        )
-    })?;
-    let client = build_client(repo, provider_kind).await?;
+    let client = build_client(repo).await?;
 
     progress.status(&format!(
-        "listing projects in {:?} team {}",
-        provider_kind, options.team_id
+        "listing projects in asana team {}",
+        options.team_id
     ));
     let projects = client
         .list_projects(&options.team_id)
@@ -824,20 +718,14 @@ async fn pm_import_async(
         if !wave_yaml_path.exists() {
             std::fs::write(&wave_yaml_path, "flow: build\n")?;
         }
-        write_pm_provider_to_wave_yaml(repo, &wave_name, provider_kind)?;
-        write_pm_project_to_wave_yaml(repo, &wave_name, provider_kind, &project.id)?;
+        write_pm_project_to_wave_yaml(repo, &wave_name, &project.id)?;
 
         // Pull items
         let remote_items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
         let existing_items = read_local_roadmap_items(&wave_dir).unwrap_or_default();
         let existing_ids: std::collections::HashSet<String> = existing_items
             .iter()
-            .filter_map(|item| {
-                item.doc
-                    .frontmatter
-                    .id_for(provider_kind)
-                    .map(str::to_string)
-            })
+            .filter_map(|item| item.doc.frontmatter.asana_id.clone())
             .collect();
 
         for remote_item in &remote_items {
@@ -845,7 +733,7 @@ async fn pm_import_async(
                 continue; // additive only — skip existing
             }
             let filename = next_remote_filename(&wave_dir, remote_item.rank, &remote_item.name);
-            write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
+            write_remote_item(&wave_dir.join(&filename), remote_item)?;
             items_created += 1;
         }
 
@@ -905,7 +793,7 @@ async fn pm_try_claim_async(
     progress: &impl Progress,
 ) -> OpsResult<Option<String>> {
     let wave_dir = require_wave_dir(repo, wave)?;
-    let ctx = build_wave_provider(repo, wave).await?;
+    let ctx = build_provider(repo, wave).await?;
     require_project(&ctx, wave)?;
 
     // Fetch remote items and find unassigned ones
@@ -933,7 +821,8 @@ async fn pm_try_claim_async(
             local
                 .doc
                 .frontmatter
-                .id_for(ctx.provider)
+                .asana_id
+                .as_deref()
                 .is_some_and(|id| id == remote.id)
         });
 
@@ -972,23 +861,22 @@ async fn pm_pull_async(
 ) -> OpsResult<PmPullResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
-        "pulling {:?} project {} into wave/{}",
-        ctx.provider, ctx.project, options.wave
+        "pulling asana project {} into wave/{}",
+        ctx.project, options.wave
     ));
     let remote_items = ctx
         .client
         .list_items(&ctx.project)
         .await
         .map_err(pm_to_ops)?;
-    let local_removed = overwrite_local_wave_from_remote(&wave_dir, &remote_items, ctx.provider)?;
+    let local_removed = overwrite_local_wave_from_remote(&wave_dir, &remote_items)?;
 
     Ok(PmPullResult {
         wave: options.wave.clone(),
-        provider: ctx.provider,
         project_id: ctx.project,
         local_removed,
         local_written: remote_items.len(),
@@ -1002,18 +890,17 @@ async fn pm_export_async(
 ) -> OpsResult<PmExportResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
-        "exporting wave/{} to {:?} project {}",
-        options.wave, ctx.provider, ctx.project
+        "exporting wave/{} to asana project {}",
+        options.wave, ctx.project
     ));
     let export = export_local_wave_to_remote(&wave_dir, &ctx, progress).await?;
 
     Ok(PmExportResult {
         wave: options.wave.clone(),
-        provider: ctx.provider,
         project_id: ctx.project,
         created: export.created,
         updated: export.updated,
@@ -1072,13 +959,11 @@ async fn pm_push_diff_async(
             "push-diff wave/{}: no changes under wave/{}/, skipping",
             options.wave, options.wave,
         ));
-        let provider = resolve_provider(repo, &options.wave)?;
         let project_id = read_wave_pm_config(repo, &options.wave)
-            .and_then(|pm| pm.project_for(provider).map(str::to_string))
+            .and_then(|pm| pm.project().map(str::to_string))
             .unwrap_or_default();
         return Ok(PmPushDiffResult {
             wave: options.wave.clone(),
-            provider,
             project_id,
             created: 0,
             updated: 0,
@@ -1086,14 +971,13 @@ async fn pm_push_diff_async(
         });
     }
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
 
     progress.status(&format!(
-        "push-diff wave/{} from baseline {} to {:?} project {}",
+        "push-diff wave/{} from baseline {} to asana project {}",
         options.wave,
         &baseline[..7.min(baseline.len())],
-        ctx.provider,
         ctx.project,
     ));
 
@@ -1146,8 +1030,9 @@ async fn pm_push_diff_async(
         let current_title = local_item.title();
         let current_desc = local_item.description();
 
-        match local_item.doc.frontmatter.id_for(ctx.provider) {
+        match local_item.doc.frontmatter.asana_id.clone() {
             Some(pm_id) => {
+                let pm_id = pm_id.as_str();
                 // Item has a provider ID — check if it actually changed vs baseline
                 if let Some(ref base) = base_doc {
                     let base_title = extract_heading(&base.body)
@@ -1195,10 +1080,7 @@ async fn pm_push_diff_async(
                     )
                     .await
                     .map_err(pm_to_ops)?;
-                local_items[local_idx]
-                    .doc
-                    .frontmatter
-                    .set_id(ctx.provider, pm_id);
+                local_items[local_idx].doc.frontmatter.asana_id = Some(pm_id);
                 write_local_item(&wave_dir, &local_items[local_idx])?;
                 progress.status(&format!("  created {filename}"));
                 created += 1;
@@ -1208,7 +1090,6 @@ async fn pm_push_diff_async(
 
     Ok(PmPushDiffResult {
         wave: options.wave.clone(),
-        provider: ctx.provider,
         project_id: ctx.project,
         created,
         updated,
@@ -1223,23 +1104,21 @@ async fn pm_sync_async(
 ) -> OpsResult<PmSyncResult> {
     let wave_dir = require_wave_dir(repo, &options.wave)?;
 
-    let ctx = build_wave_provider(repo, &options.wave).await?;
+    let ctx = build_provider(repo, &options.wave).await?;
     require_project(&ctx, &options.wave)?;
     let main_branch = get_default_branch(repo)
         .map_err(|err| OpsError::Message(format!("failed to determine main branch: {err}")))?;
 
     progress.status(&format!(
-        "syncing wave/{} with {:?} (base: {main_branch})",
-        options.wave, ctx.provider
+        "syncing wave/{} with asana (base: {main_branch})",
+        options.wave
     ));
 
-    let provider_kind = ctx.provider;
-
     // 1. Read base state from main branch
-    let base_items = read_base_items(repo, &main_branch, &options.wave, provider_kind)?;
+    let base_items = read_base_items(repo, &main_branch, &options.wave)?;
 
     // 2. Read local state from disk
-    let local_items = read_local_items(&wave_dir, provider_kind)?;
+    let local_items = read_local_items(&wave_dir)?;
 
     // 3. Fetch remote state
     let remote_items = ctx
@@ -1307,7 +1186,7 @@ async fn pm_sync_async(
                 } else if remote_changed {
                     // Pull remote → local
                     let path = wave_dir.join(local_file);
-                    write_remote_item(&path, remote_item, provider_kind)?;
+                    write_remote_item(&path, remote_item)?;
                     progress.status(&format!("  pulled {local_file}"));
                     pulled.push(local_file.clone());
                 }
@@ -1332,7 +1211,7 @@ async fn pm_sync_async(
 
                 // Write pm_id back to file
                 let mut updated_doc = local_doc.clone();
-                updated_doc.frontmatter.set_id(provider_kind, new_id);
+                updated_doc.frontmatter.asana_id = Some(new_id);
                 let rendered = updated_doc.render().map_err(pm_to_ops)?;
                 std::fs::write(wave_dir.join(local_file), rendered)?;
                 progress.status(&format!("  pushed (new) {local_file}"));
@@ -1346,7 +1225,7 @@ async fn pm_sync_async(
                     remote_item.rank + 1,
                     slugify(&remote_item.name)
                 );
-                write_remote_item(&wave_dir.join(&filename), remote_item, provider_kind)?;
+                write_remote_item(&wave_dir.join(&filename), remote_item)?;
                 progress.status(&format!("  pulled (new) {filename}"));
                 pulled.push(filename);
             }
@@ -1413,7 +1292,6 @@ fn read_base_items(
     repo: &Path,
     main_branch: &str,
     wave: &str,
-    provider: PmProviderKind,
 ) -> OpsResult<HashMap<String, RoadmapItemDocument>> {
     let wave_path = format!("wave/{wave}");
     let files = list_tree(repo, main_branch, &wave_path)
@@ -1429,8 +1307,8 @@ fn read_base_items(
             .map_err(|err| OpsError::Message(format!("failed to read base file: {err}")))?
         {
             if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    items.insert(pm_id.to_string(), doc);
+                if let Some(pm_id) = doc.frontmatter.asana_id.clone() {
+                    items.insert(pm_id, doc);
                 }
             }
         }
@@ -1440,7 +1318,6 @@ fn read_base_items(
 
 fn read_local_items(
     wave_dir: &Path,
-    provider: PmProviderKind,
 ) -> OpsResult<HashMap<String, (String, RoadmapItemDocument)>> {
     let items = list_wave_items(wave_dir).unwrap_or_default();
     let mut result = HashMap::new();
@@ -1448,8 +1325,8 @@ fn read_local_items(
         let path = wave_dir.join(&item.filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(doc) = RoadmapItemDocument::parse(&content) {
-                if let Some(pm_id) = doc.frontmatter.id_for(provider) {
-                    result.insert(pm_id.to_string(), (item.filename.clone(), doc));
+                if let Some(pm_id) = doc.frontmatter.asana_id.clone() {
+                    result.insert(pm_id, (item.filename.clone(), doc));
                 }
             }
         }
@@ -1457,10 +1334,10 @@ fn read_local_items(
     Ok(result)
 }
 
-fn remote_item_to_document(item: &PmItem, provider: PmProviderKind) -> RoadmapItemDocument {
+fn remote_item_to_document(item: &PmItem) -> RoadmapItemDocument {
     let mut frontmatter = RoadmapItemFrontmatter::default();
     frontmatter.set_priority_rank(item.rank);
-    frontmatter.set_id(provider, item.id.clone());
+    frontmatter.asana_id = Some(item.id.clone());
 
     RoadmapItemDocument {
         frontmatter,
@@ -1496,9 +1373,9 @@ async fn export_local_wave_to_remote(
         let title = local_item.title();
         let description = local_item.description();
 
-        match local_item.doc.frontmatter.id_for(ctx.provider) {
+        match local_item.doc.frontmatter.asana_id.clone() {
             Some(pm_id) => {
-                let Some(remote_item) = remote_by_id.get(pm_id) else {
+                let Some(remote_item) = remote_by_id.get(pm_id.as_str()) else {
                     progress.status(&format!(
                         "  skipped {} (remote {} missing)",
                         local_item.item.filename, pm_id
@@ -1514,7 +1391,7 @@ async fn export_local_wave_to_remote(
                 }
 
                 ctx.client
-                    .update_item(pm_id, &update)
+                    .update_item(&pm_id, &update)
                     .await
                     .map_err(pm_to_ops)?;
                 progress.status(&format!("  updated {}", local_item.item.filename));
@@ -1533,7 +1410,7 @@ async fn export_local_wave_to_remote(
                     )
                     .await
                     .map_err(pm_to_ops)?;
-                local_item.doc.frontmatter.set_id(ctx.provider, pm_id);
+                local_item.doc.frontmatter.asana_id = Some(pm_id);
                 write_local_item(wave_dir, local_item)?;
                 progress.status(&format!("  created {}", local_item.item.filename));
                 counts.created += 1;
@@ -1553,10 +1430,8 @@ fn build_text_update(title: &str, description: &str, remote_item: &PmItem) -> Pm
     }
 }
 
-fn write_remote_item(path: &Path, item: &PmItem, provider: PmProviderKind) -> OpsResult<()> {
-    let rendered = remote_item_to_document(item, provider)
-        .render()
-        .map_err(pm_to_ops)?;
+fn write_remote_item(path: &Path, item: &PmItem) -> OpsResult<()> {
+    let rendered = remote_item_to_document(item).render().map_err(pm_to_ops)?;
     std::fs::write(path, rendered)?;
     Ok(())
 }

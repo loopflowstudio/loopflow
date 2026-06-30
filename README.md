@@ -6,20 +6,19 @@ Waves are first built manually through more interactive exploration. Eventually 
 
 ## Waves
 
-A wave is **area × direction × flow**.
+A wave is **area × flow × goal**.
 
 | Field | Usage | Form |
 |-------|------|------|
 | **Area** | Scope and context | pathset |
 | **Flow** | Process followed / steps taken | sequence of prompts |
-| **Direction** | Defines success, quality, and aesthetics | prompt |
+| **Goal** | Loop prompt for autonomous runs | prompt |
 
 ```yaml
 # wave/designer/designer.yaml
 flow: build
+goal: ship-roadmap
 mode: loop
-direction:
-  - ux
 area:
   - designs/
 triggers:

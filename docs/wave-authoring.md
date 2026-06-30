@@ -126,6 +126,7 @@ Optional. Mirrors the wave's fields in lfd:
 ```yaml
 # wave/infra/infra.yaml
 flow: build
+goal: ship-roadmap
 workers: 2
 mode: loop
 crons:
@@ -146,6 +147,7 @@ triggers:
 | Field | What it does |
 |-------|-------------|
 | `flow` | Which flow to run (`build`, `garden`, `sync`, etc.) |
+| `goal` | Which loop prompt to run for autonomous iterations |
 | `workers` | Parallelism for the primary flow. `0` means "don't auto-dispatch the primary flow" |
 | `mode` | Primary execution pattern: `manual` or `loop` |
 | `crons` | Scheduled supplementary flows. Each entry has a `flow` and cron `schedule` |
@@ -237,6 +239,7 @@ Mode controls the primary execution pattern. Crons schedule supplementary flows.
 ```yaml
 # wave/mywave/mywave.yaml
 flow: build
+goal: ship-roadmap
 workers: 2
 mode: loop
 crons:

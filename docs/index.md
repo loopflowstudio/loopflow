@@ -103,6 +103,7 @@ Area is the path you pass—not a file. It scopes what the wave sees and changes
 
 ```yaml
 flow: build
+goal: ship-roadmap
 workers: 2
 mode: loop
 crons:

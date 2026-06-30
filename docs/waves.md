@@ -44,6 +44,7 @@ Crons schedule supplementary flows on a wave. They do not replace the wave's pri
 ```yaml
 # wave/shipper/shipper.yaml
 flow: build
+goal: ship-roadmap
 workers: 2
 mode: loop
 crons:

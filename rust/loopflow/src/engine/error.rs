@@ -36,6 +36,8 @@ pub enum LoadError {
 pub enum CoreError {
     #[error("flow not found: {0}")]
     FlowNotFound(String),
+    #[error("goal not found: {0}")]
+    GoalNotFound(String),
     #[error("step not found: {0}")]
     StepNotFound(String),
     #[error("invalid flow: {0}")]
@@ -69,7 +71,7 @@ impl From<LoadError> for CoreError {
     fn from(err: LoadError) -> Self {
         match err {
             LoadError::FlowNotFound(name) => CoreError::FlowNotFound(name),
-            LoadError::GoalNotFound(name) => CoreError::StepNotFound(name),
+            LoadError::GoalNotFound(name) => CoreError::GoalNotFound(name),
             LoadError::StepNotFound(name) => CoreError::StepNotFound(name),
             LoadError::InvalidFlow(msg) => CoreError::InvalidFlow(msg),
             other => CoreError::ExecutionFailed(other.to_string()),

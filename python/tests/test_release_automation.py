@@ -361,6 +361,8 @@ def test_release_schedule_contract_covers_loopflow_and_cadenza():
     assert (
         "Weekly publishing never runs unless nightly-style package verification passed" in schedule
     )
+    assert "lf op release run patch" in schedule
+    assert "release/unreleased/DECISIONS.md" in schedule
 
     weekly = yaml.load(
         (ROOT / ".github/workflows/weekly-release.yml").read_text(), Loader=yaml.BaseLoader
@@ -368,3 +370,18 @@ def test_release_schedule_contract_covers_loopflow_and_cadenza():
     assert weekly["jobs"]["package-test"]["uses"] == "./.github/workflows/nightly-packages.yml"
     assert weekly["jobs"]["release"]["needs"] == ["tag-check", "package-test"]
     assert weekly["jobs"]["release"]["permissions"]["actions"] == "write"
+    assert weekly["jobs"]["release"]["permissions"]["pull-requests"] == "write"
+
+    commands = "\n".join(
+        step.get("run", "") for step in weekly["jobs"]["release"]["steps"]
+    )
+    release_steps = weekly["jobs"]["release"]["steps"]
+    assert any(
+        step.get("uses") == "dopplerhq/secrets-fetch-action@v2.0.0"
+        for step in release_steps
+    )
+    assert "cargo build --release -p loopflow --bin lf" in commands
+    assert "lf op release run patch" in commands
+    assert "bump_patch_version.sh" not in commands
+    assert "git push origin HEAD:main" not in commands
+    assert "gh workflow run release.yml" not in commands

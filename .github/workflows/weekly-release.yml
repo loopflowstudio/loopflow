@@ -52,10 +52,11 @@ jobs:
     needs: [tag-check, package-test]
     if: needs.tag-check.outputs.skip != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
     permissions:
       contents: write
       actions: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,34 +64,20 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Bump patch version and append release notes
-        id: bump
+      - uses: astral-sh/setup-uv@v7
+      - name: Fetch release secrets
+        uses: dopplerhq/secrets-fetch-action@v2.0.0
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
+          inject-env-vars: true
+          doppler-project: loopflow
+          doppler-config: prd
+      - name: Install lf
         run: |
           set -euo pipefail
-          ./scripts/bump_patch_version.sh \
-            "${{ needs.tag-check.outputs.last_tag }}" \
-            "${{ needs.tag-check.outputs.commit_count }}" \
-            | tee bump.out
-          # bump_patch_version.sh prints `next=<version>` on its last line.
-          next=$(grep '^next=' bump.out | cut -d= -f2)
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-      - name: Refresh Cargo.lock
-        run: cargo update -p loopflow
-      - name: Commit, tag, and dispatch release
+          cargo build --release -p loopflow --bin lf
+          echo "$PWD/target/release" >> "$GITHUB_PATH"
+      - name: Run canonical release flow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          version="v${{ steps.bump.outputs.next }}"
-          git config user.name "loopflow-bot"
-          git config user.email "bot@loopflow.studio"
-          git add Cargo.toml Cargo.lock pyproject.toml RELEASE_NOTES.md
-          git commit -m "release: ${version} (weekly auto-release)"
-          git push origin HEAD:main
-
-          # Pushes made with GITHUB_TOKEN don't trigger other workflows, so
-          # cut the tag and dispatch release.yml explicitly — mirrors what
-          # auto-tag.yml would have done for a human-driven release.
-          git tag "$version"
-          git push origin "$version"
-          gh workflow run release.yml --ref "$version" -f tag="$version"
+        run: lf op release run patch

@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::lfd::config::{LfdConfig, RuntimeBackend};
 
-use super::compose;
+use super::{compose, contains_sensitive_service_env, service_environment, write_service_file};
 
 /// macOS launchd service management.
 ///
@@ -41,6 +41,7 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         .to_string_lossy()
         .to_string();
     let path_env = std::env::var("PATH").unwrap_or_default();
+    let env_vars = service_environment(&path_env);
     let log_dir = log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
 
@@ -57,14 +58,18 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let content = render_plist(&program_args, &path_env, &log_dir)?;
+    let content = render_plist(&program_args, &env_vars, &log_dir)?;
 
     let plist_str = plist_path.to_string_lossy().to_string();
     let _ = Command::new("launchctl")
         .args(["unload", &plist_str])
         .output();
 
-    std::fs::write(&plist_path, &content)?;
+    write_service_file(
+        &plist_path,
+        &content,
+        contains_sensitive_service_env(&env_vars),
+    )?;
     println!("Installed {}", plist_path.display());
 
     let status = Command::new("launchctl")
@@ -199,12 +204,23 @@ pub fn status(config: &LfdConfig) -> Result<()> {
 
 fn render_plist(
     program_args: &[String],
-    path_env: &str,
+    env_vars: &[(String, String)],
     log_dir: &std::path::Path,
 ) -> Result<String> {
     let program_args_xml = program_args
         .iter()
-        .map(|arg| format!("        <string>{arg}</string>"))
+        .map(|arg| format!("        <string>{}</string>", xml_escape(arg)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let env_xml = env_vars
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                "        <key>{}</key>\n        <string>{}</string>",
+                xml_escape(name),
+                xml_escape(value)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -233,14 +249,23 @@ fn render_plist(
     <string>{log_dir}/lfd.log</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key>
-        <string>{path_env}</string>
+{env_xml}
     </dict>
 </dict>
 </plist>
 "#,
         log_dir = log_dir.display(),
+        env_xml = env_xml,
     ))
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn build_program_arguments(backend: RuntimeBackend, lfd_path: &str) -> Result<Vec<String>> {
@@ -281,7 +306,8 @@ fn teardown_backend(backend: RuntimeBackend) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_backend_from_plist, RuntimeBackend};
+    use super::{detect_backend_from_plist, render_plist, RuntimeBackend};
+    use std::path::Path;
 
     #[test]
     fn detects_compose_backend_from_plist_content() {
@@ -304,5 +330,25 @@ mod tests {
 </array>
 "#;
         assert_eq!(detect_backend_from_plist(content), RuntimeBackend::Native);
+    }
+
+    #[test]
+    fn render_plist_persists_remote_native_environment() {
+        let env_vars = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("LFD_HTTP_ADDR".to_string(), "0.0.0.0:2486".to_string()),
+            ("LFD_AUTH_TOKEN".to_string(), "token<&>\"".to_string()),
+        ];
+        let content = render_plist(
+            &["/usr/local/bin/lfd".to_string(), "serve".to_string()],
+            &env_vars,
+            Path::new("/tmp"),
+        )
+        .expect("render plist");
+
+        assert!(content.contains("<key>LFD_HTTP_ADDR</key>"));
+        assert!(content.contains("<string>0.0.0.0:2486</string>"));
+        assert!(content.contains("<key>LFD_AUTH_TOKEN</key>"));
+        assert!(content.contains("token&lt;&amp;&gt;&quot;"));
     }
 }

@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::lfd::config::{LfdConfig, RuntimeBackend};
 
-use super::compose;
+use super::{compose, contains_sensitive_service_env, service_environment, write_service_file};
 
 // Linux systemd user service management.
 //
@@ -42,6 +42,7 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         .to_string_lossy()
         .to_string();
     let path_env = std::env::var("PATH").unwrap_or_default();
+    let env_vars = service_environment(&path_env);
     let exec_start = build_exec_start(config.runtime_backend, &lfd_path)?;
 
     let unit_path = unit_path()?;
@@ -49,24 +50,13 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let content = format!(
-        r#"[Unit]
-Description=Loopflow Daemon
-After=network.target
+    let content = render_unit(&exec_start, &env_vars);
 
-[Service]
-Type=simple
-ExecStart={exec_start}
-Restart=on-failure
-RestartSec=5
-Environment=PATH={path_env}
-
-[Install]
-WantedBy=default.target
-"#
-    );
-
-    std::fs::write(&unit_path, &content)?;
+    write_service_file(
+        &unit_path,
+        &content,
+        contains_sensitive_service_env(&env_vars),
+    )?;
     println!("Installed {}", unit_path.display());
 
     let _ = Command::new("systemctl")
@@ -206,6 +196,34 @@ pub fn status(config: &LfdConfig) -> Result<()> {
     Ok(())
 }
 
+fn render_unit(exec_start: &str, env_vars: &[(String, String)]) -> String {
+    let env_lines = env_vars
+        .iter()
+        .map(|(name, value)| format!("Environment=\"{}={}\"", name, systemd_escape(value)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"[Unit]
+Description=Loopflow Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={exec_start}
+Restart=on-failure
+RestartSec=5
+{env_lines}
+
+[Install]
+WantedBy=default.target
+"#
+    )
+}
+
+fn systemd_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn build_exec_start(backend: RuntimeBackend, lfd_path: &str) -> Result<String> {
     match backend {
         RuntimeBackend::Native => Ok(format!("{lfd_path} serve")),
@@ -244,7 +262,7 @@ fn teardown_backend(backend: RuntimeBackend) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_backend_from_unit, RuntimeBackend};
+    use super::{detect_backend_from_unit, render_unit, RuntimeBackend};
 
     #[test]
     fn detects_compose_backend_from_unit_content() {
@@ -256,5 +274,18 @@ mod tests {
     fn detects_native_backend_from_unit_content() {
         let content = "ExecStart=/usr/local/bin/lfd serve";
         assert_eq!(detect_backend_from_unit(content), RuntimeBackend::Native);
+    }
+
+    #[test]
+    fn render_unit_persists_remote_native_environment() {
+        let env_vars = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("LFD_HTTP_ADDR".to_string(), "0.0.0.0:2486".to_string()),
+            ("LFD_AUTH_TOKEN".to_string(), "token\"value".to_string()),
+        ];
+        let content = render_unit("/usr/local/bin/lfd serve", &env_vars);
+
+        assert!(content.contains("Environment=\"LFD_HTTP_ADDR=0.0.0.0:2486\""));
+        assert!(content.contains("Environment=\"LFD_AUTH_TOKEN=token\\\"value\""));
     }
 }

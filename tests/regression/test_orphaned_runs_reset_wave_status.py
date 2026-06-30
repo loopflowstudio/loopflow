@@ -79,9 +79,7 @@ def _first_boot_and_stick_a_wave_in_running(
         return wave_id
 
 
-def _reboot_and_read_wave_status(
-    lfd_bin: Path, home: Path, db_path: Path, wave_id: str
-) -> str:
+def _reboot_and_read_wave_status(lfd_bin: Path, home: Path, db_path: Path, wave_id: str) -> str:
     port = _reserve_port()
     with _running_lfd(lfd_bin, home, db_path, port):
         token = _wait_for_token(home)

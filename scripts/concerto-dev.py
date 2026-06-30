@@ -433,9 +433,7 @@ def _print_run_debug_checklist() -> None:
     print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
 
 
-def cmd_run_debug(
-    with_lfd: bool = False, docker_lfd: bool = False, repo: Path = REPO_ROOT
-) -> int:
+def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
     """Build and run with stdout visible. `repo` is the repo the app opens."""
     lfd_process: subprocess.Popen[str] | None = None
     lfd_log: TextIO | None = None

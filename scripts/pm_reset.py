@@ -21,7 +21,6 @@ Only Asana is implemented at the moment. Linear/Notion raise on --provider.
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,9 +32,7 @@ import yaml
 ASANA_API = "https://app.asana.com/api/1.0"
 
 
-def find_wave_projects(
-    repo: Path, provider: str
-) -> list[tuple[Path, str, str]]:
+def find_wave_projects(repo: Path, provider: str) -> list[tuple[Path, str, str]]:
     """Return [(yaml_path, wave_name, project_id)] for configured waves."""
     field = f"{provider}_project"
     out: list[tuple[Path, str, str]] = []
@@ -60,17 +57,14 @@ def load_asana_token(credentials_dir: Path) -> str:
     return token
 
 
-def delete_asana_project(
-    token: str, project_id: str, api_base: str = ASANA_API
-) -> None:
+def delete_asana_project(token: str, project_id: str, api_base: str = ASANA_API) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     response = httpx.delete(f"{api_base}/projects/{project_id}", headers=headers, timeout=30)
     if response.status_code == 404:
         return
     if response.status_code >= 300:
         raise RuntimeError(
-            f"Asana delete failed for {project_id}: "
-            f"{response.status_code} {response.text}"
+            f"Asana delete failed for {project_id}: {response.status_code} {response.text}"
         )
 
 
@@ -107,9 +101,7 @@ def main() -> int:
         default=str(Path.home() / ".lf/credentials"),
         help="Credentials directory (default: ~/.lf/credentials)",
     )
-    parser.add_argument(
-        "--skip-init", action="store_true", help="Skip `lf op pm init --all`"
-    )
+    parser.add_argument("--skip-init", action="store_true", help="Skip `lf op pm init --all`")
     parser.add_argument(
         "--skip-push-diff",
         action="store_true",
@@ -126,9 +118,7 @@ def main() -> int:
         for _, wave, pid in projects:
             print(f"  {wave}: {pid}")
     else:
-        print(
-            f"No waves with configured {args.provider}_project — nothing to delete."
-        )
+        print(f"No waves with configured {args.provider}_project — nothing to delete.")
 
     if projects and not args.yes and not args.dry_run:
         prompt = "\nThis will DELETE every listed project. Proceed? [y/N] "

@@ -298,7 +298,7 @@ impl SqliteStore {
 impl SqliteStore {
     pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(Self::sql(Query::HealthCheck), [])?;
+        conn.query_row(Self::sql(Query::HealthCheck), [], |_| Ok(()))?;
         Ok(())
     }
 

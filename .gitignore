@@ -34,3 +34,7 @@ reports/
 
 # Environment (secrets)
 .env
+website/.sesskey
+
+# Website generated docs copy
+website/docs/

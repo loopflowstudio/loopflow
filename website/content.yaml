@@ -1,0 +1,140 @@
+# Loopflow Website Content
+# Edit copy here—no need to touch main.py
+
+vocab:
+  essences:
+    Area: "Context and scope"
+    Direction: "Definition of success and quality"
+    Flow: "Sequence of steps"
+    Stimulus: "Loop, watch, listen, or schedule"
+
+  details:
+    Area:
+      - label: "Pathset"
+        value: "Focuses the wave on part of the codebase"
+      - label: "Auto-includes"
+        value: "README, STYLE, CLAUDE.md, scratch/, roadmap/"
+
+    Direction:
+      - label: "Shapes judgment"
+        value: "Defines intent, aesthetics, and what done looks like"
+      - label: "Composable"
+        value: "Stack multiple: product-engineer + designer"
+
+    Flow:
+      - label: "Pipelines"
+        value: "design → implement → test → polish"
+      - label: "Forks"
+        value: "Run a step in parallel with different directions, then synthesize"
+
+    Stimulus:
+      - label: "Modes"
+        value: "Once, loop, watch, cron, or listen"
+      - label: "Progression"
+        value: "Start manual, graduate to autonomous"
+
+homepage:
+  hero:
+    tagline: "Coding agents that work in a team and build over time."
+    concerto_download_url: "https://downloads.loopflow.studio/LoopflowConcerto-latest.dmg"
+
+  video:
+    poster: "/static/concerto-main.png"
+    src: null
+
+  install:
+    command_display: |
+      curl -fsSL https://loopflow.studio/install.sh | sh
+      lf init
+    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"
+
+  capabilities:
+    heading: "Built for teams of agents, not one-shot chats."
+    items:
+      - title: "Persistent context across runs"
+        description: "Waves carry memory, repo docs, and prior decisions forward — agents build on what came before."
+      - title: "Prompt files you can diff"
+        description: "Steps, directions, and wave docs live in your repo, so prompt changes get reviewed like code."
+      - title: "Composable execution model"
+        description: "Mix area, direction, flow, and stimulus to shape behavior without rewriting everything."
+      - title: "Stimulus-driven automation"
+        description: "Run once, loop continuously, react to file changes, or trigger from schedules and events."
+      - title: "Human control at shipping time"
+        description: "Agents do the work; you decide whether to ship, iterate, or branch."
+      - title: "Works across surfaces"
+        description: "Same wave can run in terminal, headless automation, and Concerto with context intact."
+
+  building_blocks:
+    heading: "Building blocks"
+    items:
+      - label: "A wave"
+        filename: "wave/auth/README.md"
+        content: |
+          ## Vision
+          Unify auth flows across web and desktop.
+          
+          ## Goals
+          - Eliminate duplicate token validation
+          - Share session refresh logic
+          - Keep auth startup under 200ms
+          
+          ## Risks
+          - Breaking daemon discovery
+          - Regressions in JWT expiry handling
+      - label: "A step"
+        filename: ".lf/steps/implement.md"
+        content: |
+          Turn the design doc into working code.
+          
+          ## Workflow
+          1. Understand the design
+          2. Implement data structures and functions
+          3. Verify with tests and done-when checks
+      - label: "A direction"
+        filename: ".lf/directions/craft.md"
+        content: |
+          Prioritize clarity over cleverness.
+          
+          - Match existing patterns in this codebase
+          - Prefer explicit data flow to hidden magic
+          - Ship complete milestones, not partial layers
+      - label: "A flow"
+        filename: ".lf/flows/ship-wave.yaml"
+        content: |
+          steps:
+            - design
+            - implement
+            - review
+            - polish
+
+  products:
+    heading: "Free and open source"
+    concerto:
+      name: "Concerto"
+      note: "Mac and iOS"
+      description: "Visual podium for running waves across branches and repos."
+      image: "/static/concerto-main.png"
+      image_alt: "Concerto showing active and idle waves"
+      details:
+        - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
+        - "Arrange the symphony — create, configure, and launch waves visually"
+        - "Maintain focus — easily find where your attention is most needed"
+    server:
+      name: "Server"
+      note: "CLI and daemon"
+      description: "Manage prompts and context with the CLI. Run waves remotely with the daemon."
+      details:
+        - "lf — context management for waves, steps, directions, and memory"
+        - "lfd — long-running daemon, natively or in containers"
+        - "Authentication built in — WorkOS OAuth via Loopflow Studio"
+      terminal_lines:
+        - type: "command"
+          content: "lf design"
+        - type: "output"
+          content: "wave: billing"
+        - type: "output"
+          content: "area: cadenza/server/"
+        - type: "output"
+          content: "direction: craft"
+        - type: "output"
+          content: "writing scratch/billing.md"

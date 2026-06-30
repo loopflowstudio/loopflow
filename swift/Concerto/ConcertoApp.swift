@@ -206,6 +206,7 @@ struct ConcertoApp: App {
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
             .environment(keyboardRouter)
+            .onOpenURL { handleDeepLink($0) }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -219,6 +220,15 @@ struct ConcertoApp: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
+
+        Window("Portfolio", id: "portfolio") {
+            PortfolioWindow(portfolioService: portfolioService)
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+                .environment(keyboardRouter)
+        }
+        .defaultSize(width: 1080, height: 760)
 
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
@@ -266,6 +276,29 @@ struct ConcertoApp: App {
                 .keyboardShortcut("k", modifiers: .command)
             }
 
+            CommandMenu("Go") {
+                Button("Portfolio") {
+                    openWindow(id: "portfolio")
+                }
+                .keyboardShortcut("0", modifiers: .command)
+
+                if !portfolioService.repos.isEmpty {
+                    Menu("Move to Repo") {
+                        ForEach(portfolioService.repos) { repo in
+                            Button(repo.displayName) {
+                                portfolioService.addRepo(repo.url)
+                                openWindow(id: "repo", value: repo.url)
+                            }
+                        }
+                    }
+                }
+
+                Button("Open Repo…") {
+                    openRepoPanel()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+
             CommandMenu("Debug") {
                 Button("Terminal Test") {
                     openWindow(id: "terminal-test")
@@ -292,6 +325,36 @@ struct ConcertoApp: App {
             snapshotError = error.localizedDescription
             showSnapshotError = true
         }
+    }
+
+    @MainActor
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme == "loopflow" else { return }
+        switch url.host {
+        case "open":
+            guard let repoPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "repo" })?.value
+            else { return }
+            let repoURL = URL(fileURLWithPath: repoPath)
+            portfolioService.addRepo(repoURL)
+            openWindow(id: "repo", value: repoURL)
+        case "portfolio":
+            openWindow(id: "portfolio")
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func openRepoPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open Repo"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        portfolioService.addRepo(url)
+        openWindow(id: "repo", value: url)
     }
 }
 #else

@@ -126,39 +126,23 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 }
 
 fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
-    if let Some(goal_name) = wave
-        .goal()
-        .filter(|_| run.snapshot.flow == wave.primary_flow().as_str())
-    {
-        let repo = Path::new(&run.worktree);
-        let goal = crate::engine::load_goal(goal_name, repo)?;
-        let prompt = crate::engine::render_goal(
-            &goal,
-            &crate::engine::GoalRenderContext {
-                flows: crate::engine::available_flow_names(repo),
-                roadmap: format!("wave/{}", wave.name()),
-            },
-        );
-        let cmd = build_lf_inline_command(
-            &prompt,
-            true,
-            &run.snapshot.direction,
-            &run.snapshot.area,
-            wave.name(),
-        );
-        return Ok((cmd, format!("goal:{goal_name}")));
-    }
-
-    Ok((
-        build_lf_step_command(
-            &run.snapshot.flow,
-            true,
-            &run.snapshot.direction,
-            &run.snapshot.area,
-            wave.name(),
-        ),
-        run.snapshot.flow.clone(),
-    ))
+    let repo = Path::new(&run.worktree);
+    let goal = crate::engine::load_goal(wave.goal(), repo)?;
+    let prompt = crate::engine::render_goal(
+        &goal,
+        &crate::engine::GoalRenderContext {
+            flows: crate::engine::available_flow_names(repo),
+            roadmap: format!("wave/{}", wave.name()),
+        },
+    );
+    let cmd = build_lf_inline_command(
+        &prompt,
+        true,
+        &run.snapshot.direction,
+        &run.snapshot.area,
+        wave.name(),
+    );
+    Ok((cmd, format!("goal:{}", wave.goal())))
 }
 
 #[derive(Clone)]
@@ -1275,7 +1259,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1334,7 +1318,7 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1441,7 +1425,7 @@ mod tests {
     #[tokio::test]
     async fn execute_wave_run_with_goal_runs_rendered_goal_prompt() {
         let repo = TestRepo::new();
-        let goals_dir = repo.path().join("goal");
+        let goals_dir = repo.path().join(".lf/goals");
         std::fs::create_dir_all(&goals_dir).expect("create goal dir");
         std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
             .expect("write goal");
@@ -1475,7 +1459,7 @@ mod tests {
             WaveStatus::Running,
         );
         wave.mode = WaveMode::Manual;
-        wave.goal = Some("drive".to_string());
+        wave.goal = "drive".to_string();
         store.create_wave(&wave).await.expect("create wave");
 
         let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
@@ -1498,9 +1482,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_wave_run_with_goal_preserves_flow_override() {
+    async fn execute_wave_run_with_goal_ignores_flow_override() {
         let repo = TestRepo::new();
-        let goals_dir = repo.path().join("goal");
+        let goals_dir = repo.path().join(".lf/goals");
         std::fs::create_dir_all(&goals_dir).expect("create goal dir");
         std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
             .expect("write goal");
@@ -1531,7 +1515,7 @@ mod tests {
             WaveStatus::Running,
         );
         wave.mode = WaveMode::Manual;
-        wave.goal = Some("drive".to_string());
+        wave.goal = "drive".to_string();
         store.create_wave(&wave).await.expect("create wave");
 
         let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
@@ -1546,11 +1530,10 @@ mod tests {
             .expect("capture mutex poisoned")
             .clone()
             .expect("runner command");
-        assert!(cmd.iter().any(|arg| arg == "qa"));
-        assert!(!cmd.iter().any(|arg| arg == ":"));
-        assert!(!cmd
-            .iter()
-            .any(|arg| arg.contains("Execute the custom goal body.")));
+        assert!(cmd.iter().any(|arg| arg == ":"));
+        let prompt = cmd.last().expect("inline prompt should be last arg");
+        assert!(prompt.contains("Execute the custom goal body."));
+        assert!(prompt.contains("wave/goal-wave"));
     }
 
     #[tokio::test]
@@ -1576,7 +1559,7 @@ mod tests {
             repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],

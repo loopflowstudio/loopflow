@@ -110,7 +110,9 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let surface = if is_interactive {
+    let surface = if cli.ide {
+        Surface::Ide
+    } else if is_interactive {
         Surface::Cli
     } else {
         Surface::Headless
@@ -249,7 +251,7 @@ fn should_launch_via_skill(step_name: &str) -> bool {
 }
 
 /// Build the launch seed for a vendor skill handoff: the skill invocation, the surface
-/// run-mode preamble, and the voice doc. Orientation now lives in the step
+/// run-mode preamble, and the voice doc for loopflow-owned surfaces. Orientation now lives in the step
 /// bodies themselves, and the step body loads from the synced skill on invoke,
 /// so this stays small enough for the GUI deep-link cap.
 ///
@@ -265,10 +267,12 @@ fn skill_launch_seed(
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let mut seed = format!("{sigil}{step_name}\n\n{}", surface.instructions());
-    if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
-        seed.push_str("\n\n<lf:voice>\n");
-        seed.push_str(voice);
-        seed.push_str("\n</lf:voice>");
+    if surface != Surface::Ide {
+        if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
+            seed.push_str("\n\n<lf:voice>\n");
+            seed.push_str(voice);
+            seed.push_str("\n</lf:voice>");
+        }
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
@@ -521,6 +525,23 @@ mod tests {
         // skills fire with `$name`.
         let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None);
         assert!(seed.starts_with("$gate\n\n"));
+    }
+
+    #[test]
+    fn skill_launch_seed_ide_omits_voice_and_surface() {
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Ide,
+            "gate",
+            Some("build auth"),
+            Some("Be terse."),
+        );
+
+        assert!(seed.starts_with("/gate\n\n"));
+        assert!(!seed.contains("Run mode is interactive"));
+        assert!(!seed.contains("Run mode is headless"));
+        assert!(!seed.contains("<lf:voice>"));
+        assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
     }
 
     #[test]

@@ -1055,7 +1055,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
             flow: json["primary_flow"] as? String ?? "",
-            goal: json["goal"] as? String,
+            goal: json["goal"] as! String,
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
             agent: json["agent"] as? String,

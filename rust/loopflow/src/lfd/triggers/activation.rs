@@ -612,7 +612,7 @@ mod tests {
             repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),

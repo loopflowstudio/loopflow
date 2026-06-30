@@ -243,7 +243,8 @@ pub async fn create_wave_handler(
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let goal = goal
         .or_else(|| wave_config.as_ref().and_then(|c| c.goal.clone()))
-        .and_then(|value| trimmed_non_empty(Some(&value)));
+        .and_then(|value| trimmed_non_empty(Some(&value)))
+        .unwrap_or_else(|| "ship-roadmap".to_string());
     let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
     let cron_defs = requested_crons
         .or_else(|| wave_config.as_ref().and_then(|c| c.crons.clone()))
@@ -630,7 +631,9 @@ pub async fn update_wave_handler(
         wave.primary_flow = flow;
     }
     if let Some(goal) = payload.goal {
-        wave.goal = trimmed_non_empty(Some(&goal));
+        if let Some(goal) = trimmed_non_empty(Some(&goal)) {
+            wave.goal = goal;
+        }
     }
     if let Some(direction) = payload.direction {
         wave.direction = direction;
@@ -785,7 +788,9 @@ async fn start_wave_run(
         flow_override = overrides.flow;
         roadmap_item = overrides.roadmap_item;
         if let Some(goal) = overrides.goal {
-            wave.goal = trimmed_non_empty(Some(&goal));
+            if let Some(goal) = trimmed_non_empty(Some(&goal)) {
+                wave.goal = goal;
+            }
         }
         if let Some(direction) = overrides.direction {
             wave.direction = direction;
@@ -1585,7 +1590,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),

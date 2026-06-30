@@ -112,7 +112,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let mode_str = row.text(11)?;
     let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
     let primary_flow = row.text(12)?;
-    let goal = row.opt_text(13)?;
+    let goal = row.text(13)?;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;

@@ -85,7 +85,7 @@ pub struct WaveDto {
     pub repo: String,
     pub mode: String,
     pub primary_flow: String,
-    pub goal: Option<String>,
+    pub goal: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -623,6 +623,7 @@ mod contract_tests {
         assert_eq!(wave.object, "wave");
         assert_eq!(wave.name, "engbot");
         assert_eq!(wave.primary_flow, "build");
+        assert_eq!(wave.goal, "ship-roadmap");
         assert_eq!(wave.mode, "loop");
         assert_eq!(wave.status, "running");
         assert_eq!(wave.iteration, 3);
@@ -643,7 +644,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn wave_goal_serializes_null_when_absent() {
+    fn wave_goal_serializes_required_value() {
         let wave = WaveDto {
             id: "wave_abc123".to_string(),
             object: "wave".to_string(),
@@ -651,7 +652,7 @@ mod contract_tests {
             repo: "/tmp/repo".to_string(),
             mode: "loop".to_string(),
             primary_flow: "build".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             direction: Vec::new(),
             area: Vec::new(),
             agent: None,
@@ -674,8 +675,18 @@ mod contract_tests {
         };
 
         let json = serde_json::to_value(&wave).unwrap();
-        assert!(json.get("goal").is_some());
-        assert!(json["goal"].is_null());
+        assert_eq!(json["goal"], "ship-roadmap");
+    }
+
+    #[test]
+    fn wave_goal_is_required() {
+        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        json.as_object_mut()
+            .expect("wave fixture should be an object")
+            .remove("goal");
+
+        let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
+        assert!(err.to_string().contains("missing field `goal`"));
     }
 
     #[test]

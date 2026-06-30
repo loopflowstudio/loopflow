@@ -2322,7 +2322,7 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],

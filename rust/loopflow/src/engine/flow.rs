@@ -666,35 +666,20 @@ fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
         if repo_ns.exists() {
             return Ok(repo_ns);
         }
-        let repo_singular_ns = markdown_path(&repo.join(".lf/goal").join(prefix), goal_name);
-        if repo_singular_ns.exists() {
-            return Ok(repo_singular_ns);
-        }
         if let Some(home) = home_dir() {
             let home_ns = markdown_path(&home.join(".lf/goals").join(prefix), goal_name);
             if home_ns.exists() {
                 return Ok(home_ns);
             }
-            let home_singular_ns = markdown_path(&home.join(".lf/goal").join(prefix), goal_name);
-            if home_singular_ns.exists() {
-                return Ok(home_singular_ns);
-            }
         }
     }
 
-    if let Some(path) = first_existing_path([
-        markdown_path(&repo.join(".lf/goals"), name),
-        markdown_path(&repo.join(".lf/goal"), name),
-        markdown_path(&repo.join("goal"), name),
-    ]) {
+    if let Some(path) = first_existing_path([markdown_path(&repo.join(".lf/goals"), name)]) {
         return Ok(path);
     }
 
     if let Some(home) = home_dir() {
-        if let Some(path) = first_existing_path([
-            markdown_path(&home.join(".lf/goals"), name),
-            markdown_path(&home.join(".lf/goal"), name),
-        ]) {
+        if let Some(path) = first_existing_path([markdown_path(&home.join(".lf/goals"), name)]) {
             return Ok(path);
         }
     }
@@ -1569,12 +1554,26 @@ mod tests {
     #[test]
     fn load_goal_finds_repo_goal_override() {
         let tmp = TempDir::new().unwrap();
-        let goals_dir = tmp.path().join("goal");
+        let goals_dir = tmp.path().join(".lf/goals");
         fs::create_dir_all(&goals_dir).unwrap();
         fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
 
         let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
         assert_eq!(goal.prompt, "Repo goal prompt.");
+    }
+
+    #[test]
+    fn load_goal_ignores_legacy_goal_paths() {
+        let tmp = TempDir::new().unwrap();
+        let singular_dir = tmp.path().join(".lf/goal");
+        let root_dir = tmp.path().join("goal");
+        fs::create_dir_all(&singular_dir).unwrap();
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::write(singular_dir.join("custom.md"), "Singular goal.").unwrap();
+        fs::write(root_dir.join("custom.md"), "Root goal.").unwrap();
+
+        let err = load_goal("custom", tmp.path()).unwrap_err();
+        assert!(matches!(err, LoadError::GoalNotFound(name) if name == "custom"));
     }
 
     #[test]

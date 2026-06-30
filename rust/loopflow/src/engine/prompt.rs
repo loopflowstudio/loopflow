@@ -260,6 +260,7 @@ pub enum PromptFormatMode {
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
     Cli,
+    Ide,
     ConcertoMac,
     ConcertoIphone,
     #[default]
@@ -277,6 +278,7 @@ impl Surface {
         match self {
             Self::Headless => builtins::SURFACE_HEADLESS,
             Self::Cli => builtins::SURFACE_CLI,
+            Self::Ide => "",
             Self::ConcertoMac => builtins::SURFACE_CONCERTO_MAC,
             Self::ConcertoIphone => builtins::SURFACE_CONCERTO_IPHONE,
         }
@@ -289,6 +291,7 @@ impl std::str::FromStr for Surface {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let surface = match value {
             "cli" => Self::Cli,
+            "ide" => Self::Ide,
             "concerto_mac" => Self::ConcertoMac,
             "concerto_iphone" => Self::ConcertoIphone,
             _ => Self::Headless,
@@ -1619,13 +1622,16 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    if components.surface.is_interactive() {
+    if components.surface.is_interactive() && components.surface != Surface::Ide {
         if let Some(ref voice) = components.voice_doc {
             parts.push(format!("<lf:voice>\n{}\n</lf:voice>", voice));
         }
     }
 
-    parts.push(components.surface.instructions().to_string());
+    let instructions = components.surface.instructions();
+    if !instructions.is_empty() {
+        parts.push(instructions.to_string());
+    }
 
     parts
 }
@@ -2354,6 +2360,21 @@ mod tests {
     }
 
     #[test]
+    fn format_prompt_ide_surface_omits_voice_and_surface_instructions() {
+        let components = PromptComponents {
+            surface: Surface::Ide,
+            voice_doc: Some("Use repo voice.".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:voice>"));
+        assert!(!prompt.contains("Run mode is interactive"));
+        assert!(!prompt.contains("Run mode is headless"));
+        assert!(!prompt.contains("Surface:"));
+    }
+
+    #[test]
     fn format_prompt_concerto_mac_surface_message() {
         let components = PromptComponents {
             surface: Surface::ConcertoMac,
@@ -2704,6 +2725,14 @@ mod tests {
             .parse::<Surface>()
             .expect("surface parsing is infallible");
         assert_eq!(parsed, Surface::Headless);
+    }
+
+    #[test]
+    fn surface_parser_accepts_ide() {
+        let parsed = "ide"
+            .parse::<Surface>()
+            .expect("surface parsing is infallible");
+        assert_eq!(parsed, Surface::Ide);
     }
 
     // ==========================================================================

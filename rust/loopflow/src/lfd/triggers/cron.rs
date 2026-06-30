@@ -181,7 +181,7 @@ mod tests {
             repo: repo_tmp.path().to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
-            goal: None,
+            goal: "ship-roadmap".to_string(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),

@@ -34,6 +34,7 @@ Loopflow and Cadenza both carry the scheduled release workflow pair. Each repo r
 
 - Nightly jobs prove release artifacts without deploying them.
 - Weekly publishing never runs unless nightly-style package verification passed in the same workflow run.
+- Release-note generation uses token compression: read the full release context, group repetition, preserve decisions and unique facts, and never substitute first-N commits or lines for summarization.
 - Secrets stay in Doppler or host-local env files, never Terraform state or committed config.
 - The cron server is self-hosted per repo. Studio discovery/auth is not supported.
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.

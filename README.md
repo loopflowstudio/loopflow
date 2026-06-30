@@ -161,6 +161,7 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context, preferring release decisions when present |
 | `synthesize` | Combine multiple perspectives into one |
+| `token-compress` | Compress text into a target token budget without silently dropping important information |
 | `validate` | Validate flows, steps, and directions |
 
 ## Flows

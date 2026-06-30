@@ -414,9 +414,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                         progress,
                     )?;
                     println!(
-                        "{}: {:?} project {} ({} linked, {} created)",
+                        "{}: asana project {} ({} linked, {} created)",
                         result.wave,
-                        result.provider,
                         result.project_id,
                         result.linked,
                         result.created.len()
@@ -431,9 +430,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     progress,
                 )?;
                 println!(
-                    "{}: {:?} project {} ({} linked, {} created)",
+                    "{}: asana project {} ({} linked, {} created)",
                     result.wave,
-                    result.provider,
                     result.project_id,
                     result.linked,
                     result.created.len()
@@ -500,9 +498,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     progress,
                 )?;
                 println!(
-                    "{}: {:?} project {} ({} files written, {} removed)",
+                    "{}: asana project {} ({} files written, {} removed)",
                     result.wave,
-                    result.provider,
                     result.project_id,
                     result.local_written,
                     result.local_removed
@@ -522,9 +519,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     progress,
                 )?;
                 println!(
-                    "{}: {:?} project {} ({} created, {} updated, {} skipped)",
+                    "{}: asana project {} ({} created, {} updated, {} skipped)",
                     result.wave,
-                    result.provider,
                     result.project_id,
                     result.created,
                     result.updated,
@@ -545,9 +541,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     progress,
                 )?;
                 println!(
-                    "{}: {:?} project {} ({} created, {} updated, {} unchanged)",
+                    "{}: asana project {} ({} created, {} updated, {} unchanged)",
                     result.wave,
-                    result.provider,
                     result.project_id,
                     result.created,
                     result.updated,
@@ -567,9 +562,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 for wave in result.waves {
                     let s = &wave.status;
                     println!(
-                        "{}: {:?} project {} — local {}, linked {}, remote {}, remote-only {}",
+                        "{}: asana project {} — local {}, linked {}, remote {}, remote-only {}",
                         wave.wave,
-                        s.provider,
                         s.project_id,
                         s.local_total,
                         s.linked,

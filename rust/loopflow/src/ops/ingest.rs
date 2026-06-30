@@ -434,13 +434,11 @@ mod tests {
 
     fn write_pm_config(repo: &Path) {
         std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
-        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: linear\n")
-            .expect("write repo pm config");
 
         let wave_dir = repo.join("wave").join("test-wave");
         std::fs::write(
             wave_dir.join("test-wave.yaml"),
-            "flow: build\npm:\n  linear_project: \"lin-1\"\n",
+            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
         )
         .expect("write wave pm config");
     }

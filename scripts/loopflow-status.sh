@@ -75,9 +75,9 @@ generate_container_status() {
     # Check daemon health first
     local lfq_ok=false
     if loopflow_has_cmd timeout; then
-        timeout "$timeout_s" lfq status >/dev/null 2>&1 && lfq_ok=true
+        timeout "$timeout_s" lfq list >/dev/null 2>&1 && lfq_ok=true
     else
-        lfq status >/dev/null 2>&1 && lfq_ok=true
+        lfq list >/dev/null 2>&1 && lfq_ok=true
     fi
 
     if [[ "$lfq_ok" != true ]]; then

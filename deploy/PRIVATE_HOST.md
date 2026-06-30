@@ -66,7 +66,7 @@ After `LFD_AUTH_TOKEN` exists on the host, run locally:
 ```bash
 deploy/setup-private-client.sh --host "$LFD_HOST" --ssh-user "$LFD_SSH_USER" --token "$LFD_AUTH_TOKEN"
 source ~/.lf/private-host.env
-lfq status
+lfq list
 ```
 
 The setup script writes:
@@ -103,7 +103,7 @@ Claude and Codex sessions run inside `lfd` executor containers when waves or ses
 source ~/.lf/private-host.env
 curl -f "$LFD_URL/health"
 curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status"
-lfq status
+lfq list
 uv run python scripts/test_remote_smoke.py --url "$LFD_URL" --token "$LFD_TOKEN" --repo /Users/jack/src/loopflow --insecure
 ```
 
@@ -125,6 +125,6 @@ From this Mac:
 
 ```bash
 source ~/.lf/private-host.env
-lfq status
+lfq list
 ssh "$LFD_SSH_USER@$LFD_HOST" 'cd ~/src/loopflow && deploy/loopflow-server.sh status'
 ```

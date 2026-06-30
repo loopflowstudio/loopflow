@@ -48,9 +48,9 @@ loopflow_detect_container_mode() {
     local timeout_s
     timeout_s="$(awk "BEGIN {printf \"%.1f\", $(loopflow_status_timeout_ms) / 1000}")"
     if loopflow_has_cmd timeout; then
-        timeout "$timeout_s" lfq status >/dev/null 2>&1
+        timeout "$timeout_s" lfq list >/dev/null 2>&1
     else
-        lfq status >/dev/null 2>&1
+        lfq list >/dev/null 2>&1
     fi
 }
 

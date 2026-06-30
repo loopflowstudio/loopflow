@@ -79,9 +79,11 @@ if [[ "$pull" == true ]]; then
 
     echo "pulling $repo"
     if [[ -n "$default_branch" ]]; then
-        git -C "$repo" pull --ff-only origin "$default_branch"
+        git -C "$repo" fetch origin "$default_branch"
+        git -C "$repo" merge --ff-only "origin/$default_branch"
     else
-        git -C "$repo" pull --ff-only
+        git -C "$repo" fetch
+        git -C "$repo" merge --ff-only "@{upstream}"
     fi
 fi
 

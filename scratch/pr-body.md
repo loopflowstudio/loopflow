@@ -4,14 +4,23 @@
 swift test --package-path swift --filter Portfolio
 swift test --package-path swift
 cargo fmt --check
-uv run pytest python/tests/test_pm_reset.py -q
+cargo clippy -- -D warnings
+cargo test --all
+uv run pytest python/tests/
+cargo test -p loopflow build_codex_command_without_context_file_omits_model_instructions
 cargo +nightly test -p loopflow build_codex_command_without_context_file_omits_model_instructions
 RUSTUP_TOOLCHAIN=nightly uv run pytest tests/regression/test_orphaned_runs_reset_wave_status.py tests/regression/test_terminal_session_dto_exposes_tmux_name.py -q
 ```
 
-The portfolio tests cover legacy decode into Active, fixed tier grouping, midpoint/edge reorder math, and persistence after reload. The full Swift package run passed 338 tests.
+The portfolio tests cover legacy decode into Active, fixed tier grouping, midpoint/edge reorder math, and persistence after reload. The full Swift package run passed 338 tests. Full Rust and Python unit suites pass.
 
-Stable Rust is currently blocked in this checkout before branch code runs: `libsqlite3-sys 0.38.1` fails to compile under stable `rustc 1.93.0` because `cfg_select` is still rejected as unstable. The focused Rust test and Rust-backed regression tests pass with the installed nightly toolchain.
+Xcode UI validation was attempted with:
+
+```bash
+cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+```
+
+That command built and ran the Concerto test bundle, then failed when `ConcertoUITests-Runner` was killed before establishing its test connection. No manual visual drag/drop QA was available in this run.
 
 ## Intent
 

@@ -28,7 +28,7 @@ Legacy migration is local to `PortfolioRepo.init(from:)`: missing `tierId` becom
 - Card drop placement uses a simple top-half/bottom-half split. It is enough for MVP reorder slots, but it is not a precise insertion indicator.
 - Repeated midpoint insertion between the same two neighbors can eventually lose precision. The current portfolio scale makes this unlikely; a future normalize-on-load pass would be cheap if needed.
 - No rendering environment was available in this run, so visual drag/drop verification was not performed.
-- Stable Rust validation is blocked in this checkout: `cargo build` fails compiling `libsqlite3-sys 0.38.1` because stable `rustc 1.93.0` rejects `cfg_select` as unstable. The same Rust and regression checks pass with the installed nightly toolchain.
+- Concerto UI runner validation is environment-sensitive. The Xcode command built and ran the Concerto test bundle, then failed when `ConcertoUITests-Runner` was killed before establishing its test connection.
 
 ## What's not included
 
@@ -41,8 +41,12 @@ Legacy migration is local to `PortfolioRepo.init(from:)`: missing `tierId` becom
 
 - `swift test --package-path swift --filter Portfolio` passed: 8 tests.
 - `swift test --package-path swift` passed: 338 tests.
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` built and ran the Concerto test bundle, then failed at `ConcertoUITests-Runner` bootstrap with signal kill before establishing connection.
 - `cargo fmt --check` passed.
+- `cargo clippy -- -D warnings` passed.
+- `cargo test --all` passed.
+- `uv run pytest python/tests/` passed: 148 tests.
 - `uv run pytest python/tests/test_pm_reset.py -q` passed: 8 tests.
+- `cargo test -p loopflow build_codex_command_without_context_file_omits_model_instructions` passed.
 - `cargo +nightly test -p loopflow build_codex_command_without_context_file_omits_model_instructions` passed.
 - `RUSTUP_TOOLCHAIN=nightly uv run pytest tests/regression/test_orphaned_runs_reset_wave_status.py tests/regression/test_terminal_session_dto_exposes_tmux_name.py -q` passed: 3 tests.
-- Stable `cargo test -p loopflow build_codex_command_without_context_file_omits_model_instructions` did not reach branch code; it failed during dependency build at `libsqlite3-sys 0.38.1` / `cfg_select`.

@@ -30,3 +30,4 @@ Loopflow and Cadenza both carry the scheduled release workflow pair. Each repo r
 - Secrets stay in Doppler or host-local env files, never Terraform state or committed config.
 - The cron server is self-hosted per repo. Studio discovery/auth is not supported.
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.
+- Automation spend uses the company card feed as source of truth and stops for approval above $100/month.

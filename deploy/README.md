@@ -15,6 +15,8 @@ deploy/loopflow-server.sh up
 
 Container mode and self-hosted bearer-token auth are the default. Keep secrets in Doppler; `.env` is the local fallback.
 
+Cost guardrails live in `deploy/COSTS.md`. The maintained automation budget is $100/month; if actual or projected spend crosses it, stop before adding spend.
+
 ## Loopflow and Cadenza
 
 Use the same server shape for both repos. The Terraform module and `loopflow-server.sh --repo PATH` are repo-parameterized; each repo should carry its own Docker/deploy files and Doppler project/config. Keep the cadence from `release/SCHEDULE.md` identical, then vary only product-specific build, smoke-test, signing, and publish commands.

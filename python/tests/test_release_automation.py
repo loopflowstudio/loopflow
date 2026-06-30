@@ -137,6 +137,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
+    assert "deploy/COSTS.md" in readme
+    assert "$100/month" in readme
     assert "openssl rand -hex 32" in readme
     assert "leave `LF_TLS_MODE` empty" in readme
     assert "Mac mini + Tailscale" in readme
@@ -198,6 +200,17 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "loopflow.server" in plist
     assert "studio.loopflow.server" not in plist
     assert "loopflow-server.sh" in plist
+
+    cost_docs = (ROOT / "deploy/COSTS.md").read_text()
+    budget_config = yaml.safe_load((ROOT / "deploy/budget.yaml").read_text())
+    assert budget_config["monthly_budget_usd"] == "100.00"
+    assert budget_config["source_of_truth"] == "mercury_company_card"
+    assert "scripts/check_monthly_spend.py" in cost_docs
+    assert "company card" in cost_docs
+    assert "AWS" in cost_docs
+    assert "Fly.io" in cost_docs
+    assert "Claude / Anthropic" in cost_docs
+    assert "Codex / OpenAI" in cost_docs
 
 
 def test_aws_self_hosted_topology_keeps_secrets_out_of_terraform():

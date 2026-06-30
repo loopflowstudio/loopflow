@@ -419,7 +419,7 @@ fn format_prompt_includes_auto_mode_header() {
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert!(prompt.contains("auto"));
+    assert!(prompt.contains("Run mode is headless"));
 }
 
 #[test]

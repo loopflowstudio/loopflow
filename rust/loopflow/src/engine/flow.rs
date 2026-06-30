@@ -143,6 +143,21 @@ pub struct GoalRenderContext {
     pub roadmap: String,
 }
 
+const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave.
+
+Run the loop as an orchestrator. Read the roadmap and goal, pick the next move,
+dispatch an `lf` flow or step to do the actual implementation work, read the
+result, then decide what changed about the next move. Keep this transcript about
+decisions and coordination.
+
+Do not hand-write substantial code or docs inline. Use an `lf` flow or step as
+the default implementation path. Inline edits are only for trivial fixes that
+are smaller than dispatching a subagent; when you do that, say why.
+
+When interactive subagent sessions are available, use them to launch the work,
+steer it, answer questions, and read the result back into the loop. If no safe
+move remains, record the blocker instead of inventing work."#;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteStep {
     pub step: Step,
@@ -269,7 +284,8 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     };
 
     format!(
-        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n</lf:goal-context>",
+        LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
         flows,
         ctx.roadmap
@@ -1533,6 +1549,9 @@ mod tests {
         );
 
         assert!(rendered.contains("Drive the work."));
+        assert!(rendered.contains("<lf:loopflow-operating-prompt>"));
+        assert!(rendered.contains("dispatch an `lf` flow or step"));
+        assert!(rendered.contains("Do not hand-write substantial code or docs inline."));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
         assert!(rendered.contains("wave/goals"));

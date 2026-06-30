@@ -1,0 +1,13 @@
+flow: build
+mode: manual
+workers: 0
+area:
+- .github/workflows/
+- deploy/
+- docker/
+- release/
+- scripts/
+- wave/release/
+direction:
+- clarity
+- care

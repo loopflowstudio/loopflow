@@ -466,10 +466,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         .map(|guard| guard.clone())
         .unwrap_or_default();
 
-    let mut breakdown = ContextBreakdown {
-        system_tokens: count_tokens(crate::engine::builtins::RLM_DOC),
-        ..Default::default()
-    };
+    let mut breakdown = ContextBreakdown::default();
 
     if let Some(ref step) = components.step {
         if let Some(ref content) = step.content {
@@ -1618,14 +1615,9 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: RLM, voice, surface.
+/// third-party app classifiers: voice, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
-
-    parts.push(format!(
-        "<lf:rlm>\n{}\n</lf:rlm>",
-        crate::engine::builtins::RLM_DOC
-    ));
 
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
@@ -2160,12 +2152,9 @@ mod tests {
             ..Default::default()
         };
 
-        // Set budget to only fit docs, not summaries (system sections are a
-        // mandatory floor, so add them to the budget).
-        let system = count_tokens(crate::engine::builtins::RLM_DOC);
+        // Set budget to only fit docs, not summaries.
         let doc_tokens = count_tokens("Doc content");
-        let trimmed =
-            trim_context_with_breakdown(GatheredContext(components), system + doc_tokens + 5);
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), doc_tokens + 5);
 
         assert!(trimmed.components().summaries.is_empty());
         assert_eq!(trimmed.components().docs.len(), 1);
@@ -2197,8 +2186,7 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
-            + count_tokens("x")
+        let budget = count_tokens("x")
             + count_tokens("Summary should survive after wave memory is dropped")
             + 1;
         let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
@@ -2276,10 +2264,7 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
-            + count_tokens("x")
-            + count_tokens(scratch_content)
-            + 1;
+        let budget = count_tokens("x") + count_tokens(scratch_content) + 1;
         let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
 
         assert_eq!(trimmed.components().docs.len(), 1);
@@ -2689,8 +2674,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
 
-        // Verify order: system (rlm) -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
-        let rlm_pos = prompt.find("<lf:rlm>").unwrap();
+        // Verify order: surface block -> wave -> docs -> diff -> direction -> clipboard -> step
         let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
@@ -2699,7 +2683,6 @@ mod tests {
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
         let step_pos = prompt.find("<lf:step:implement>").unwrap();
 
-        assert!(rlm_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);

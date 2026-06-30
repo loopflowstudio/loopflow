@@ -9,10 +9,10 @@ struct GhosttyTerminalViewTests {
     func wrapsEnvironmentAssignmentsWithEnv() {
         let command = buildGhosttyShellCommand(
             argv: ["/bin/zsh", "-lc", "echo hi"],
-            env: ["RLM_DEPTH": "1"]
+            env: ["LF_WAVE": "1"]
         )
 
-        #expect(command == "env RLM_DEPTH='1' '/bin/zsh' '-lc' 'echo hi'")
+        #expect(command == "env LF_WAVE='1' '/bin/zsh' '-lc' 'echo hi'")
     }
 
     @Test("returns the raw command when no environment is provided")
@@ -27,7 +27,7 @@ struct GhosttyTerminalViewTests {
 
     @Test("returns nil when there is no command to run")
     func returnsNilWithoutCommand() {
-        #expect(buildGhosttyShellCommand(argv: [], env: ["RLM_DEPTH": "1"]) == nil)
+        #expect(buildGhosttyShellCommand(argv: [], env: ["LF_WAVE": "1"]) == nil)
     }
 
     @Test("builds a local tmux attach command from connection info")

@@ -3,9 +3,6 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-/// Bundled RLM.md — recursive language model instructions for agents.
-pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
-
 /// Bundled VOICE.md — default voice/tone guidance for agent output.
 pub const VOICE_DOC: &str = include_str!("builtins/VOICE.md");
 

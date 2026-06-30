@@ -1,7 +1,7 @@
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
-    prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
     PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
@@ -389,8 +389,6 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     }
 
     debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
-
-    seed_rlm_env(&built.config);
 
     info!(harness = built.harness, "launching agent");
     let launch_start = Instant::now();

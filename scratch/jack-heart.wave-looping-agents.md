@@ -2,6 +2,7 @@
 
 First build of the `goals` chord. Full vision: `wave/goals/README.md`.
 Decisions: `release/unreleased/DECISIONS.md` (2026-06-30).
+Launch plan + post-primitive design decisions: `scratch/goals-launch-plan.md`.
 
 ## What to build
 

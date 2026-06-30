@@ -22,7 +22,7 @@ pub mod worktrees;
 
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
-    build_model_command, build_opencode_command, check_cli_available, launch_agent, seed_rlm_env,
+    build_model_command, build_opencode_command, check_cli_available, launch_agent,
     AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};

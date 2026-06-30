@@ -286,10 +286,6 @@ pub struct Config {
     #[serde(default)]
     pub budgets: BudgetConfig,
 
-    /// Agent for RLM sub-agents (default: same as agent)
-    #[serde(default)]
-    pub rlm_agent: Option<String>,
-
     /// Release targets and scoping rules.
     #[serde(default)]
     pub release: ReleaseConfig,
@@ -309,14 +305,6 @@ pub struct Config {
     /// Default PM provider roles for PM-enabled waves.
     #[serde(default)]
     pub pm: Option<PmRolesConfig>,
-
-    /// Max concurrent RLM sub-agents
-    #[serde(default = "default_rlm_max_parallel")]
-    pub rlm_max_parallel: usize,
-
-    /// Max RLM recursion depth
-    #[serde(default = "default_rlm_max_depth")]
-    pub rlm_max_depth: usize,
 }
 
 fn default_land() -> String {
@@ -325,14 +313,6 @@ fn default_land() -> String {
 
 fn default_summary_tokens() -> usize {
     5000
-}
-
-fn default_rlm_max_parallel() -> usize {
-    10
-}
-
-fn default_rlm_max_depth() -> usize {
-    3
 }
 
 impl Default for Config {
@@ -359,14 +339,11 @@ impl Default for Config {
             branch_names: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
-            rlm_agent: None,
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
             linear: LinearConfig::default(),
             notion: NotionConfig::default(),
             pm: None,
-            rlm_max_parallel: default_rlm_max_parallel(),
-            rlm_max_depth: default_rlm_max_depth(),
         }
     }
 }

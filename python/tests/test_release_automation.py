@@ -180,6 +180,10 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "is required for cron-host bootstrap" in bootstrap
     assert "systemctl enable --now loopflow-server.service" in bootstrap
     assert "launchctl bootstrap" in bootstrap
+    assert 'data["ProgramArguments"] = [server_script, "up"]' in bootstrap
+    assert '"PATH"' in bootstrap
+    assert '"DOCKER_CONFIG"' in bootstrap
+    assert '"DOCKER_HOST"' in bootstrap
     assert "lfq create root" in bootstrap
     assert "install -m 0600" in bootstrap
 
@@ -189,6 +193,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "loopflow.connection.token" in private_client
     assert "concerto.connectionSettings.v2" in private_client
     assert "alias lfdhost='ssh" in private_client
+    assert "lfq list >/dev/null" in private_client
+    assert 'curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status"' in private_client
+    assert "lfq status" not in private_client
 
     service = (ROOT / "deploy/systemd/loopflow-server.service").read_text()
     assert "ExecStart=/opt/loopflow/deploy/loopflow-server.sh up" in service

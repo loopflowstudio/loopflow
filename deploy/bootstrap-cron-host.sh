@@ -143,19 +143,28 @@ install_mac_launch_agent() {
     local dest="$HOME/Library/LaunchAgents/loopflow.server.plist"
     mkdir -p "$(dirname "$dest")"
     cp "$repo/deploy/launchd/loopflow.server.plist" "$dest"
-    plutil -replace ProgramArguments.0 -string "$repo/deploy/loopflow-server.sh" "$dest"
-    python3 - "$dest" <<'PY_PLIST'
+    python3 - "$dest" "$repo/deploy/loopflow-server.sh" <<'PY_PLIST'
 import os
 import plistlib
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+server_script = sys.argv[2]
 with path.open("rb") as handle:
     data = plistlib.load(handle)
 
+data["ProgramArguments"] = [server_script, "up"]
+
 env = data.setdefault("EnvironmentVariables", {})
-for name in ["DOPPLER_TOKEN", "LOOPFLOW_SECRETS", "LF_DOMAIN", "LF_TLS_MODE", "LFD_AUTH_TOKEN", "LFD_PORT"]:
+env.setdefault(
+    "PATH",
+    os.environ.get(
+        "PATH",
+        "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ),
+)
+for name in ["DOPPLER_TOKEN", "DOCKER_CONFIG", "DOCKER_HOST", "LOOPFLOW_SECRETS", "LF_DOMAIN", "LF_TLS_MODE", "LFD_AUTH_TOKEN", "LFD_PORT"]:
     value = os.environ.get(name)
     if value:
         env[name] = value

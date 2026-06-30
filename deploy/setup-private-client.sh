@@ -18,7 +18,7 @@ Options:
   --token-file PATH  Read bearer token from PATH.
   --env-file PATH    Write shell exports here (default: ~/.lf/private-host.env)
   --no-concerto      Do not seed Concerto UserDefaults/Keychain.
-  --verify           Run lfq status after writing local config.
+  --verify           Run lfq list after writing local config.
   -h, --help         Show this help.
 
 The env file contains secrets and is written with 0600 permissions.
@@ -189,5 +189,7 @@ fi
 if [[ "$verify" -eq 1 ]]; then
     # shellcheck disable=SC1090
     source "$env_file"
-    lfq status
+    lfq list >/dev/null
+    curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status" >/dev/null
+    echo "verified private lfd connection"
 fi

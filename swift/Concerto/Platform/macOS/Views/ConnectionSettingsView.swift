@@ -5,7 +5,6 @@ import AppKit
 struct ConnectionSettingsView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.authService) private var authService
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
 
@@ -136,7 +135,7 @@ struct ConnectionSettingsView: View {
                         handleConnectWithPhoneChange(enabled)
                     }
 
-                Text("Enables mobile access and exposes lfd for discovery when signed in to studio.")
+                Text("Binds bundled lfd to the local network with the generated bearer token. Pair phones manually with the host and token.")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -496,11 +495,6 @@ struct ConnectionSettingsView: View {
     }
 
     private func handleConnectWithPhoneChange(_ enabled: Bool) {
-        if enabled && authService.currentToken() == nil {
-            connectWithPhone = false
-            errorMessage = "Sign in to loopflow.studio on this Mac before enabling phone access."
-            return
-        }
         if !enabled && !BundledDaemonManager.connectWithPhoneEnabled {
             return
         }

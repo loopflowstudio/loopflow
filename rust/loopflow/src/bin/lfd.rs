@@ -4,14 +4,12 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ipnet::IpNet;
 use secrecy::ExposeSecret;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use loopflow::lfd::auth::AuthProvider;
-use loopflow::lfd::config::{AuthMode, LfdConfig, StorageType};
+use loopflow::lfd::config::{LfdConfig, StorageType};
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -62,6 +60,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loopflow::lfd::obs::init_tracing();
 
     let args: Vec<String> = std::env::args().collect();
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("lfd {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     if let Some(command) = args.get(1).map(String::as_str) {
         let command_args = &args[2..];
         let force = has_flag(command_args, "--force");
@@ -104,15 +110,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cancel = CancellationToken::new();
 
-    if requires_secure_bind(lfd_config.auth.mode)
-        && !allow_insecure_bind
-        && !http_addr.ip().is_loopback()
-        && !is_tailscale_ip(http_addr.ip())
-    {
+    if !allow_insecure_bind && !http_addr.ip().is_loopback() && lfd_config.auth.token.is_none() {
         return Err(format!(
-            "refusing insecure non-loopback bind for auth.mode={}: {}. \
-             use --allow-insecure-bind to override",
-            lfd_config.auth.mode, http_addr
+            "refusing non-loopback bind without LFD_AUTH_TOKEN/auth.token: {http_addr}. \
+             Set a bearer token from Doppler or pass --allow-insecure-bind for local-network experiments"
         )
         .into());
     }
@@ -125,19 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: SharedStore = Arc::new(open_store(&storage_config).await?);
 
     let is_loopback = http_addr.ip().is_loopback();
-    let (auth_provider, registration_client, registration_creds) = loopflow::lfd::setup_auth(
-        &lfd_config,
-        store.clone(),
-        &storage_config,
-        http_addr,
-        cancel.clone(),
-    )
-    .await;
-    if !is_loopback && matches!(auth_provider, AuthProvider::Local { .. }) {
+    let auth_provider = loopflow::lfd::setup_auth(&lfd_config);
+    if !is_loopback {
         tracing::warn!(
             addr = %http_addr,
-            "binding to non-loopback address with auth.mode=local; \
-             remote requests require the session token"
+            "binding to non-loopback address; remote requests require the bearer token"
         );
     }
 
@@ -307,7 +300,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         output_hub: output,
         provider_auth: ProviderAuthService::new(store.clone()),
         auth: auth_provider,
-        registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
         http_security: lfd_config.http_security,
@@ -334,12 +326,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = signal::ctrl_c() => {
             tracing::info!("shutdown signal received");
         }
-    }
-
-    // Deregister on shutdown.
-    if let (Some(client), Some((jwt, mid))) = (&registration_client, &registration_creds) {
-        tracing::info!("deregistering from loopflow.studio");
-        client.deregister(jwt, mid).await;
     }
 
     cancel.cancel();
@@ -401,27 +387,14 @@ fn storage_config_from_config(
     }
 }
 
-fn requires_secure_bind(mode: AuthMode) -> bool {
-    matches!(mode, AuthMode::Studio)
-}
-
-fn is_tailscale_ip(ip: std::net::IpAddr) -> bool {
-    let cidr: IpNet = "100.64.0.0/10".parse().expect("valid tailscale cidr");
-    cidr.contains(&ip)
-}
-
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        has_flag, is_tailscale_ip, requires_secure_bind, storage_config_from_config, AuthMode,
-        LfdConfig, StorageConfig, StorageType,
-    };
+    use super::{has_flag, storage_config_from_config, LfdConfig, StorageConfig, StorageType};
     use std::ffi::OsString;
-    use std::net::IpAddr;
     use std::sync::{Mutex, OnceLock};
     use tempfile::{tempdir, TempDir};
 
@@ -484,20 +457,6 @@ mod tests {
             }
             StorageConfig::Postgres { .. } => panic!("expected sqlite storage"),
         }
-    }
-
-    #[test]
-    fn secure_bind_required_for_studio() {
-        assert!(requires_secure_bind(AuthMode::Studio));
-        assert!(!requires_secure_bind(AuthMode::Local));
-    }
-
-    #[test]
-    fn tailscale_range_is_detected() {
-        assert!(is_tailscale_ip(IpAddr::from([100, 64, 10, 3])));
-        assert!(is_tailscale_ip(IpAddr::from([100, 127, 255, 254])));
-        assert!(!is_tailscale_ip(IpAddr::from([100, 128, 0, 1])));
-        assert!(!is_tailscale_ip(IpAddr::from([192, 168, 1, 10])));
     }
 
     #[test]

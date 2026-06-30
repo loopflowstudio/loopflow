@@ -23,7 +23,7 @@ Environment:
   LF_DOMAIN=lfd.example.com           Caddy host name
   LF_TLS_MODE=internal                private/Tailscale TLS; leave empty for public ACME
   CADDYFILE=/path/to/Caddyfile        optional Caddy config override
-  LFD_AUTH_TOKEN=...                  required when LFD_AUTH_MODE is local or unset
+  LFD_AUTH_TOKEN=...                  required bearer token for remote lfd
   LFD_PORT=2486                       local exposed lfd port
 USAGE
 }
@@ -111,8 +111,8 @@ run_with_secrets() {
 
 preflight_remote_auth() {
     run_with_secrets bash -c '
-        if [ "${LFD_AUTH_MODE:-local}" = "local" ] && [ -z "${LFD_AUTH_TOKEN:-}" ]; then
-            echo "LFD_AUTH_TOKEN is required for self-hosted local auth" >&2
+        if [ -z "${LFD_AUTH_TOKEN:-}" ]; then
+            echo "LFD_AUTH_TOKEN is required for self-hosted remote execution" >&2
             echo "Set it in Doppler or export it before starting the server." >&2
             exit 1
         fi

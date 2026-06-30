@@ -45,7 +45,7 @@ Changes since `v0.9.9`.
 
 ## Auth simplification
 
-- **Local vs studio modes** — `lfd` auth collapses to two modes. No more half-wired states
+- **Self-hosted bearer-token auth** — `lfd` remote access uses explicit bearer tokens from repo-owned deployment secrets
 - **PM auth is OAuth-only** — API-key entry removed for Asana, Linear, and Notion; all three flow through `lfq auth` browser handshake
 
 ## Wave configuration

@@ -126,8 +126,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "lfq create root /opt/loopflow" in readme
 
     compose = (ROOT / "docker/docker-compose.yml").read_text()
-    assert 'LFD_AUTH_MODE: "${LFD_AUTH_MODE:-local}"' in compose
-    assert 'LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:-}"' in compose
+    assert "LFD_AUTH_MODE" not in compose
+    assert 'LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:?set LFD_AUTH_TOKEN}"' in compose
 
     prod_compose = (ROOT / "deploy/docker-compose.prod.yml").read_text()
     assert "${CADDYFILE:-../deploy/Caddyfile}" in prod_compose
@@ -140,7 +140,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
 
     script = (ROOT / "deploy/loopflow-server.sh").read_text()
     assert 'docker compose -p "$project_name"' in script
-    assert "LFD_AUTH_TOKEN is required for self-hosted local auth" in script
+    assert "LFD_AUTH_TOKEN is required for self-hosted remote execution" in script
     assert '(cd "$repo" && doppler run -- "$@")' in script
     assert 'export CADDYFILE="$repo/deploy/Caddyfile.internal"' in script
 
@@ -150,8 +150,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     timer = (ROOT / "deploy/systemd/loopflow-server-update.timer").read_text()
     assert "OnCalendar=*-*-* 04:15:00" in timer
 
-    plist = (ROOT / "deploy/launchd/studio.loopflow.server.plist").read_text()
-    assert "studio.loopflow.server" in plist
+    plist = (ROOT / "deploy/launchd/loopflow.server.plist").read_text()
+    assert "loopflow.server" in plist
+    assert "studio.loopflow.server" not in plist
     assert "loopflow-server.sh" in plist
 
 

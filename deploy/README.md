@@ -22,7 +22,6 @@ Use the same server shape for both repos. The Terraform module and `loopflow-ser
 ## Secrets
 
 ```bash
-doppler secrets set LFD_AUTH_MODE=local
 doppler secrets set LFD_AUTH_TOKEN="$(openssl rand -hex 32)"
 doppler secrets set GH_TOKEN=ghp_xxx
 doppler secrets set ANTHROPIC_API_KEY=sk-ant-xxx
@@ -72,9 +71,9 @@ The update timer refreshes the server nightly. Keep local dev binaries fresh wit
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
-cp deploy/launchd/studio.loopflow.server.plist ~/Library/LaunchAgents/
-plutil -replace ProgramArguments.0 -string "$PWD/deploy/loopflow-server.sh" ~/Library/LaunchAgents/studio.loopflow.server.plist
-launchctl load ~/Library/LaunchAgents/studio.loopflow.server.plist
+cp deploy/launchd/loopflow.server.plist ~/Library/LaunchAgents/
+plutil -replace ProgramArguments.0 -string "$PWD/deploy/loopflow-server.sh" ~/Library/LaunchAgents/loopflow.server.plist
+launchctl load ~/Library/LaunchAgents/loopflow.server.plist
 ```
 
 Use `LF_TLS_MODE=internal` for a Tailscale-only hostname; the deploy script mounts `deploy/Caddyfile.internal`. Leave `LF_TLS_MODE` empty for public ACME and it uses `deploy/Caddyfile`. Docker Desktop must be running; the launch agent keeps the stack up every five minutes.
@@ -99,7 +98,7 @@ curl -f https://lfd.example.com/health
 curl -H "Authorization: Bearer $LFD_AUTH_TOKEN" https://lfd.example.com/status
 ```
 
-Point Concerto or `lfq` at the host and use the bearer token from `LFD_AUTH_TOKEN`. Studio discovery is optional, not the default path.
+Point Concerto or `lfq` at the host and use the bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo owns its deployment.
 
 ## Troubleshoot
 

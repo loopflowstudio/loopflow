@@ -9,7 +9,7 @@ use std::process::Command;
 
 const KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
-const KEYCHAIN_SERVICE: &str = "studio.loopflow.lfd.provider-token-key";
+const KEYCHAIN_SERVICE: &str = "loopflow.lfd.provider-token-key";
 const KEYCHAIN_ACCOUNT: &str = "default";
 #[cfg(target_os = "linux")]
 const SECRET_TOOL_LABEL: &str = "Loopflow LFD Provider Token Key";

@@ -16,25 +16,15 @@ use subtle::ConstantTimeEq;
 
 use crate::lfd::http;
 use crate::lfd::http::state::HttpState;
-use crate::lfd::token_ledger::TokenLedger;
 
 const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_BEARER_TOKEN_BYTES: usize = 4096;
 
-/// Auth provider for lfd connections.
-///
-/// Selected from config (`auth.mode`). Determines how requests are authenticated.
+/// Bearer-token auth for lfd connections.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum AuthProvider {
-    /// Local mode: session token auth.
-    Local { session_token: SecretString },
-    /// Registered with studio. Local token on loopback, connection tokens
-    /// validated locally via ledger for remote clients.
-    Studio {
-        local_token: SecretString,
-        ledger: TokenLedger,
-    },
+    Bearer { session_token: SecretString },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,42 +38,12 @@ impl AuthProvider {
     pub async fn validate(
         &self,
         provided_token: Option<&str>,
-        source: IpAddr,
+        _source: IpAddr,
     ) -> Result<(), (StatusCode, &'static str)> {
         match self {
-            AuthProvider::Local { session_token } => {
+            AuthProvider::Bearer { session_token } => {
                 authorize_expected_token(session_token, provided_token)
             }
-            AuthProvider::Studio {
-                local_token,
-                ledger,
-            } => match provided_token {
-                Some(token) if source.is_loopback() && token_matches(local_token, token) => Ok(()),
-                Some(token) => match ledger.validate(token).await {
-                    Ok(true) => Ok(()),
-                    Ok(false) => {
-                        if source.is_loopback() {
-                            Err((StatusCode::UNAUTHORIZED, "invalid token"))
-                        } else {
-                            Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(error = %error, "connection token validation failed");
-                        Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "connection token validation failed",
-                        ))
-                    }
-                },
-                None => {
-                    if source.is_loopback() {
-                        Err((StatusCode::UNAUTHORIZED, "missing token"))
-                    } else {
-                        Err((StatusCode::UNAUTHORIZED, "missing connection token"))
-                    }
-                }
-            },
         }
     }
 
@@ -96,15 +56,7 @@ impl AuthProvider {
         };
 
         match self {
-            AuthProvider::Studio { local_token, .. } => token_matches(local_token, token),
-            AuthProvider::Local { .. } => false,
-        }
-    }
-
-    pub fn connection_ledger(&self) -> Option<TokenLedger> {
-        match self {
-            AuthProvider::Studio { ledger, .. } => Some(ledger.clone()),
-            _ => None,
+            AuthProvider::Bearer { session_token } => token_matches(session_token, token),
         }
     }
 }
@@ -238,17 +190,8 @@ fn token_matches(expected: &SecretString, provided: &str) -> bool {
         .into()
 }
 
-fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'static str) {
-    match auth {
-        AuthProvider::Local { .. } => (StatusCode::UNAUTHORIZED, "malformed token"),
-        AuthProvider::Studio { .. } => {
-            if source.is_loopback() {
-                (StatusCode::UNAUTHORIZED, "malformed token")
-            } else {
-                (StatusCode::UNAUTHORIZED, "malformed connection token")
-            }
-        }
-    }
+fn malformed_token_error(_auth: &AuthProvider, _source: IpAddr) -> (StatusCode, &'static str) {
+    (StatusCode::UNAUTHORIZED, "malformed token")
 }
 
 pub(crate) fn extract_token(headers: &HeaderMap) -> ParsedToken<'_> {
@@ -366,9 +309,7 @@ fn throttled_response() -> Response {
 mod tests {
     use super::*;
 
-    use crate::lfd::token_ledger::TokenLedger;
     use axum::http::HeaderValue;
-    use tempfile::tempdir;
 
     fn token(value: &str) -> SecretString {
         SecretString::new(value.to_string())
@@ -544,61 +485,5 @@ mod tests {
         assert!(!throttle.record_failure(key.clone(), 2));
         assert!(throttle.record_failure(key.clone(), 2));
         assert!(throttle.is_throttled(&key, 2));
-    }
-
-    #[tokio::test]
-    async fn studio_accepts_local_session_token_on_loopback() {
-        let tmp = tempdir().expect("tempdir");
-        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
-            .await
-            .expect("ledger");
-        let auth = AuthProvider::Studio {
-            local_token: token("local-session"),
-            ledger,
-        };
-
-        let result = auth
-            .validate(Some("local-session"), IpAddr::from([127, 0, 0, 1]))
-            .await;
-        assert_eq!(result, Ok(()));
-    }
-
-    #[tokio::test]
-    async fn studio_accepts_connection_token_for_remote_source() {
-        let tmp = tempdir().expect("tempdir");
-        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
-            .await
-            .expect("ledger");
-        let mut minted = ledger.mint(1).await.expect("mint");
-        let connection_token = minted.pop().expect("token");
-        let auth = AuthProvider::Studio {
-            local_token: token("local-session"),
-            ledger,
-        };
-
-        let result = auth
-            .validate(Some(&connection_token), IpAddr::from([203, 0, 113, 7]))
-            .await;
-        assert_eq!(result, Ok(()));
-    }
-
-    #[tokio::test]
-    async fn studio_rejects_local_session_token_for_remote_source() {
-        let tmp = tempdir().expect("tempdir");
-        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
-            .await
-            .expect("ledger");
-        let auth = AuthProvider::Studio {
-            local_token: token("local-session"),
-            ledger,
-        };
-
-        let result = auth
-            .validate(Some("local-session"), IpAddr::from([203, 0, 113, 7]))
-            .await;
-        assert_eq!(
-            result,
-            Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
-        );
     }
 }

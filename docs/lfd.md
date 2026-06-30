@@ -110,8 +110,7 @@ LFD_MAX_SLOTS     # concurrent run slots
 Auth tuning within a shape:
 
 ```bash
-LFD_AUTH_MODE     # local or studio
-LFD_AUTH_TOKEN    # optional session-token override
+LFD_AUTH_TOKEN    # bearer-token override for self-hosted remote hosts
 ```
 
 Executor tuning within a shape:
@@ -148,9 +147,7 @@ LFD_HTTP_TRUSTED_PROXY_CIDRS
 mode: native # native (default) or container
 
 auth:
-  mode: local # default, self-hosted bearer-token auth
   token: bundled-session-token # set from Doppler or env for remote hosts
-  base_url: https://auth.loopflow.studio # only used when opting into studio mode
 
 executor:
   image: loopflow/agent:latest
@@ -188,7 +185,7 @@ http_security:
 
 `executor.sandbox` was removed. If that key is still present in old config, `lfd` fails fast and tells you to delete it.
 
-Container mode stays self-hosted by default. Set `LFD_AUTH_TOKEN` from Doppler or another secret store for remote hosts. Opt into `auth.mode: studio` only when using studio discovery.
+Container mode is self-hosted only. Set `LFD_AUTH_TOKEN` from Doppler or another secret store before binding a remote host.
 
 ### Credential mounts
 

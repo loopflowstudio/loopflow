@@ -176,9 +176,9 @@ built-in commands — skills fire there with `$step`.
 
 **Context:** Release and cron automation had been drifting toward a private studio-hosted deployment model, with Terraform and secret handling living outside this repo. The release server needs to be inspectable, reproducible, and maintainable from loopflow itself, whether it runs on a Mac mini, Tailscale host, Fly.io, or cloud VM.
 
-**Decision:** Loopflow automation is self-hosted by default. The public repo carries the runnable container and deployment shape; Doppler supplies secrets; studio discovery is optional rather than the assumed path. Nightly package verification proves artifacts without deploying, weekly release is the automated publishing cadence, and local dev machines get a single `scripts/pull-local-bin.sh` update path.
+**Decision:** Loopflow automation is self-hosted by default. The public repo carries the runnable container and deployment shape; Doppler supplies secrets; studio discovery is removed rather than the assumed path. Nightly package verification proves artifacts without deploying, weekly release is the automated publishing cadence, and local dev machines get a single `scripts/pull-local-bin.sh` update path.
 
-**Implications:** Container mode uses local bearer-token auth unless explicitly configured for studio. Deployment docs and compose defaults must avoid hidden global-host assumptions. Infrastructure config can be committed when it contains topology and mechanics, but credentials stay in Doppler or local env files.
+**Implications:** Container mode uses self-hosted bearer-token auth only. Deployment docs and compose defaults must avoid hidden global-host assumptions. Infrastructure config can be committed when it contains topology and mechanics, but credentials stay in Doppler or local env files.
 
 ## 2026-06-29 — Hashimoto-style review is a standing quality ritual
 
@@ -195,3 +195,11 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Loopflow and Cadenza use carbon-copy nightly and weekly schedules: nightly package verification at `0 9 * * *` UTC without deployment, and weekly release at `0 12 * * 0` UTC gated by the same package verification. Repo-specific parameters live inside each repo's workflow body.
 
 **Implications:** Changing the cadence means changing both repositories together. Cadenza does not inherit Loopflow's Rust package matrix, and Loopflow does not inherit Cadenza's signing-sensitive TestFlight path; only the rhythm and gate semantics are shared.
+
+## 2026-06-29 — Remove studio auth
+
+**Context:** Secure remote execution still matters, but the global studio-discovery server made loopflow feel centrally hosted by default and pushed deployment mechanics into private infrastructure.
+
+**Decision:** Delete studio auth, daemon registration, and hosted discovery. Remote `lfd` access is self-hosted bearer-token auth only; each repo owns its deployment config and keeps secrets in Doppler or host-local env.
+
+**Implications:** Concerto connects to explicit self-hosted URLs and tokens instead of studio sign-in. Container compose requires `LFD_AUTH_TOKEN`. Token rotation happens in the repo/host secret system, not through a studio connection-token ledger.

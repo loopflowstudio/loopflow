@@ -28,5 +28,5 @@ Loopflow and Cadenza both carry the scheduled release workflow pair. Each repo r
 - Nightly jobs prove release artifacts without deploying them.
 - Weekly publishing never runs unless nightly-style package verification passed in the same workflow run.
 - Secrets stay in Doppler or host-local env files, never Terraform state or committed config.
-- The cron server is self-hosted by default. Studio discovery is opt-in.
+- The cron server is self-hosted per repo. Studio discovery/auth is not supported.
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.

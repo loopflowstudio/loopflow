@@ -1,22 +1,27 @@
 import os
-from pathlib import Path
 import re
-import yaml
+from pathlib import Path
 
+import yaml
 from fasthtml.common import *
-from starlette.responses import RedirectResponse, PlainTextResponse
+from starlette.responses import PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
 from db import add_to_waitlist, init_db
-from internal_pages import fonts_page, colors_page, design_page
+from internal_pages import colors_page, design_page, fonts_page
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
     hdrs=(
         Meta(name="viewport", content="width=device-width, initial-scale=1"),
         Link(rel="icon", href="/static/logo.svg", type="image/svg+xml"),
-        NotStr('<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">'),
-        Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"),
+        NotStr(
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">'
+        ),
+        Link(
+            rel="stylesheet",
+            href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
+        ),
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
         Link(rel="stylesheet", href="/static/style.css"),
     ),
@@ -24,6 +29,7 @@ app, rt = fast_app(
 
 
 # Components
+
 
 def SkipLink():
     return A("Skip to main content", href="#main-content", cls="skip-link")
@@ -44,7 +50,16 @@ def Navbar():
             Ul(
                 Li(A("Docs", href="/docs")),
                 Li(A("Team", href="/team")),
-                Li(A("GitHub", href="https://github.com/loopflowstudio/loopflow", target="_blank", rel="noopener noreferrer", cls="external-link", **{"aria-label": "GitHub (opens in new tab)"})),
+                Li(
+                    A(
+                        "GitHub",
+                        href="https://github.com/loopflowstudio/loopflow",
+                        target="_blank",
+                        rel="noopener noreferrer",
+                        cls="external-link",
+                        **{"aria-label": "GitHub (opens in new tab)"},
+                    )
+                ),
                 Li(A("Install", href="/download", cls="btn btn-primary")),
                 cls="nav-links",
             ),
@@ -61,7 +76,14 @@ def SiteFooter():
                 P("Loopflow — Living software. Conducted by you."),
                 P(
                     "Built by ",
-                    A("Loopflow Studio", href="https://github.com/loopflowstudio", target="_blank", rel="noopener noreferrer", cls="external-link", **{"aria-label": "Loopflow Studio (opens in new tab)"}),
+                    A(
+                        "Loopflow Studio",
+                        href="https://github.com/loopflowstudio",
+                        target="_blank",
+                        rel="noopener noreferrer",
+                        cls="external-link",
+                        **{"aria-label": "Loopflow Studio (opens in new tab)"},
+                    ),
                     cls="built-by",
                 ),
                 cls="footer-text",
@@ -109,7 +131,9 @@ def TerminalBlock(lines: list[tuple[str, str]]):
 
 def CopyButton(text: str):
     return Button(
-        NotStr('<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" /></svg>'),
+        NotStr(
+            '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" /></svg>'
+        ),
         cls="copy-btn",
         onclick=f"navigator.clipboard.writeText('{text}')",
         **{"aria-label": "Copy to clipboard"},
@@ -189,7 +213,9 @@ def _detail_li(text: str):
     return Li(text)
 
 
-def ProductCard(name: str, description: str, details: list[str], image_content, note: str | None = None):
+def ProductCard(
+    name: str, description: str, details: list[str], image_content, note: str | None = None
+):
     header = [H3(name)]
     if note:
         header.append(Span(note, cls="product-note"))
@@ -214,6 +240,7 @@ def _require_content_path(path: str) -> object:
             raise RuntimeError(f"content.yaml missing required key: {path}")
         current = current[segment]
     return current
+
 
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
@@ -245,10 +272,11 @@ CANONICAL_DOCS_DIR = Path(__file__).parent.parent / "docs"
 def slugify(text: str) -> str:
     """Convert heading text to URL-friendly slug: 'Quick Reference' -> 'quick-reference'"""
     slug = text.lower()
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
-    slug = re.sub(r'\s+', '-', slug)
-    slug = re.sub(r'-+', '-', slug)
-    return slug.strip('-')
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
 
 DOCS_NAV = [
     ("Home", "index"),
@@ -316,109 +344,131 @@ LLMS_TXT_CONTENT = generate_llms_txt()
 
 def render_markdown(content: str) -> list:
     # Remove YAML frontmatter
-    content = re.sub(r'^---\n.*?\n---\n', '', content, flags=re.DOTALL)
+    content = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
 
     elements = []
-    lines = content.split('\n')
+    lines = content.split("\n")
     i = 0
 
     while i < len(lines):
         line = lines[i]
 
         # Code blocks
-        if line.startswith('```'):
+        if line.startswith("```"):
             code_lines = []
             i += 1
-            while i < len(lines) and not lines[i].startswith('```'):
+            while i < len(lines) and not lines[i].startswith("```"):
                 code_lines.append(lines[i])
                 i += 1
-            elements.append(Pre(Code('\n'.join(code_lines)), tabindex="0"))
+            elements.append(Pre(Code("\n".join(code_lines)), tabindex="0"))
             i += 1
             continue
 
         # Headers
-        if line.startswith('# '):
+        if line.startswith("# "):
             elements.append(H1(line[2:]))
             i += 1
             continue
-        if line.startswith('## '):
+        if line.startswith("## "):
             heading_text = line[3:]
             anchor_id = slugify(heading_text)
-            elements.append(H2(
-                heading_text,
-                A('#', href=f'#{anchor_id}', cls='anchor-link', **{'aria-label': 'Link to section'}),
-                id=anchor_id,
-            ))
+            elements.append(
+                H2(
+                    heading_text,
+                    A(
+                        "#",
+                        href=f"#{anchor_id}",
+                        cls="anchor-link",
+                        **{"aria-label": "Link to section"},
+                    ),
+                    id=anchor_id,
+                )
+            )
             i += 1
             continue
-        if line.startswith('### '):
+        if line.startswith("### "):
             heading_text = line[4:]
             anchor_id = slugify(heading_text)
-            elements.append(H3(
-                heading_text,
-                A('#', href=f'#{anchor_id}', cls='anchor-link', **{'aria-label': 'Link to section'}),
-                id=anchor_id,
-            ))
+            elements.append(
+                H3(
+                    heading_text,
+                    A(
+                        "#",
+                        href=f"#{anchor_id}",
+                        cls="anchor-link",
+                        **{"aria-label": "Link to section"},
+                    ),
+                    id=anchor_id,
+                )
+            )
             i += 1
             continue
 
         # Horizontal rule
-        if line.strip() == '---':
+        if line.strip() == "---":
             elements.append(Hr())
             i += 1
             continue
 
         # Tables
-        if '|' in line and i + 1 < len(lines) and '---' in lines[i + 1]:
-            headers = [h.strip() for h in line.split('|') if h.strip()]
+        if "|" in line and i + 1 < len(lines) and "---" in lines[i + 1]:
+            headers = [h.strip() for h in line.split("|") if h.strip()]
             i += 2  # Skip header and separator
             rows = []
-            while i < len(lines) and '|' in lines[i]:
-                cells = [c.strip() for c in lines[i].split('|') if c.strip()]
+            while i < len(lines) and "|" in lines[i]:
+                cells = [c.strip() for c in lines[i].split("|") if c.strip()]
                 rows.append(cells)
                 i += 1
             elements.append(
                 Table(
                     Thead(Tr(*[Th(h) for h in headers])),
-                    Tbody(*[Tr(*[Td(render_inline(c)) for c in row]) for row in rows])
+                    Tbody(*[Tr(*[Td(render_inline(c)) for c in row]) for row in rows]),
                 )
             )
             continue
 
         # Unordered lists
-        if line.startswith('- '):
+        if line.startswith("- "):
             items = []
-            while i < len(lines) and lines[i].startswith('- '):
+            while i < len(lines) and lines[i].startswith("- "):
                 items.append(Li(render_inline(lines[i][2:])))
                 i += 1
             elements.append(Ul(*items))
             continue
 
         # Ordered lists
-        if re.match(r'^\d+\. ', line):
+        if re.match(r"^\d+\. ", line):
             items = []
-            while i < len(lines) and re.match(r'^\d+\. ', lines[i]):
-                items.append(Li(render_inline(re.sub(r'^\d+\. ', '', lines[i]))))
+            while i < len(lines) and re.match(r"^\d+\. ", lines[i]):
+                items.append(Li(render_inline(re.sub(r"^\d+\. ", "", lines[i]))))
                 i += 1
             elements.append(Ol(*items))
             continue
 
         # Blockquotes
-        if line.startswith('> '):
+        if line.startswith("> "):
             quote_lines = []
-            while i < len(lines) and lines[i].startswith('> '):
+            while i < len(lines) and lines[i].startswith("> "):
                 quote_lines.append(lines[i][2:])
                 i += 1
-            elements.append(Blockquote(P(' '.join(quote_lines))))
+            elements.append(Blockquote(P(" ".join(quote_lines))))
             continue
 
         # Paragraphs
         if line.strip():
             para_lines = []
-            while i < len(lines) and lines[i].strip() and not lines[i].startswith('#') and not lines[i].startswith('```') and not lines[i].startswith('- ') and not lines[i].startswith('> ') and '|' not in lines[i]:
+            while (
+                i < len(lines)
+                and lines[i].strip()
+                and not lines[i].startswith("#")
+                and not lines[i].startswith("```")
+                and not lines[i].startswith("- ")
+                and not lines[i].startswith("> ")
+                and "|" not in lines[i]
+            ):
                 para_lines.append(lines[i])
                 i += 1
-            elements.append(P(render_inline(' '.join(para_lines))))
+            elements.append(P(render_inline(" ".join(para_lines))))
             continue
 
         i += 1
@@ -430,23 +480,26 @@ def render_inline(text: str) -> NotStr:
     # Handle images - convert relative paths to /static/
     def fix_image(m):
         alt, src = m.group(1), m.group(2)
-        if not src.startswith(('http', '/')):
-            src = '/static/' + src
+        if not src.startswith(("http", "/")):
+            src = "/static/" + src
         return f'<img src="{src}" alt="{alt}">'
-    text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', fix_image, text)
+
+    text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", fix_image, text)
+
     # Handle links - convert relative .md links to absolute /docs/ paths
     def fix_link(m):
         label, href = m.group(1), m.group(2)
-        if href.endswith('.md') and not href.startswith(('http', '/')):
-            href = '/docs/' + href
+        if href.endswith(".md") and not href.startswith(("http", "/")):
+            href = "/docs/" + href
         return f'<a href="{href}">{label}</a>'
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', fix_link, text)
+
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", fix_link, text)
     # Handle inline code
-    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     # Handle bold
-    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     # Handle italic
-    text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
+    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
     return NotStr(text)
 
 
@@ -534,8 +587,7 @@ def build_homepage():
     concerto_product = PRODUCTS_CONTENT["concerto"]
     server_product = PRODUCTS_CONTENT["server"]
     server_terminal_lines = [
-        (line["type"], line["content"])
-        for line in server_product["terminal_lines"]
+        (line["type"], line["content"]) for line in server_product["terminal_lines"]
     ]
 
     video_src = VIDEO_CONTENT.get("src") or None
@@ -573,7 +625,10 @@ def build_homepage():
                 Div(
                     H2(CAPABILITIES_CONTENT["heading"]),
                     Div(
-                        *[CapabilityItem(item["title"], item["description"]) for item in capability_items],
+                        *[
+                            CapabilityItem(item["title"], item["description"])
+                            for item in capability_items
+                        ],
                         cls="capabilities-grid",
                     ),
                 ),
@@ -726,9 +781,27 @@ def get():
                 Div(
                     H2("The runtime"),
                     Div(
-                        TermCard("1", "Trigger", CONCERTO_VOCAB_ICONS["Trigger"], CONCERTO_VOCAB_ESSENCES["Trigger"], CONCERTO_VOCAB_DETAILS["Trigger"]),
-                        TermCard("2", "Loop", CONCERTO_VOCAB_ICONS["Loop"], CONCERTO_VOCAB_ESSENCES["Loop"], CONCERTO_VOCAB_DETAILS["Loop"]),
-                        TermCard("3", "Subscription", CONCERTO_VOCAB_ICONS["Subscription"], CONCERTO_VOCAB_ESSENCES["Subscription"], CONCERTO_VOCAB_DETAILS["Subscription"]),
+                        TermCard(
+                            "1",
+                            "Trigger",
+                            CONCERTO_VOCAB_ICONS["Trigger"],
+                            CONCERTO_VOCAB_ESSENCES["Trigger"],
+                            CONCERTO_VOCAB_DETAILS["Trigger"],
+                        ),
+                        TermCard(
+                            "2",
+                            "Loop",
+                            CONCERTO_VOCAB_ICONS["Loop"],
+                            CONCERTO_VOCAB_ESSENCES["Loop"],
+                            CONCERTO_VOCAB_DETAILS["Loop"],
+                        ),
+                        TermCard(
+                            "3",
+                            "Subscription",
+                            CONCERTO_VOCAB_ICONS["Subscription"],
+                            CONCERTO_VOCAB_ESSENCES["Subscription"],
+                            CONCERTO_VOCAB_DETAILS["Subscription"],
+                        ),
                         cls="vocab-grid vocab-grid-3",
                     ),
                     Script(VOCAB_ACCORDION_SCRIPT),
@@ -744,7 +817,10 @@ def get():
                         alt="Concerto showing waves with active, idle, and scheduled states",
                         cls="concerto-showcase-img",
                     ),
-                    P("All your agents, all your branches, one view.", cls="concerto-showcase-caption"),
+                    P(
+                        "All your agents, all your branches, one view.",
+                        cls="concerto-showcase-caption",
+                    ),
                     cls="container",
                 ),
                 cls="concerto-showcase-section",
@@ -753,7 +829,11 @@ def get():
             Section(
                 Div(
                     Div(
-                        Pre(Code("curl -fsSL https://loopflow.studio/install.sh | sh\nlf init"), cls="install-code", tabindex="0"),
+                        Pre(
+                            Code("curl -fsSL https://loopflow.studio/install.sh | sh\nlf init"),
+                            cls="install-code",
+                            tabindex="0",
+                        ),
                         CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh && lf init"),
                         cls="install-code-wrapper",
                     ),
@@ -787,10 +867,17 @@ def get():
         Main(
             Section(
                 Div(
-                    Span("Coming Soon", cls="maturity-badge maturity-experimental", style="margin-bottom: 24px; display: inline-block;"),
+                    Span(
+                        "Coming Soon",
+                        cls="maturity-badge maturity-experimental",
+                        style="margin-bottom: 24px; display: inline-block;",
+                    ),
                     H1("Symphonia"),
                     P("Concerto for teams.", cls="tagline"),
-                    P("Server-side agents, coordinating agents at very large scale as a collective team.", style="color: var(--text-secondary); font-size: 16px; max-width: 520px; margin: 0 auto 32px;"),
+                    P(
+                        "Server-side agents, coordinating agents at very large scale as a collective team.",
+                        style="color: var(--text-secondary); font-size: 16px; max-width: 520px; margin: 0 auto 32px;",
+                    ),
                     cls="container",
                 ),
                 cls="page-hero",
@@ -798,8 +885,14 @@ def get():
             Section(
                 Div(
                     H2("Get in touch"),
-                    P("Symphonia is in development. If you're interested in running coordinated agent teams at scale, we'd love to hear from you."),
-                    A("teams@loopflow.studio", href="mailto:teams@loopflow.studio", cls="contact-email"),
+                    P(
+                        "Symphonia is in development. If you're interested in running coordinated agent teams at scale, we'd love to hear from you."
+                    ),
+                    A(
+                        "teams@loopflow.studio",
+                        href="mailto:teams@loopflow.studio",
+                        cls="contact-email",
+                    ),
                     cls="container",
                 ),
                 cls="contact-section",
@@ -918,16 +1011,27 @@ def get():
                     P("Read the steps. Try the CLI. Decide with evidence.", cls="tagline"),
                     Div(
                         H2("CLI"),
-                        P("Prompt and context construction from the terminal. Best for: daily work, CI, and careful pilots.", cls="install-desc"),
+                        P(
+                            "Prompt and context construction from the terminal. Best for: daily work, CI, and careful pilots.",
+                            cls="install-desc",
+                        ),
                         Div(
-                            Pre(Code("curl -fsSL https://loopflow.studio/install.sh | sh"), cls="install-code", tabindex="0"),
+                            Pre(
+                                Code("curl -fsSL https://loopflow.studio/install.sh | sh"),
+                                cls="install-code",
+                                tabindex="0",
+                            ),
                             CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh"),
                             cls="install-code-wrapper",
                         ),
                         P("macOS · Claude Code, Codex, or Gemini CLI", cls="system-req"),
                         Div(
                             P("Then:", cls="next-step-label"),
-                            Pre(Code("cd your-project\nlf init\nlf design"), cls="install-code next-steps", tabindex="0"),
+                            Pre(
+                                Code("cd your-project\nlf init\nlf design"),
+                                cls="install-code next-steps",
+                                tabindex="0",
+                            ),
                             cls="next-steps-wrapper",
                         ),
                         cls="install-option",
@@ -941,7 +1045,6 @@ def get():
         ),
         SiteFooter(),
     )
-
 
 
 @rt("/fonts")

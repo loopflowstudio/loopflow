@@ -61,11 +61,13 @@ def _notify_signup(email: str, product: str) -> None:
     if not RESEND_API_KEY:
         return
     try:
-        resend.Emails.send({
-            "from": "Loopflow <notifications@loopflow.studio>",
-            "to": NOTIFY_EMAIL,
-            "subject": f"Waitlist signup: {product}",
-            "text": f"{email} signed up for {product}",
-        })
+        resend.Emails.send(
+            {
+                "from": "Loopflow <notifications@loopflow.studio>",
+                "to": NOTIFY_EMAIL,
+                "subject": f"Waitlist signup: {product}",
+                "text": f"{email} signed up for {product}",
+            }
+        )
     except Exception as error:
         log.warning("Failed to send waitlist notification: %s", error)

@@ -11,7 +11,10 @@ def fonts_page():
     return Html(
         Head(
             Title("Font Comparison | Loopflow"),
-            Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&family=Lato:wght@400;500;700&family=Source+Sans+3:wght@400;500;600&family=Nunito+Sans:wght@400;500;600&family=Open+Sans:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Fira+Code:wght@400;500;600&family=Source+Code+Pro:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"),
+            Link(
+                rel="stylesheet",
+                href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&family=Lato:wght@400;500;700&family=Source+Sans+3:wght@400;500;600&family=Nunito+Sans:wght@400;500;600&family=Open+Sans:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Fira+Code:wght@400;500;600&family=Source+Code+Pro:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap",
+            ),
             Style("""
                 :root {
                     --bg: #FAF8F5;
@@ -183,7 +186,6 @@ def fonts_page():
         Body(
             H1("Font Comparison"),
             P("Current selections and alternatives", cls="subtitle"),
-
             # Current selections
             Div(
                 # Cormorant Garamond (chosen serif)
@@ -210,9 +212,15 @@ def fonts_page():
                         cls="font-name",
                     ),
                     Div("Agents that remember", cls="sample-text"),
-                    P("Context that travels with your agents, prompts worth keeping, and tight feedback loops.", cls="sample-body"),
+                    P(
+                        "Context that travels with your agents, prompts worth keeping, and tight feedback loops.",
+                        cls="sample-body",
+                    ),
                     Div("Get Started", cls="sample-button"),
-                    P("Body text, buttons, UI. Warm humanist that pairs naturally with Garamond.", cls="notes"),
+                    P(
+                        "Body text, buttons, UI. Warm humanist that pairs naturally with Garamond.",
+                        cls="notes",
+                    ),
                     cls="font-card font-lato chosen",
                 ),
                 # JetBrains Mono (chosen monospace)
@@ -223,13 +231,18 @@ def fonts_page():
                         cls="font-name",
                     ),
                     Div("lf design → implement", cls="sample-text"),
-                    Pre("$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement", cls="sample-code"),
-                    P("Code, terminal, technical content. Clear character distinction.", cls="notes"),
+                    Pre(
+                        "$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement",
+                        cls="sample-code",
+                    ),
+                    P(
+                        "Code, terminal, technical content. Clear character distinction.",
+                        cls="notes",
+                    ),
                     cls="font-card font-jetbrains chosen",
                 ),
                 cls="font-grid",
             ),
-
             H2("Alternative Serifs"),
             Div(
                 # EB Garamond
@@ -241,7 +254,10 @@ def fonts_page():
                         cls="sample-row",
                     ),
                     P("Agents that remember. Work that compounds.", cls="sample-body"),
-                    P("Historical revival of Claude Garamont's types. Includes the long ſ character.", cls="notes"),
+                    P(
+                        "Historical revival of Claude Garamont's types. Includes the long ſ character.",
+                        cls="notes",
+                    ),
                     cls="font-card font-eb-garamond",
                 ),
                 # Playfair Display
@@ -253,7 +269,10 @@ def fonts_page():
                         cls="sample-row",
                     ),
                     P("Agents that remember. Work that compounds.", cls="sample-body"),
-                    P("High-contrast transitional serif. Decorative italics from the pointed steel pen era.", cls="notes"),
+                    P(
+                        "High-contrast transitional serif. Decorative italics from the pointed steel pen era.",
+                        cls="notes",
+                    ),
                     cls="font-card font-playfair",
                 ),
                 # Fraunces
@@ -265,28 +284,39 @@ def fonts_page():
                         cls="sample-row",
                     ),
                     P("Agents that remember. Work that compounds.", cls="sample-body"),
-                    P("Playful old-style with Art Nouveau italic influence. Previous choice.", cls="notes"),
+                    P(
+                        "Playful old-style with Art Nouveau italic influence. Previous choice.",
+                        cls="notes",
+                    ),
                     cls="font-card font-fraunces",
                 ),
                 cls="font-grid",
             ),
-
             H2("Alternative Sans-Serifs"),
             Div(
                 # Source Sans 3
                 Div(
                     Div("Source Sans 3", cls="font-name"),
                     Div("Agents that remember", cls="sample-text"),
-                    P("Context that travels with your agents, prompts worth keeping, and tight feedback loops.", cls="sample-body"),
+                    P(
+                        "Context that travels with your agents, prompts worth keeping, and tight feedback loops.",
+                        cls="sample-body",
+                    ),
                     Div("Get Started", cls="sample-button"),
-                    P("Adobe's first open-source font. Clean humanist with excellent readability.", cls="notes"),
+                    P(
+                        "Adobe's first open-source font. Clean humanist with excellent readability.",
+                        cls="notes",
+                    ),
                     cls="font-card font-source-sans",
                 ),
                 # Nunito Sans
                 Div(
                     Div("Nunito Sans", cls="font-name"),
                     Div("Agents that remember", cls="sample-text"),
-                    P("Context that travels with your agents, prompts worth keeping, and tight feedback loops.", cls="sample-body"),
+                    P(
+                        "Context that travels with your agents, prompts worth keeping, and tight feedback loops.",
+                        cls="sample-body",
+                    ),
                     Div("Get Started", cls="sample-button"),
                     P("Rounded terminals give it a softer, friendlier feel.", cls="notes"),
                     cls="font-card font-nunito-sans",
@@ -295,7 +325,10 @@ def fonts_page():
                 Div(
                     Div("Open Sans", cls="font-name"),
                     Div("Agents that remember", cls="sample-text"),
-                    P("Context that travels with your agents, prompts worth keeping, and tight feedback loops.", cls="sample-body"),
+                    P(
+                        "Context that travels with your agents, prompts worth keeping, and tight feedback loops.",
+                        cls="sample-body",
+                    ),
                     Div("Get Started", cls="sample-button"),
                     P("Classic humanist workhorse. Neutral but warm.", cls="notes"),
                     cls="font-card font-open-sans",
@@ -304,21 +337,26 @@ def fonts_page():
                 Div(
                     Div("IBM Plex Sans", cls="font-name"),
                     Div("Agents that remember", cls="sample-text"),
-                    P("Context that travels with your agents, prompts worth keeping, and tight feedback loops.", cls="sample-body"),
+                    P(
+                        "Context that travels with your agents, prompts worth keeping, and tight feedback loops.",
+                        cls="sample-body",
+                    ),
                     Div("Get Started", cls="sample-button"),
                     P("More technical/corporate feel. Previous choice.", cls="notes"),
                     cls="font-card font-ibm-plex",
                 ),
                 cls="font-grid",
             ),
-
             H2("Alternative Monospace"),
             Div(
                 # Fira Code
                 Div(
                     Div("Fira Code", cls="font-name"),
                     Div("lf design → implement", cls="sample-text"),
-                    Pre("$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement", cls="sample-code"),
+                    Pre(
+                        "$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement",
+                        cls="sample-code",
+                    ),
                     P("Popular with ligatures. Mozilla origin, open source.", cls="notes"),
                     cls="font-card font-fira-code",
                 ),
@@ -326,7 +364,10 @@ def fonts_page():
                 Div(
                     Div("Source Code Pro", cls="font-name"),
                     Div("lf design → implement", cls="sample-text"),
-                    Pre("$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement", cls="sample-code"),
+                    Pre(
+                        "$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement",
+                        cls="sample-code",
+                    ),
                     P("Adobe's monospace. Clean, neutral, highly legible.", cls="notes"),
                     cls="font-card font-source-code",
                 ),
@@ -334,7 +375,10 @@ def fonts_page():
                 Div(
                     Div("IBM Plex Mono", cls="font-name"),
                     Div("lf design → implement", cls="sample-text"),
-                    Pre("$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement", cls="sample-code"),
+                    Pre(
+                        "$ lf init\n$ lf design\nDesigning on branch: feature-auth\n$ lf implement",
+                        cls="sample-code",
+                    ),
                     P("Pairs with IBM Plex Sans. Distinctive character.", cls="notes"),
                     cls="font-card font-ibm-plex-mono",
                 ),
@@ -349,7 +393,10 @@ def colors_page():
     return Html(
         Head(
             Title("Colors | Loopflow Design System"),
-            Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400&display=swap"),
+            Link(
+                rel="stylesheet",
+                href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400&display=swap",
+            ),
             Style("""
                 :root {
                     --burgundy: #722F37;
@@ -511,13 +558,18 @@ def colors_page():
         Body(
             A("← Back to Home", href="/", cls="nav-back"),
             H1("Color Palette"),
-            P("Unified colors for loopflow and loopflowstudio — deep burgundy meets warm cream.", cls="subtitle"),
-
+            P(
+                "Unified colors for loopflow and loopflowstudio — deep burgundy meets warm cream.",
+                cls="subtitle",
+            ),
             H2("Brand Foundation"),
             Div(
                 Img(src="/static/logo.svg", alt="Loopflow Logo"),
                 Div(
-                    P("The logo uses a gradient from wine to cyan:", style="margin-bottom: 12px; color: var(--text-secondary);"),
+                    P(
+                        "The logo uses a gradient from wine to cyan:",
+                        style="margin-bottom: 12px; color: var(--text-secondary);",
+                    ),
                     Div(
                         Div(
                             Div(style="background: #9B1A4A;", cls="logo-swatch"),
@@ -526,7 +578,10 @@ def colors_page():
                             cls="logo-color",
                         ),
                         Div(
-                            Div(style="background: linear-gradient(135deg, #9B1A4A, #0AB3CC);", cls="logo-swatch"),
+                            Div(
+                                style="background: linear-gradient(135deg, #9B1A4A, #0AB3CC);",
+                                cls="logo-swatch",
+                            ),
                             Div("Gradient", cls="logo-hex"),
                             Div("Logo", style="font-size: 12px;"),
                             cls="logo-color",
@@ -542,7 +597,6 @@ def colors_page():
                 ),
                 cls="logo-section",
             ),
-
             Div(
                 Pre("""Logo Wine (#9B1A4A)
         ↓
@@ -555,8 +609,10 @@ Primary Burgundy (#722F37) ← UI accent color
 Burgundy Hover (#8B3D47)"""),
                 cls="relationship",
             ),
-            P("The burgundy is the logo wine's 'indoor voice' — same family, but appropriate for sustained UI use.", style="color: var(--text-secondary); margin-bottom: 32px;"),
-
+            P(
+                "The burgundy is the logo wine's 'indoor voice' — same family, but appropriate for sustained UI use.",
+                style="color: var(--text-secondary); margin-bottom: 32px;",
+            ),
             H2("Primary Accent"),
             Div(
                 Div(
@@ -583,11 +639,13 @@ Burgundy Hover (#8B3D47)"""),
                 ),
                 cls="color-grid",
             ),
-
             H2("Light Mode (Cream)"),
             Div(
                 Div(
-                    Div(style="background: #FAF8F5; border: 1px solid var(--border);", cls="color-swatch"),
+                    Div(
+                        style="background: #FAF8F5; border: 1px solid var(--border);",
+                        cls="color-swatch",
+                    ),
                     Div(
                         Div("Background", cls="color-name"),
                         Div("--bg", cls="color-token"),
@@ -598,7 +656,10 @@ Burgundy Hover (#8B3D47)"""),
                     cls="color-card",
                 ),
                 Div(
-                    Div(style="background: #FFFDFB; border: 1px solid var(--border);", cls="color-swatch"),
+                    Div(
+                        style="background: #FFFDFB; border: 1px solid var(--border);",
+                        cls="color-swatch",
+                    ),
                     Div(
                         Div("Surface", cls="color-name"),
                         Div("--bg-surface", cls="color-token"),
@@ -654,7 +715,6 @@ Burgundy Hover (#8B3D47)"""),
                 ),
                 cls="color-grid",
             ),
-
             H2("Dark Mode (Slate)"),
             Div(
                 Div(
@@ -722,7 +782,6 @@ Burgundy Hover (#8B3D47)"""),
                 ),
                 cls="dark-preview",
             ),
-
             H2("Status Colors"),
             Div(
                 Div(
@@ -780,7 +839,10 @@ def design_page():
     return Html(
         Head(
             Title("Design System | Loopflow"),
-            Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Lato:wght@400;700;900&family=JetBrains+Mono:wght@400;500&display=swap"),
+            Link(
+                rel="stylesheet",
+                href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Lato:wght@400;700;900&family=JetBrains+Mono:wght@400;500&display=swap",
+            ),
             Style("""
                 :root {
                     --burgundy: #722F37;
@@ -1003,16 +1065,16 @@ def design_page():
         Body(
             A("← Back to Home", href="/", cls="nav-back"),
             H1("Design System"),
-            P("Typography, spacing, and components for loopflow and loopflowstudio.", cls="subtitle"),
-
+            P(
+                "Typography, spacing, and components for loopflow and loopflowstudio.",
+                cls="subtitle",
+            ),
             Div(
                 A("View Colors", href="/colors"),
                 A("View Fonts", href="/fonts"),
                 cls="nav-links",
             ),
-
             H2("Typography"),
-
             H3("Serif — Cormorant Garamond"),
             Div(
                 Div("SERIF", cls="type-label"),
@@ -1020,83 +1082,158 @@ def design_page():
                 Div("Work that compounds.", cls="type-serif-italic"),
                 cls="type-sample",
             ),
-            P("Used for headlines, taglines, and hero text. The italic "f" has an elongated S-curve reminiscent of a violin f-hole.", style="color: var(--text-secondary);"),
-
+            P(
+                "Used for headlines, taglines, and hero text. The italic "
+                " has an elongated S-curve reminiscent of a violin f-hole.",
+                style="color: var(--text-secondary);",
+            ),
             H3("Sans — Lato"),
             Div(
                 Div("SANS-SERIF", cls="type-label"),
-                Div("Context that travels with your agents, prompts worth keeping, and tight feedback loops. Loopflow helps you build software with AI that actually works—no more starting from scratch every session.", cls="type-sans"),
+                Div(
+                    "Context that travels with your agents, prompts worth keeping, and tight feedback loops. Loopflow helps you build software with AI that actually works—no more starting from scratch every session.",
+                    cls="type-sans",
+                ),
                 cls="type-sample",
             ),
-            P("Used for body text, buttons, navigation, and UI elements. Warm humanist that pairs naturally with Cormorant Garamond.", style="color: var(--text-secondary);"),
-
+            P(
+                "Used for body text, buttons, navigation, and UI elements. Warm humanist that pairs naturally with Cormorant Garamond.",
+                style="color: var(--text-secondary);",
+            ),
             H3("Mono — JetBrains Mono"),
             Div(
                 Pre(
-                    Span("$ ", cls="prompt"), "lf init\n",
-                    Span("$ ", cls="prompt"), "lf design\n",
-                    Span("# Designing on branch: feature-auth", cls="comment"), "\n",
-                    Span("$ ", cls="prompt"), "lf implement",
+                    Span("$ ", cls="prompt"),
+                    "lf init\n",
+                    Span("$ ", cls="prompt"),
+                    "lf design\n",
+                    Span("# Designing on branch: feature-auth", cls="comment"),
+                    "\n",
+                    Span("$ ", cls="prompt"),
+                    "lf implement",
                     cls="type-mono",
                 ),
                 cls="type-sample",
             ),
-            P("Used for code, terminal output, and technical content. Clear character distinction.", style="color: var(--text-secondary);"),
-
+            P(
+                "Used for code, terminal output, and technical content. Clear character distinction.",
+                style="color: var(--text-secondary);",
+            ),
             H2("Spacing Scale"),
             P("Based on a 4pt grid. Use semantic names, not arbitrary values."),
             Div(
-                Div(Div(style="width: 4px; height: 4px;", cls="spacing-box"), Div("xs", cls="spacing-label"), Div("4px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 8px; height: 8px;", cls="spacing-box"), Div("sm", cls="spacing-label"), Div("8px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 12px; height: 12px;", cls="spacing-box"), Div("md", cls="spacing-label"), Div("12px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 16px; height: 16px;", cls="spacing-box"), Div("lg", cls="spacing-label"), Div("16px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 20px; height: 20px;", cls="spacing-box"), Div("xl", cls="spacing-label"), Div("20px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 24px; height: 24px;", cls="spacing-box"), Div("xxl", cls="spacing-label"), Div("24px", cls="spacing-value"), cls="spacing-item"),
-                Div(Div(style="width: 32px; height: 32px;", cls="spacing-box"), Div("xxxl", cls="spacing-label"), Div("32px", cls="spacing-value"), cls="spacing-item"),
+                Div(
+                    Div(style="width: 4px; height: 4px;", cls="spacing-box"),
+                    Div("xs", cls="spacing-label"),
+                    Div("4px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 8px; height: 8px;", cls="spacing-box"),
+                    Div("sm", cls="spacing-label"),
+                    Div("8px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 12px; height: 12px;", cls="spacing-box"),
+                    Div("md", cls="spacing-label"),
+                    Div("12px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 16px; height: 16px;", cls="spacing-box"),
+                    Div("lg", cls="spacing-label"),
+                    Div("16px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 20px; height: 20px;", cls="spacing-box"),
+                    Div("xl", cls="spacing-label"),
+                    Div("20px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 24px; height: 24px;", cls="spacing-box"),
+                    Div("xxl", cls="spacing-label"),
+                    Div("24px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
+                Div(
+                    Div(style="width: 32px; height: 32px;", cls="spacing-box"),
+                    Div("xxxl", cls="spacing-label"),
+                    Div("32px", cls="spacing-value"),
+                    cls="spacing-item",
+                ),
                 cls="spacing-grid",
             ),
-
             H2("Corner Radius"),
             Div(
-                Div(Div(style="border-radius: 4px;", cls="radius-box"), Div("sm · 4px", cls="radius-label"), cls="radius-item"),
-                Div(Div(style="border-radius: 8px;", cls="radius-box"), Div("md · 8px", cls="radius-label"), cls="radius-item"),
-                Div(Div(style="border-radius: 12px;", cls="radius-box"), Div("lg · 12px", cls="radius-label"), cls="radius-item"),
-                Div(Div(style="border-radius: 16px;", cls="radius-box"), Div("xl · 16px", cls="radius-label"), cls="radius-item"),
-                Div(Div(style="border-radius: 9999px; width: 80px;", cls="radius-box"), Div("full", cls="radius-label"), cls="radius-item"),
+                Div(
+                    Div(style="border-radius: 4px;", cls="radius-box"),
+                    Div("sm · 4px", cls="radius-label"),
+                    cls="radius-item",
+                ),
+                Div(
+                    Div(style="border-radius: 8px;", cls="radius-box"),
+                    Div("md · 8px", cls="radius-label"),
+                    cls="radius-item",
+                ),
+                Div(
+                    Div(style="border-radius: 12px;", cls="radius-box"),
+                    Div("lg · 12px", cls="radius-label"),
+                    cls="radius-item",
+                ),
+                Div(
+                    Div(style="border-radius: 16px;", cls="radius-box"),
+                    Div("xl · 16px", cls="radius-label"),
+                    cls="radius-item",
+                ),
+                Div(
+                    Div(style="border-radius: 9999px; width: 80px;", cls="radius-box"),
+                    Div("full", cls="radius-label"),
+                    cls="radius-item",
+                ),
                 cls="radius-grid",
             ),
-
             H2("Buttons"),
             Div(
                 Button("Primary Action", cls="btn btn-primary"),
                 Button("Secondary Action", cls="btn btn-secondary"),
                 cls="button-grid",
             ),
-            P("Primary buttons use burgundy. One primary action per view.", style="color: var(--text-secondary); margin-top: 16px;"),
-
+            P(
+                "Primary buttons use burgundy. One primary action per view.",
+                style="color: var(--text-secondary); margin-top: 16px;",
+            ),
             H2("Design Principles"),
-
             Div(
                 H4("Burgundy accent — used sparingly"),
-                P("The accent color signals warmth, craft, and classical instruments. Use only for CTAs, links, and focus states. Never for backgrounds or large areas."),
+                P(
+                    "The accent color signals warmth, craft, and classical instruments. Use only for CTAs, links, and focus states. Never for backgrounds or large areas."
+                ),
                 cls="principle-card",
             ),
             Div(
                 H4("Cream backgrounds — clarity and warmth"),
-                P("The warm cream palette (#FAF8F5) feels inviting without being cold. White surfaces (#FFFDFB) elevate cards and modals."),
+                P(
+                    "The warm cream palette (#FAF8F5) feels inviting without being cold. White surfaces (#FFFDFB) elevate cards and modals."
+                ),
                 cls="principle-card",
             ),
             Div(
                 H4("Serif for editorial moments"),
-                P("Cormorant Garamond headlines signal intentionality and craft. Reserve for hero text, taglines, and special emphasis."),
+                P(
+                    "Cormorant Garamond headlines signal intentionality and craft. Reserve for hero text, taglines, and special emphasis."
+                ),
                 cls="principle-card",
             ),
             Div(
                 H4("980px max-width — refined, not sprawling"),
-                P("Narrower than typical SaaS (1200px). Signals that content is considered, not bloated."),
+                P(
+                    "Narrower than typical SaaS (1200px). Signals that content is considered, not bloated."
+                ),
                 cls="principle-card",
             ),
-
             H2("CSS Variables"),
             Pre(
                 """:root {

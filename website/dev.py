@@ -66,7 +66,9 @@ def db(args: argparse.Namespace) -> None:
     if not url:
         result = subprocess.run(
             ["neonctl", "connection-string", "--database-name", "website"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
             url = result.stdout.strip()
@@ -174,18 +176,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Website development CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # serve
     serve_parser = subparsers.add_parser("serve", help="Start dev server")
-    serve_parser.add_argument("-k", "--kill", action="store_true", help="Kill existing process on port 5001")
+    serve_parser.add_argument(
+        "-k", "--kill", action="store_true", help="Kill existing process on port 5001"
+    )
     serve_parser.set_defaults(func=serve)
 
     # test
     test_parser = subparsers.add_parser("test", help="Run tests")
-    test_parser.add_argument("-a", "--a11y", action="store_true", help="Run accessibility tests only")
+    test_parser.add_argument(
+        "-a", "--a11y", action="store_true", help="Run accessibility tests only"
+    )
     test_parser.add_argument("-k", help="Filter tests by keyword")
     test_parser.add_argument("--headed", action="store_true", help="Run in headed mode")
     test_parser.set_defaults(func=test)
@@ -208,9 +214,15 @@ def main() -> None:
     # figma-export
     figma_export_parser = subparsers.add_parser("figma-export", help="Export from Figma")
     figma_export_parser.add_argument("url", help="Figma file URL (can include node-id)")
-    figma_export_parser.add_argument("-n", "--node", action="append", help="Node ID to export (can repeat)")
-    figma_export_parser.add_argument("-f", "--format", choices=["png", "svg", "jpg", "pdf"], default="png")
-    figma_export_parser.add_argument("-s", "--scale", type=float, default=2.0, help="Scale factor (default: 2)")
+    figma_export_parser.add_argument(
+        "-n", "--node", action="append", help="Node ID to export (can repeat)"
+    )
+    figma_export_parser.add_argument(
+        "-f", "--format", choices=["png", "svg", "jpg", "pdf"], default="png"
+    )
+    figma_export_parser.add_argument(
+        "-s", "--scale", type=float, default=2.0, help="Scale factor (default: 2)"
+    )
     figma_export_parser.add_argument("-o", "--output", default="static", help="Output directory")
     figma_export_parser.set_defaults(func=figma_export)
 

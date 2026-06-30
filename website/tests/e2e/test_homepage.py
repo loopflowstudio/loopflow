@@ -1,6 +1,5 @@
 from playwright.sync_api import Page
 
-
 TAGLINE = "Coding agents that work in a team and build over time."
 CONCERTO_DMG_URL = "https://downloads.loopflow.studio/LoopflowConcerto-latest.dmg"
 
@@ -29,7 +28,9 @@ def test_hero_video(homepage: Page):
     section = homepage.locator(".hero-video-section")
     assert section.is_visible()
     assert section.locator("video.demo-video").is_visible()
-    assert section.locator("video.demo-video").get_attribute("poster") == "/static/concerto-main.png"
+    assert (
+        section.locator("video.demo-video").get_attribute("poster") == "/static/concerto-main.png"
+    )
 
 
 def test_capabilities_section(homepage: Page):

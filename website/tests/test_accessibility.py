@@ -7,7 +7,6 @@ Run with: cd website && uv run pytest tests/ -v
 import pytest
 from playwright.sync_api import Page
 
-
 # Pages to test for accessibility
 PAGES_TO_TEST = [
     "/",
@@ -37,7 +36,8 @@ class TestAccessibility:
 
         # Filter to only critical and serious violations (WCAG AA)
         violations = [
-            v for v in results.response.get("violations", [])
+            v
+            for v in results.response.get("violations", [])
             if v.get("impact") in ("critical", "serious")
         ]
 
@@ -73,16 +73,10 @@ class TestFocusStates:
             button.focus()
 
             # Check that focus is visible (has outline or other indicator)
-            outline = button.evaluate(
-                "el => getComputedStyle(el).outline"
-            )
-            box_shadow = button.evaluate(
-                "el => getComputedStyle(el).boxShadow"
-            )
+            outline = button.evaluate("el => getComputedStyle(el).outline")
+            box_shadow = button.evaluate("el => getComputedStyle(el).boxShadow")
 
-            has_focus_indicator = (
-                outline != "none" and "0px" not in outline
-            ) or (
+            has_focus_indicator = (outline != "none" and "0px" not in outline) or (
                 box_shadow != "none"
             )
 
@@ -161,15 +155,13 @@ class TestExternalLinks:
                 continue
 
             # Check for visual indicator (↗ symbol via ::after pseudo-element)
-            content_after = link.evaluate(
-                "el => getComputedStyle(el, '::after').content"
-            )
+            content_after = link.evaluate("el => getComputedStyle(el, '::after').content")
 
             text = link.text_content() or ""
 
             # Should have either ::after content or ↗ in the text
             has_indicator = (
-                content_after not in ('none', '""', "''")
+                content_after not in ("none", '""', "''")
                 or "↗" in text
                 or "opens in new" in (link.get_attribute("aria-label") or "").lower()
             )

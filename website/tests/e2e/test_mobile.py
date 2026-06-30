@@ -7,7 +7,6 @@ Run with: cd website && python dev.py test -k mobile
 import pytest
 from playwright.sync_api import Page
 
-
 # Common mobile viewport sizes
 MOBILE_VIEWPORTS = [
     {"width": 375, "height": 667, "name": "iPhone SE"},
@@ -51,7 +50,7 @@ class TestMobileNavNoOverlap:
 
         # Check no two boxes overlap
         for i, (name_a, box_a) in enumerate(boxes):
-            for name_b, box_b in boxes[i + 1:]:
+            for name_b, box_b in boxes[i + 1 :]:
                 overlap = _boxes_overlap(box_a, box_b)
                 assert not overlap, (
                     f"Nav items overlap on {viewport['name']}: "
@@ -147,8 +146,7 @@ class TestMobileImagesNoOverflow:
             # Image should fit within viewport (with some padding tolerance)
             max_width = viewport["width"] - 20  # Allow 10px padding each side
             assert box["width"] <= max_width, (
-                f"Image {i} too wide on {viewport['name']}: "
-                f"{box['width']:.0f}px > {max_width}px"
+                f"Image {i} too wide on {viewport['name']}: {box['width']:.0f}px > {max_width}px"
             )
 
     def test_no_horizontal_scroll(self, mobile_page: Page):
@@ -222,7 +220,7 @@ class TestMobileTouchTargets:
                 )
 
         if violations:
-            pytest.fail(f"Buttons too small for touch:\n" + "\n".join(violations))
+            pytest.fail("Buttons too small for touch:\n" + "\n".join(violations))
 
     def test_nav_links_touch_target_size(self, mobile_page: Page):
         """Nav links should have adequate touch targets."""
@@ -247,8 +245,8 @@ class TestMobileTouchTargets:
 def _boxes_overlap(box_a: dict, box_b: dict) -> bool:
     """Check if two bounding boxes overlap."""
     return not (
-        box_a["x"] + box_a["width"] <= box_b["x"] or
-        box_b["x"] + box_b["width"] <= box_a["x"] or
-        box_a["y"] + box_a["height"] <= box_b["y"] or
-        box_b["y"] + box_b["height"] <= box_a["y"]
+        box_a["x"] + box_a["width"] <= box_b["x"]
+        or box_b["x"] + box_b["width"] <= box_a["x"]
+        or box_a["y"] + box_a["height"] <= box_b["y"]
+        or box_b["y"] + box_b["height"] <= box_a["y"]
     )

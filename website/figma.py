@@ -8,13 +8,12 @@ Usage:
 Requires FIGMA_TOKEN environment variable (get from Figma > Settings > Personal access tokens)
 """
 
+import json
 import os
 import re
 import sys
 import urllib.request
-import json
 from pathlib import Path
-
 
 FIGMA_API = "https://api.figma.com/v1"
 
@@ -33,7 +32,7 @@ def parse_figma_url(url: str) -> tuple[str, str | None]:
     # https://www.figma.com/design/ZusAUvXyxOGdyuUra2TtUb/Loopflow-logo?node-id=0-1
     # https://www.figma.com/file/ZusAUvXyxOGdyuUra2TtUb/Name
 
-    match = re.search(r'figma\.com/(?:design|file)/([a-zA-Z0-9]+)', url)
+    match = re.search(r"figma\.com/(?:design|file)/([a-zA-Z0-9]+)", url)
     if not match:
         print(f"Error: Could not parse Figma URL: {url}")
         sys.exit(1)
@@ -41,7 +40,7 @@ def parse_figma_url(url: str) -> tuple[str, str | None]:
     file_key = match.group(1)
 
     # Check for node-id parameter
-    node_match = re.search(r'node-id=([0-9]+-[0-9]+)', url)
+    node_match = re.search(r"node-id=([0-9]+-[0-9]+)", url)
     node_id = node_match.group(1) if node_match else None
 
     return file_key, node_id
@@ -73,14 +72,12 @@ def get_file_nodes(file_key: str, node_ids: list[str], token: str) -> dict:
     return api_request(f"/files/{file_key}/nodes?ids={ids}", token)
 
 
-def export_nodes(file_key: str, node_ids: list[str], token: str,
-                 format: str = "png", scale: float = 2.0) -> dict:
+def export_nodes(
+    file_key: str, node_ids: list[str], token: str, format: str = "png", scale: float = 2.0
+) -> dict:
     """Export nodes as images. Returns URLs to download."""
     ids = ",".join(node_ids)
-    return api_request(
-        f"/images/{file_key}?ids={ids}&format={format}&scale={scale}",
-        token
-    )
+    return api_request(f"/images/{file_key}?ids={ids}&format={format}&scale={scale}", token)
 
 
 def download_image(url: str, output_path: Path):
@@ -98,8 +95,17 @@ def walk_nodes(node: dict, depth: int = 0) -> list[tuple[str, str, str, int]]:
     node_type = node.get("type", "")
 
     # Only include exportable types
-    exportable = {"FRAME", "COMPONENT", "INSTANCE", "GROUP", "VECTOR",
-                  "RECTANGLE", "ELLIPSE", "TEXT", "CANVAS"}
+    exportable = {
+        "FRAME",
+        "COMPONENT",
+        "INSTANCE",
+        "GROUP",
+        "VECTOR",
+        "RECTANGLE",
+        "ELLIPSE",
+        "TEXT",
+        "CANVAS",
+    }
 
     if node_type in exportable:
         results.append((node_id, name, node_type, depth))
@@ -113,12 +119,12 @@ def walk_nodes(node: dict, depth: int = 0) -> list[tuple[str, str, str, int]]:
 
 def list_nodes(file_key: str, token: str):
     """List all exportable nodes in a file."""
-    print(f"Fetching file structure...")
+    print("Fetching file structure...")
     data = get_file(file_key, token)
 
     file_name = data.get("name", "Unknown")
     print(f"\nFile: {file_name}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     document = data.get("document", {})
     nodes = walk_nodes(document)
@@ -129,13 +135,19 @@ def list_nodes(file_key: str, token: str):
         url_id = node_id.replace(":", "-")
         print(f"{indent}{name} ({node_type}) [node-id={url_id}]")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Total exportable nodes: {len(nodes)}")
-    print(f"\nTo export: python figma.py export <url> --node <node-id>")
+    print("\nTo export: python figma.py export <url> --node <node-id>")
 
 
-def export_to_file(file_key: str, node_ids: list[str], token: str,
-                   output_dir: Path, format: str = "png", scale: float = 2.0):
+def export_to_file(
+    file_key: str,
+    node_ids: list[str],
+    token: str,
+    output_dir: Path,
+    format: str = "png",
+    scale: float = 2.0,
+):
     """Export nodes and save to files."""
     print(f"Exporting {len(node_ids)} node(s) as {format.upper()} at {scale}x...")
 
@@ -164,7 +176,7 @@ def export_to_file(file_key: str, node_ids: list[str], token: str,
         node_info = nodes_data.get(api_id, {}).get("document", {})
         name = node_info.get("name", api_id.replace(":", "-"))
         # Clean filename
-        safe_name = re.sub(r'[^\w\-]', '_', name).lower()
+        safe_name = re.sub(r"[^\w\-]", "_", name).lower()
 
         output_path = output_dir / f"{safe_name}.{format}"
         download_image(url, output_path)

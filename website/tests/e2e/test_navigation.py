@@ -36,7 +36,6 @@ def test_cli_redirects_to_docs(page: Page, base_url: str):
     assert "/docs" in page.url
 
 
-
 def test_nav_title_no_overlap_with_links_desktop(homepage: Page):
     """Nav title should not overlap with nav links on desktop."""
     nav_title = homepage.locator(".nav-title")

@@ -56,7 +56,7 @@ These gate the deploy proving out live; carried over from the shipped import ite
 because they're still outstanding:
 
 - Confirm the website's keys live in Doppler `loopflow/prd` — `FLY_API_TOKEN`,
-  `WEBSITE_DB_URL`, `RESEND_API_KEY`, `FIGMA_TOKEN`, and the FastHTML session
-  key. The deploy pulls them via the existing `DOPPLER_TOKEN_PRD` GitHub secret;
-  nothing new goes into GitHub secrets.
+  `WEBSITE_DB_URL`, `RESEND_API_KEY`, and `FIGMA_TOKEN`. The deploy pulls them
+  via the existing `DOPPLER_TOKEN_PRD` GitHub secret; nothing new goes into
+  GitHub secrets.
 - Disable GitHub Pages in repo settings once the site's `/docs` is live.

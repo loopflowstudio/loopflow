@@ -5,6 +5,7 @@ Run with: cd website && uv run pytest tests/ -v
 """
 
 import pytest
+from axe_playwright_python.sync_playwright import Axe
 from playwright.sync_api import Page
 
 # Pages to test for accessibility
@@ -26,8 +27,6 @@ class TestAccessibility:
     @pytest.mark.parametrize("path", PAGES_TO_TEST)
     def test_axe_accessibility(self, page: Page, server: str, path: str):
         """Run axe-core accessibility audit on each page."""
-        from axe_playwright_python.sync_playwright import Axe
-
         page.goto(f"{server}{path}")
         page.wait_for_load_state("networkidle")
 

@@ -29,8 +29,8 @@ curl -I http://127.0.0.1:5017/docs    # 200
 ```
 
 Gate also confirmed the packaged image excludes `.sesskey`, `.venv`, and
-`tests/` (via `website/.dockerignore`), and that `.sesskey` is untracked and
-gitignored.
+`tests/` (via `website/.dockerignore`) before app startup. FastHTML creates
+`.sesskey` at runtime; the local file remains untracked and gitignored.
 
 ## What's not proven here
 
@@ -38,7 +38,7 @@ gitignored.
   smoke-tests `https://loopflow.studio/` with rollback, but first real deploy
   happens on merge.
 - Deploy depends on Doppler `loopflow/prd` holding `FLY_API_TOKEN`,
-  `WEBSITE_DB_URL`, `RESEND_API_KEY`, `FIGMA_TOKEN`, and the session key, pulled
-  via the existing `DOPPLER_TOKEN_PRD` GitHub secret.
+  `WEBSITE_DB_URL`, `RESEND_API_KEY`, and `FIGMA_TOKEN`, pulled via the existing
+  `DOPPLER_TOKEN_PRD` GitHub secret.
 - GitHub Pages disable is a repo-settings op, done out of band once
   `loopflow.studio/docs` is live.

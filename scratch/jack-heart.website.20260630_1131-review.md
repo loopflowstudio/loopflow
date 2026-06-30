@@ -20,7 +20,8 @@ Docs remain canonical in root `docs/`. Local development and tests materialize t
 
 ## Risks and bottlenecks
 
-- The production deploy still depends on Doppler `loopflow/prd` containing `FLY_API_TOKEN`, `WEBSITE_DB_URL`, `RESEND_API_KEY`, `FIGMA_TOKEN`, and the FastHTML session key.
+- The production deploy still depends on Doppler `loopflow/prd` containing `FLY_API_TOKEN`, `WEBSITE_DB_URL`, `RESEND_API_KEY`, and `FIGMA_TOKEN`.
+- FastHTML creates a runtime `.sesskey` when the app starts, but the key is not packaged into the Docker image. If the site starts relying on server-side sessions, a stable session secret should be wired explicitly.
 - GitHub Pages retirement is partly a repo-settings operation; the branch removes the website/docs duplication path but cannot disable Pages from local code.
 - The deploy workflow smoke test only checks `/`. Browser coverage exercises docs and subpages locally, but production rollback is keyed to the homepage status.
 - `docs/_config.yml` remains for now. It is inert for the website path, but should be removed once Pages is confirmed disabled if the repo wants no Pages residue.
@@ -42,4 +43,4 @@ Docs remain canonical in root `docs/`. Local development and tests materialize t
   - `/docs` -> 200
   - `/docs/lfop` -> 200
   - `/install.sh` -> 302
-- Container packaging check confirmed `/app/.sesskey`, `/app/.venv`, and `/app/tests` are absent.
+- Image packaging check before app startup confirmed `/app/.sesskey`, `/app/.venv`, and `/app/tests` are absent. Runtime app startup creates `/app/.sesskey`.

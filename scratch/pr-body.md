@@ -18,7 +18,7 @@ curl -I http://127.0.0.1:5017/
 curl -I http://127.0.0.1:5017/docs
 ```
 
-Gate results: website tests passed with 61 passed, 3 skipped; `uv run ruff check website` passed; Docker build and container smoke passed for `/`, `/docs`, `/docs/lfop`, and `/install.sh`.
+Gate results: website tests passed with 61 passed, 3 skipped; `uv run ruff check website` passed; Docker build and container smoke passed for `/`, `/docs`, `/docs/lfop`, and `/install.sh`. The packaged image excludes `.sesskey`, `.venv`, and tests; FastHTML creates `.sesskey` only after runtime startup.
 
 ## Intent
 
@@ -26,7 +26,7 @@ Move the public Loopflow marketing and docs site from the private studio repo in
 
 ## Assumptions
 
-- Doppler `loopflow/prd` provides `FLY_API_TOKEN`, `WEBSITE_DB_URL`, `RESEND_API_KEY`, `FIGMA_TOKEN`, and the website session key.
+- Doppler `loopflow/prd` provides `FLY_API_TOKEN`, `WEBSITE_DB_URL`, `RESEND_API_KEY`, and `FIGMA_TOKEN`.
 - GitHub Pages will be disabled out of band after `loopflow.studio/docs` is live.
 - First cut is a faithful move; broader copy/style alignment stays in the next website wave item.
 

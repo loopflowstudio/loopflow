@@ -8,15 +8,15 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-uv run python scripts/install.py local --use   # build lf, lfd, Loopflow.app -> local-bin/, make active
-scripts/pull-local-bin.sh    # lf/lfd only: pull default branch, build, install to ~/.local/bin
+uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.app -> local-bin/, make active
+uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd
 cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
 ```
 
-`install.py local` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into
-`<worktree>/local-bin/`. `--use` promotes that build: symlinks `lf`/`lfd` onto
-`PATH` and installs `Loopflow.app` into `/Applications`. Each worktree builds in
-isolation; `--use` picks which one is active.
+`install.py` is the local entry point. `local --use` builds this worktree's
+`lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that
+build. `refresh` is the fast CLI-only path: pull the default branch, rebuild
+`lf`/`lfd`, and install them into the local bin dir.
 
 Use `release/` to keep the rationale and notes for each shipped version close to the code.
 
@@ -51,7 +51,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Weekly | `Regression (weekly auto-release)` | Runs nightly package verification, bumps patch when commits landed since the last tag, tags, and dispatches `Release` | Yes |
 | Release | `Release` (on tag) | Builds the native tarballs **and** the signed, notarized `Loopflow.dmg`; uploads the DMG to R2 and attaches it to the GitHub Release alongside `lf`/`lfd` | Yes |
 | Local | `scripts/install.py local --use` | Build this worktree's `lf`, `lfd`, and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
-| Local | `scripts/pull-local-bin.sh` | `lf`/`lfd` only: pull, release-build, atomically copy into the local bin dir | Local only |
+| Local | `scripts/install.py refresh` | `lf`/`lfd` only: pull, release-build, atomically copy into the local bin dir | Local only |
 
 Nightly packages prove release artifacts while keeping deployment out of the loop. Weekly release reuses that package gate before publishing.
 

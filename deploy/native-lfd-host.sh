@@ -120,7 +120,7 @@ update_target() {
 }
 
 install_bins() {
-    "$repo/scripts/pull-local-bin.sh" --repo "$repo" --install-dir "$install_dir" "$@"
+    uv run --with typer python "$repo/scripts/install.py" refresh --install-dir "$install_dir" "$@"
 }
 
 wait_for_health() {

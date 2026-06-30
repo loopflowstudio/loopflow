@@ -307,11 +307,11 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 From a dev checkout, build everything locally with one entry:
 
 ```bash
-uv run python scripts/install.py local --use   # build lf, lfd, Loopflow.app -> local-bin/, make active
-scripts/pull-local-bin.sh                       # lf/lfd only → ~/.local/bin
+uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.app -> local-bin/, make active
+uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd
 ```
 
-`install.py local` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`. `--use` symlinks `lf`/`lfd` onto `PATH` and installs `Loopflow.app` into `/Applications`—each worktree builds in isolation, `--use` picks the active one.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, and install them into the local bin dir.
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 

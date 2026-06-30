@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build and install loopflow locally.
 
-    install.py                  # build and install everything
-    install.py --service        # also install/restart lfd as a launchd service
-    install.py --skip wheel     # skip a build stage (wheel|cargo|swift)
-    install.py -n               # dry run
+    install.py local            # build this worktree into local-bin/
+    install.py local --use      # promote this worktree onto PATH and /Applications
+    install.py local --service  # also install/restart lfd as a launchd service
+    install.py local --skip swift
+    install.py local -n         # dry run
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """

@@ -258,7 +258,7 @@ def find_concerto_executable(
     Prefers app bundle executable for consistent assets and windowing.
     """
     derived_data = Path.home() / "Library/Developer/Xcode/DerivedData"
-    install_path = Path("/Applications/Concerto.app")
+    install_path = Path("/Applications/Loopflow.app")
     executable_path = install_path / "Contents/MacOS/Concerto"
 
     # Check installed app first

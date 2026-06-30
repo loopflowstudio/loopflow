@@ -1,0 +1,7 @@
+flow: ship-roadmap
+mode: manual
+area:
+  - rust/loopflow/src/engine/builtins
+  - rust/loopflow/src/lfd
+  - rust/loopflow/src/ops/pm.rs
+  - python/loopflow

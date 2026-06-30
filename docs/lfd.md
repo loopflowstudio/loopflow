@@ -55,6 +55,16 @@ lfd serve
 
 The default listen address is `127.0.0.1:2486`. Override it with `LFD_HTTP_ADDR`.
 
+For a self-hosted native remote daemon, set the remote bind address and bearer token when installing. `lfd install` persists selected `LFD_*` environment variables into the service file, so the daemon survives restarts without hand-editing launchd or systemd units.
+
+```bash
+export LFD_HTTP_ADDR=0.0.0.0:2486
+export LFD_AUTH_TOKEN=$(openssl rand -hex 32)
+lfd install --force
+```
+
+Service files that contain token-like values are written with owner-only permissions.
+
 ## Install
 
 ```bash

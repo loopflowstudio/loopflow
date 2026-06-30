@@ -202,7 +202,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "loopflow-server.sh" in plist
 
     cost_docs = (ROOT / "deploy/COSTS.md").read_text()
-    budget_config = yaml.safe_load((ROOT / "deploy/budget.yaml").read_text())
+    budget_config = yaml.safe_load((ROOT / "deploy/budget.json").read_text())
     assert budget_config["monthly_budget_usd"] == "100.00"
     assert budget_config["source_of_truth"] == "mercury_company_card"
     assert "scripts/check_monthly_spend.py" in cost_docs

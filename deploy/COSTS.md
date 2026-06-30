@@ -23,7 +23,7 @@ scripts/check_monthly_spend.py --csv ~/.lf/costs/mercury-$(date +%Y-%m).csv
 
 ## Vendors covered
 
-`deploy/budget.yaml` categorizes charges for:
+`deploy/budget.json` categorizes charges for:
 
 - AWS
 - Fly.io

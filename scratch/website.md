@@ -110,7 +110,8 @@ calls before this lands in public history:
   live doc surface.
 - `.sesskey` is absent from the repo and gitignored.
 
-## Follow-ups (not this PR)
+## Not this PR
 
-- Staging environment (`fly.staging.toml`) if we want a preview tier.
-- Wire website freshness into the release wave's cron/feedback loop.
+This is item 01 of `wave/website`. **Faithful move only** — do not fix stale
+content (e.g. the "WorkOS OAuth via Loopflow Studio" copy) here. Content/docs/
+style truing-up is item 02; staging and release-loop wiring are item 03.

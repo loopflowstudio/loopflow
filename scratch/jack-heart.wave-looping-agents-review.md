@@ -4,7 +4,7 @@
 
 Added a `goal/` prompt primitive and a `goal` field on waves. Goals resolve from
 repo-local files, user files, then builtins, and a wave with `goal: <name>` runs
-the rendered goal prompt as its loop body.
+the rendered goal prompt as its primary loop body.
 
 The wave DTO mirrors now carry `goal` through Rust, Python, Swift, and the shared
 fixture. lfd persists the field, accepts it on create/update/run overrides, and
@@ -22,16 +22,22 @@ now show `goal: ship-roadmap` in wave config examples.
   prompt, not in a new config struct.
 - A goal run uses `lf : <rendered prompt>` instead of inventing a separate runner.
   That keeps the first primitive small and reuses the existing launch path.
+- Goals replace only the standing primary loop body. Explicit flow overrides from
+  manual runs, crons, and triggers still run the requested flow.
+- `goal` stays explicit in the wave JSON contract. A wave without a goal
+  serializes `"goal": null` instead of omitting the field, matching the Python
+  required-nullable mirror.
 - Missing goals now surface as `goal not found` instead of falling through as
   `step not found`.
 
 ## How it fits together
 
 `Wave.goal` is stored with the wave row and exposed through HTTP DTOs. When lfd
-executes a wave run, `build_wave_run_command` chooses the goal path when present:
-load goal, render it with flow names and `wave/<name>` as the roadmap handle,
-then launch `lf` with an inline prompt. Waves without a goal keep the existing
-primary-flow behavior.
+executes a wave run, `build_wave_run_command` chooses the goal path only when the
+run snapshot still names the wave's primary flow: load goal, render it with flow
+names and `wave/<name>` as the roadmap handle, then launch `lf` with an inline
+prompt. Runs without a goal, or runs with an explicit flow override, keep the
+existing flow execution path.
 
 ## Risks and bottlenecks
 
@@ -41,8 +47,9 @@ primary-flow behavior.
 - The primitive coexists with existing `direction` plumbing in this branch. The
   roadmap says goal supersedes direction, but the full removal is outside this
   first cut.
-- Concerto UI validation is locally blocked by the UI runner environment. The
-  Swift package tests pass; the Xcode UI job failed before completing bootstrap.
+- Concerto UI validation was skipped in this headless gate because no rendering
+  environment is available. Swift package tests cover the shared model and
+  service contract, but not the full Xcode UI runner.
 
 ## What's not included
 
@@ -60,5 +67,7 @@ primary-flow behavior.
 - `swift test --package-path swift` passed: 336 Swift Testing tests plus 5 XCTest tests.
 - `tests/e2e/test_smoke.sh` passed.
 - `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` passed: 16 tests.
+- `uv run pytest tests/regression/ -v` passed: 4 tests.
 - `docker version && cargo test -p loopflow docker_` passed: 11 docker-filtered tests.
-- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` failed locally: unit tests ran, but the UI runner exited before bootstrapping; logs also showed ATS failures from local Concerto config pointing at `http://100.96.227.95:2486`.
+- Concerto Xcode UI test was not run in this gate because the session has no
+  rendering environment.

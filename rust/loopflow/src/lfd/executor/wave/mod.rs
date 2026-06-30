@@ -126,7 +126,10 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 }
 
 fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
-    if let Some(goal_name) = wave.goal() {
+    if let Some(goal_name) = wave
+        .goal()
+        .filter(|_| run.snapshot.flow == wave.primary_flow().as_str())
+    {
         let repo = Path::new(&run.worktree);
         let goal = crate::engine::load_goal(goal_name, repo)?;
         let prompt = crate::engine::render_goal(
@@ -1492,6 +1495,62 @@ mod tests {
         assert!(prompt.contains("Execute the custom goal body."));
         assert!(prompt.contains("- custom"));
         assert!(prompt.contains("wave/goal-wave"));
+    }
+
+    #[tokio::test]
+    async fn execute_wave_run_with_goal_preserves_flow_override() {
+        let repo = TestRepo::new();
+        let goals_dir = repo.path().join("goal");
+        std::fs::create_dir_all(&goals_dir).expect("create goal dir");
+        std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
+            .expect("write goal");
+
+        let db_path = repo.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store"),
+        );
+        let scheduler = Arc::new(crate::lfd::scheduler::Scheduler::new(1));
+        let event_hub = EventHub::new(16);
+        let runner = Arc::new(CapturingRunner {
+            cmd: Mutex::new(None),
+        });
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            OutputHub::new(1024, repo.path().join("output")),
+            event_hub,
+            runner.clone(),
+        );
+
+        let mut wave = make_wave(
+            "goal-wave",
+            repo.path(),
+            "ship-roadmap",
+            WaveStatus::Running,
+        );
+        wave.mode = WaveMode::Manual;
+        wave.goal = Some("drive".to_string());
+        store.create_wave(&wave).await.expect("create wave");
+
+        let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
+        run.snapshot.flow = "qa".to_string();
+        store.update_wave_run(&run).await.expect("update run");
+
+        executor.execute(&run.id).await.expect("execute run");
+
+        let cmd = runner
+            .cmd
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone()
+            .expect("runner command");
+        assert!(cmd.iter().any(|arg| arg == "qa"));
+        assert!(!cmd.iter().any(|arg| arg == ":"));
+        assert!(!cmd
+            .iter()
+            .any(|arg| arg.contains("Execute the custom goal body.")));
     }
 
     #[tokio::test]

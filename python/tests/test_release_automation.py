@@ -44,6 +44,78 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert not any(term in commands for term in forbidden)
 
 
+def test_token_compress_step_is_documented_as_preserving_information():
+    step = (ROOT / "rust/loopflow/src/engine/builtins/ops/step/token-compress.md").read_text()
+    docs = (ROOT / "docs/index.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    assert "Compress text into a target token budget" in step
+    assert "Compression is not truncation" in step
+    assert "Do not summarize a list by taking the first items" in step
+    assert "Omitted" in step
+    assert "lf token-compress" in docs
+    assert "Do not take the first N commits" in docs
+    assert "| `token-compress` |" in readme
+
+
+def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Cargo.toml").write_text('[package]\nname = "loopflow"\nversion = "1.2.3"\n')
+    (repo / "pyproject.toml").write_text('[project]\nname = "loopflow"\nversion = "1.2.3"\n')
+    (repo / "RELEASE_NOTES.md").write_text("# v1.2.3\n\nPrevious release.\n")
+    scripts = repo / "scripts"
+    scripts.mkdir()
+    script = scripts / "bump_patch_version.sh"
+    script.write_text((ROOT / "scripts/bump_patch_version.sh").read_text())
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+
+    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "release: v1.2.3"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "tag", "v1.2.3"], cwd=repo, check=True)
+
+    subjects = [
+        "deploy: add native host updater",
+        "lfd: persist remote token file",
+        "concerto: improve portfolio status",
+        "lf: hand off steps through vendor skills",
+        "build(deps): bump serde from 1.0.0 to 1.0.1 (#1)",
+    ]
+    subjects.extend(f"workflow: generated change {index}" for index in range(55))
+
+    for index, subject in enumerate(subjects):
+        (repo / "change.txt").write_text(f"{index}\n")
+        subprocess.run(["git", "add", "change.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", subject], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+
+    result = subprocess.run(
+        [str(script), "v1.2.3", str(len(subjects))],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    notes = (repo / "RELEASE_NOTES.md").read_text()
+    assert "next=1.2.4" in result.stdout
+    assert "# v1.2.4" in notes
+    assert f"Weekly auto-release with {len(subjects)} commits since `v1.2.3`." in notes
+    assert "Commits are grouped by theme instead of truncated" in notes
+    assert "## Release and self-hosting infrastructure" in notes
+    assert "## Authentication and remote execution" in notes
+    assert "## Concerto and user surfaces" in notes
+    assert "## Agent workflows and developer tooling" in notes
+    assert "## Dependency updates" in notes
+    assert "serde 1.0.0 → 1.0.1" in notes
+    for subject in subjects:
+        if subject.startswith("build(deps)"):
+            continue
+        assert subject in notes
+
+
 def test_pull_local_bin_builds_and_installs_binaries(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

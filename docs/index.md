@@ -147,6 +147,18 @@ Steps run to completion. Built-ins: `debug`, `design`, `implement`, `gate`, `qa`
 ln -s ../.lf/steps .claude/commands
 ```
 
+### Token compression
+
+Use `token-compress` when a workflow needs to fit more context into a smaller budget without losing the important shape.
+
+```bash
+lf token-compress: Compress this release context to 1200 tokens
+```
+
+Compression is not truncation. A good compression pass preserves decisions, rationale, risks, open questions, names, dates, versions, paths, commands, URLs, and identifiers. It groups repetition before cutting. If the budget forces meaningful omissions, it says what was omitted.
+
+Release systems, long-running waves, and handoffs should compress source material before summarizing it. Do not take the first N commits, first N lines, or latest N messages as a substitute for understanding the whole input.
+
 ---
 
 ## Flow

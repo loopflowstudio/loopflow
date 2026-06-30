@@ -25,7 +25,7 @@ struct SetupView: View {
         VStack(spacing: 32) {
             // Header
             VStack(spacing: 8) {
-                Text("Loopflow Concerto")
+                Text("Loopflow")
                     .font(Typography.heroTitle())
                     .fontWeight(.bold)
 

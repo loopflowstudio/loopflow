@@ -243,3 +243,19 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Use native launchd `lfd` as the default Mac private cron-host path. Keep Docker Compose as an explicit self-hosted/container option, especially for Linux or hosts that need container isolation, but do not block the Mac private host on it.
 
 **Implications:** The Mac host runbook centers on `deploy/native-lfd-host.sh`. Secure remote execution still needs a containerized executor story, but daemon availability, wave scheduling, and remote API access should not wait for Docker Compose first-run polish.
+
+## 2026-06-30 — The desktop app is "Loopflow"; Concerto stays the dev nickname
+
+**Context:** The macOS app shipped as "Loopflow Concerto" — `Loopflow Concerto.app`, `LoopflowConcerto.dmg`, display name "Loopflow Concerto." Internally everyone calls it Concerto. The product users actually use is Loopflow; `lf`/`lfd` are the lower-level internals. The two-word product name muddied that.
+
+**Decision:** The user-facing product is **Loopflow**. Rename every surface a user sees — `CFBundleDisplayName`/`CFBundleName`, the app bundle (`Loopflow.app`), the DMG volume and download keys (`Loopflow-<version>.dmg`, `Loopflow-latest.dmg`), and in-app titles. **Concerto stays the internal/dev nickname** — the Swift target/executable, the bundle id `com.loopflow.concerto` (keeping it preserves granted TCC permissions and deep-link registration), `scripts/concerto-dev.py`, and the debug `Concerto Dev.app` are unchanged. No tooling reorg.
+
+**Implications:** The DMG download key changes, so the loopflowstudio website download link must update in the same window or it 404s (cross-repo, flagged, not done here). Keeping the bundle id means no permission re-grant. The app's bundle version is now stamped from the release tag at build time rather than frozen at `1.0`, so Loopflow reports the same version as `lf --version`.
+
+## 2026-06-30 — One local build entry; per-worktree `local-bin/`
+
+**Context:** Three overlapping local-install paths (`pull-local-bin.sh` → `~/.local/bin`, `install.py local` → `/Applications` + bin, `concerto-dev.py run` → `~/Applications`) all wrote to **global** locations, so sibling worktrees fought over the same `lf` and the same `/Applications` app — you couldn't run two worktrees' builds side by side.
+
+**Decision:** `scripts/install.py local` is the single local build entry. It builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/` (gitignored, isolated per worktree). `--use` *promotes* a build: symlink `~/.local/bin/{lf,lfd}` → the worktree's `local-bin`, and copy `local-bin/Loopflow.app` → `/Applications`. Build is isolated; `--use` chooses the active one. The desktop app is a first-class release artifact alongside `lf`/`lfd`, named as such in `release/README.md` and `release/SCHEDULE.md`.
+
+**Implications:** `pull-local-bin.sh` stays as the CLI-only quick path; `concerto-dev.py` stays for fast debug iteration. Symlinked `lf`/`lfd` mean rebuilds take effect with no re-promote; the app still needs `--use` to re-copy. Switching active worktrees is one `install.py local --use` from that worktree.

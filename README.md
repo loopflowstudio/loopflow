@@ -295,12 +295,22 @@ lf research -d ceo
 
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
-scripts/pull-local-bin.sh    # dev checkout → ~/.local/bin
 ```
+
+Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf` and `lfd`.
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
 `install.sh` only downloads the `lf` and `lfd` binaries. To connect Claude, GitHub, and optional providers, run `lfd install`—add `--no-interactive` to skip the prompts (CI, Docker, scripted installs).
+
+From a dev checkout, build everything locally with one entry:
+
+```bash
+uv run python scripts/install.py local --use   # build lf, lfd, Loopflow.app -> local-bin/, make active
+scripts/pull-local-bin.sh                       # lf/lfd only → ~/.local/bin
+```
+
+`install.py local` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`. `--use` symlinks `lf`/`lfd` onto `PATH` and installs `Loopflow.app` into `/Applications`—each worktree builds in isolation, `--use` picks the active one.
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 

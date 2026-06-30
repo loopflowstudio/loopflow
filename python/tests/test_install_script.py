@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import platform
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -40,7 +41,14 @@ def _stage_build_artifacts(root: Path) -> None:
 
     swift_concerto = root / "swift" / "Concerto"
     swift_concerto.mkdir(parents=True)
-    (swift_concerto / "Info.plist").write_text("<plist/>")
+    (swift_concerto / "Info.plist").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>'
+        "<key>CFBundleName</key><string>Loopflow</string>"
+        "</dict></plist>\n"
+    )
     (swift_concerto / "Concerto.sdef").write_text("<dictionary/>")
     (swift_concerto / "AppIcon.icns").write_bytes(b"icns-fake")
 
@@ -50,8 +58,8 @@ def _stage_build_artifacts(root: Path) -> None:
     _write_fake_macho(cargo_rel / "lfd")
 
 
-def _make_spec(root: Path, applications_dir: Path) -> install.BundleSpec:
-    return install.default_bundle_spec(root=root, applications_dir=applications_dir)
+def _make_spec(root: Path) -> install.BundleSpec:
+    return install.default_bundle_spec(root=root)
 
 
 def _stage_bundle(spec: install.BundleSpec, binaries: tuple[str, ...]) -> None:
@@ -101,12 +109,10 @@ def test_install_concerto_bundles_lfd_and_lf(
     """
     root = tmp_path / "repo"
     _stage_build_artifacts(root)
-    applications = tmp_path / "Applications"
-    applications.mkdir()
     _patch_subprocess(monkeypatch)
 
-    spec = _make_spec(root, applications)
-    install._install_concerto(spec)
+    spec = _make_spec(root)
+    install._install_concerto(spec, "9.9.9")
 
     assert (spec.macos_dir / "Concerto").exists()
     assert (spec.macos_dir / "lfd").exists(), (
@@ -115,11 +121,15 @@ def test_install_concerto_bundles_lfd_and_lf(
     )
     assert (spec.macos_dir / "lf").exists()
 
+    stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
+    assert stamped["CFBundleShortVersionString"] == "9.9.9"
+    assert stamped["CFBundleVersion"] == "9.9.9"
+
 
 def test_verify_bundle_rejects_missing_aux_executable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    spec = _make_spec(tmp_path / "repo", tmp_path / "Applications")
+    spec = _make_spec(tmp_path / "repo")
     _stage_bundle(spec, binaries=("Concerto", "lf"))
     _patch_subprocess(monkeypatch)
 
@@ -130,7 +140,7 @@ def test_verify_bundle_rejects_missing_aux_executable(
 def test_verify_bundle_rejects_wrong_architecture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    spec = _make_spec(tmp_path / "repo", tmp_path / "Applications")
+    spec = _make_spec(tmp_path / "repo")
     _stage_bundle(spec, binaries=("Concerto", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=["sparc64"])
 
@@ -139,7 +149,7 @@ def test_verify_bundle_rejects_wrong_architecture(
 
 
 def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    spec = _make_spec(tmp_path / "repo", tmp_path / "Applications")
+    spec = _make_spec(tmp_path / "repo")
     _stage_bundle(spec, binaries=("Concerto", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=[])  # lipo fails -> not Mach-O
 
@@ -155,23 +165,20 @@ def test_install_concerto_fails_when_codesign_verify_fails(
     """
     root = tmp_path / "repo"
     _stage_build_artifacts(root)
-    applications = tmp_path / "Applications"
-    applications.mkdir()
     _patch_subprocess(monkeypatch, codesign_verify_rc=1)
 
     with pytest.raises(install.StageError, match="codesign --verify failed"):
-        install._install_concerto(_make_spec(root, applications))
+        install._install_concerto(_make_spec(root), "9.9.9")
 
 
-def test_install_binaries_errors_on_missing_cargo_output(
+def test_stage_binaries_errors_on_missing_cargo_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Silent-skip regression: if cargo didn't produce lf/lfd, the installer
-    must refuse to claim success.
+    """Silent-skip regression: if cargo didn't produce lf/lfd, staging into
+    local-bin/ must refuse to claim success.
     """
     monkeypatch.setattr(install, "ROOT", tmp_path / "repo")
     (tmp_path / "repo" / "target" / "release").mkdir(parents=True)
-    monkeypatch.setattr(install, "_resolve_install_dir", lambda: tmp_path / "bin")
 
     with pytest.raises(install.StageError, match="expected build artifact missing"):
-        install._install_binaries()
+        install._stage_binaries(tmp_path / "local-bin")

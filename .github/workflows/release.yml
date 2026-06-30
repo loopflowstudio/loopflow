@@ -94,10 +94,10 @@ jobs:
               region_name="auto",
           )
           bucket = "downloads"
-          dmg = "swift/dist/LoopflowConcerto.dmg"
+          dmg = "swift/dist/Loopflow.dmg"
           for key, cache in [
-              (f"LoopflowConcerto-{version}.dmg", "public, max-age=31536000, immutable"),
-              ("LoopflowConcerto-latest.dmg", "public, max-age=60"),
+              (f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable"),
+              ("Loopflow-latest.dmg", "public, max-age=60"),
           ]:
               client.upload_file(dmg, bucket, key, ExtraArgs={
                   "ContentType": "application/x-apple-diskimage",
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: dmg
-          path: swift/dist/LoopflowConcerto.dmg
+          path: swift/dist/Loopflow.dmg
 
   # --- Stage 2: Publish (all gated on builds) ---
 

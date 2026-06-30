@@ -52,6 +52,16 @@ extension CertificatePinningDelegate: URLSessionDelegate, URLSessionTaskDelegate
             return
         }
 
+        // A valid CA chain (e.g. a `*.ts.net` cert from a `tailscale serve` TLS
+        // proxy in front of lfd) is system-trusted and rotates on its own
+        // schedule. Don't pin it — let the system validate, so cert renewals
+        // don't trip a false trust mismatch. Pinning below is only for
+        // self-signed / privately-issued certs that fail default evaluation.
+        if SecTrustEvaluateWithError(trust, nil) {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
         let newFingerprint = fingerprint(for: certificate)
 
         if let existingFingerprint = pinStore.pinnedFingerprint(for: connection) {

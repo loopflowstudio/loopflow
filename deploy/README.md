@@ -98,7 +98,7 @@ chmod 600 ~/.lf/lfd-token
 deploy/native-lfd-host.sh install
 ```
 
-The native install does not require Docker Desktop. It installs the `com.loopflow.lfd` service and `com.loopflow.lfd.update` nightly update agent.
+The native install does not require Docker Desktop. It installs the `com.loopflow.lfd` service and `com.loopflow.lfd.update` nightly update agent. Both launchd jobs read the bearer token from `~/.lf/lfd-token` instead of embedding it in the plist.
 
 Use the Docker Compose launchd path only when you explicitly want the container stack:
 

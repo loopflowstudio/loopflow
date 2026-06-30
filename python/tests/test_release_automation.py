@@ -151,7 +151,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "--token-file PATH" in private_client_help.stderr
     assert "--no-concerto" in private_client_help.stderr
     assert "native-lfd-host.sh" in native_host_help.stderr
-    assert "install|install-update-agent|update|restart|status|logs|health" in native_host_help.stderr
+    assert "install|install-update-agent|update|restart|status|logs|health|serve" in native_host_help.stderr
     assert "LFD_HTTP_ADDR=0.0.0.0:2486" in native_host_help.stderr
     assert "LFD_AUTH_TOKEN_FILE=~/.lf/lfd-token" in native_host_help.stderr
 
@@ -214,7 +214,10 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
 
     native_host = (ROOT / "deploy/native-lfd-host.sh").read_text()
     assert "scripts/pull-local-bin.sh" in native_host
-    assert "install --force" in native_host
+    assert '"Label": "com.loopflow.lfd"' in native_host
+    assert '"serve"' in native_host
+    assert 'exec "$lfd_bin" serve' in native_host
+    assert "install --force" not in native_host
     assert "launchctl kickstart -k" in native_host
     assert "StartCalendarInterval" in native_host
     assert '"Hour": 4' in native_host

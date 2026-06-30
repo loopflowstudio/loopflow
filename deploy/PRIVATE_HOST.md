@@ -58,7 +58,7 @@ doppler secrets set LFD_AUTH_TOKEN="$LFD_AUTH_TOKEN"
 doppler secrets set LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh
 ```
 
-The launch agent keeps native `lfd` up. A second `com.loopflow.lfd.update` launch agent runs `deploy/native-lfd-host.sh update` at 04:30 host-local time and reads the token from `~/.lf/lfd-token` through `LFD_AUTH_TOKEN_FILE`; the bearer token is not embedded in the plist. Docker Desktop is not required for the native service. Use `deploy/bootstrap-cron-host.sh` only when you explicitly want the Docker Compose stack.
+The launch agent keeps native `lfd` up. A second `com.loopflow.lfd.update` launch agent runs `deploy/native-lfd-host.sh update` at 04:30 host-local time. Both plists read the token from `~/.lf/lfd-token` through `LFD_AUTH_TOKEN_FILE`; the bearer token is not embedded in launchd config. Docker Desktop is not required for the native service. Use `deploy/bootstrap-cron-host.sh` only when you explicitly want the Docker Compose stack.
 
 ## Configure this Mac as a client
 

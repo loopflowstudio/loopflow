@@ -5,6 +5,7 @@ surfaces that expose all of that coherently.
 
 ## Tasks
 
+0. **`release-infra-and-cron-host`** (p0) — shared Loopflow/Cadenza release cadence, local updater, self-hosted `lfd` cron host, and budget guardrails
 1. **`daily-garden-cycle`** (p1) — root runs a scheduled garden pass and
    produces reviewable mutation PRs
 2. **`continuous-build-loop`** (p1) — loop-mode waves ingest from PM, ship work,
@@ -38,3 +39,4 @@ surfaces that expose all of that coherently.
   primary path. `npx/*` and `rams/*` stay on the assembled-prompt fallback until
   external skill namespace semantics are designed.
 - Scheduled automation is only useful if the outputs stay reviewable and calm
+- Release infrastructure spans Loopflow and Cadenza; shared cadence belongs here, while repo-specific deploy mechanics stay in each repo

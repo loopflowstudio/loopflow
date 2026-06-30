@@ -499,10 +499,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 )?;
                 println!(
                     "{}: asana project {} ({} files written, {} removed)",
-                    result.wave,
-                    result.project_id,
-                    result.local_written,
-                    result.local_removed
+                    result.wave, result.project_id, result.local_written, result.local_removed
                 );
             }
         }
@@ -520,11 +517,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 )?;
                 println!(
                     "{}: asana project {} ({} created, {} updated, {} skipped)",
-                    result.wave,
-                    result.project_id,
-                    result.created,
-                    result.updated,
-                    result.skipped
+                    result.wave, result.project_id, result.created, result.updated, result.skipped
                 );
             }
         }

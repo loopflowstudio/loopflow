@@ -2034,9 +2034,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Doppler => {
-            Err(TokenRefreshError::MissingToken { provider })
-        }
+        Provider::Asana | Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 

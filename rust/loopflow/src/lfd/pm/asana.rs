@@ -823,7 +823,6 @@ mod tests {
     use super::*;
     use crate::engine::config::AsanaConfig;
     use crate::lfd::pm::test_server::{self, json_response, response};
-    use crate::lfd::pm::PmProvider;
 
     fn working_branch_metadata() -> Value {
         json!({

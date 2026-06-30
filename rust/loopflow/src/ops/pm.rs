@@ -633,10 +633,7 @@ fn next_item_filename(
     }
 }
 
-fn overwrite_local_wave_from_remote(
-    wave_dir: &Path,
-    remote_items: &[PmItem],
-) -> OpsResult<usize> {
+fn overwrite_local_wave_from_remote(wave_dir: &Path, remote_items: &[PmItem]) -> OpsResult<usize> {
     let local_files = list_wave_items(wave_dir)?;
     let removed = local_files.len();
     for item in local_files {
@@ -1316,9 +1313,7 @@ fn read_base_items(
     Ok(items)
 }
 
-fn read_local_items(
-    wave_dir: &Path,
-) -> OpsResult<HashMap<String, (String, RoadmapItemDocument)>> {
+fn read_local_items(wave_dir: &Path) -> OpsResult<HashMap<String, (String, RoadmapItemDocument)>> {
     let items = list_wave_items(wave_dir).unwrap_or_default();
     let mut result = HashMap::new();
     for item in items {
@@ -1535,163 +1530,11 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::pm::PmResult;
-    use async_trait::async_trait;
     use tempfile::TempDir;
-
-    #[derive(Debug)]
-    struct StaticProvider {
-        items: Vec<PmItem>,
-    }
-
-    #[derive(Debug)]
-    struct RecordingProvider {
-        created: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        next_id: std::sync::Arc<std::sync::Mutex<u32>>,
-    }
-
-    #[derive(Debug)]
-    struct MutableProvider {
-        items: std::sync::Arc<std::sync::Mutex<Vec<PmItem>>>,
-        next_id: std::sync::Arc<std::sync::Mutex<u32>>,
-    }
-
-    #[async_trait]
-    impl PmProvider for StaticProvider {
-        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("create_project should not be called in this test");
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("list_projects should not be called in this test");
-        }
-
-        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            Ok(self.items.clone())
-        }
-
-        async fn create_item(&self, _project_id: &str, _item: &PmItemCreate) -> PmResult<String> {
-            panic!("create_item should not be called in this test");
-        }
-
-        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
-            panic!("update_item should not be called in this test");
-        }
-
-        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("complete_item should not be called in this test");
-        }
-
-        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("comment should not be called in this test");
-        }
-
-        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
-            panic!("claim_item should not be called in this test");
-        }
-    }
-
-    #[async_trait]
-    impl PmProvider for RecordingProvider {
-        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("create_project should not be called in this test");
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("list_projects should not be called in this test");
-        }
-
-        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            Ok(Vec::new())
-        }
-
-        async fn create_item(&self, _project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-            self.created
-                .lock()
-                .expect("created lock")
-                .push(item.name.clone());
-            let mut next_id = self.next_id.lock().expect("next_id lock");
-            *next_id += 1;
-            Ok(format!("lin-{}", *next_id))
-        }
-
-        async fn update_item(&self, _item_id: &str, _update: &PmItemUpdate) -> PmResult<()> {
-            panic!("update_item should not be called in this test");
-        }
-
-        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("complete_item should not be called in this test");
-        }
-
-        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("comment should not be called in this test");
-        }
-
-        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
-            panic!("claim_item should not be called in this test");
-        }
-    }
-
-    #[async_trait]
-    impl PmProvider for MutableProvider {
-        async fn create_project(&self, _name: &str, _description: &str) -> PmResult<String> {
-            panic!("create_project should not be called in this test");
-        }
-
-        async fn list_projects(&self, _team_id: &str) -> PmResult<Vec<crate::lfd::pm::PmProject>> {
-            panic!("list_projects should not be called in this test");
-        }
-
-        async fn list_items(&self, _project_id: &str) -> PmResult<Vec<PmItem>> {
-            Ok(self.items.lock().expect("items lock").clone())
-        }
-
-        async fn create_item(&self, _project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-            let mut next_id = self.next_id.lock().expect("next_id lock");
-            *next_id += 1;
-            let id = format!("lin-{}", *next_id);
-            self.items.lock().expect("items lock").push(PmItem {
-                id: id.clone(),
-                name: item.name.clone(),
-                description: item.description.clone(),
-                rank: item.rank,
-                completed: false,
-                assignee: None,
-            });
-            Ok(id)
-        }
-
-        async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-            let mut items = self.items.lock().expect("items lock");
-            let item = items
-                .iter_mut()
-                .find(|item| item.id == item_id)
-                .expect("item should exist");
-            if let Some(name) = update.name.as_deref() {
-                item.name = name.to_string();
-            }
-            if let Some(description) = update.description.as_deref() {
-                item.description = description.to_string();
-            }
-            Ok(())
-        }
-
-        async fn complete_item(&self, _item_id: &str) -> PmResult<()> {
-            panic!("complete_item should not be called in this test");
-        }
-
-        async fn comment(&self, _item_id: &str, _body: &str) -> PmResult<()> {
-            panic!("comment should not be called in this test");
-        }
-
-        async fn claim_item(&self, _item_id: &str, _branch: &str) -> PmResult<()> {
-            panic!("claim_item should not be called in this test");
-        }
-    }
 
     #[test]
     fn slugify_converts_name_to_filename_slug() {
-        assert_eq!(slugify("Ship Linear Client"), "ship-linear-client");
+        assert_eq!(slugify("Ship Asana Client"), "ship-asana-client");
         assert_eq!(slugify("01: Auth & Setup"), "01-auth-setup");
         assert_eq!(slugify("  spaces  "), "spaces");
     }
@@ -1699,13 +1542,13 @@ mod tests {
     #[test]
     fn normalize_title_collapses_case_and_whitespace() {
         assert_eq!(
-            normalize_title("  Ship   Linear   Client "),
-            "ship linear client"
+            normalize_title("  Ship   Asana   Client "),
+            "ship asana client"
         );
     }
 
     #[test]
-    fn remote_item_to_document_sets_provider_id_and_heading() {
+    fn remote_item_to_document_sets_asana_id_and_heading() {
         let item = PmItem {
             id: "item-42".to_string(),
             name: "Build the thing".to_string(),
@@ -1715,10 +1558,8 @@ mod tests {
             assignee: None,
         };
 
-        let doc = remote_item_to_document(&item, PmProviderKind::Linear);
-        assert_eq!(doc.frontmatter.linear_id.as_deref(), Some("item-42"));
-        assert_eq!(doc.frontmatter.asana_id, None);
-        assert_eq!(doc.frontmatter.notion_id, None);
+        let doc = remote_item_to_document(&item);
+        assert_eq!(doc.frontmatter.asana_id.as_deref(), Some("item-42"));
         assert!(doc.body.starts_with("# Build the thing\n"));
         assert!(doc.body.contains("Some details here."));
     }
@@ -1734,15 +1575,15 @@ mod tests {
             assignee: None,
         };
 
-        let doc = remote_item_to_document(&item, PmProviderKind::Asana);
+        let doc = remote_item_to_document(&item);
         assert_eq!(doc.body, "# Empty\n");
     }
 
     #[test]
     fn extract_heading_strips_number_prefix() {
         assert_eq!(
-            extract_heading("# 03: Linear client\n\nSome description"),
-            Some("Linear client")
+            extract_heading("# 03: Asana client\n\nSome description"),
+            Some("Asana client")
         );
         assert_eq!(
             extract_heading("# No prefix here\n"),
@@ -1768,292 +1609,45 @@ mod tests {
     }
 
     #[test]
-    fn write_pm_provider_to_wave_yaml_sets_provider_field() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
-
-        write_pm_provider_to_wave_yaml(dir.path(), "pm", PmProviderKind::Linear)
-            .expect("write pm provider");
-
-        let content = std::fs::read_to_string(wave_dir.join("pm.yaml")).expect("read wave config");
-        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).expect("parse yaml");
-        let pm = value.get("pm").expect("pm block");
-        assert_eq!(
-            pm.get("provider").and_then(|value| value.as_str()),
-            Some("linear")
-        );
-    }
-
-    #[test]
-    fn wave_pm_is_enabled_requires_provider_project() {
+    fn wave_pm_is_enabled_requires_asana_project() {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path();
-        std::fs::create_dir_all(repo.join(".lf")).expect("create lf dir");
-        std::fs::write(repo.join(".lf/config.yaml"), "pm:\n  provider: linear\n")
-            .expect("write config");
 
         let wave_dir = repo.join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
-        )
-        .expect("write wave config");
+        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
         assert!(!wave_pm_is_enabled(repo, "pm"));
 
         std::fs::write(
             wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  linear_project: \"lin-1\"\n  asana_project: \"asa-1\"\n",
+            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
         )
         .expect("rewrite wave config");
         assert!(wave_pm_is_enabled(repo, "pm"));
     }
 
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_preserves_local_body_and_uses_remote_rank() {
+    #[test]
+    fn write_pm_project_to_wave_yaml_sets_asana_project() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("01-existing.md"),
-            "# Existing task\n\nLocal body stays put.\n",
-        )
-        .expect("write local item");
+        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
 
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let ctx = PmContext {
-            client: Box::new(StaticProvider {
-                items: vec![
-                    PmItem {
-                        id: "lin-1".to_string(),
-                        name: "Existing task".to_string(),
-                        description: "Remote body should not replace local.".to_string(),
-                        rank: 0,
-                        completed: false,
-                        assignee: None,
-                    },
-                    PmItem {
-                        id: "lin-2".to_string(),
-                        name: "Second task".to_string(),
-                        description: "Imported from remote.".to_string(),
-                        rank: 1,
-                        completed: false,
-                        assignee: None,
-                    },
-                ],
-            }),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
+        write_pm_project_to_wave_yaml(dir.path(), "pm", "asa-123").expect("write pm project");
 
-        let result = bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        assert_eq!(result.created_local, vec!["02-second-task.md"]);
-
-        let existing = std::fs::read_to_string(wave_dir.join("01-existing.md")).expect("read");
-        assert!(existing.contains("linear_id: lin-1"));
-        assert!(existing.contains("Local body stays put."));
-        assert!(!existing.contains("Remote body should not replace local."));
-
-        let imported =
-            std::fs::read_to_string(wave_dir.join("02-second-task.md")).expect("read imported");
-        assert!(imported.contains("linear_id: lin-2"));
-        assert!(imported.contains("# Second task"));
-        assert!(imported.contains("Imported from remote."));
-    }
-
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_creates_linear_items_in_reverse_local_order() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = RecordingProvider {
-            created: created.clone(),
-            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
-        };
-        let ctx = PmContext {
-            client: Box::new(provider),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
-
-        bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        let created = created.lock().expect("created lock").clone();
-        assert_eq!(created, vec!["Third", "Second", "First"]);
-
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("linear_id: lin-1"));
-    }
-
-    #[tokio::test]
-    async fn bootstrap_read_write_provider_creates_asana_items_in_reverse_local_order() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("01-first.md"), "# First\n").expect("write first");
-        std::fs::write(wave_dir.join("02-second.md"), "# Second\n").expect("write second");
-        std::fs::write(wave_dir.join("03-third.md"), "# Third\n").expect("write third");
-
-        let mut local_items = read_local_roadmap_items(&wave_dir).expect("read local items");
-        let progress = crate::ops::NullProgress;
-        let args = BootstrapArgs {
-            repo: dir.path(),
-            wave: "pm",
-            wave_dir: &wave_dir,
-            project_name: "PM",
-            description: "",
-            progress: &progress,
-        };
-        let created = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = RecordingProvider {
-            created: created.clone(),
-            next_id: std::sync::Arc::new(std::sync::Mutex::new(0)),
-        };
-        let ctx = PmContext {
-            client: Box::new(provider),
-            provider: PmProviderKind::Asana,
-            project: "proj-1".to_string(),
-        };
-
-        bootstrap_read_write_provider(&args, &mut local_items, ctx)
-            .await
-            .expect("bootstrap succeeds");
-
-        let created = created.lock().expect("created lock").clone();
-        assert_eq!(created, vec!["Third", "Second", "First"]);
-
-        let created_order = std::fs::read_to_string(wave_dir.join("01-first.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-3"));
-        let created_order = std::fs::read_to_string(wave_dir.join("02-second.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-2"));
-        let created_order = std::fs::read_to_string(wave_dir.join("03-third.md")).expect("read");
-        assert!(created_order.contains("asana_id: lin-1"));
-    }
-
-    #[tokio::test]
-    async fn pm_export_creates_updates_and_skips_without_recreating_missing_remote_items() {
-        let dir = TempDir::new().expect("temp dir");
-        let wave_dir = dir.path().join("wave").join("pm");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("01-new-item.md"),
-            "# New item\n\nFresh local details.\n",
-        )
-        .expect("write new item");
-        std::fs::write(
-            wave_dir.join("02-unchanged.md"),
-            "---\nlinear_id: lin-2\n---\n# Unchanged\n\nSame remote text.\n",
-        )
-        .expect("write unchanged item");
-        std::fs::write(
-            wave_dir.join("03-updated.md"),
-            "---\nlinear_id: lin-3\n---\n# Updated title\n\nNew local text.\n",
-        )
-        .expect("write updated item");
-        std::fs::write(
-            wave_dir.join("04-missing.md"),
-            "---\nlinear_id: lin-404\n---\n# Missing remote\n\nDo not recreate.\n",
-        )
-        .expect("write missing item");
-
-        let items = std::sync::Arc::new(std::sync::Mutex::new(vec![
-            PmItem {
-                id: "lin-2".to_string(),
-                name: "Unchanged".to_string(),
-                description: "Same remote text.".to_string(),
-                rank: 1,
-                completed: false,
-                assignee: None,
-            },
-            PmItem {
-                id: "lin-3".to_string(),
-                name: "Old title".to_string(),
-                description: "Old remote text.".to_string(),
-                rank: 2,
-                completed: false,
-                assignee: None,
-            },
-        ]));
-        let ctx = PmContext {
-            client: Box::new(MutableProvider {
-                items: items.clone(),
-                next_id: std::sync::Arc::new(std::sync::Mutex::new(99)),
-            }),
-            provider: PmProviderKind::Linear,
-            project: "proj-1".to_string(),
-        };
-
-        let result = export_local_wave_to_remote(&wave_dir, &ctx, &crate::ops::NullProgress)
-            .await
-            .expect("export succeeds");
-
+        let content = std::fs::read_to_string(wave_dir.join("pm.yaml")).expect("read wave config");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).expect("parse yaml");
+        let pm = value.get("pm").expect("pm block");
         assert_eq!(
-            result,
-            PmExportCounts {
-                created: 1,
-                updated: 1,
-                skipped: 2,
-            }
+            pm.get("asana_project").and_then(|value| value.as_str()),
+            Some("asa-123")
         );
-
-        let new_file = std::fs::read_to_string(wave_dir.join("01-new-item.md")).expect("read");
-        assert!(new_file.contains("linear_id: lin-100"));
-
-        let items = items.lock().expect("items lock").clone();
-        assert_eq!(items.len(), 3);
-        assert!(items.iter().any(|item| {
-            item.id == "lin-100"
-                && item.name == "New item"
-                && item.description == "Fresh local details."
-                && item.rank == 0
-        }));
-        assert!(items.iter().any(|item| {
-            item.id == "lin-3"
-                && item.name == "Updated title"
-                && item.description == "New local text."
-        }));
-        assert!(!items.iter().any(|item| item.id == "lin-404"));
     }
 
     #[test]
     fn build_text_update_only_includes_changed_text_fields() {
         let remote = PmItem {
-            id: "lin-1".to_string(),
+            id: "asa-1".to_string(),
             name: "Existing".to_string(),
             description: "Remote body.".to_string(),
             rank: 0,
@@ -2081,7 +1675,7 @@ mod tests {
 
         let remote_items = vec![
             PmItem {
-                id: "lin-2".to_string(),
+                id: "asa-2".to_string(),
                 name: "Remote second".to_string(),
                 description: "Pulled from PM.".to_string(),
                 rank: 1,
@@ -2089,7 +1683,7 @@ mod tests {
                 assignee: None,
             },
             PmItem {
-                id: "lin-1".to_string(),
+                id: "asa-1".to_string(),
                 name: "Remote first".to_string(),
                 description: "Higher priority.".to_string(),
                 rank: 0,
@@ -2098,20 +1692,19 @@ mod tests {
             },
         ];
 
-        let removed =
-            overwrite_local_wave_from_remote(&wave_dir, &remote_items, PmProviderKind::Linear)
-                .expect("pull should rewrite local files");
+        let removed = overwrite_local_wave_from_remote(&wave_dir, &remote_items)
+            .expect("pull should rewrite local files");
 
         assert_eq!(removed, 2);
         assert!(!wave_dir.join("01-local-first.md").exists());
         assert!(!wave_dir.join("02-local-second.md").exists());
 
         let first = std::fs::read_to_string(wave_dir.join("01-remote-second.md")).expect("read");
-        assert!(first.contains("linear_id: lin-2"));
+        assert!(first.contains("asana_id: asa-2"));
         assert!(first.contains("# Remote second"));
 
         let second = std::fs::read_to_string(wave_dir.join("02-remote-first.md")).expect("read");
-        assert!(second.contains("linear_id: lin-1"));
+        assert!(second.contains("asana_id: asa-1"));
         assert!(second.contains("# Remote first"));
     }
 }

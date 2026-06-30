@@ -17,7 +17,7 @@ Each repo should carry these files with carbon-copy cadence:
 .github/workflows/nightly-packages.yml   # same schedule; repo-specific package test body
 .github/workflows/weekly-release.yml     # same schedule; calls nightly package verification before publishing
 scripts/install.py                       # single local build entry: lf + lfd + desktop app -> per-worktree local-bin/
-scripts/pull-local-bin.sh                # or repo-equivalent CLI-only local updater
+uv run python scripts/install.py refresh # or repo-equivalent CLI-only local updater
 deploy/loopflow-server.sh                # or repo-equivalent self-hosted cron runner
 deploy/systemd/* / deploy/launchd/*      # host keep-alive/update units
 ```

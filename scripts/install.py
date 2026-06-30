@@ -6,6 +6,7 @@
     install.py local --service  # also install/restart lfd as a launchd service
     install.py local --skip swift
     install.py local -n         # dry run
+    install.py refresh          # pull default branch, rebuild lf/lfd, install to PATH
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
@@ -108,6 +109,44 @@ def _run_or_raise(cmd: list[str], label: str, cwd: Path | None = None) -> None:
         raise StageError(f"{label} exited {code}")
 
 
+# --- Git refresh ---
+
+
+def _git_stdout(args: list[str], repo: Path = ROOT, check: bool = True) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+    if check:
+        result.check_returncode()
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _refresh_default_branch(repo: Path = ROOT) -> None:
+    default_branch = _git_stdout(
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        repo=repo,
+        check=False,
+    ).removeprefix("origin/")
+    current_branch = _git_stdout(["branch", "--show-current"], repo=repo)
+    if default_branch and current_branch != default_branch:
+        raise StageError(
+            f"refusing to pull {current_branch}; checkout {default_branch} or pass --no-pull"
+        )
+
+    typer.echo(f"Pulling {repo}...")
+    if default_branch:
+        _run_or_raise(["git", "fetch", "origin", default_branch], "git", cwd=repo)
+        _run_or_raise(["git", "merge", "--ff-only", f"origin/{default_branch}"], "git", cwd=repo)
+    else:
+        _run_or_raise(["git", "fetch"], "git", cwd=repo)
+        _run_or_raise(["git", "merge", "--ff-only", "@{upstream}"], "git", cwd=repo)
+
+
 # --- Builds ---
 
 
@@ -119,6 +158,15 @@ def _build_wheel() -> None:
 def _build_binaries() -> None:
     typer.echo("Building lf/lfd (cargo release)...")
     _run_or_raise(["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT)
+
+
+def _build_cli_binaries() -> None:
+    typer.echo("Building lf/lfd (cargo release)...")
+    _run_or_raise(
+        ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf", "--bin", "lfd"],
+        "cargo",
+        cwd=ROOT,
+    )
 
 
 def _build_concerto() -> None:
@@ -241,10 +289,15 @@ def _install_wheel() -> None:
 
 def _stage_binaries(local_bin: Path) -> None:
     """Copy freshly built lf/lfd into this worktree's local-bin/."""
-    local_bin.mkdir(parents=True, exist_ok=True)
+    _install_cli_binaries(local_bin)
+
+
+def _install_cli_binaries(install_dir: Path) -> None:
+    """Atomically copy freshly built lf/lfd into install_dir."""
+    install_dir.mkdir(parents=True, exist_ok=True)
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):
-        _atomic_install(built / name, local_bin / name)
+        _atomic_install(built / name, install_dir / name)
 
 
 def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
@@ -417,6 +470,34 @@ app = typer.Typer(help="Build and install loopflow locally.", add_completion=Fal
 @app.callback()
 def _root() -> None:
     """Build and install loopflow locally."""
+
+
+@app.command()
+def refresh(
+    no_pull: bool = typer.Option(
+        False, "--no-pull", help="Build the current checkout without pulling"
+    ),
+    install_dir: Path | None = typer.Option(
+        None, "--install-dir", help="Install lf/lfd here instead of the resolved local bin dir"
+    ),
+) -> None:
+    """Pull the default branch, rebuild lf/lfd, and install them locally."""
+    resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
+
+    try:
+        if not no_pull:
+            _refresh_default_branch(ROOT)
+        _build_cli_binaries()
+        _install_cli_binaries(resolved_install_dir)
+    except (subprocess.CalledProcessError, StageError) as exc:
+        typer.echo(f"refresh failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"installed: {resolved_install_dir / 'lf'}")
+    for name in ("lf", "lfd"):
+        result = subprocess.run([str(resolved_install_dir / name), "--version"], text=True)
+        if result.returncode != 0:
+            raise typer.Exit(code=result.returncode)
 
 
 @app.command()

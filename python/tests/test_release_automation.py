@@ -74,7 +74,12 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-m", "release: v1.2.3"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        ["git", "commit", "-m", "release: v1.2.3"],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
     subprocess.run(["git", "tag", "v1.2.3"], cwd=repo, check=True)
 
     subjects = [
@@ -89,7 +94,12 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
     for index, subject in enumerate(subjects):
         (repo / "change.txt").write_text(f"{index}\n")
         subprocess.run(["git", "add", "change.txt"], cwd=repo, check=True)
-        subprocess.run(["git", "commit", "-m", subject], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            ["git", "commit", "-m", subject],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
 
     result = subprocess.run(
         [str(script), "v1.2.3", str(len(subjects))],
@@ -120,6 +130,10 @@ def test_pull_local_bin_builds_and_installs_binaries(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "Cargo.toml").write_text("[workspace]\nmembers = []\n")
+    scripts = repo / "scripts"
+    scripts.mkdir()
+    (scripts / "install.py").write_text((ROOT / "scripts/install.py").read_text())
+    (scripts / "bundle_version.py").write_text((ROOT / "scripts/bundle_version.py").read_text())
     subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
 
     fake_bin = tmp_path / "fake-bin"
@@ -130,18 +144,7 @@ def test_pull_local_bin_builds_and_installs_binaries(tmp_path: Path):
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" > {cargo_log}
-repo=''
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --manifest-path)
-            repo="$(dirname "$2")"
-            shift 2
-            ;;
-        *)
-            shift
-            ;;
-    esac
-done
+repo="$PWD"
 mkdir -p "$repo/target/release"
 printf '#!/usr/bin/env bash\necho lf fake\n' > "$repo/target/release/lf"
 printf '#!/usr/bin/env bash\necho lfd fake\n' > "$repo/target/release/lfd"
@@ -175,16 +178,20 @@ chmod +x "$repo/target/release/lf" "$repo/target/release/lfd"
     assert (install_dir / "lf").read_text().startswith("#!/usr/bin/env bash")
     assert (install_dir / "lfd").read_text().startswith("#!/usr/bin/env bash")
     assert "build --release -p loopflow --bin lf --bin lfd" in cargo_log.read_text()
+    assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
 
 
-def test_pull_local_bin_fetches_then_merges_without_user_pull_config():
-    script = (ROOT / "scripts/pull-local-bin.sh").read_text()
+def test_install_refresh_fetches_then_merges_without_user_pull_config():
+    install = (ROOT / "scripts/install.py").read_text()
+    wrapper = (ROOT / "scripts/pull-local-bin.sh").read_text()
 
-    assert 'git -C "$repo" fetch origin "$default_branch"' in script
-    assert 'git -C "$repo" merge --ff-only "origin/$default_branch"' in script
-    assert 'git -C "$repo" fetch' in script
-    assert 'git -C "$repo" merge --ff-only "@{upstream}"' in script
-    assert 'git -C "$repo" pull --ff-only' not in script
+    assert '["git", "fetch", "origin", default_branch]' in install
+    assert '["git", "merge", "--ff-only", f"origin/{default_branch}"]' in install
+    assert '["git", "fetch"]' in install
+    assert '["git", "merge", "--ff-only", "@{upstream}"]' in install
+    assert "pull --ff-only" not in install
+    assert "scripts/install.py" in wrapper
+    assert "cargo build" not in wrapper
 
 
 def test_self_hosted_server_primitives_are_documented_and_runnable():
@@ -223,7 +230,10 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "--token-file PATH" in private_client_help.stderr
     assert "--no-concerto" in private_client_help.stderr
     assert "native-lfd-host.sh" in native_host_help.stderr
-    assert "install|install-update-agent|update|restart|status|logs|health|serve" in native_host_help.stderr
+    assert (
+        "install|install-update-agent|update|restart|status|logs|health|serve"
+        in native_host_help.stderr
+    )
     assert "LFD_HTTP_ADDR=0.0.0.0:2486" in native_host_help.stderr
     assert "LFD_AUTH_TOKEN_FILE=~/.lf/lfd-token" in native_host_help.stderr
 
@@ -285,7 +295,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "install -m 0600" in bootstrap
 
     native_host = (ROOT / "deploy/native-lfd-host.sh").read_text()
-    assert "scripts/pull-local-bin.sh" in native_host
+    assert "scripts/install.py" in native_host
+    assert "scripts/pull-local-bin.sh" not in native_host
     assert '"Label": "com.loopflow.lfd"' in native_host
     assert '"serve"' in native_host
     assert 'exec "$lfd_bin" serve' in native_host
@@ -297,7 +308,10 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert '"LFD_AUTH_TOKEN_FILE": token_file' in native_host
     assert 'printf \'%s\\n\' "$LFD_AUTH_TOKEN" > "$token_file"' in native_host
     assert 'chmod 0600 "$token_file"' in native_host
-    assert "LFD_AUTH_TOKEN or readable LFD_AUTH_TOKEN_FILE is required for native private lfd host management" in native_host
+    assert (
+        "LFD_AUTH_TOKEN or readable LFD_AUTH_TOKEN_FILE is required "
+        "for native private lfd host management"
+    ) in native_host
 
     private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
     assert "Host is required. Pass --host or set LFD_HOST." in private_client

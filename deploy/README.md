@@ -72,7 +72,7 @@ deploy/bootstrap-cron-host.sh --host linux
 
 Use Doppler for maintained hosts. On Linux the bootstrap writes `/etc/loopflow-server.env` with `0600` permissions so systemd can reach either `DOPPLER_TOKEN` or host-local fallback secrets. On macOS it writes the same launch environment into `~/Library/LaunchAgents/loopflow.server.plist`; prefer a Doppler service token over embedding long-lived provider credentials there.
 
-The Linux update timer refreshes container hosts nightly. The native macOS private-host path installs `com.loopflow.lfd.update`, which refreshes the repo, rebuilds local binaries, and restarts `lfd` at 04:30 host-local time. Keep local dev binaries fresh with `scripts/pull-local-bin.sh`; server restarts should be predictable.
+The Linux update timer refreshes container hosts nightly. The native macOS private-host path installs `com.loopflow.lfd.update`, which refreshes the repo, rebuilds local binaries, and restarts `lfd` at 04:30 host-local time. Keep local dev binaries fresh with `uv run python scripts/install.py refresh`; server restarts should be predictable.
 
 ## Manual Linux service install
 

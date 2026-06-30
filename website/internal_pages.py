@@ -1121,5 +1121,3 @@ def design_page():
             ),
         ),
     )
-
-

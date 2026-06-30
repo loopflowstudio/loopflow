@@ -50,11 +50,6 @@ h1, h2, h3 {
     margin: 0 auto;
     padding: 0 24px;
 }
-.container-wide {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 0 24px;
-}
 
 /* Navigation */
 nav {
@@ -96,20 +91,6 @@ nav .container {
     font-size: 18px;
     color: var(--text);
     text-decoration: none;
-}
-.nav-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    text-decoration: none;
-    color: #000;
-    font-family: var(--font-serif);
-    font-weight: 400;
-    font-size: 20px;
-}
-.nav-brand img {
-    width: 28px;
-    height: 28px;
 }
 .nav-links {
     display: flex;
@@ -157,23 +138,9 @@ nav .container {
     }
 }
 @media (max-width: 480px) {
-    .nav-brand {
-        font-size: 0;
-        gap: 0;
-        overflow: hidden;
-        flex-shrink: 0;
-        width: 24px;
-    }
-    .nav-brand img {
-        width: 24px;
-        height: 24px;
-    }
     .nav-links {
         gap: 12px;
         font-size: 13px;
-    }
-    .nav-brand {
-        font-size: 15px;
     }
 }
 
@@ -322,21 +289,9 @@ a:focus-visible,
     letter-spacing: 0.5px;
     margin-bottom: 12px;
 }
-.maturity-stable {
-    background: rgba(22, 163, 74, 0.1);
-    color: var(--green);
-}
-.maturity-early {
-    background: rgba(202, 138, 4, 0.1);
-    color: var(--yellow);
-}
 .maturity-experimental {
     background: rgba(234, 88, 12, 0.1);
     color: var(--orange);
-}
-.maturity-preview {
-    background: rgba(10, 179, 204, 0.1);
-    color: #0e7490;
 }
 
 /* Quick Install */
@@ -401,16 +356,6 @@ a:focus-visible,
     width: 18px;
     height: 18px;
     color: var(--text-secondary);
-}
-.quick-install .link {
-    display: block;
-    margin-top: 16px;
-    font-size: 14px;
-    color: var(--burgundy);
-    text-decoration: none;
-}
-.quick-install .link:hover {
-    text-decoration: underline;
 }
 .quick-install .hero-actions {
     justify-content: center;
@@ -677,172 +622,6 @@ a:focus-visible,
     color: var(--text);
     background: none;
 }
-.code-comment {
-    color: var(--text-secondary);
-}
-
-/* Section */
-.section {
-    padding: 60px 0;
-    border-top: 1px solid var(--border);
-}
-.section h2 {
-    font-family: var(--font-serif);
-    font-size: 28px;
-    font-weight: 400;
-    margin-bottom: 24px;
-    color: var(--burgundy);
-}
-.section-content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: start;
-}
-@media (max-width: 768px) {
-    .section-content {
-        grid-template-columns: 1fr;
-        gap: 32px;
-    }
-}
-.section-text p {
-    color: var(--text-secondary);
-    font-size: 15px;
-    line-height: 1.7;
-    margin-bottom: 16px;
-}
-.section-text ul {
-    list-style: none;
-    padding: 0;
-}
-.section-text li {
-    color: var(--text-secondary);
-    font-size: 14px;
-    line-height: 1.6;
-    padding-left: 20px;
-    position: relative;
-    margin-bottom: 8px;
-}
-.section-text li::before {
-    content: '•';
-    color: var(--burgundy);
-    position: absolute;
-    left: 0;
-}
-
-/* Feature List */
-.feature-list {
-    padding: 60px 0;
-    border-top: 1px solid var(--border);
-}
-.feature-list h2 {
-    font-family: var(--font-serif);
-    font-size: 28px;
-    font-weight: 400;
-    margin-bottom: 32px;
-    text-align: center;
-}
-.feature-list-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 32px;
-    max-width: 800px;
-    margin: 0 auto;
-}
-@media (max-width: 640px) {
-    .feature-list-grid {
-        grid-template-columns: 1fr;
-    }
-}
-.feature-list-item h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 6px;
-}
-.feature-list-item p {
-    color: var(--text-secondary);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-/* Download Section */
-.download-section {
-    padding: 60px 0;
-    background: var(--bg-subtle);
-    border-top: 1px solid var(--border);
-    text-align: center;
-}
-.download-section h2 {
-    font-family: var(--font-serif);
-    font-size: 28px;
-    font-weight: 400;
-    margin-bottom: 16px;
-}
-.download-section .note {
-    color: var(--text-secondary);
-    font-size: 14px;
-    margin-bottom: 24px;
-}
-.download-section .system-req {
-    color: var(--text-secondary);
-    font-size: 13px;
-    margin-top: 16px;
-}
-
-/* Commands Section */
-.commands-section {
-    padding: 60px 0;
-    border-top: 1px solid var(--border);
-}
-.commands-section h2 {
-    font-family: var(--font-serif);
-    font-size: 28px;
-    font-weight: 400;
-    margin-bottom: 32px;
-    text-align: center;
-}
-.commands-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 24px;
-    max-width: 800px;
-    margin: 0 auto;
-}
-@media (max-width: 640px) {
-    .commands-grid {
-        grid-template-columns: 1fr;
-    }
-}
-.command-item code {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    color: var(--burgundy);
-}
-.command-item p {
-    color: var(--text-secondary);
-    font-size: 13px;
-    margin-top: 4px;
-}
-
-/* Status Section */
-.status-section {
-    padding: 60px 0;
-    border-top: 1px solid var(--border);
-    text-align: center;
-}
-.status-section h2 {
-    font-family: var(--font-serif);
-    font-size: 24px;
-    font-weight: 400;
-    margin-bottom: 16px;
-}
-.status-section p {
-    color: var(--text-secondary);
-    font-size: 15px;
-    max-width: 600px;
-    margin: 0 auto;
-    line-height: 1.6;
-}
 
 /* Footer */
 footer {
@@ -911,20 +690,6 @@ footer p {
 .download-hero .tagline {
     margin-bottom: 48px;
 }
-.install-options {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 32px;
-    max-width: 840px;
-    margin: 0 auto;
-    text-align: left;
-}
-@media (max-width: 640px) {
-    .install-options {
-        grid-template-columns: 1fr;
-        gap: 40px;
-    }
-}
 .install-option h2 {
     font-family: var(--font-serif);
     font-size: 24px;
@@ -943,15 +708,6 @@ footer p {
     color: var(--text-secondary);
     margin-bottom: 20px;
     line-height: 1.5;
-}
-.install-note {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin-top: 10px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: rgba(177, 116, 58, 0.08);
-    border: 1px solid rgba(177, 116, 58, 0.2);
 }
 .install-option .system-req {
     margin-top: 12px;
@@ -973,17 +729,6 @@ footer p {
     padding: 12px 16px;
     white-space: pre;
     overflow-x: auto;
-}
-
-/* Demo image */
-.demo-gif {
-    width: 100%;
-    max-width: min(650px, 100%);
-    margin: 0 auto 24px;
-    border-radius: 12px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
-    display: block;
-    box-sizing: border-box;
 }
 
 /* Docs page styles */
@@ -1411,44 +1156,6 @@ h3:hover .anchor-link,
     color: var(--burgundy);
     text-decoration: underline;
     text-underline-offset: 2px;
-}
-
-/* How-To section */
-.howto-section {
-    padding: 80px 0;
-    border-top: 1px solid var(--border);
-}
-.howto-section h2 {
-    font-family: var(--font-serif);
-    font-size: 28px;
-    font-weight: 400;
-    margin-bottom: 16px;
-    text-align: center;
-}
-.howto-section .howto-desc {
-    color: var(--text-secondary);
-    font-size: 15px;
-    text-align: center;
-    margin-bottom: 32px;
-    max-width: 500px;
-    margin-left: auto;
-    margin-right: auto;
-}
-.howto-section .terminal {
-    max-width: 650px;
-    margin: 0 auto;
-}
-@media (max-width: 768px) {
-    .howto-section .terminal {
-        max-width: 100%;
-    }
-}
-
-.features-grid {
-    display: none;
-}
-.feature-card {
-    display: none;
 }
 
 /* Team Page */

@@ -327,7 +327,6 @@ def render_markdown(content: str) -> list:
 
         # Code blocks
         if line.startswith('```'):
-            lang = line[3:].strip()
             code_lines = []
             i += 1
             while i < len(lines) and not lines[i].startswith('```'):

@@ -72,12 +72,12 @@ homepage:
         content: |
           ## Vision
           Unify auth flows across web and desktop.
-          
+
           ## Goals
           - Eliminate duplicate token validation
           - Share session refresh logic
           - Keep auth startup under 200ms
-          
+
           ## Risks
           - Breaking daemon discovery
           - Regressions in JWT expiry handling
@@ -85,7 +85,7 @@ homepage:
         filename: ".lf/steps/implement.md"
         content: |
           Turn the design doc into working code.
-          
+
           ## Workflow
           1. Understand the design
           2. Implement data structures and functions
@@ -94,7 +94,7 @@ homepage:
         filename: ".lf/directions/craft.md"
         content: |
           Prioritize clarity over cleverness.
-          
+
           - Match existing patterns in this codebase
           - Prefer explicit data flow to hidden magic
           - Ship complete milestones, not partial layers

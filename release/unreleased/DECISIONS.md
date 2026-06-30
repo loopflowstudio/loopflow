@@ -203,3 +203,11 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Delete studio auth, daemon registration, and hosted discovery. Remote `lfd` access is self-hosted bearer-token auth only; each repo owns its deployment config and keeps secrets in Doppler or host-local env.
 
 **Implications:** Concerto connects to explicit self-hosted URLs and tokens instead of studio sign-in. Container compose requires `LFD_AUTH_TOKEN`. Token rotation happens in the repo/host secret system, not through a studio connection-token ledger.
+
+## 2026-06-29 — Release automation gets its own wave
+
+**Context:** Release automation now spans CI cadence, self-hosted daemon infrastructure, local freshness, Cadenza parity, and future product replication. Keeping that intent only in conversation makes future agents rediscover scope and success criteria.
+
+**Decision:** Add `wave/release/` as the owner for daily verification, weekly publishing, self-hosted cron infrastructure, local updater freshness, and product-release parity. Root gardens it alongside desktop, mobile, and workflows.
+
+**Implications:** Release work is no longer incidental workflow plumbing. Changes to schedules, deploy shape, Doppler assumptions, or cross-repo parity should update the release wave metadata and include a Mitchell Hashimoto simulated review when they ship.

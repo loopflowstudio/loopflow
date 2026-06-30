@@ -12,33 +12,16 @@ it uses whatever Developer ID Application identity is in the keychain.
 from __future__ import annotations
 
 import os
-import plistlib
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from bundle_version import read_release_version, stamp_bundle_version
+
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
-
-
-def _read_version() -> str:
-    """Release version for the app bundle: RELEASE_TAG on CI, else Cargo.toml."""
-    tag = os.environ.get("RELEASE_TAG")
-    if tag:
-        return tag.lstrip("v")
-    match = re.search(r'^version = "([^"]+)"', (REPO_ROOT / "Cargo.toml").read_text(), re.MULTILINE)
-    return match.group(1) if match else "0.0.0"
-
-
-def _stamp_bundle_version(info_plist: Path, version: str) -> None:
-    """Stamp the bundle version from the single source of truth (Cargo.toml/tag)."""
-    data = plistlib.loads(info_plist.read_bytes())
-    data["CFBundleShortVersionString"] = version
-    data["CFBundleVersion"] = version
-    info_plist.write_bytes(plistlib.dumps(data))
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -143,7 +126,7 @@ def release() -> int:
         return result.returncode
 
     app_name = "Loopflow"
-    version = _read_version()
+    version = read_release_version(REPO_ROOT)
     dist_dir = SWIFT_DIR / "dist"
     app_dir = dist_dir / f"{app_name}.app" / "Contents"
 
@@ -155,7 +138,7 @@ def release() -> int:
     build_dir = SWIFT_DIR / ".build" / "release"
     shutil.copy(build_dir / "Concerto", app_dir / "MacOS")
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
-    _stamp_bundle_version(app_dir / "Info.plist", version)
+    stamp_bundle_version(app_dir / "Info.plist", version)
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")

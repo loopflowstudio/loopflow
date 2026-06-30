@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import os
 import platform
-import plistlib
-import re
 import shutil
 import subprocess
 import threading
@@ -24,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typer
+from bundle_version import read_release_version, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
@@ -32,15 +31,6 @@ LOCAL_BIN = ROOT / "local-bin"
 APP_NAME = "Loopflow"
 LEGACY_APP_NAME = "Loopflow Concerto"
 BUILD_STAGES = ("wheel", "cargo", "swift")
-
-
-def _read_version() -> str:
-    """Release version for the app bundle: RELEASE_TAG on CI, else Cargo.toml."""
-    tag = os.environ.get("RELEASE_TAG")
-    if tag:
-        return tag.lstrip("v")
-    match = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.MULTILINE)
-    return match.group(1) if match else "0.0.0"
 
 
 # --- Bundle spec (single source of truth for Concerto.app layout) ---
@@ -282,14 +272,6 @@ def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLIC
 # --- Concerto bundle ---
 
 
-def _stamp_bundle_version(info_plist: Path, version: str) -> None:
-    """Stamp the bundle version from the single source of truth (Cargo.toml/tag)."""
-    data = plistlib.loads(info_plist.read_bytes())
-    data["CFBundleShortVersionString"] = version
-    data["CFBundleVersion"] = version
-    info_plist.write_bytes(plistlib.dumps(data))
-
-
 def _install_concerto(spec: BundleSpec, version: str) -> None:
     if spec.app_path.exists():
         shutil.rmtree(spec.app_path)
@@ -302,7 +284,7 @@ def _install_concerto(spec: BundleSpec, version: str) -> None:
 
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)
-    _stamp_bundle_version(installed_plist, version)
+    stamp_bundle_version(installed_plist, version)
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
@@ -462,7 +444,7 @@ def local(
 
     spec = default_bundle_spec()
     install_dir = _resolve_install_dir()
-    version = _read_version()
+    version = read_release_version(ROOT)
 
     if dry_run:
         planned = [s for s in BUILD_STAGES if s not in skip_set] or ["(nothing)"]

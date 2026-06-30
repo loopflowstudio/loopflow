@@ -66,12 +66,12 @@ struct ConnectionStoreTests {
     @Test("seeds remote mode from concerto config when defaults are empty")
     func seedsFromConcertoConfig() {
         let defaults = makeDefaults()
-        let config = remoteConfig(host: "lfd-dev.loopflow.studio")
+        let config = remoteConfig(host: "lfd.example.com")
 
         let store = makeStore(defaults: defaults, config: config)
 
         #expect(store.mode == .remote)
-        #expect(store.activeConnection.host == "lfd-dev.loopflow.studio")
+        #expect(store.activeConnection.host == "lfd.example.com")
         #expect(store.activeConnection.port == 443)
         #expect(store.activeConnection.useTLS)
         #expect(store.activeConnection.authMode == .staticToken)
@@ -81,7 +81,7 @@ struct ConnectionStoreTests {
     func userDefaultsWinsOverConcertoConfig() {
         let defaults = makeDefaults()
         let persisted = ServerConnection(
-            host: "saved.loopflow.studio",
+            host: "saved.example.com",
             port: 443,
             useTLS: true,
             authMode: .none
@@ -89,23 +89,23 @@ struct ConnectionStoreTests {
         let seeded = makeStore(defaults: defaults)
         seeded.setRemoteConnection(persisted)
 
-        let config = remoteConfig(host: "lfd-dev.loopflow.studio")
+        let config = remoteConfig(host: "lfd.example.com")
         let reloaded = makeStore(defaults: defaults, config: config)
 
         #expect(reloaded.mode == .remote)
-        #expect(reloaded.activeConnection.host == "saved.loopflow.studio")
+        #expect(reloaded.activeConnection.host == "saved.example.com")
         #expect(reloaded.activeConnection.port == 443)
     }
 
     @Test("concerto config seeds user defaults on first launch")
     func concertoConfigPersistsAfterFirstLaunch() {
         let defaults = makeDefaults()
-        _ = makeStore(defaults: defaults, config: remoteConfig(host: "lfd-dev.loopflow.studio"))
+        _ = makeStore(defaults: defaults, config: remoteConfig(host: "lfd.example.com"))
 
-        let reloaded = makeStore(defaults: defaults, config: remoteConfig(host: "changed.loopflow.studio"))
+        let reloaded = makeStore(defaults: defaults, config: remoteConfig(host: "changed.example.com"))
 
         #expect(reloaded.mode == .remote)
-        #expect(reloaded.activeConnection.host == "lfd-dev.loopflow.studio")
+        #expect(reloaded.activeConnection.host == "lfd.example.com")
     }
 
     @Test("loopback concerto config is ignored")

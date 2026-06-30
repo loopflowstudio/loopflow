@@ -6,7 +6,7 @@ import Security
 public final class ConnectionSecretStore: @unchecked Sendable {
     public static let shared = ConnectionSecretStore()
 
-    private let keychainService = "studio.loopflow.connection.token"
+    private let keychainService = "loopflow.connection.token"
 
     public init() {}
 

@@ -231,14 +231,11 @@ final class BundledDaemonManager {
         }
 
         process.executableURL = lfdPath
-        process.arguments = connectWithPhone
-            ? ["serve", Self.bundledMarkerArgument, "--allow-insecure-bind"]
-            : ["serve", Self.bundledMarkerArgument]
+        process.arguments = ["serve", Self.bundledMarkerArgument]
 
         var env = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
-        env["LFD_AUTH_MODE"] = connectWithPhone ? "studio" : "local"
         env["LFD_AUTH_TOKEN"] = token
         env["LFD_DISABLE_WORKTREE_JANITOR"] = "1"
         env["LFD_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
@@ -403,7 +400,6 @@ final class BundledDaemonManager {
         connectWithPhone: Bool
     ) -> [String] {
         let portMapping = connectWithPhone ? "\(port):2486" : "127.0.0.1:\(port):2486"
-        let authMode = connectWithPhone ? "studio" : "local"
         var args = [
             "run", "-d",
             "--name", containerName,
@@ -415,7 +411,6 @@ final class BundledDaemonManager {
             "-v", "\(credentialSocketPath.path):/var/run/concerto-auth.sock:ro",
             "-e", "LFD_HTTP_ADDR=0.0.0.0:2486",
             "-e", "LFD_DB_PATH=/data/concerto.db",
-            "-e", "LFD_AUTH_MODE=\(authMode)",
             "-e", "LFD_AUTH_TOKEN=\(token)",
             "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
             "-e", "LFD_DISABLE_WORKTREE_JANITOR=1",
@@ -441,9 +436,7 @@ final class BundledDaemonManager {
             }
         }
 
-        args += connectWithPhone
-            ? [lfdContainerImage(), "serve", Self.bundledMarkerArgument, "--allow-insecure-bind"]
-            : [lfdContainerImage(), "serve", Self.bundledMarkerArgument]
+        args += [lfdContainerImage(), "serve", Self.bundledMarkerArgument]
         return args
     }
 

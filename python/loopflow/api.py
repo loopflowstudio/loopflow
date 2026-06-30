@@ -70,13 +70,6 @@ def providers() -> list[ProviderInfo]:
     return _client().providers()
 
 
-def revoke_connection_tokens(
-    prefix: Optional[str] = None,
-    revoke_all: bool = False,
-) -> int:
-    return _client().revoke_connection_tokens(prefix=prefix, revoke_all=revoke_all)
-
-
 def usage_summary(
     group_by: str = "wave",
     wave: Optional[str] = None,
@@ -307,7 +300,6 @@ __all__ = [
     "disconnect_auth",
     "configure_api_key",
     "providers",
-    "revoke_connection_tokens",
     "usage_summary",
     "waves",
     "wave",

@@ -8,7 +8,6 @@ use tracing::warn;
 
 use secrecy::SecretString;
 
-const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 45 * 60;
 const DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES: i64 = 8 * 1024 * 1024 * 1024;
@@ -25,77 +24,15 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
-/// `mode` selects the auth strategy:
-/// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
-/// - `"studio"`: registered with studio for discovery. Local token on
-///   loopback, connection tokens validated locally for remote clients.
-///   Connection tokens are session credentials: valid from mint until expiry
-///   (1 hour) or revocation. lfd mints tokens and sends them to studio,
-///   which distributes them to mobile clients. Validation is local (no
-///   round-trip to studio on connect).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AuthMode {
-    #[default]
-    Local,
-    Studio,
-}
-
-impl AuthMode {
-    fn parse(value: &str) -> Result<Self> {
-        match value.trim() {
-            "local" => Ok(Self::Local),
-            "studio" => Ok(Self::Studio),
-            other => bail!("invalid auth.mode value '{other}'; expected 'local' or 'studio'"),
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Studio => "studio",
-        }
-    }
-}
-
-impl std::fmt::Display for AuthMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for AuthMode {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
+/// lfd uses bearer-token auth for local and remote clients. Local launches
+/// generate a session token under `~/.lf/session-token`; self-hosted remote
+/// deployments set `auth.token` or `LFD_AUTH_TOKEN` from Doppler or another
+/// secret store.
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
-    #[serde(default)]
-    pub mode: AuthMode,
-    /// Optional session-token override for embedded launches.
+    /// Optional session-token override for embedded launches and self-hosted deployments.
     pub token: Option<SecretString>,
-    #[serde(default = "default_base_url")]
-    pub base_url: String,
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            mode: AuthMode::default(),
-            token: None,
-            base_url: default_base_url(),
-        }
-    }
-}
-
-fn default_base_url() -> String {
-    DEFAULT_AUTH_BASE_URL.to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +115,13 @@ fn default_output_log_retention_days() -> u32 {
     DEFAULT_OUTPUT_LOG_RETENTION_DAYS
 }
 
+fn reject_removed_env(name: &str, replacement: &str) -> Result<()> {
+    if std::env::var_os(name).is_some() {
+        bail!("{name} was removed; use {replacement} for self-hosted lfd auth");
+    }
+    Ok(())
+}
+
 impl RawLfdConfig {
     fn apply_env_overrides(&mut self) -> Result<()> {
         if let Ok(value) = std::env::var("LFD_MODE") {
@@ -187,12 +131,7 @@ impl RawLfdConfig {
             }
         }
 
-        if let Ok(value) = std::env::var("LFD_AUTH_MODE") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.auth.mode = AuthMode::parse(trimmed)?;
-            }
-        }
+        reject_removed_env("LFD_AUTH_MODE", "LFD_AUTH_TOKEN")?;
 
         if let Ok(value) = std::env::var("LFD_AUTH_TOKEN") {
             let trimmed = value.trim();
@@ -975,7 +914,6 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.mode, AuthMode::Local);
     }
 
     #[test]
@@ -1009,16 +947,22 @@ executor:
     }
 
     #[test]
-    fn mode_container_preserves_explicit_local_token_auth() {
+    fn mode_container_preserves_explicit_token_auth() {
         let raw = r#"
 mode: container
 auth:
-  mode: local
   token: explicit-token
 "#;
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
-        assert_eq!(resolved.auth.mode, AuthMode::Local);
+        assert_eq!(
+            resolved
+                .auth
+                .token
+                .as_ref()
+                .map(|t| t.expose_secret().as_str()),
+            Some("explicit-token")
+        );
     }
 
     #[test]
@@ -1068,7 +1012,6 @@ executor:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",
@@ -1090,7 +1033,6 @@ executor:
             "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
         std::env::set_var("LFD_MODE", "container");
-        std::env::set_var("LFD_AUTH_MODE", "studio");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_CREDENTIAL_SOCKET", "/tmp/concerto-auth.sock");
         std::env::set_var(
@@ -1125,7 +1067,6 @@ executor:
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())
         );
-        assert_eq!(resolved.auth.mode, AuthMode::Studio);
         assert_eq!(
             resolved
                 .auth
@@ -1189,13 +1130,30 @@ executor:
     }
 
     #[test]
-    fn auth_mode_yaml_rejects_removed_ci_alias() {
+    fn auth_mode_env_is_rejected() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_AUTH_MODE"]);
+        std::env::set_var("LFD_AUTH_MODE", "local");
+
+        let mut config = RawLfdConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("removed env should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "LFD_AUTH_MODE was removed; use LFD_AUTH_TOKEN for self-hosted lfd auth"
+        );
+    }
+
+    #[test]
+    fn auth_mode_yaml_is_rejected() {
         let raw = r#"
 auth:
-  mode: ci
+  mode: local
 "#;
-        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("ci mode rejected");
-        assert!(err.to_string().contains("expected 'local' or 'studio'"));
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("mode key rejected");
+        assert!(err.to_string().contains("unknown field `mode`"));
     }
 
     #[test]
@@ -1261,7 +1219,6 @@ http_security:
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
             "LFD_MODE",
-            "LFD_AUTH_MODE",
             "LFD_AUTH_TOKEN",
             "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",

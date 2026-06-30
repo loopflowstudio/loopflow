@@ -132,10 +132,9 @@ async fn test_http_state(root: &Path) -> HttpState {
         event_hub,
         output_hub,
         provider_auth: ProviderAuthService::new(store),
-        auth: AuthProvider::Local {
+        auth: AuthProvider::Bearer {
             session_token: secrecy::SecretString::from(TEST_TOKEN.to_string()),
         },
-        registration: None,
         started_at: time::OffsetDateTime::now_utc(),
         github: GitHubConfig::default(),
         http_security: HttpSecurityConfig::default(),

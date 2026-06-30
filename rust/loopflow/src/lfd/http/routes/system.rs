@@ -4,29 +4,21 @@ use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::registration::RegistrationState;
 use crate::lfd::types::{AgentStatus, WaveRunStatus};
 
 pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
-    let registration = registration_state(&state)
-        .await
-        .map(|registration| registration.public_summary());
     Json(HealthResponse {
         status: if counts.database_ok { "ok" } else { "degraded" }.to_string(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         database: counts.database_ok,
         waves_running: counts.waves_running,
         agents_active: counts.agents_active,
-        registration,
     })
 }
 
 pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusResponse> {
     let counts = counts(&state).await;
-    let registration = registration_state(&state)
-        .await
-        .map(RegistrationState::sanitized);
     Json(StatusResponse {
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
@@ -34,7 +26,6 @@ pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusRespon
         agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
-        registration,
     })
 }
 
@@ -92,11 +83,6 @@ async fn counts(state: &HttpState) -> Counts {
     }
 }
 
-async fn registration_state(state: &HttpState) -> Option<RegistrationState> {
-    let client = state.registration.as_ref()?;
-    Some(client.status().await)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,7 +92,6 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
-    use crate::lfd::registration::RegistrationClient;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
@@ -114,7 +99,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::sync::Mutex;
 
-    async fn test_http_state(registration: Option<RegistrationClient>) -> HttpState {
+    async fn test_http_state() -> HttpState {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store: SharedStore = Arc::new(
@@ -145,10 +130,9 @@ mod tests {
             event_hub,
             output_hub,
             provider_auth: ProviderAuthService::new(store.clone()),
-            auth: AuthProvider::Local {
+            auth: AuthProvider::Bearer {
                 session_token: secrecy::SecretString::from("test-token".to_string()),
             },
-            registration,
             started_at: OffsetDateTime::now_utc(),
             github: GitHubConfig::default(),
             http_security: HttpSecurityConfig::default(),
@@ -159,52 +143,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn health_handler_returns_public_registration_summary() {
-        let registration = RegistrationClient::new("https://auth.example.test");
-        registration
-            .set_state_for_test(RegistrationState {
-                enabled: true,
-                registered: true,
-                machine_id: Some("machine-123".to_string()),
-                machine_name: Some("host-abc".to_string()),
-                ..RegistrationState::default()
-            })
-            .await;
-        let state = test_http_state(Some(registration)).await;
+    async fn health_handler_reports_core_status() {
+        let state = test_http_state().await;
 
         let Json(payload) = health_handler(State(state)).await;
-        let registration = payload.registration.expect("registration summary");
-        assert!(registration.enabled);
-        assert!(registration.registered);
-        let value = serde_json::to_value(registration).expect("serialize summary");
-        assert_eq!(value.as_object().expect("summary object").len(), 2);
+        assert_eq!(payload.waves_running, 0);
+        assert_eq!(payload.agents_active, 0);
     }
 
     #[tokio::test]
-    async fn status_handler_sanitizes_registration_last_error() {
-        let registration = RegistrationClient::new("https://auth.example.test");
-        registration
-            .set_state_for_test(RegistrationState {
-                enabled: true,
-                registered: true,
-                last_error: Some(
-                    "failed with Bearer abcdef0123456789abcdef0123456789 at /tmp/private".into(),
-                ),
-                machine_id: Some("machine-123".into()),
-                machine_name: Some("host-abc".into()),
-                ..RegistrationState::default()
-            })
-            .await;
-        let state = test_http_state(Some(registration)).await;
+    async fn status_handler_reports_slot_counts() {
+        let state = test_http_state().await;
 
         let Json(payload) = status_handler(State(state)).await;
-        let registration = payload.registration.expect("registration state");
-        let last_error = registration.last_error.expect("last_error");
-        assert!(!last_error.contains("abcdef0123456789abcdef0123456789"));
-        assert!(!last_error.contains("/tmp/private"));
-        assert!(last_error.contains("[REDACTED_TOKEN]"));
-        assert!(last_error.contains("[REDACTED_PATH]"));
-        assert_eq!(registration.machine_id, Some("machine-123".to_string()));
-        assert_eq!(registration.machine_name, Some("host-abc".to_string()));
+        assert_eq!(payload.slots_total, 1);
+        assert_eq!(payload.slots_used, 0);
     }
 }

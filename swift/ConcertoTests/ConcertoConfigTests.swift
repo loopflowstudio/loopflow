@@ -11,7 +11,7 @@ struct ConcertoConfigTests {
 
         try """
         connection:
-          host: lfd-dev.loopflow.studio
+          host: lfd.example.com
           port: 443
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
@@ -19,7 +19,7 @@ struct ConcertoConfigTests {
         let connection = try #require(config.connection)
         let serverConnection = connection.toServerConnection()
 
-        #expect(connection.host == "lfd-dev.loopflow.studio")
+        #expect(connection.host == "lfd.example.com")
         #expect(connection.port == 443)
         #expect(serverConnection.useTLS)
         #expect(serverConnection.authMode == .staticToken)
@@ -51,7 +51,7 @@ struct ConcertoConfigTests {
 
         try """
         somethingElse:
-          host: lfd-dev.loopflow.studio
+          host: lfd.example.com
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
         let config = try #require(loadConcertoConfig(configURL: configURL))
@@ -66,7 +66,7 @@ struct ConcertoConfigTests {
         try """
         profile:
           connection:
-            host: lfd-dev.loopflow.studio
+            host: lfd.example.com
             port: 443
         """.write(to: configURL, atomically: true, encoding: .utf8)
 

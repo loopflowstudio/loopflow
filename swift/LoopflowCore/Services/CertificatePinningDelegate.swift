@@ -8,7 +8,7 @@ final class CertificatePinningDelegate: NSObject, @unchecked Sendable {
     private let connection: ServerConnection
     private let pinStore: CertificatePinStore
 
-    private let stateQueue = DispatchQueue(label: "studio.loopflow.pin.delegate")
+    private let stateQueue = DispatchQueue(label: "loopflow.pin.delegate")
     private var trustRequirement: TrustRequirement?
 
     init(connection: ServerConnection, pinStore: CertificatePinStore) {

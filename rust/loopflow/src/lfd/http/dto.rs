@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
-use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::sessions::types::ContextSnapshot;
 use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
@@ -20,8 +19,6 @@ pub struct HealthResponse {
     pub database: bool,
     pub waves_running: u32,
     pub agents_active: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registration: Option<RegistrationPublicSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -32,8 +29,6 @@ pub struct StatusResponse {
     pub agents_active: u32,
     pub slots_used: u32,
     pub slots_total: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registration: Option<RegistrationState>,
 }
 
 #[derive(Debug, Serialize)]

@@ -244,7 +244,7 @@ On first launch (before any saved connection settings), Concerto also checks `~/
 
 ```yaml
 connection:
-  host: lfd-dev.loopflow.studio
+  host: lfd.example.com
   port: 443
 ```
 

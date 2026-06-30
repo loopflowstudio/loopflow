@@ -9,7 +9,6 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
 use crate::lfd::provider_auth::ProviderAuthService;
-use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::SharedStore;
@@ -24,7 +23,6 @@ pub struct HttpState {
     pub output_hub: OutputHub,
     pub provider_auth: ProviderAuthService,
     pub auth: AuthProvider,
-    pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,
     pub http_security: HttpSecurityConfig,

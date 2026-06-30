@@ -697,10 +697,9 @@ mod tests {
             event_hub,
             output_hub,
             provider_auth: ProviderAuthService::new(store.clone()),
-            auth: AuthProvider::Local {
+            auth: AuthProvider::Bearer {
                 session_token: secrecy::SecretString::from("test-token".to_string()),
             },
-            registration: None,
             started_at: OffsetDateTime::now_utc(),
             github: GitHubConfig::default(),
             http_security: HttpSecurityConfig::default(),

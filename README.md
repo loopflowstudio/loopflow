@@ -335,8 +335,6 @@ lfq auth asana       # connect Asana with OAuth
 lfq auth linear      # connect Linear with OAuth
 lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
-lfq token revoke abc123   # revoke connection tokens by hash prefix
-lfq token revoke --all    # revoke all connection tokens
 ```
 
 PM provider config:

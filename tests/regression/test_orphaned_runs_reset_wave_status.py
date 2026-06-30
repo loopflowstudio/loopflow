@@ -98,7 +98,10 @@ def _reboot_and_read_wave_status(
 
 def _init_git_repo(repo_dir: Path) -> None:
     repo_dir.mkdir(parents=True, exist_ok=True)
-    run = lambda *args: subprocess.run(args, cwd=repo_dir, check=True, capture_output=True)
+
+    def run(*args):
+        subprocess.run(args, cwd=repo_dir, check=True, capture_output=True)
+
     run("git", "init")
     run("git", "checkout", "-B", "main")
     run("git", "config", "user.email", "t@example.com")

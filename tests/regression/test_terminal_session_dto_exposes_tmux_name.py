@@ -95,5 +95,6 @@ def _wait_for_terminal_session(
             return matches[0]
         time.sleep(0.25)
     raise AssertionError(
-        f"no terminal_session appeared for wave {wave_id} within {timeout_seconds}s; last body: {last_body}"
+        f"no terminal_session appeared for wave {wave_id} within {timeout_seconds}s; "
+        f"last body: {last_body}"
     )

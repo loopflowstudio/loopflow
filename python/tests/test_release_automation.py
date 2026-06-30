@@ -105,6 +105,16 @@ chmod +x "$repo/target/release/lf" "$repo/target/release/lfd"
     assert "build --release -p loopflow --bin lf --bin lfd" in cargo_log.read_text()
 
 
+def test_pull_local_bin_fetches_then_merges_without_user_pull_config():
+    script = (ROOT / "scripts/pull-local-bin.sh").read_text()
+
+    assert 'git -C "$repo" fetch origin "$default_branch"' in script
+    assert 'git -C "$repo" merge --ff-only "origin/$default_branch"' in script
+    assert 'git -C "$repo" fetch' in script
+    assert 'git -C "$repo" merge --ff-only "@{upstream}"' in script
+    assert 'git -C "$repo" pull --ff-only' not in script
+
+
 def test_self_hosted_server_primitives_are_documented_and_runnable():
     help_result = subprocess.run(
         [str(ROOT / "deploy/loopflow-server.sh"), "--help"],

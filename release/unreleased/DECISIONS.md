@@ -227,3 +227,11 @@ built-in commands — skills fire there with `$step`.
 **Decision:** Continue autonomous release-infra iteration until actual or projected automation spend would exceed $100/month. Card/bank transactions are the source of truth; AWS, Fly.io, Claude/Anthropic, OpenAI/Codex, OpenCode, Doppler, and release-host services should use the company card when the vendor supports card billing.
 
 **Implications:** Cost tracking is part of release infrastructure, not bookkeeping after the fact. Provider dashboards can warn early, but the monthly budget gate is enforced from transaction exports/API data. Spending above the threshold requires human approval before proceeding.
+
+## 2026-06-30 — Release infra is measured by cadence, host health, and budget
+
+**Context:** The release-infra work had become several intertwined threads: nightly package checks, weekly releases, local `lf` refresh, a self-hosted `lfd` cron host, Cadenza production deployment, and cost controls. Without a written operating contract, progress was easy to mistake for whichever deployment task happened most recently.
+
+**Decision:** Treat the goal as one release system with explicit measures: nightly package verification green, weekly release gated by that verification, local refresh as one command, self-hosted cron host reachable and observable, and automation/runtime spend under $100/month. Loopflow owns the primitives and cron host; Cadenza mirrors the cadence and proves the product-repo deployment shape. Secrets stay in Doppler or host-local env; private host details stay out of public repos.
+
+**Implications:** The next Loopflow work should prioritize local `lf`/`lfd` refresh and the self-hosted cron host before adding more product-specific deployment features. Any attempt to introduce a global studio-hosted default server is out of scope unless explicitly re-decided. Cost above $100/month is the next true human blocker.

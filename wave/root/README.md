@@ -25,8 +25,8 @@ wave: root
 
 ## Current priorities
 
-1. **`review-open-work-and-garden-parity`** — manual and automated status passes should read as one system
-2. **Release automation spine** — daily verification, weekly publishing, and self-hosted cron hosting should stay visible as one operating rhythm
+1. **Release infra and cron host** — nightly/weekly release cadence, local updater, maintained self-hosted `lfd`, and budget guardrails
+2. **`review-open-work-and-garden-parity`** — manual and automated status passes should read as one system
 3. **Calendar rhythm that earns trust** — scheduled scans need to be current enough to matter and quiet enough not to create noise
 4. **Mutation review that stays human-sized** — root should propose reviewable adjustments, not dump a strategy deck into a PR
 
@@ -47,4 +47,4 @@ wave: root
 
 ## What success looks like
 
-Open Concerto in the morning and get the full picture in one pass: shipped work, blocked work, mutation proposals, calibration checkpoints, and anything that needs a human. Root is doing its job when that ritual feels obvious and the next action is clear.
+Open Concerto in the morning and get the full picture in one pass: shipped work, blocked work, release health, cron-host health, mutation proposals, calibration checkpoints, and anything that needs a human. Root is doing its job when that ritual feels obvious and the next action is clear.

@@ -513,7 +513,7 @@ public final class RepoState {
                         switch event {
                         case .connected(let connected):
                             self.updateConnectionState(.connected)
-                            self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
+                            self.applyConnectedSnapshot(connected.waves)
                             self.preloadWaveContent(for: self.waves)
                             await self.refreshAttention()
                             await self.refreshTerminalSessions()
@@ -1579,6 +1579,16 @@ public final class RepoState {
         groupBy: UsageGroupBy
     ) async throws -> UsageTimeseries {
         try await waveService.usageTimeseries(filters: filters, bucket: bucket, groupBy: groupBy)
+    }
+
+    /// Apply the daemon's initial wave snapshot, scoped to this window's repo.
+    /// The bundled daemon may serve several repos at once; without this filter a
+    /// window would swallow every repo's waves. Per-event updates (`handleWaveEvent`)
+    /// are already repo-scoped — this closes the same gap on the bulk snapshot.
+    func applyConnectedSnapshot(_ waves: [Wave]) {
+        let currentRepoPath = repoTarget?.path.normalizedFilePath
+        let scoped = waves.filter { $0.repo.normalizedFilePath == currentRepoPath }
+        waveStore.setAll(scoped.map(makeWaveViewModel))
     }
 
     private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {

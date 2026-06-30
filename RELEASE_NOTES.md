@@ -1,3 +1,61 @@
+# v0.9.11
+
+Weekly auto-release with 80 commits since `v0.9.10`.
+
+Commits are grouped by theme instead of truncated. This is a deterministic token-compression pass for CI: preserve every unique commit subject, merge repetition into structure, and avoid first-N summaries.
+
+## Release and self-hosting infrastructure
+
+- token-compress: add compression step and group release-note commits
+- website: import public site and deploy from loopflow
+- deploy: keep native lfd tokens out of launchd plists
+- deploy: schedule native lfd host updates
+- scripts: make local binary refresh ignore pull config
+- deploy: add native mac lfd host manager
+- deploy: harden private lfd host bootstrap
+- wave: codify release infra operating goal
+- release: make spend guardrail stdlib-only
+- deploy: add monthly spend guardrails
+- deploy: scrub private host details from cron host docs
+- deploy: document Mac Mini remote setup
+- deploy: add cron host bootstrap script
+- wave: add release automation metadata
+- release: add self-hosted automated release infra
+- release: defensive tag fix + backfill v0.9.10 archive (#661)
+
+## Authentication and remote execution
+
+- lfd: persist native service environment
+- lfd: fix sqlite health checks
+- lfd: remove studio auth
+- Pair Loopflow mobile with remote lfd
+- desktop: launch embedded build flows through lfd terminals
+
+## Concerto and user surfaces
+
+- install: one local build entry per worktree; rename desktop app to Loopflow
+- concerto-dev: add --repo to run-debug to launch into any repo (#736)
+- concerto: scope the connected wave snapshot to the window's repo (#732)
+- concerto: deep-link + menu nav to open a repo or portfolio (#728)
+- wave reorg: collapse 13 waves into root/desktop/mobile/workflows
+
+## Agent workflows and developer tooling
+
+- engine/git: stop sync_main reverting just-merged work on overlapping paths (#730)
+- lf: hand off steps through vendor skills
+- installer: tolerate --no-interactive in shell installs
+
+## Dependency updates
+
+- 47 dependency update(s): rusqlite 0.39.0 → 0.40.1, ruff 0.15.18 → 0.15.20, time 0.3.49 → 0.3.51, uuid 1.23.3 → 1.23.4, anyhow 1.0.102 → 1.0.103, bytes 1.11.1 → 1.12.0, tower-http 0.6.11 → 0.7.0, ruff 0.15.17 → 0.15.18, tokio-postgres 0.7.17 → 0.7.18, cron 0.16.0 → 0.17.0, time 0.3.48 → 0.3.49, actions/checkout 6 → 7, time 0.3.47 → 0.3.48, regex 1.12.3 → 1.12.4, rusqlite 0.40.0 → 0.40.1, ruff 0.15.16 → 0.15.17, uuid 1.23.2 → 1.23.3, ignore 0.4.25 → 0.4.26, tiktoken-rs 0.11.0 → 0.12.0, ruff 0.15.15 → 0.15.16, chrono 0.4.44 → 0.4.45, ruff 0.15.14 → 0.15.15, reqwest 0.13.3 → 0.13.4, rusqlite 0.39.0 → 0.40.0, uuid 1.23.1 → 1.23.2, serde_json 1.0.149 → 1.0.150, ruff 0.15.13 → 0.15.14, ctrlc 3.5.1 → 3.5.2, tower-http 0.6.10 → 0.6.11, tar 0.4.45 → 0.4.46, tower-http 0.6.8 → 0.6.10, ruff 0.15.12 → 0.15.13, thiserror 1.0.69 → 2.0.18, uuid 1.21.0 → 1.23.1, reqwest 0.13.2 → 0.13.3, github.com/argmaxinc/whisperkit 0.18.0 → 1.0.0, tracing-subscriber 0.3.22 → 0.3.23, ipnet 2.11.0 → 2.12.0, tar 0.4.44 → 0.4.45, tokio-postgres 0.7.16 → 0.7.17, rusqlite 0.38.0 → 0.39.0, ruff 0.15.11 → 0.15.12, cron 0.12.1 → 0.16.0, gethostname 0.4.3 → 1.1.0, actions/upload-artifact 4 → 7, actions/download-artifact 4 → 8, dopplerhq/secrets-fetch-action 1.3.1 → 2.0.0
+
+## Other changes
+
+- op pr: add -m/--model agent override
+- voice: checkpoint-and-proceed + design-stage framing
+- git sync: keep checked-out default branches in sync across worktrees
+- gstack: bundle as namespaced builtin, simplify step discovery
+
 # v0.9.10
 
 Loopflow 0.9.10 folds the chord model into waves, adds PM integration across Asana, Linear, and Notion, ships an attention queue and wave workspaces in Concerto, and unifies `lf` and `lfd` behind a shared execution engine.

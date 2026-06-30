@@ -1,87 +1,78 @@
-# v0.9.10
+# v0.9.11
 
-Loopflow 0.9.10 folds the chord model into waves, adds PM integration across Asana, Linear, and Notion, ships an attention queue and wave workspaces in Concerto, and unifies `lf` and `lfd` behind a shared execution engine.
+Loopflow 0.9.11 picks a side: it is the orchestration layer above the agent vendors, not a chat client. The native session UI and the mobile-as-an-app surface come out; interactive work hands off to Claude Code, Codex, and opencode in their own surfaces. Steps become vendor Skills instead of a 100KB assembled prompt. Release automation goes self-hosted end to end, and the desktop app ships as **Loopflow**.
 
-Changes since `v0.9.9`.
+Changes since `v0.9.10`.
 
-## Waves absorb chords
+## Loopflow is the layer above
 
-- **Chord-waves replace chord tables** — a chord-wave is now an ordinary wave whose `area` points at `wave/<name>/` directories. Removed ~1400 lines of chord-specific CRUD across Rust, Python, and Swift
-- **Gardening replaces tending** — the coordinating flow that lets a chord-wave observe, assess, and mutate member waves. `tend` renamed to `garden` throughout; `scan` + `assess` + `mutate` + `review` are the primitives
-- **VSM governance flows** — `govern-identity`, `govern-coordination`, `govern-control`, and `govern-intelligence` each scan, assess, and mutate a different viable-system layer
-- **xor / or / loop in flows** — flows can branch on a router step's judgment (`xor`), parallelize (`or`), or repeat until exit (`loop`). `xor` paths can be `silence` — a clean no-op when nothing needs to happen
-- **Build / govern / ops categorization** — every step and flow is tagged by agency: `build/` for work you drive, `govern/` for autonomous coordination, `ops/` for side-channel utilities. Concerto's Flows panel groups the catalog the same way
+The recurring temptation was to reimplement the vendors' own session UIs — a native chat client, a mobile pairing flow, an lfd layer that parsed Claude/Codex streams into our event model. That work doesn't compound: the vendors ship better chat, IDE, and mobile clients than we will, and faster. So Loopflow steps back to the orchestration layer and runs headless agent work; when a human drives a session, it happens in the vendor's surface.
 
-## PM integration
+- **Sessions launch in the vendor's app** — a plain `lf <step>` opens a fresh session directly in Claude Code or Codex when configured that way. Terminal-first; Concerto is just another caller
+- **Embedded terminal stays** — a tmux pane running the vendor's own TUI inside Concerto. Concerto frames it; the vendor renders it
+- **Bounce to the vendor's IDE** — open the worktree in VS Code / Cursor / JetBrains where the vendor's extension runs the session
+- **Native chat UI and the session-hosting harness removed** — the SwiftUI chat client and the ~7,800-line `lfd/sessions/harness` stream-parser are gone; they existed only to feed a UI we're no longer building
+- **Mobile-as-an-app archived** — the iOS target, `lf op pair`, pairing tokens, and remote-lfd-for-phone infra are dropped. Mobile happens through the vendors' own mobile apps. Concerto stays the macOS surface, raised a layer: wave monitoring plus the frame around vendor TUIs
 
-- **Asana, Linear, and Notion providers** — OAuth-only auth, each mapping a wave's `items/` to PM tasks. `lf op pm init`, `pm pull`, `pm export`, `pm push-diff`, `pm status`, all with `--all` variants that sweep every PM-enabled wave
-- **`lfq auth asana` / `linear` / `notion`** — connect providers in the browser; `lfq auth status` shows PM providers alongside GitHub/Claude/Codex
-- **Branch-locked claims** — Asana working-branch claims prevent two waves from picking the same item concurrently
-- **Ingest auto-refreshes PM-backed waves** — pulls from the provider before picking an item, with local-mirror fallback on failure
-- **Asana rich text via `html_notes`** — task descriptions preserve markdown formatting on sync, with plaintext fallback for older tasks
-- **Priority buckets, Notion page blocks, per-wave bootstrap** — enough provider-specific polish to run real backlogs through the pipe
+## Steps become vendor Skills
 
-## Attention queue
+Every path to "inject our context at launch" was blocked at once — argv truncation, Claude's competitor-mention guard on system prompts, and ~5KB caps on GUI deep links. Both vendors had already shipped the same answer for reusable instructions: **Skills** (the open `SKILL.md` standard, loaded progressively). So loopflow stops assembling a prompt for handoffs. The execution model becomes files on disk plus a tiny seed.
 
-- **One inbox for everything needing a human** — code reviews ready to ship, step failures, rebase conflicts, missing PRs, dirty scratch. Items flow `surfaced → viewed → resolved` and auto-resolve when the underlying condition clears
-- **Concerto detail pane** — the empty "catch a wave" state is replaced with the attention queue. Items expose contextual actions like **Ship** and **Retry**
-- **`/attention` HTTP routes** — `GET /attention`, `GET /attention/history`, `PATCH /attention/{id}` for external clients
-- **Algedonic signals with repair backoff** — wave failures escalate through a lineage-aware repair loop with error classification before surfacing to the human
+- **A sync emits each step as a `SKILL.md`** into `.claude/skills/` and `.agents/skills/` at repo and global scope. Bodies stay out of context until the step fires; generated skills carry a provenance marker so re-sync prunes safely
+- **The seed is just `"<surface preamble> /step"`** — the only per-run injection. Identical headless and interactive, save the run-mode preamble. Verified to fire under headless `claude -p` and `codex exec`, not only interactively
+- **Harness-aware sigil** — `$step` for Codex (works in both `exec` and the interactive composer), `/step` for Claude
+- **Ambient context moves to disk** — repo conventions, voice, and orientation live in `AGENTS.md` / `CLAUDE.md`, auto-loaded by the vendor. The agent reads `scratch/` and `wave/` on demand; we point, we don't dump
+- **Directions removed as a first-class concept** — with no assembled prompt, a direction had no delivery vehicle. The `-d/--direction` flag, config field, wave key, loader, and `builtins/directions/` are gone; the perspective text was redistributed into the relevant step bodies. The wave model simplifies from area × direction × flow to **area × flow**
+- **`LOOPFLOW.md` leaves the product** — the operating manual is no longer injected into every session. It now lives in loopflow's own agent doc, loaded only when working on loopflow itself
 
-## Wave workspaces and agent embedding
+## Self-hosted release automation
 
-- **Wave workspaces in Concerto** — each wave gets a workspace pane with terminal-native keyboard routing, cached transcript state, and pluggable shells (Ghostty in addition to the built-in terminal)
-- **Terminal multiplexer** — multi-pane layout with tmux attach helpers; the lfd side exposes a terminal-attach connection contract
-- **Interactive checkpoints** — step agents can pause mid-flow, hand control to a human, and resume where they left off
-- **Codex session input over HTTP** — `lfd` accepts Codex session input so agent sessions are controllable via API, not just stdin
-- **Connections panel redesign** — cleaner provider auth with Doppler secrets support and on-disk credential detection (Claude/Codex tokens read from `~/.claude/.credentials.json` and `~/.codex/auth.json` before falling back to Keychain)
-- **Eager daemon startup** — `BundledDaemonManager` starts at app launch, so provider auth is available before any repo connects
+Release and cron automation had been drifting toward a private studio-hosted shape, with infrastructure living outside the repo. 0.9.11 reverses that: the release server is inspectable, reproducible, and maintainable from loopflow itself.
 
-## Shared execution engine
+- **Self-hosted by default** — the public repo carries the runnable container and deployment shape; Doppler supplies secrets. Studio discovery is removed, not assumed
+- **Studio auth deleted** — daemon registration and hosted discovery are gone. Remote `lfd` access is self-hosted bearer-token auth only; each repo owns its deploy config
+- **Nightly verification, weekly release** — nightly package checks prove artifacts without deploying (`0 9 * * *` UTC); weekly publishing is gated by that verification (`0 12 * * 0` UTC). Loopflow and Cadenza run carbon-copy schedules
+- **Native launchd `lfd` is the default Mac host path** — Docker Desktop's launchd/PATH/credential-helper friction made the container stack a poor first step on macOS. `deploy/native-lfd-host.sh` centers the Mac runbook; Compose stays an explicit option for Linux and isolation needs
+- **Cron host bootstrap, scheduled host updates, and native service env** — `lfd` persists its launchd environment, schedules its own updates, and keeps native tokens out of plists
+- **Monthly spend guardrails** — stdlib-only cost tracking; automation spend over $100/month is the gate that needs a human
+- **`wave/release/`** — owns daily verification, weekly publishing, cron-host infra, local-updater freshness, and cross-repo release parity
 
-- **One flow engine for `lf` and `lfd`** — flow runs emit runtime journals whether triggered from the CLI or from Concerto, giving both surfaces the same observability
-- **`lfd` observes wave CLI runs** — standalone `lf` invocations now report through the same journals the daemon uses for wave runs
-- **Prompt system/content split** — assembled prompts use Claude's plan-compatible structure so step agents can be routed through plan mode
+## The desktop app is Loopflow
 
-## Auth simplification
+The macOS app shipped as "Loopflow Concerto," but the product users actually use is Loopflow; Concerto was always the internal nickname.
 
-- **Self-hosted bearer-token auth** — `lfd` remote access uses explicit bearer tokens from repo-owned deployment secrets
-- **PM auth is OAuth-only** — API-key entry removed for Asana, Linear, and Notion; all three flow through `lfq auth` browser handshake
+- **Every user-facing surface renamed** — app bundle (`Loopflow.app`), display name, DMG volume and download keys (`Loopflow-<version>.dmg`, `Loopflow-latest.dmg`), and in-app titles
+- **Concerto stays the dev nickname** — the Swift target, the bundle id `com.loopflow.concerto` (preserving granted TCC permissions and deep-link registration), and the debug `Concerto Dev.app` are unchanged
+- **Version stamped from the release tag** — the app now reports the same version as `lf --version` instead of a frozen `1.0`
 
-## Wave configuration
+## One local build per worktree
 
-- **Wave crons** — supplementary flows scheduled per wave, independent of the worker pool. `workers: 0` + `crons:` is valid for cron-only governance waves
-- **Restructured wave items** — items are stored as a directory under `wave/<name>/items/` with structured README frontmatter (Vision, Strategy, Goals, Risks, Metrics)
-- **Concurrent ingest coordination** — PM claim prevents two agents from picking the same item simultaneously
-- **Garden wave-report step** — reads health signals across all waves for inbox-zero triage
+Three overlapping install paths all wrote to global locations, so sibling worktrees fought over the same `lf` and the same `/Applications` app.
 
-## Review workflow
+- **`scripts/install.py local` is the single entry** — builds this worktree's `lf`, `lfd`, and `Loopflow.app` into a gitignored `<worktree>/local-bin/`, isolated per worktree
+- **`--use` promotes a build** — symlinks `~/.local/bin/{lf,lfd}` to the worktree and copies its `Loopflow.app` to `/Applications`. Symlinked binaries mean rebuilds take effect with no re-promote; switching active worktrees is one `install.py local --use`
+- **The desktop app is a first-class release artifact** alongside `lf`/`lfd`. `pull-local-bin.sh` stays the CLI-only quick path and now ignores pull config
 
-- **Review splits into `demo` and `code-review`** — `demo` is an experience-first walkthrough of observable changes; `code-review` walks structural and architectural decisions. `review-design` reframed to reshape AI-elaborated design into user intent
-- **Review prompts orient before evaluating** — reviews now open with an orientation pass (what changed, what's open, where judgment is needed) instead of narrowing on whatever seemed "most interesting"
-- **Structured PR body template** — gate writes `Try it`, `Intent`, `Assumptions`, `Key decisions`, `Not included` sections to `scratch/pr-body.md`; `pr` and `land` consume the cached copy
+## Concerto navigation
 
-## Ecosystem
+- **Deep-link and menu navigation** — open a repo or portfolio directly from a deep link or the menu bar
+- **Window-scoped wave snapshots** — the connected wave snapshot is scoped to the window's repo, so multiple windows don't cross-contaminate
+- **`concerto-dev --repo`** — launch the debug build straight into any repo
 
-- **gstack workstyle imports** — `lf gstack:office-hours` runs imported steps from external repos. Namespaced flows isolate third-party content from local steps
-- **npx skills** — `lf npx:explain-code` fetches a step from the npx ecosystem and runs it
-- **Flows catalog in Concerto** — browse the full catalog from the Flows panel; each flow shows parent flows that use it
+## Vocabulary: Wave → Loop
 
-## Release and CI
+A design pass settled the MVP nouns: **Loopflow** (product) → **Loop** (an always-running, steerable session aligned to a **Goal**) → **Worker** (a hosted tmux session running one Flow on one Task) → **Flow** → **Step**. "Loop" says what the thing is and it's the word in the product name, so it supersedes the earlier "keep Wave" call. The rename is wide — API, `wave/` dirs, Concerto UI, DTOs, config keys, goldens — and lands as its own migration; 0.9.11 fixes the vocabulary, not the rename.
 
-- **Nightly regression suite** — automated end-to-end checks feed into a weekly auto-release cadence
-- **Decisions ledger shapes release notes** — interactive runs append to `release/unreleased/DECISIONS.md`; `lf op release run` promotes the ledger to `release/v<version>/` and feeds it into the release-notes step. Falls back to merged PR history when the ledger is absent
-- **Concerto.app bundles `lf` and `lfd`** — install script no longer required for the embedded CLI and daemon
-- **Dependabot hardening** — auto-enable squash merge on open; only close PRs on required-check failure (not flaky optional checks); documented workflow in the repo
-- **CI enforces clear scratch before landing** — `scratch/` must be empty before a PR can merge
+## Fixes and maintenance
 
-## Quality of life
-
-- **`lf review-open-work`** — surveys branches, PRs, worktrees, and waves for inbox-zero triage. New `ship` flow pairs it with `land`
-- **Rebase-conflict auto-recovery** — `lf op rebase` / `land` / `pr` launch a step agent on conflict instead of failing; the original command retries after resolution
-- **Stacked-branch rebase after squash** — fork-point detection via `git cherry` skips commits already absorbed into the target, so B stacked on A rebases cleanly after A squash-merges
-- **Fresh-branch preservation** — rotated worktrees are no longer incorrectly pruned; squash-merged status is suppressed while a branch is still tree-equal to main
-- **Dirty-file auto-commit** — standalone step runs commit dirty files after completing instead of leaving them loose
-- **`lf op wt` prefers exact branch matches** and supports sourced `dev-lf` for in-repo development
-- **Rebase notes for already-merged branches** — clearer guidance when a branch's commits are already on main
-- **`concerto-dev.py` release script extracted** — `scripts/release-concerto.py` is callable directly from CI, and Concerto font loading works across release, `swift run`, and xcodegen builds
+- **Cross-worktree git sync** — checked-out default branches stay in sync across worktrees, and `sync_main` no longer reverts just-merged work on overlapping paths
+- **`lfd` sqlite health checks** fixed
+- **Installer tolerates `--no-interactive`** in shell installs
+- **gstack bundled as a namespaced builtin** — simpler step discovery, third-party content isolated from local steps
+- **Wave reorg** — 13 waves collapsed into root / desktop / mobile / workflows, then the release wave added on top
+- **`lf op pr -m/--model`** — agent override for the PR step
+- **Voice update** — checkpoint-and-proceed for reversible work, plus design-stage framing
+- **token-compress step** — context compression, with release-note commits grouped
+- **Public website imported** and deployed from loopflow
+- **Hashimoto-style review ritual** — a standing quality lens (simplicity, operations, API shape, deletable complexity) run before any unit of work is called done
+- **Dependabot automation and dependency bumps** — auto-enable squash merge on open, close PRs only on required-check failure, and routine Rust/Python/Swift/Actions updates across the cycle

@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_monthly_spend.py"
-CONFIG = ROOT / "deploy/budget.yaml"
+CONFIG = ROOT / "deploy/budget.json"
 
 
 def run_budget(*args: str) -> subprocess.CompletedProcess[str]:

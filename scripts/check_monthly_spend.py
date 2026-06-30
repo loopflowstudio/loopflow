@@ -13,8 +13,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-import yaml
-
+REPO_ROOT = Path(__file__).resolve().parents[1]
 MONEY_QUANT = Decimal("0.01")
 DATE_FIELDS = ["date", "posted_at", "postedat", "created_at", "createdat", "timestamp"]
 TEXT_FIELDS = [
@@ -170,7 +169,7 @@ def _spend_amount(row: dict[str, Any]) -> Optional[Decimal]:
 
 
 def _load_config(path: Path) -> Config:
-    data = yaml.safe_load(path.read_text()) or {}
+    data = json.loads(path.read_text())
     raw_budget = data.get("monthly_budget_usd")
     budget = _parse_decimal(raw_budget)
     if budget is None or budget <= 0:
@@ -354,7 +353,7 @@ def _render_json(report: Report) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check monthly automation spend against budget.")
-    parser.add_argument("--config", type=Path, default=Path("deploy/budget.yaml"))
+    parser.add_argument("--config", type=Path, default=REPO_ROOT / "deploy/budget.json")
     parser.add_argument("--csv", type=Path, action="append", default=[])
     parser.add_argument("--json", type=Path, action="append", default=[])
     parser.add_argument("--month", help="Month to check, YYYY-MM. Defaults to current month.")

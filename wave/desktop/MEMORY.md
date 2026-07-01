@@ -53,6 +53,42 @@
   scripts that wait for local lfd should probe `http://127.0.0.1:2486/health`
   instead of `/v0/status` (`/status` is root and auth-protected).
 
+## Patterns (verified 2026-06-30, remote TLS connection)
+
+- **Concerto reaches a native remote `lfd` over HTTPS via Tailscale, not TLS in
+  `lfd`.** `deploy/tailscale-lfd-host.sh` keeps native `lfd` on `127.0.0.1` and
+  runs `tailscale serve` as the HTTPS ingress with a real `*.ts.net` cert.
+  `deploy/native-lfd-host.sh` owns the launchd lifecycle. The wrapper
+  deliberately does not expose native `serve` — that stays an internal launchd
+  entrypoint. Keep TLS termination outside `lfd`; don't add TLS serving to the
+  daemon.
+- **Remote bearer token is read fresh from `~/.lf/concerto.yaml` per request.**
+  `RemoteConnectionConfig` (`swift/LoopflowCore/Config/ConcertoConfig.swift`)
+  now carries an optional `token`. `ConnectionStore.token(for:)` prefers the
+  config token over the static/Keychain token, but only when config host+port
+  match the active connection — a token in one profile can't leak to another.
+  This makes rotation immediate without re-pasting into Settings. `configLoader`
+  is `@escaping` and held on the store so the read stays live.
+- **CA-trusted certs (incl. `*.ts.net`) use system trust, not pinning.**
+  `CertificatePinningDelegate` skips pinning for CA-trusted chains, avoiding
+  false positives when Tailscale renews certs.
+- **Dev builds use bundle id `com.loopflow.concerto.dev`.** `scripts/concerto-dev.py`
+  rewrites the assembled `Concerto Dev.app` Info.plist (source plist unchanged),
+  so worktree dev runs don't overwrite installed-app remote settings.
+- **macOS UI-test mode skips bundled daemons and remote subscriptions.** Guard
+  in `PortfolioWindow.swift` / `ConnectionStore`; UI tests must not touch a live
+  remote host.
+
+## Not yet built (remote connection)
+
+- No multi-profile Concerto config — the schema is one remote `connection` plus
+  optional container settings. Multi-host profiles are speculative; not
+  compelling with a single Mac mini host today.
+- No live-tailnet integration test in CI — coverage is script syntax/help
+  behavior plus `ConcertoConfigTests`/`ConnectionStoreTests`. A real
+  `tailscale serve` round-trip is untested.
+- No bundled TLS inside `lfd` — this is a rejected alternative, not a gap.
+
 ## Preferences
 
 - For this wave, prefer lfd-owned terminal sessions over Swift-owned tmux.

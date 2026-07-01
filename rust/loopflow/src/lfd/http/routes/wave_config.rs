@@ -180,12 +180,11 @@ fn remove_or_set_step_agents(
     Ok(())
 }
 
-/// Update agent fields in `wave/<name>/goal.md`, preserving existing frontmatter.
-pub(crate) fn update_wave_agent_config(
+/// Update `wave/<name>/goal.md` frontmatter, preserving existing body text.
+pub(crate) fn update_wave_goal_config(
     repo: &Path,
     name: &str,
-    agent: Option<String>,
-    step_agents: Option<HashMap<String, String>>,
+    update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
     let path = goal_path(repo, name);
     if let Some(parent) = path.parent() {
@@ -195,13 +194,25 @@ pub(crate) fn update_wave_agent_config(
 
     let (mut value, body) = goal_value_from_content(&path, name)?;
     let map = wave_config_map(&mut value, &path)?;
-    remove_or_set_string(map, "agent", agent);
-    remove_or_set_step_agents(map, step_agents)?;
+    update(map)?;
 
     let rendered = render_goal_md(&value, &body)?;
     std::fs::write(&path, rendered)
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(())
+}
+
+/// Update agent fields in `wave/<name>/goal.md`, preserving existing frontmatter.
+pub(crate) fn update_wave_agent_config(
+    repo: &Path,
+    name: &str,
+    agent: Option<String>,
+    step_agents: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    update_wave_goal_config(repo, name, |map| {
+        remove_or_set_string(map, "agent", agent);
+        remove_or_set_step_agents(map, step_agents)
+    })
 }
 
 #[cfg(test)]

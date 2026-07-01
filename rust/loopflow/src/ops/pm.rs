@@ -7,7 +7,9 @@ use crate::engine::git::{
     current_branch, diff_names_under, get_default_branch, list_tree, log_grep, merge_base,
     show_file,
 };
-use crate::lfd::http::routes::wave_config::{read_wave_config, WavePmConfig};
+use crate::lfd::http::routes::wave_config::{
+    read_wave_config, update_wave_goal_config, WavePmConfig,
+};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::notion::NotionClient;
@@ -311,67 +313,24 @@ fn yaml_string(value: &str) -> serde_yaml_ng::Value {
     serde_yaml_ng::Value::String(value.to_string())
 }
 
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
-    if !content.starts_with("---") {
-        return None;
-    }
-    let mut parts = content.splitn(3, "---");
-    let _ = parts.next();
-    let frontmatter = parts.next()?;
-    let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
-    Some((frontmatter.to_string(), body))
-}
-
-fn default_goal_body(wave: &str) -> String {
-    format!("Run one loop iteration for the {wave} wave.\n")
-}
-
 fn update_wave_pm_goal(
     repo: &Path,
     wave: &str,
     update: impl FnOnce(&mut serde_yaml_ng::Mapping) -> OpsResult<()>,
 ) -> OpsResult<()> {
-    let path = repo.join("wave").join(wave).join("goal.md");
-    let (mut value, body) = if path.exists() {
-        let content = std::fs::read_to_string(&path)?;
-        if let Some((frontmatter, body)) = split_frontmatter(&content) {
-            (
-                serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&frontmatter)
-                    .map_err(|err| OpsError::Message(format!("invalid wave goal yaml: {err}")))?,
-                body,
-            )
-        } else {
-            (
-                serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-                content,
-            )
-        }
-    } else {
-        (
-            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-            default_goal_body(wave),
-        )
-    };
+    update_wave_goal_config(repo, wave, |map| {
+        let pm_key = yaml_string("pm");
+        let mut pm_map = map
+            .get(&pm_key)
+            .and_then(serde_yaml_ng::Value::as_mapping)
+            .cloned()
+            .unwrap_or_default();
 
-    let map = value
-        .as_mapping_mut()
-        .ok_or_else(|| OpsError::Message("wave goal frontmatter must be a mapping".to_string()))?;
-    let pm_key = yaml_string("pm");
-    let mut pm_map = map
-        .get(&pm_key)
-        .and_then(serde_yaml_ng::Value::as_mapping)
-        .cloned()
-        .unwrap_or_default();
-
-    update(&mut pm_map)?;
-    map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
-
-    let output = serde_yaml_ng::to_string(&value)
-        .map_err(|err| OpsError::Message(format!("failed to encode wave goal yaml: {err}")))?;
-    let output = format!("---\n{}---\n{}", output, body);
-    std::fs::write(&path, output)?;
-    Ok(())
+        update(&mut pm_map).map_err(|err| err.to_string())?;
+        map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
+        Ok(())
+    })
+    .map_err(OpsError::Message)
 }
 
 pub(crate) fn write_pm_provider_to_wave_goal(
@@ -854,8 +813,7 @@ async fn pm_import_async(
             std::fs::write(
                 &goal_path,
                 format!(
-                    "---\nprimary_flow: build\n---\n{}\n",
-                    default_goal_body(&wave_name)
+                    "---\nprimary_flow: build\n---\nRun one loop iteration for the {wave_name} wave.\n\n"
                 ),
             )?;
         }
@@ -1941,16 +1899,13 @@ mod tests {
         write_pm_provider_to_wave_goal(dir.path(), "pm", PmProviderKind::Linear)
             .expect("write pm provider");
 
-        let content = std::fs::read_to_string(wave_dir.join("goal.md")).expect("read wave goal");
-        let (frontmatter, body) = split_frontmatter(&content).expect("frontmatter");
-        let value: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str(&frontmatter).expect("parse yaml");
-        let pm = value.get("pm").expect("pm block");
+        let config = read_wave_config(dir.path(), "pm").expect("read wave config");
         assert_eq!(
-            pm.get("provider").and_then(|value| value.as_str()),
-            Some("linear")
+            config.pm.and_then(|pm| pm.provider),
+            Some(PmProviderKind::Linear)
         );
-        assert_eq!(body, "Drive the work.\n");
+        let content = std::fs::read_to_string(wave_dir.join("goal.md")).expect("read wave goal");
+        assert!(content.ends_with("Drive the work.\n"));
     }
 
     #[test]

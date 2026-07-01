@@ -24,7 +24,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import yaml
@@ -99,7 +98,7 @@ def clear_project_id(goal_path: Path, provider: str) -> None:
     goal_path.write_text(_render_goal(data, body))
 
 
-def run_cmd(cmd: list[str], dry_run: bool, cwd: Optional[Path] = None) -> None:
+def run_cmd(cmd: list[str], dry_run: bool, cwd: Path | None = None) -> None:
     print(f"  $ {' '.join(cmd)}")
     if dry_run:
         return

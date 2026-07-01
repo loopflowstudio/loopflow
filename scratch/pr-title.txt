@@ -1,1 +1,1 @@
-lfd: make goals the wave loop body
+lfd: run waves from goal prompts

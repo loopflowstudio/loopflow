@@ -91,7 +91,6 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     config.serialized = None;
     config.area = None;
     config.direction = None;
-    config.step_agents = None;
     Some(config)
 }
 
@@ -327,7 +326,13 @@ mod tests {
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
-        assert_eq!(config.step_agents, None);
+        assert_eq!(
+            config.step_agents,
+            Some(HashMap::from([(
+                "implement".to_string(),
+                "claude:sonnet".to_string(),
+            )]))
+        );
     }
 
     #[test]

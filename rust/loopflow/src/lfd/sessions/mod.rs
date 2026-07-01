@@ -299,6 +299,7 @@ impl SessionManager {
                     compact: config.client_compact.unwrap_or(false),
                 },
                 related_repos,
+                operate: false,
             },
         )
         .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;

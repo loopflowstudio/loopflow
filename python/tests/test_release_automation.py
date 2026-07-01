@@ -405,13 +405,10 @@ def test_release_schedule_contract_covers_loopflow_and_cadenza():
     assert weekly["jobs"]["release"]["permissions"]["actions"] == "write"
     assert weekly["jobs"]["release"]["permissions"]["pull-requests"] == "write"
 
-    commands = "\n".join(
-        step.get("run", "") for step in weekly["jobs"]["release"]["steps"]
-    )
+    commands = "\n".join(step.get("run", "") for step in weekly["jobs"]["release"]["steps"])
     release_steps = weekly["jobs"]["release"]["steps"]
     assert any(
-        step.get("uses") == "dopplerhq/secrets-fetch-action@v2.0.0"
-        for step in release_steps
+        step.get("uses") == "dopplerhq/secrets-fetch-action@v2.0.0" for step in release_steps
     )
     assert "cargo build --release -p loopflow --bin lf" in commands
     assert "lf op release run patch" in commands
@@ -433,8 +430,7 @@ def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
     assert build_dmg["timeout-minutes"] == "45"
     assert "python3 -u scripts/release-concerto.py" in commands
     assert any(
-        step.get("name") == "Build, sign, and notarize DMG"
-        and step.get("timeout-minutes") == "35"
+        step.get("name") == "Build, sign, and notarize DMG" and step.get("timeout-minutes") == "35"
         for step in steps
     )
     assert any(

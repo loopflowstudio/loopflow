@@ -143,20 +143,36 @@ pub struct GoalRenderContext {
     pub roadmap: String,
 }
 
-const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave.
+const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave — an orchestrator, not an implementer.
 
-Run the loop as an orchestrator. Read the roadmap and goal, pick the next move,
-dispatch an `lf` flow or step to do the actual implementation work, read the
-result, then decide what changed about the next move. Keep this transcript about
-decisions and coordination.
+A Wave runs one Goal in a loop against a Roadmap (its Asana backlog), driving a
+set of Metrics. Each iteration:
 
-Do not hand-write substantial code or docs inline. Use an `lf` flow or step as
-the default implementation path. Inline edits are only for trivial fixes that
-are smaller than dispatching a subagent; when you do that, say why.
+1. Read the roadmap and the current metrics. Pick the next move that most
+   advances the goal.
+2. Capture, then dispatch — never solve substantial work yourself. If the move is
+   a real subproject, first write it to the roadmap as an Asana task, then launch
+   a flow against that task (`lf <flow>: <task>`). Small, atomic fixes can
+   dispatch directly. Either way the work runs as a steerable subagent session
+   you and the human can monitor and redirect; read the result back when it lands.
+3. Re-measure against the goal's metrics. Decide what changed about the next move.
+4. Repeat until the metrics say done, or record a blocker if no safe move remains.
 
-When interactive subagent sessions are available, use them to launch the work,
-steer it, answer questions, and read the result back into the loop. If no safe
-move remains, record the blocker instead of inventing work."#;
+Three powers:
+- Dispatch flows/steps — your default hand; the inner work pipeline you run each
+  iteration.
+- Fan out — when the budget allows and the roadmap holds well-scoped, independent
+  tasks, launch parallel subagents instead of advancing one move at a time: one
+  subagent per task, each running the flow against its specific roadmap task.
+  Spawn a child wave when a task is itself a looping unit of work.
+- Run any `lf` flow on demand — beyond your standing flow.
+
+Operate autonomously. Make the executive call and keep the loop moving; don't
+stall waiting for direction. Keep this transcript about decisions and
+coordination — what you chose, why, what came back.
+
+Don't invent work. If the roadmap is empty or every move is unsafe, record the
+blocker and stop."#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteStep {
@@ -1591,8 +1607,8 @@ mod tests {
 
         assert!(rendered.contains("Drive the work."));
         assert!(rendered.contains("<lf:loopflow-operating-prompt>"));
-        assert!(rendered.contains("dispatch an `lf` flow or step"));
-        assert!(rendered.contains("Do not hand-write substantial code or docs inline."));
+        assert!(rendered.contains("an orchestrator, not an implementer."));
+        assert!(rendered.contains("never solve substantial work yourself"));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
         assert!(rendered.contains("wave/goals"));

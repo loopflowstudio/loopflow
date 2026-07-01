@@ -311,7 +311,7 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
-    /// Voice/tone guidance — resolved from user ~/.lf/ > repo .lf/ > builtin.
+    /// Voice/tone guidance resolved from user ~/.lf/ or repo .lf/.
     pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,

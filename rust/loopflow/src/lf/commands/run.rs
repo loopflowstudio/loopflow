@@ -250,10 +250,10 @@ fn should_launch_via_skill(step_name: &str) -> bool {
     !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
 }
 
-/// Build the launch seed for a vendor skill handoff: the skill invocation, the surface
-/// run-mode preamble, and the voice doc. Orientation now lives in the step
-/// bodies themselves, and the step body loads from the synced skill on invoke,
-/// so this stays small enough for the GUI deep-link cap.
+/// Build the launch seed for a vendor skill handoff: the skill invocation,
+/// system-safe instruction sections, and optional user message. Orientation now
+/// lives in the step bodies themselves, and the step body loads from the synced
+/// skill on invoke, so this stays small enough for the GUI deep-link cap.
 ///
 /// The invocation sigil is harness-specific: Codex's interactive composer
 /// reserves `/` for built-in commands, so skills fire with `$name` there (and
@@ -267,17 +267,17 @@ fn skill_launch_seed(
     operate: bool,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
-    let mut seed = format!("{sigil}{step_name}\n\n{}", surface.instructions());
-    if operate {
-        seed.push_str("\n\n<lf:operate>\n");
-        seed.push_str(crate::engine::builtins::OPERATE_DOC);
-        seed.push_str("\n</lf:operate>");
-    }
-    if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
-        seed.push_str("\n\n<lf:voice>\n");
-        seed.push_str(voice);
-        seed.push_str("\n</lf:voice>");
-    }
+    let system_components = PromptComponents {
+        surface,
+        voice_doc: voice
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        operate,
+        ..Default::default()
+    };
+    let system_sections = crate::engine::prompt::format_system_sections(&system_components);
+    let mut seed = format!("{sigil}{step_name}\n\n{}", system_sections.join("\n\n"));
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
         seed.push_str(message);
@@ -510,17 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn skill_launch_seed_starts_with_slash_step_and_surface() {
+    fn skill_launch_seed_starts_with_slash_step_surface_and_interactive_voice() {
         let seed = skill_launch_seed(
             "claude",
-            Surface::Headless,
+            Surface::Cli,
             "implement",
             Some("build auth"),
             Some("Be terse."),
             false,
         );
         assert!(seed.starts_with("/implement\n\n"));
-        assert!(seed.contains("Run mode is headless"));
+        assert!(seed.contains("Run mode is interactive"));
         assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
         // Orientation now lives in the step body, not the seed.
         assert!(!seed.contains("<lf:orientation>"));
@@ -543,6 +543,20 @@ mod tests {
         assert!(!seed.contains("<lf:operate>"));
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_omits_voice_for_headless_surface() {
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            Some("Be terse."),
+            false,
+        );
+        assert!(seed.contains("Run mode is headless"));
+        assert!(!seed.contains("<lf:voice>"));
     }
 
     #[test]

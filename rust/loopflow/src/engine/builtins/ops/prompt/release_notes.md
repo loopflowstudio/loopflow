@@ -4,10 +4,10 @@ Do not ask questions. Make best-effort assumptions and proceed.
 
 ## Workflow
 
-1. Read the PR list below. Note diff stats — PRs with 100+ additions are major changes.
-2. Find connections between PRs. Which ones are part of the same story?
-3. For major changes (100+ lines added), run `git diff <prev_tag>..HEAD -- <relevant paths>` to understand what actually changed. The PR title and body are a summary — the diff is ground truth.
-4. Write the release notes.
+1. Read the structured release context. Use release decisions as the intent ledger and PRs/diffs as the behavior ledger.
+2. Find the through-line: which decisions explain why these changes belong in one release?
+3. For major changes or unclear PRs, run `git diff <prev_tag>..HEAD -- <relevant paths>` to verify what actually shipped.
+4. Write the release notes as an interpreted story grounded in shipped behavior.
 
 ## Output format
 
@@ -16,25 +16,26 @@ Raw markdown only. No JSON, no code fences wrapping the output.
 First line must be exactly: `# v{version}`
 
 Structure:
-1. **Opening** — 2-3 sentences answering "why upgrade?" Not a list. Not "This release includes..." Tell the story.
-2. **Thematic sections** — named after what actually changed in this release. Not "Improvements" or "Bug fixes" — names like "Sandbox execution", "Release workflow", "CLI ergonomics". Each section has a prose paragraph connecting the changes, followed by detail bullets for scanners.
-3. **Small changes** — group minor fixes and tweaks at the end under a single section.
+1. **Opening** — 2-4 sentences answering “why upgrade?” Tell the release story.
+2. **Thematic sections** — named after user/operator outcomes, not implementation buckets. Each section has a prose paragraph connecting intent to behavior, followed by detail bullets for scanners.
+3. **Operational notes** — only when relevant: deployment, release process, migration, billing, TestFlight, compatibility, or manual steps.
+4. **Small changes** — group minor fixes and tweaks at the end.
 
 ## Theming
 
-Theme names come from the changes, not a template. Read the PRs and find what they're about.
+Theme names come from the release, not a template. Read decisions first, then PRs and diffs. Use decisions to understand intent; use commits and diffs to prove what shipped.
 
 When target context is provided (target name, tag prefix, area scope), include only changes relevant to that scope.
 
 ## Style
 
-Lead with outcomes, not mechanisms. What can users do now? What got better?
+Lead with outcomes, not mechanisms.
 
-Good: "`lf op next` now starts fresh from main after merged PRs — no manual cleanup"
-Bad: "Refactored release.rs to extract helper functions"
+Good: “`lf op release run` now turns release decisions into versioned notes and archives the ledger for audit.”
+Bad: “Updated release.rs and release_notes.md.”
 
-Skip internal refactors unless they affect what users experience.
+Do not paste `DECISIONS.md` wholesale. Do not dump PR titles verbatim. The release notes are the synthesis; the ledger remains archived separately.
 
-Each thematic section: prose paragraph first (what's the story?), then bullets (what specifically changed?). The prose connects related PRs into a narrative. The bullets give scanners the detail.
+Skip internal refactors unless they affect what users experience or how operators run the system.
 
-If previous release notes are provided below, match their voice and density.
+If previous release notes are provided below, match their voice and density while keeping this release concise.

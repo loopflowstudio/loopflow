@@ -252,12 +252,10 @@ pub fn release_notes(
     progress.status("Collecting merged PRs...");
     let prs = merged_prs_since(&main_repo, &resolved_prev_tag, &target)?;
 
-    progress.status("Generating release notes...");
-    let notes = generate_release_notes(&prs, &version, &resolved_prev_tag, &target)?;
+    progress.status("Generating narrative release notes...");
+    run_release_notes_step(&main_repo, &version, &resolved_prev_tag, &prs, &target)?;
 
-    progress.status("Writing RELEASE_NOTES.md...");
-    write_release_notes(&main_repo, &notes, &version)?;
-
+    let notes = fs::read_to_string(main_repo.join("RELEASE_NOTES.md"))?;
     Ok(notes)
 }
 

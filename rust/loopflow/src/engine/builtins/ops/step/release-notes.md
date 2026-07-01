@@ -3,24 +3,51 @@ requires: LF_RELEASE_NOTES_CONTEXT env var pointing to JSON release context
 produces: RELEASE_NOTES.md
 diff_files: false
 ---
-Write narrative release notes from structured release context.
+Write release notes that fuse release intent with shipped behavior.
 
 ## Workflow
 
 1. Read `LF_RELEASE_NOTES_CONTEXT` and parse the JSON.
-2. If `decisions` is present, treat it as primary source — the agent-authored ledger of intent decisions made during this cycle. Use its themes, voice, and framing. PRs in `merged_prs` are supplementary: use them to fill gaps and surface mechanical changes that weren't logged as decisions.
-3. If `decisions` is absent or empty, fall back to `merged_prs` as the primary source.
-4. Keep the previous release-note voice if `previous_release_notes` exists.
-5. Write `RELEASE_NOTES.md` with:
-   - `# v<version>` header
-   - "Changes since `<prev_tag>`" section
-   - themed sections grouping by what users feel, not what code changed
-   - concise bullets with concrete impact
+2. Treat `decisions` as the intent ledger: what changed in product direction, release policy, operations, and user experience during this cycle.
+3. Treat `merged_prs` and, when needed, `git diff <prev_tag>..HEAD`, as the behavior ledger: what actually shipped.
+4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
+5. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
+6. Write `RELEASE_NOTES.md`.
 
-## Guardrails
+## Output
 
-- Decisions describe intent; PRs describe diffs. Lead with intent.
-- Don't dump PR titles verbatim — rephrase for users.
-- Prefer clear themes over chronological lists.
-- Keep language specific and factual; no marketing filler.
-- Always overwrite `RELEASE_NOTES.md` with the new version's notes.
+Raw markdown only. No JSON. No code fence wrapping the output.
+
+First line must be exactly:
+
+```markdown
+# v<version>
+```
+
+Structure:
+
+1. **Opening story** — 2-4 sentences. Answer “why upgrade?” and name the through-line of the release. This is narrative, not a list.
+2. **Thematic sections** — sections named after user/operator outcomes, not implementation buckets. Each section starts with a short paragraph connecting the decisions to the shipped behavior, followed by concise bullets for scanners.
+3. **Operational notes** — include only when relevant: release process, deployment, migration, billing, TestFlight, compatibility, or known manual steps.
+4. **Small changes** — minor fixes and polish that do not deserve a full theme.
+
+## Source handling
+
+- Decisions are source material, not release notes. Do not paste the ledger wholesale.
+- PR titles are source material, not release notes. Do not dump them chronologically.
+- If decisions and commits disagree, trust the commits for what shipped and use decisions to explain why.
+- If decisions mention future work that did not ship, either omit it or mark it clearly as “not included.”
+- If there are no decisions, build the narrative from merged PRs and diffs.
+- If there are decisions but no matching shipped behavior, keep the note cautious: describe the policy/intent change, not an implementation that is absent.
+
+## Style
+
+- Lead with outcomes, not mechanisms.
+- Be specific and factual. No marketing filler.
+- Prefer a few strong themes over many headings.
+- Write for the person deciding whether to upgrade and the operator debugging the release six weeks later.
+- Keep the decision ledger archived under `release/v<version>/DECISIONS.md`; `RELEASE_NOTES.md` should be the interpreted story.
+
+## Quality bar
+
+A good release note could not be generated from PR titles alone. It carries the intent from `DECISIONS.md`, proves it against shipped changes, and leaves a concise operational record.

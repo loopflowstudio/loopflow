@@ -1,78 +1,25 @@
-# v0.9.11
+# v0.9.12
 
-Loopflow 0.9.11 picks a side: it is the orchestration layer above the agent vendors, not a chat client. The native session UI and the mobile-as-an-app surface come out; interactive work hands off to Claude Code, Codex, and opencode in their own surfaces. Steps become vendor Skills instead of a 100KB assembled prompt. Release automation goes self-hosted end to end, and the desktop app ships as **Loopflow**.
+A maintenance release aimed inward, at the machinery that builds, updates, and ships loopflow. Local development and the native Mac host now share one update command instead of two drifting scripts. The DMG release job can no longer hang the pipeline silently. And release notes — including this one — are now written by interpreting the decision ledger against what actually shipped. Nothing here changes the product surface; it makes that surface easier to keep current and to release.
 
-Changes since `v0.9.10`.
+## One update path for local and native hosts
 
-## Loopflow is the layer above
+Local dev and the native Mac `lfd` host had grown two implementations of the same operation: pull the default branch, rebuild `lf`/`lfd`, install them into a local bin dir. Two copies meant two things to test and a standing risk that the Mac host would drift from the developer path. This cycle collapses them onto one. `scripts/install.py` now owns local installation end to end, and the native host updater calls it directly.
 
-The recurring temptation was to reimplement the vendors' own session UIs — a native chat client, a mobile pairing flow, an lfd layer that parsed Claude/Codex streams into our event model. That work doesn't compound: the vendors ship better chat, IDE, and mobile clients than we will, and faster. So Loopflow steps back to the orchestration layer and runs headless agent work; when a human drives a session, it happens in the vendor's surface.
+- **`install.py refresh` is the fast CLI-only update** — pulls the default branch (fast-forward only, and it refuses to pull a non-default branch), rebuilds `lf`/`lfd`, installs them atomically. `--no-pull` and `--install-dir` are there when you need them.
+- **`install.py local --use` stays the full build-and-promote path** for `lf`, `lfd`, and `Loopflow.app`.
+- **`deploy/native-lfd-host.sh` updates via `install.py refresh`**, so the Mac host and a developer's laptop run the same code.
+- **`scripts/pull-local-bin.sh` is now a thin wrapper** that delegates to `install.py refresh` — existing callers keep working; new docs point at `install.py`.
 
-- **Sessions launch in the vendor's app** — a plain `lf <step>` opens a fresh session directly in Claude Code or Codex when configured that way. Terminal-first; Concerto is just another caller
-- **Embedded terminal stays** — a tmux pane running the vendor's own TUI inside Concerto. Concerto frames it; the vendor renders it
-- **Bounce to the vendor's IDE** — open the worktree in VS Code / Cursor / JetBrains where the vendor's extension runs the session
-- **Native chat UI and the session-hosting harness removed** — the SwiftUI chat client and the ~7,800-line `lfd/sessions/harness` stream-parser are gone; they existed only to feed a UI we're no longer building
-- **Mobile-as-an-app archived** — the iOS target, `lf op pair`, pairing tokens, and remote-lfd-for-phone infra are dropped. Mobile happens through the vendors' own mobile apps. Concerto stays the macOS surface, raised a layer: wave monitoring plus the frame around vendor TUIs
+## A release pipeline that fails fast and explains itself
 
-## Steps become vendor Skills
+Two changes harden how a release actually gets out the door. The DMG job could hang indefinitely on a stuck subprocess and spin until the workflow-level limit with no signal why; now every external step is bounded and logs are unbuffered, so a stuck step fails fast with a clear message. Separately, the release-note step was rebuilt around the split this document is written to: `DECISIONS.md` carries intent, merged PRs and diffs carry shipped behavior, and the note interprets one against the other.
 
-Every path to "inject our context at launch" was blocked at once — argv truncation, Claude's competitor-mention guard on system prompts, and ~5KB caps on GUI deep links. Both vendors had already shipped the same answer for reusable instructions: **Skills** (the open `SKILL.md` standard, loaded progressively). So loopflow stops assembling a prompt for handoffs. The execution model becomes files on disk plus a tiny seed.
+- **DMG build hangs are bounded** — `build-dmg` gets a 45-minute cap plus tighter per-step limits (35m build/sign/notarize, 30m `notarytool --wait`, 20m cargo/swift, 10m dmg creation, 5m codesign/staple, 5m R2 upload). The release script runs with `python3 -u` and flushed logging, so CI progress is visible as it happens instead of after the fact.
+- **Release notes fuse intent and behavior** — the `release-notes` step treats decisions as the *why* and commits as the *what shipped*, producing an outcome-oriented story (opening → thematic sections → operational notes → small changes). The raw ledger stays archived under `release/v<version>/DECISIONS.md`.
+- **`lf op release notes` and `lf op release run` share one step** — standalone notes, weekly releases, and repo consumers like Cadenza now use the same prompt contract instead of each embedding its own note writer.
 
-- **A sync emits each step as a `SKILL.md`** into `.claude/skills/` and `.agents/skills/` at repo and global scope. Bodies stay out of context until the step fires; generated skills carry a provenance marker so re-sync prunes safely
-- **The seed is just `"<surface preamble> /step"`** — the only per-run injection. Identical headless and interactive, save the run-mode preamble. Verified to fire under headless `claude -p` and `codex exec`, not only interactively
-- **Harness-aware sigil** — `$step` for Codex (works in both `exec` and the interactive composer), `/step` for Claude
-- **Ambient context moves to disk** — repo conventions, voice, and orientation live in `AGENTS.md` / `CLAUDE.md`, auto-loaded by the vendor. The agent reads `scratch/` and `wave/` on demand; we point, we don't dump
-- **Directions removed as a first-class concept** — with no assembled prompt, a direction had no delivery vehicle. The `-d/--direction` flag, config field, wave key, loader, and `builtins/directions/` are gone; the perspective text was redistributed into the relevant step bodies. The wave model simplifies from area × direction × flow to **area × flow**
-- **`LOOPFLOW.md` leaves the product** — the operating manual is no longer injected into every session. It now lives in loopflow's own agent doc, loaded only when working on loopflow itself
+## Operational notes
 
-## Self-hosted release automation
-
-Release and cron automation had been drifting toward a private studio-hosted shape, with infrastructure living outside the repo. 0.9.11 reverses that: the release server is inspectable, reproducible, and maintainable from loopflow itself.
-
-- **Self-hosted by default** — the public repo carries the runnable container and deployment shape; Doppler supplies secrets. Studio discovery is removed, not assumed
-- **Studio auth deleted** — daemon registration and hosted discovery are gone. Remote `lfd` access is self-hosted bearer-token auth only; each repo owns its deploy config
-- **Nightly verification, weekly release** — nightly package checks prove artifacts without deploying (`0 9 * * *` UTC); weekly publishing is gated by that verification (`0 12 * * 0` UTC). Loopflow and Cadenza run carbon-copy schedules
-- **Native launchd `lfd` is the default Mac host path** — Docker Desktop's launchd/PATH/credential-helper friction made the container stack a poor first step on macOS. `deploy/native-lfd-host.sh` centers the Mac runbook; Compose stays an explicit option for Linux and isolation needs
-- **Cron host bootstrap, scheduled host updates, and native service env** — `lfd` persists its launchd environment, schedules its own updates, and keeps native tokens out of plists
-- **Monthly spend guardrails** — stdlib-only cost tracking; automation spend over $100/month is the gate that needs a human
-- **`wave/release/`** — owns daily verification, weekly publishing, cron-host infra, local-updater freshness, and cross-repo release parity
-
-## The desktop app is Loopflow
-
-The macOS app shipped as "Loopflow Concerto," but the product users actually use is Loopflow; Concerto was always the internal nickname.
-
-- **Every user-facing surface renamed** — app bundle (`Loopflow.app`), display name, DMG volume and download keys (`Loopflow-<version>.dmg`, `Loopflow-latest.dmg`), and in-app titles
-- **Concerto stays the dev nickname** — the Swift target, the bundle id `com.loopflow.concerto` (preserving granted TCC permissions and deep-link registration), and the debug `Concerto Dev.app` are unchanged
-- **Version stamped from the release tag** — the app now reports the same version as `lf --version` instead of a frozen `1.0`
-
-## One local build per worktree
-
-Three overlapping install paths all wrote to global locations, so sibling worktrees fought over the same `lf` and the same `/Applications` app.
-
-- **`scripts/install.py local` is the single entry** — builds this worktree's `lf`, `lfd`, and `Loopflow.app` into a gitignored `<worktree>/local-bin/`, isolated per worktree
-- **`--use` promotes a build** — symlinks `~/.local/bin/{lf,lfd}` to the worktree and copies its `Loopflow.app` to `/Applications`. Symlinked binaries mean rebuilds take effect with no re-promote; switching active worktrees is one `install.py local --use`
-- **The desktop app is a first-class release artifact** alongside `lf`/`lfd`. `pull-local-bin.sh` stays the CLI-only quick path and now ignores pull config
-
-## Concerto navigation
-
-- **Deep-link and menu navigation** — open a repo or portfolio directly from a deep link or the menu bar
-- **Window-scoped wave snapshots** — the connected wave snapshot is scoped to the window's repo, so multiple windows don't cross-contaminate
-- **`concerto-dev --repo`** — launch the debug build straight into any repo
-
-## Vocabulary: Wave → Loop
-
-A design pass settled the MVP nouns: **Loopflow** (product) → **Loop** (an always-running, steerable session aligned to a **Goal**) → **Worker** (a hosted tmux session running one Flow on one Task) → **Flow** → **Step**. "Loop" says what the thing is and it's the word in the product name, so it supersedes the earlier "keep Wave" call. The rename is wide — API, `wave/` dirs, Concerto UI, DTOs, config keys, goldens — and lands as its own migration; 0.9.11 fixes the vocabulary, not the rename.
-
-## Fixes and maintenance
-
-- **Cross-worktree git sync** — checked-out default branches stay in sync across worktrees, and `sync_main` no longer reverts just-merged work on overlapping paths
-- **`lfd` sqlite health checks** fixed
-- **Installer tolerates `--no-interactive`** in shell installs
-- **gstack bundled as a namespaced builtin** — simpler step discovery, third-party content isolated from local steps
-- **Wave reorg** — 13 waves collapsed into root / desktop / mobile / workflows, then the release wave added on top
-- **`lf op pr -m/--model`** — agent override for the PR step
-- **Voice update** — checkpoint-and-proceed for reversible work, plus design-stage framing
-- **token-compress step** — context compression, with release-note commits grouped
-- **Public website imported** and deployed from loopflow
-- **Hashimoto-style review ritual** — a standing quality lens (simplicity, operations, API shape, deletable complexity) run before any unit of work is called done
-- **Dependabot automation and dependency bumps** — auto-enable squash merge on open, close PRs only on required-check failure, and routine Rust/Python/Swift/Actions updates across the cycle
+- Deploy scripts and docs that referenced `pull-local-bin.sh` still work through the wrapper, but should migrate to `scripts/install.py refresh`.
+- No config, DTO, or schema changes this cycle; upgrading is a rebuild.

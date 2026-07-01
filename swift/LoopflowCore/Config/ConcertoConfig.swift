@@ -18,13 +18,15 @@ public struct ExtraMount: Codable, Equatable {
 public struct RemoteConnectionConfig: Codable {
     public var host: String
     public var port: Int
+    public var token: String?
 
     public func toServerConnection() -> ServerConnection {
         ServerConnection(
             host: host,
             port: port,
             useTLS: true,
-            authMode: .staticToken
+            authMode: .staticToken,
+            staticToken: token
         )
     }
 
@@ -78,6 +80,7 @@ private func parseConnectionConfig(_ lines: [String]) -> RemoteConnectionConfig?
 
     var host: String?
     var port: Int?
+    var token: String?
 
     for line in section {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -94,6 +97,9 @@ private func parseConnectionConfig(_ lines: [String]) -> RemoteConnectionConfig?
             host = unquote(value)
         case "port":
             port = Int(unquote(value))
+        case "token":
+            let parsed = unquote(value)
+            token = parsed.isEmpty ? nil : parsed
         default:
             break
         }
@@ -103,7 +109,7 @@ private func parseConnectionConfig(_ lines: [String]) -> RemoteConnectionConfig?
         return nil
     }
 
-    return RemoteConnectionConfig(host: host, port: port)
+    return RemoteConnectionConfig(host: host, port: port, token: token)
 }
 
 private func parseContainerConfig(_ lines: [String]) -> ContainerConfig? {

@@ -23,6 +23,27 @@ struct ConcertoConfigTests {
         #expect(connection.port == 443)
         #expect(serverConnection.useTLS)
         #expect(serverConnection.authMode == .staticToken)
+        #expect(connection.token == nil)
+        #expect(serverConnection.staticToken == nil)
+    }
+
+    @Test("parses token into the server connection")
+    func parsesTokenIntoServerConnection() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        connection:
+          host: mini.tailnet.ts.net
+          port: 443
+          token: "abc123secret"
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let connection = try #require(config.connection)
+
+        #expect(connection.token == "abc123secret")
+        #expect(connection.toServerConnection().staticToken == "abc123secret")
     }
 
     @Test("returns nil when config file is missing")

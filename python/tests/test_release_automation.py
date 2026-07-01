@@ -219,6 +219,12 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
         text=True,
         capture_output=True,
     )
+    tailscale_host_help = subprocess.run(
+        [str(ROOT / "deploy/tailscale-lfd-host.sh"), "--help"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
 
     assert "up|update|down|status|logs|health" in help_result.stderr
     assert "LOOPFLOW_SECRETS=auto|doppler|env" in help_result.stderr
@@ -236,6 +242,10 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     )
     assert "LFD_HTTP_ADDR=0.0.0.0:2486" in native_host_help.stderr
     assert "LFD_AUTH_TOKEN_FILE=~/.lf/lfd-token" in native_host_help.stderr
+    assert "tailscale-lfd-host.sh" in tailscale_host_help.stderr
+    assert "serve-off" in tailscale_host_help.stderr
+    assert "TS_HTTPS_PORT=443" in tailscale_host_help.stderr
+    assert "serve              Internal launchd entrypoint" not in tailscale_host_help.stderr
 
     readme = (ROOT / "deploy/README.md").read_text()
     assert "doppler secrets set LFD_AUTH_TOKEN" in readme
@@ -252,6 +262,8 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "lfq create root /opt/loopflow" in readme
     assert "deploy/PRIVATE_HOST.md" in readme
     assert "claude,codex,ssh" in readme
+    assert "deploy/tailscale-lfd-host.sh install" in readme
+    assert "https://<host>.<tailnet>.ts.net" in readme
 
     private_readme = (ROOT / "deploy/PRIVATE_HOST.md").read_text()
     assert "<tailscale-host-or-ip>" in private_readme
@@ -312,6 +324,13 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
         "LFD_AUTH_TOKEN or readable LFD_AUTH_TOKEN_FILE is required "
         "for native private lfd host management"
     ) in native_host
+
+    tailscale_host = (ROOT / "deploy/tailscale-lfd-host.sh").read_text()
+    assert 'export LFD_HTTP_ADDR="127.0.0.1:${port}"' in tailscale_host
+    assert '"$ts" serve --bg --https="$https_port" "http://127.0.0.1:${port}"' in tailscale_host
+    assert '"$ts" serve --https="$https_port" off' in tailscale_host
+    assert 'install | install-update-agent | update | restart | status | logs | health | serve-off)' in tailscale_host
+    assert 'install | install-update-agent | update | restart | status | logs | health | serve | serve-off)' not in tailscale_host
 
     private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
     assert "Host is required. Pass --host or set LFD_HOST." in private_client

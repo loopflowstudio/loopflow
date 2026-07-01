@@ -108,6 +108,44 @@ struct ConnectionStoreTests {
         #expect(reloaded.activeConnection.host == "lfd.example.com")
     }
 
+    @Test("concerto config token takes priority and rotates")
+    func concertoConfigTokenTakesPriorityAndRotates() {
+        let defaults = makeDefaults()
+        let connection = ServerConnection(
+            host: "lfd.example.com",
+            port: 443,
+            useTLS: true,
+            authMode: .staticToken,
+            staticToken: "stale-token"
+        )
+        var config = remoteConfig(host: "lfd.example.com", token: "fresh-token")
+        let store = makeStore(defaults: defaults, configLoader: { config })
+
+        #expect(store.token(for: connection) == "fresh-token")
+
+        config = remoteConfig(host: "lfd.example.com", token: "rotated-token")
+
+        #expect(store.token(for: connection) == "rotated-token")
+    }
+
+    @Test("concerto config token only applies to matching connection")
+    func concertoConfigTokenRequiresMatchingConnection() {
+        let defaults = makeDefaults()
+        let connection = ServerConnection(
+            host: "other.example.com",
+            port: 443,
+            useTLS: true,
+            authMode: .staticToken,
+            staticToken: "connection-token"
+        )
+        let store = makeStore(
+            defaults: defaults,
+            config: remoteConfig(host: "lfd.example.com", token: "config-token")
+        )
+
+        #expect(store.token(for: connection) == "connection-token")
+    }
+
     @Test("loopback concerto config is ignored")
     func ignoresLoopbackConcertoConfig() {
         for host in ["localhost", "127.0.0.1", "::1", " LOCALHOST "] {
@@ -128,10 +166,14 @@ struct ConnectionStoreTests {
     }
 
     private func makeStore(defaults: UserDefaults, config: ConcertoConfig? = nil) -> ConnectionStore {
-        ConnectionStore(defaults: defaults, configLoader: { config })
+        makeStore(defaults: defaults, configLoader: { config })
     }
 
-    private func remoteConfig(host: String) -> ConcertoConfig {
-        ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: 443))
+    private func makeStore(defaults: UserDefaults, configLoader: @escaping () -> ConcertoConfig?) -> ConnectionStore {
+        ConnectionStore(defaults: defaults, configLoader: configLoader)
+    }
+
+    private func remoteConfig(host: String, token: String? = nil) -> ConcertoConfig {
+        ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: 443, token: token))
     }
 }

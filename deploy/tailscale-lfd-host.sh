@@ -83,16 +83,27 @@ serve_off() {
 }
 
 command=""
-for arg in "$@"; do
+args=("$@")
+index=0
+while [[ "$index" -lt "${#args[@]}" ]]; do
+    arg="${args[$index]}"
     case "$arg" in
-        install | install-update-agent | update | restart | status | logs | health | serve | serve-off)
+        install | install-update-agent | update | restart | status | logs | health | serve-off)
             command="$arg"
+            ;;
+        --repo | --install-dir)
+            index=$((index + 1))
+            ;;
+        --repo=* | --install-dir=*)
             ;;
         -h | --help)
             usage
             exit 0
             ;;
+        -*)
+            ;;
     esac
+    index=$((index + 1))
 done
 
 if [[ -z "$command" ]]; then

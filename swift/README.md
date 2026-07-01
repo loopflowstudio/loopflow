@@ -246,9 +246,10 @@ On first launch (before any saved connection settings), Concerto also checks `~/
 connection:
   host: lfd.example.com
   port: 443
+  token: "paste-token-here"
 ```
 
-If present, it seeds remote mode from that host/port (TLS + static-token auth) and reads the token from Keychain via the existing `<host>:<port>` account mapping.
+If present, it seeds remote mode from that host/port (TLS + static-token auth). When `token` is set, Concerto reads it fresh from the file for matching host/port requests so token rotation does not require re-pasting through Settings. Without `token`, Concerto falls back to Keychain via the existing `<host>:<port>` account mapping.
 
 In bundled mode, Settings also supports optional CLI symlink install for `lf` + `lfd` (for `~/.local/bin` or `/usr/local/bin`).
 

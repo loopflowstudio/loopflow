@@ -51,6 +51,10 @@ REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
 DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
+# Dev build runs under its own bundle id so it never shares connection settings
+# (UserDefaults/keychain) with the installed Concerto. Worktree dev stays on the
+# local bundled lfd; the installed app keeps its own (e.g. Mac Mini) connection.
+DEV_BUNDLE_ID = "com.loopflow.concerto.dev"
 R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
@@ -955,6 +959,7 @@ def _install_dev_app() -> None:
 
     shutil.copy(SWIFT_DIR / ".build" / "debug" / "Concerto", app_dir / "MacOS")
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
+    _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS", profile="debug")
@@ -965,6 +970,13 @@ def _install_dev_app() -> None:
         codesign_cmd += ["--entitlements", str(entitlements)]
     codesign_cmd.append(str(DEV_APP))
     run(codesign_cmd)
+
+
+def _apply_dev_identity(plist: Path) -> None:
+    """Rewrite the dev app's bundle id and name so it gets its own settings domain."""
+    run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
+    run(["plutil", "-replace", "CFBundleName", "-string", "Concerto Dev", str(plist)])
+    run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Concerto Dev", str(plist)])
 
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:

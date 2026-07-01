@@ -127,6 +127,8 @@ struct PortfolioWindow: View {
     }
 
     private func prepareConnectionIfNeeded() async {
+        // UI tests run against mock data; never start a daemon or reach a remote lfd.
+        if RepoState.uiTestMode() != nil { return }
         guard connectionStore.mode == .bundled else { return }
         if let current = SharedDaemon.currentConnection {
             connectionStore.setBundledRuntimeConnection(current)
@@ -141,6 +143,7 @@ struct PortfolioWindow: View {
     }
 
     private func syncRepoStates() async {
+        if RepoState.uiTestMode() != nil { return }
         if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
             return
         }
@@ -156,6 +159,7 @@ struct PortfolioWindow: View {
 
     private func startEventSubscription() async {
         guard eventService == nil else { return }
+        if RepoState.uiTestMode() != nil { return }
         if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
             return
         }

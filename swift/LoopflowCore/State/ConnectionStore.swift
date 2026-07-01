@@ -69,6 +69,7 @@ public final class ConnectionStore {
     private static let legacyDefaultsKey = "concerto.serverConnection.v1"
     private let secretStore: ConnectionSecretStore
     private let pinStore: CertificatePinStore
+    private let configLoader: () -> ConcertoConfig?
 
     public var mode: ConnectionMode
     public var activeConnection: ServerConnection
@@ -91,11 +92,12 @@ public final class ConnectionStore {
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
         defaults: UserDefaults = .standard,
-        configLoader: () -> ConcertoConfig?
+        configLoader: @escaping () -> ConcertoConfig?
     ) {
         self.secretStore = secretStore
         self.pinStore = pinStore
         self.defaults = defaults
+        self.configLoader = configLoader
 
         let initial = Self.loadInitialState(
             defaults: defaults,
@@ -147,7 +149,22 @@ public final class ConnectionStore {
     }
 
     public func token(for connection: ServerConnection) -> String? {
-        connection.staticToken ?? secretStore.token(for: connection)
+        configToken(for: connection) ?? connection.staticToken ?? secretStore.token(for: connection)
+    }
+
+    /// Token from `~/.lf/concerto.yaml` for a matching remote host, read fresh on
+    /// each call so a rotated token is picked up without re-pasting into the app.
+    /// Takes precedence over the keychain copy, which can go stale.
+    private func configToken(for connection: ServerConnection) -> String? {
+        guard let config = configLoader()?.connection,
+              config.host == connection.host,
+              config.port == connection.port,
+              let token = config.token,
+              !token.isEmpty
+        else {
+            return nil
+        }
+        return token
     }
 
     public func clearPinnedCertificate(for connection: ServerConnection? = nil) {

@@ -100,6 +100,24 @@ deploy/native-lfd-host.sh install
 
 The native install does not require Docker Desktop. It installs the `com.loopflow.lfd` service and `com.loopflow.lfd.update` nightly update agent. Both launchd jobs read the bearer token from `~/.lf/lfd-token` instead of embedding it in the plist.
 
+### HTTPS front (recommended for Tailscale)
+
+`tailscale-lfd-host.sh` wraps the native install: lfd binds loopback and `tailscale serve` terminates HTTPS in front of it, so clients connect with a real `*.ts.net` cert instead of plain http on the tailnet. lfd itself does not serve TLS, so the front is the only secure ingress.
+
+```bash
+# one-time: enable "HTTPS Certificates" for the tailnet
+#   https://login.tailscale.com/admin/dns
+
+export LFD_AUTH_TOKEN=$(openssl rand -hex 32)
+printf '%s\n' "$LFD_AUTH_TOKEN" > ~/.lf/lfd-token && chmod 600 ~/.lf/lfd-token
+
+deploy/tailscale-lfd-host.sh install      # lfd on 127.0.0.1:2486 + HTTPS front on :443
+deploy/tailscale-lfd-host.sh status       # lfd + `tailscale serve` status
+deploy/tailscale-lfd-host.sh serve-off    # remove the front (leaves lfd running)
+```
+
+Point Concerto at `https://<host>.<tailnet>.ts.net` (TLS on, port 443) with the bearer token from `LFD_AUTH_TOKEN`.
+
 Use the Docker Compose launchd path only when you explicitly want the container stack:
 
 ```bash

@@ -595,6 +595,7 @@ struct ParseWaveFromJSONTests {
             "repo": "/tmp/repo",
             "flow": "start",
             "goal": "ship-roadmap",
+            "metrics": [],
             "direction": ["ux"],
             "area": ["."],
             "status": "running",
@@ -634,6 +635,7 @@ struct ParseWaveFromJSONTests {
             "repo": "/tmp/repo",
             "flow": "start",
             "goal": "ship-roadmap",
+            "metrics": [],
             "status": "idle",
             "flow_steps": ["ingest", "kickoff"],
             "open_pr_count": 0

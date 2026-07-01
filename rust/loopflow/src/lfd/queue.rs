@@ -722,6 +722,7 @@ mod tests {
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),

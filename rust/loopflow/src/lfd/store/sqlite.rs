@@ -208,6 +208,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let direction_json = serde_json::to_string(wave.direction())?;
         let area_json = serde_json::to_string(wave.area())?;
+        let metrics_json = serde_json::to_string(wave.metrics())?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
@@ -234,6 +235,7 @@ impl SqliteStore {
                 wave.mode().as_str(),
                 wave.primary_flow(),
                 wave.goal(),
+                metrics_json,
             ],
         )?;
         Ok(())

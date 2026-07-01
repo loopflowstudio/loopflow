@@ -82,6 +82,7 @@ class Wave(BaseModel):
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
     goal: str
+    metrics: list[str]
     workers: int = 1
     direction: list[str]
     area: list[str]

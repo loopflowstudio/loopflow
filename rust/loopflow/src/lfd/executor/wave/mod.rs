@@ -133,6 +133,7 @@ fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, St
         &crate::engine::GoalRenderContext {
             flows: crate::engine::available_flow_names(repo),
             roadmap: format!("wave/{}", wave.name()),
+            metrics: wave.metrics().clone(),
         },
     );
     let cmd = build_lf_inline_command(
@@ -1260,6 +1261,7 @@ mod tests {
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1319,6 +1321,7 @@ mod tests {
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1506,6 +1509,7 @@ mod tests {
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],

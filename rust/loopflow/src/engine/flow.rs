@@ -141,6 +141,7 @@ pub struct Goal {
 pub struct GoalRenderContext {
     pub flows: Vec<String>,
     pub roadmap: String,
+    pub metrics: Vec<String>,
 }
 
 const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave — an orchestrator, not an implementer.
@@ -284,7 +285,10 @@ pub fn available_flow_names(repo: &Path) -> Vec<String> {
 
 pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
     if let Ok(goal_path) = find_goal_path(name, repo) {
-        let prompt = fs::read_to_string(goal_path)?;
+        let content = fs::read_to_string(goal_path)?;
+        let prompt = split_frontmatter(&content)
+            .map(|(_, body)| body)
+            .unwrap_or(content);
         return Ok(Goal { prompt });
     }
 
@@ -309,13 +313,23 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let metrics = if ctx.metrics.is_empty() {
+        "No metrics are configured.".to_string()
+    } else {
+        ctx.metrics
+            .iter()
+            .map(|metric| format!("- {metric}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
         LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
         flows,
-        ctx.roadmap
+        ctx.roadmap,
+        metrics
     )
 }
 
@@ -677,6 +691,11 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    let wave_goal = repo.join("wave").join(name).join("goal.md");
+    if wave_goal.exists() {
+        return Ok(wave_goal);
+    }
+
     if let Some((prefix, goal_name)) = name.split_once('/') {
         let repo_ns = markdown_path(&repo.join(".lf/goals").join(prefix), goal_name);
         if repo_ns.exists() {
@@ -1579,6 +1598,24 @@ mod tests {
     }
 
     #[test]
+    fn load_goal_prefers_wave_goal_md() {
+        let tmp = TempDir::new().unwrap();
+        let goals_dir = tmp.path().join(".lf/goals");
+        let wave_dir = tmp.path().join("wave/goals");
+        fs::create_dir_all(&goals_dir).unwrap();
+        fs::create_dir_all(&wave_dir).unwrap();
+        fs::write(goals_dir.join("goals.md"), "Repo goal prompt.").unwrap();
+        fs::write(
+            wave_dir.join("goal.md"),
+            "---\nmetrics:\n  - tests pass\n---\nWave goal prompt.",
+        )
+        .unwrap();
+
+        let goal = load_goal("goals", tmp.path()).unwrap();
+        assert_eq!(goal.prompt, "Wave goal prompt.");
+    }
+
+    #[test]
     fn load_goal_ignores_legacy_goal_paths() {
         let tmp = TempDir::new().unwrap();
         let singular_dir = tmp.path().join(".lf/goal");
@@ -1602,6 +1639,7 @@ mod tests {
             &GoalRenderContext {
                 flows: vec!["build".to_string(), "qa".to_string()],
                 roadmap: "wave/goals".to_string(),
+                metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
             },
         );
 
@@ -1612,6 +1650,8 @@ mod tests {
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
         assert!(rendered.contains("wave/goals"));
+        assert!(rendered.contains("- tests pass"));
+        assert!(rendered.contains("- docs updated"));
     }
 
     #[test]

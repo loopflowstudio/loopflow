@@ -799,7 +799,7 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
         if let Some(error) = error_body.errors.first() {
             if error.message.contains("Missing required `team` field") {
                 return format!(
-                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/<name>.yaml or `asana.default_team` in .lf/config.yaml."
+                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/goal.md frontmatter or `asana.default_team` in .lf/config.yaml."
                 );
             }
             return format!(

@@ -154,6 +154,7 @@ struct LocalWaveServiceAuthTests {
                       "area": [],
                       "flow": "ship-roadmap",
                       "goal": "ship-roadmap",
+                      "metrics": [],
                       "triggers": [],
                       "git": {
                         "worktree_path": "/tmp/repo.agent-embedding",

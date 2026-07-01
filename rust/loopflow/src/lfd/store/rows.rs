@@ -99,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, repo, direction, area, paused, status, iteration,
-///        cycle_start_iteration, created_at, workers, mode, primary_flow, goal
+///        cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(3)?)?;
     let area = parse_json_vec(&row.text(4)?)?;
@@ -113,6 +113,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
     let primary_flow = row.text(12)?;
     let goal = row.text(13)?;
+    let metrics = parse_json_vec(&row.text(14)?)?;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;
@@ -125,6 +126,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         mode,
         primary_flow,
         goal,
+        metrics,
         crons: Vec::new(),
         direction,
         area,

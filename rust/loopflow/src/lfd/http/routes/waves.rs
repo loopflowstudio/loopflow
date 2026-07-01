@@ -20,8 +20,10 @@ use crate::lfd::http::dto::{
     CombineResponseResult, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
     NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveCronDto, WaveDto,
 };
+#[cfg(test)]
+use crate::lfd::http::routes::wave_config::TriggerDef;
 use crate::lfd::http::routes::wave_config::{
-    read_wave_config, update_wave_agent_config, TriggerDef, WaveConfig, WaveCronDef,
+    read_wave_config, update_wave_agent_config, WaveConfig, WaveCronDef,
 };
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -144,6 +146,7 @@ pub struct AddTriggerRequest {
     max_iterations: Option<u32>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 struct ParsedTrigger {
     signal: Signal,
@@ -210,11 +213,6 @@ pub async fn create_wave_handler(
     let id = LfdId::new();
     let name = requested_name.unwrap_or_else(|| format!("wave-{}", id));
     let wave_config = read_wave_config(&repo_path, &name);
-    let config_trigger = wave_config
-        .as_ref()
-        .and_then(|config| config.triggers.as_ref())
-        .map(parse_trigger)
-        .transpose()?;
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
@@ -229,8 +227,6 @@ pub async fn create_wave_handler(
     if existing {
         return Err(wave_name_exists_error(&name));
     }
-    let wave_source_wave_id =
-        resolve_wave_source_wave_id(&state.store, &repo, &name, config_trigger.as_ref()).await?;
 
     let mode = wave_config
         .as_ref()
@@ -248,9 +244,11 @@ pub async fn create_wave_handler(
         .or_else(|| trimmed_non_empty(config_goal))
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let workers = create_wave_workers(requested_workers, serialized, wave_config.as_ref());
-    let cron_defs = requested_crons
-        .or_else(|| wave_config.as_ref().and_then(|c| c.crons.clone()))
+    let metrics = wave_config
+        .as_ref()
+        .and_then(|config| config.metrics.clone())
         .unwrap_or_default();
+    let cron_defs = requested_crons.unwrap_or_default();
     let crons = build_wave_crons(&id, &cron_defs)?;
 
     let mut wave = Wave {
@@ -260,6 +258,7 @@ pub async fn create_wave_handler(
         mode,
         primary_flow,
         goal,
+        metrics,
         crons: Vec::new(),
         direction,
         area,
@@ -291,15 +290,7 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
-    // Collect triggers: config-provided first, then defaults.
     let mut triggers: Vec<Trigger> = Vec::new();
-
-    if let Some(parsed) = config_trigger {
-        let mut s = Trigger::new(LfdId::new(), wave.id().clone(), parsed.signal);
-        s.source_wave_id = wave_source_wave_id.clone();
-        s.flow = parsed.flow;
-        triggers.push(s);
-    }
 
     // Every wave gets repo (rebase on main) and ci-fix unless config already covers them.
     for (signal, flow) in [(Signal::Repo, "integrate"), (Signal::CiFailure, "ci-fix")] {
@@ -372,6 +363,7 @@ async fn ensure_wave_workspace(
         })
 }
 
+#[cfg(test)]
 fn parse_trigger(trigger: &TriggerDef) -> Result<ParsedTrigger, (StatusCode, Json<ErrorResponse>)> {
     let signal = match trigger.signal.as_str() {
         "repo" => Signal::Repo,
@@ -483,6 +475,7 @@ fn update_wave_workers(
         .unwrap_or(current_workers)
 }
 
+#[cfg(test)]
 async fn resolve_wave_source_wave_id(
     store: &crate::lfd::store::SharedStore,
     repo: &str,
@@ -511,6 +504,7 @@ async fn resolve_wave_source_wave_id(
         .map(Some)
 }
 
+#[cfg(test)]
 async fn resolve_wave_id_in_repo(
     store: &crate::lfd::store::SharedStore,
     repo: &str,
@@ -1589,6 +1583,7 @@ mod tests {
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
@@ -1672,13 +1667,14 @@ mod tests {
     fn wave_trigger_schema_parses_source_and_source_repo() {
         let trigger = TriggerDef {
             signal: "wave".to_string(),
-            flow: None,
+            flow: Some("build".to_string()),
             source: Some("infra".to_string()),
             source_repo: Some("/tmp/source".to_string()),
         };
 
         let parsed = parse_trigger(&trigger).expect("parse trigger");
         assert_eq!(parsed.signal, Signal::Wave);
+        assert_eq!(parsed.flow.as_deref(), Some("build"));
         assert_eq!(parsed.source.as_deref(), Some("infra"));
         assert_eq!(parsed.source_repo.as_deref(), Some("/tmp/source"));
     }
@@ -1918,10 +1914,10 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("designer.yaml"),
-            "pm:\n  provider: asana\n  asana_project: '123'\n",
+            wave_dir.join("goal.md"),
+            "---\npm:\n  provider: asana\n  asana_project: '123'\n---\nDrive the work.\n",
         )
-        .expect("write wave config");
+        .expect("write wave goal");
         std::fs::write(wave_dir.join("1-something.md"), "# Something\n")
             .expect("write roadmap item");
 
@@ -2031,7 +2027,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_wave_uses_mode_from_wave_config() {
+    async fn create_wave_uses_intent_from_goal_md() {
         let state = test_http_state().await;
         let repo_tmp = tempdir().expect("tempdir");
         init_git_repo(repo_tmp.path());
@@ -2039,10 +2035,10 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("designer.yaml"),
-            "flow: build\nmode: manual\ndirection: [clarity]\narea: [src/]\n",
+            wave_dir.join("goal.md"),
+            "---\nprimary_flow: build\nmode: manual\ndirection: [clarity]\narea: [src/]\nmetrics:\n  - tests pass\n---\nDrive the work.\n",
         )
-        .expect("write wave config");
+        .expect("write wave goal");
 
         let Json(created) = create_wave_handler(
             State(state.clone()),
@@ -2065,8 +2061,10 @@ mod tests {
 
         assert_eq!(created.mode, "manual");
         assert_eq!(created.primary_flow, "build");
-        assert_eq!(created.direction, vec!["clarity".to_string()]);
-        assert_eq!(created.area, vec!["src/".to_string()]);
+        assert_eq!(created.goal, "designer");
+        assert_eq!(created.metrics, vec!["tests pass".to_string()]);
+        assert_eq!(created.direction, Vec::<String>::new());
+        assert_eq!(created.area, Vec::<String>::new());
     }
 
     #[tokio::test]
@@ -2099,7 +2097,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_wave_reads_crons_from_config() {
+    async fn create_wave_ignores_crons_from_goal_md() {
         let state = test_http_state().await;
         let repo_tmp = tempdir().expect("tempdir");
         init_git_repo(repo_tmp.path());
@@ -2107,10 +2105,10 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("designer.yaml"),
-            "flow: build\nworkers: 0\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n  - flow: wave-reduce\n    schedule: '0 0 1 * *'\n",
+            wave_dir.join("goal.md"),
+            "---\nprimary_flow: build\nworkers: 0\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n---\nDrive the work.\n",
         )
-        .expect("write wave config");
+        .expect("write wave goal");
 
         let Json(created) = create_wave_handler(
             State(state.clone()),
@@ -2132,14 +2130,12 @@ mod tests {
         .expect("create wave");
 
         assert_eq!(created.workers, 0);
-        assert_eq!(created.crons.len(), 2);
-        assert_eq!(created.crons[0].flow, "wave-polish");
-        assert_eq!(created.crons[1].schedule, "0 0 1 * *");
+        assert!(created.crons.is_empty());
 
         let Json(listed) = list_wave_crons_handler(State(state), Path(created.id.clone()))
             .await
             .expect("list crons");
-        assert_eq!(listed.data.len(), 2);
+        assert!(listed.data.is_empty());
     }
 
     #[tokio::test]

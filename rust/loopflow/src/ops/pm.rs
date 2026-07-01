@@ -213,7 +213,7 @@ pub(crate) fn wave_pm_is_enabled(repo: &Path, wave: &str) -> bool {
 fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     if ctx.project.trim().is_empty() {
         return Err(OpsError::Message(format!(
-            "wave/{wave}/{wave}.yaml is missing a project id for {:?}",
+            "wave/{wave}/goal.md is missing a project id for {:?}",
             ctx.provider
         )));
     }
@@ -311,23 +311,52 @@ fn yaml_string(value: &str) -> serde_yaml_ng::Value {
     serde_yaml_ng::Value::String(value.to_string())
 }
 
-fn update_wave_pm_yaml(
+fn split_frontmatter(content: &str) -> Option<(String, String)> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let mut parts = content.splitn(3, "---");
+    let _ = parts.next();
+    let frontmatter = parts.next()?;
+    let rest = parts.next()?;
+    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+    Some((frontmatter.to_string(), body))
+}
+
+fn default_goal_body(wave: &str) -> String {
+    format!("Run one loop iteration for the {wave} wave.\n")
+}
+
+fn update_wave_pm_goal(
     repo: &Path,
     wave: &str,
     update: impl FnOnce(&mut serde_yaml_ng::Mapping) -> OpsResult<()>,
 ) -> OpsResult<()> {
-    let path = repo.join("wave").join(wave).join(format!("{wave}.yaml"));
-    let mut value = if path.exists() {
+    let path = repo.join("wave").join(wave).join("goal.md");
+    let (mut value, body) = if path.exists() {
         let content = std::fs::read_to_string(&path)?;
-        serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content)
-            .map_err(|err| OpsError::Message(format!("invalid wave yaml: {err}")))?
+        if let Some((frontmatter, body)) = split_frontmatter(&content) {
+            (
+                serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&frontmatter)
+                    .map_err(|err| OpsError::Message(format!("invalid wave goal yaml: {err}")))?,
+                body,
+            )
+        } else {
+            (
+                serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
+                content,
+            )
+        }
     } else {
-        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
+        (
+            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
+            default_goal_body(wave),
+        )
     };
 
     let map = value
         .as_mapping_mut()
-        .ok_or_else(|| OpsError::Message("wave config must be a mapping".to_string()))?;
+        .ok_or_else(|| OpsError::Message("wave goal frontmatter must be a mapping".to_string()))?;
     let pm_key = yaml_string("pm");
     let mut pm_map = map
         .get(&pm_key)
@@ -339,17 +368,18 @@ fn update_wave_pm_yaml(
     map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
 
     let output = serde_yaml_ng::to_string(&value)
-        .map_err(|err| OpsError::Message(format!("failed to encode wave yaml: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("failed to encode wave goal yaml: {err}")))?;
+    let output = format!("---\n{}---\n{}", output, body);
     std::fs::write(&path, output)?;
     Ok(())
 }
 
-pub(crate) fn write_pm_provider_to_wave_yaml(
+pub(crate) fn write_pm_provider_to_wave_goal(
     repo: &Path,
     wave: &str,
     provider: PmProviderKind,
 ) -> OpsResult<()> {
-    update_wave_pm_yaml(repo, wave, |pm_map| {
+    update_wave_pm_goal(repo, wave, |pm_map| {
         pm_map.insert(
             yaml_string("provider"),
             serde_yaml_ng::to_value(provider)
@@ -359,13 +389,13 @@ pub(crate) fn write_pm_provider_to_wave_yaml(
     })
 }
 
-pub(crate) fn write_pm_project_to_wave_yaml(
+pub(crate) fn write_pm_project_to_wave_goal(
     repo: &Path,
     wave: &str,
     provider: PmProviderKind,
     project_id: &str,
 ) -> OpsResult<()> {
-    update_wave_pm_yaml(repo, wave, |pm_map| {
+    update_wave_pm_goal(repo, wave, |pm_map| {
         pm_map.insert(yaml_string(project_key(provider)), yaml_string(project_id));
         Ok(())
     })
@@ -397,7 +427,7 @@ async fn pm_init_async(
     }
 
     let provider_kind = resolve_provider(repo, &wave)?;
-    write_pm_provider_to_wave_yaml(repo, &wave, provider_kind)?;
+    write_pm_provider_to_wave_goal(repo, &wave, provider_kind)?;
 
     let (project_name, description) = read_wave_project_metadata(repo, &wave)?;
     let mut local_items = read_local_roadmap_items(&wave_dir)?;
@@ -627,7 +657,7 @@ async fn ensure_project(
         .create_project(project_name, description)
         .await
         .map_err(pm_to_ops)?;
-    write_pm_project_to_wave_yaml(repo, wave, ctx.provider, &project_id)?;
+    write_pm_project_to_wave_goal(repo, wave, ctx.provider, &project_id)?;
     Ok(project_id)
 }
 
@@ -819,13 +849,18 @@ async fn pm_import_async(
             std::fs::create_dir_all(&wave_dir)?;
         }
 
-        // Write wave config
-        let wave_yaml_path = wave_dir.join(format!("{wave_name}.yaml"));
-        if !wave_yaml_path.exists() {
-            std::fs::write(&wave_yaml_path, "flow: build\n")?;
+        let goal_path = wave_dir.join("goal.md");
+        if !goal_path.exists() {
+            std::fs::write(
+                &goal_path,
+                format!(
+                    "---\nprimary_flow: build\n---\n{}\n",
+                    default_goal_body(&wave_name)
+                ),
+            )?;
         }
-        write_pm_provider_to_wave_yaml(repo, &wave_name, provider_kind)?;
-        write_pm_project_to_wave_yaml(repo, &wave_name, provider_kind, &project.id)?;
+        write_pm_provider_to_wave_goal(repo, &wave_name, provider_kind)?;
+        write_pm_project_to_wave_goal(repo, &wave_name, provider_kind, &project.id)?;
 
         // Pull items
         let remote_items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
@@ -1893,22 +1928,29 @@ mod tests {
     }
 
     #[test]
-    fn write_pm_provider_to_wave_yaml_sets_provider_field() {
+    fn write_pm_provider_to_wave_goal_sets_provider_field() {
         let dir = TempDir::new().expect("temp dir");
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("pm.yaml"), "flow: build\n").expect("write wave config");
+        std::fs::write(
+            wave_dir.join("goal.md"),
+            "---\nprimary_flow: build\n---\nDrive the work.\n",
+        )
+        .expect("write wave goal");
 
-        write_pm_provider_to_wave_yaml(dir.path(), "pm", PmProviderKind::Linear)
+        write_pm_provider_to_wave_goal(dir.path(), "pm", PmProviderKind::Linear)
             .expect("write pm provider");
 
-        let content = std::fs::read_to_string(wave_dir.join("pm.yaml")).expect("read wave config");
-        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).expect("parse yaml");
+        let content = std::fs::read_to_string(wave_dir.join("goal.md")).expect("read wave goal");
+        let (frontmatter, body) = split_frontmatter(&content).expect("frontmatter");
+        let value: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&frontmatter).expect("parse yaml");
         let pm = value.get("pm").expect("pm block");
         assert_eq!(
             pm.get("provider").and_then(|value| value.as_str()),
             Some("linear")
         );
+        assert_eq!(body, "Drive the work.\n");
     }
 
     #[test]
@@ -1922,17 +1964,17 @@ mod tests {
         let wave_dir = repo.join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  asana_project: \"asa-1\"\n",
+            wave_dir.join("goal.md"),
+            "---\npm:\n  asana_project: \"asa-1\"\n---\nDrive the work.\n",
         )
-        .expect("write wave config");
+        .expect("write wave goal");
         assert!(!wave_pm_is_enabled(repo, "pm"));
 
         std::fs::write(
-            wave_dir.join("pm.yaml"),
-            "flow: build\npm:\n  linear_project: \"lin-1\"\n  asana_project: \"asa-1\"\n",
+            wave_dir.join("goal.md"),
+            "---\npm:\n  linear_project: \"lin-1\"\n  asana_project: \"asa-1\"\n---\nDrive the work.\n",
         )
-        .expect("rewrite wave config");
+        .expect("rewrite wave goal");
         assert!(wave_pm_is_enabled(repo, "pm"));
     }
 

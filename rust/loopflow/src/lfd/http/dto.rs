@@ -86,6 +86,7 @@ pub struct WaveDto {
     pub mode: String,
     pub primary_flow: String,
     pub goal: String,
+    pub metrics: Vec<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -624,6 +625,10 @@ mod contract_tests {
         assert_eq!(wave.name, "engbot");
         assert_eq!(wave.primary_flow, "build");
         assert_eq!(wave.goal, "ship-roadmap");
+        assert_eq!(
+            wave.metrics,
+            vec!["all roadmap items shipped", "cargo test green"]
+        );
         assert_eq!(wave.mode, "loop");
         assert_eq!(wave.status, "running");
         assert_eq!(wave.iteration, 3);
@@ -653,6 +658,7 @@ mod contract_tests {
             mode: "loop".to_string(),
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
             agent: None,
@@ -676,6 +682,7 @@ mod contract_tests {
 
         let json = serde_json::to_value(&wave).unwrap();
         assert_eq!(json["goal"], "ship-roadmap");
+        assert_eq!(json["metrics"], serde_json::json!([]));
     }
 
     #[test]
@@ -687,6 +694,17 @@ mod contract_tests {
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `goal`"));
+    }
+
+    #[test]
+    fn wave_metrics_is_required() {
+        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        json.as_object_mut()
+            .expect("wave fixture should be an object")
+            .remove("metrics");
+
+        let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
+        assert!(err.to_string().contains("missing field `metrics`"));
     }
 
     #[test]

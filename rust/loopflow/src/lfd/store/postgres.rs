@@ -218,6 +218,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let direction_json = serde_json::to_string(wave.direction())?;
             let area_json = serde_json::to_string(wave.area())?;
+            let metrics_json = serde_json::to_string(wave.metrics())?;
             let paused: i32 = if wave.status() == WaveStatus::Paused {
                 1
             } else {
@@ -229,6 +230,7 @@ impl PostgresStore {
             let mode = wave.mode().as_str();
             let primary_flow = wave.primary_flow();
             let goal = wave.goal();
+            let metrics = metrics_json.as_str();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -247,6 +249,7 @@ impl PostgresStore {
                         &mode,
                         &primary_flow.as_str(),
                         &goal,
+                        &metrics,
                     ],
                 )
                 .await?;

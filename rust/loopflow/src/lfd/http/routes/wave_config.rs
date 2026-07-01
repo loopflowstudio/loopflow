@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
@@ -42,7 +43,7 @@ impl WavePmConfig {
     }
 }
 
-/// Config read from `wave/<name>/<name>.yaml` during wave creation.
+/// Intent read from `wave/<name>/goal.md` frontmatter during wave creation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct WaveConfig {
     pub flow: Option<String>,
@@ -55,14 +56,16 @@ pub(crate) struct WaveConfig {
     pub area: Option<Vec<String>>,
     pub triggers: Option<TriggerDef>,
     pub direction: Option<Vec<String>>,
+    pub metrics: Option<Vec<String>>,
+    pub roadmap: Option<String>,
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
 }
 
-/// Read wave config from `wave/<name>/<name>.yaml`.
+/// Read wave intent from `wave/<name>/goal.md` frontmatter.
 pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
-    let path = repo.join("wave").join(name).join(format!("{name}.yaml"));
+    let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
@@ -71,65 +74,131 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
             return None;
         }
     };
-    match serde_yaml_ng::from_str(&content) {
-        Ok(config) => Some(config),
-        Err(err) => {
-            warn!(path = %path.display(), error = %err, "invalid wave config");
-            None
+    let mut config = match split_frontmatter(&content) {
+        Some((frontmatter, _)) => match serde_yaml_ng::from_str::<WaveConfig>(&frontmatter) {
+            Ok(config) => config,
+            Err(err) => {
+                warn!(path = %path.display(), error = %err, "invalid wave goal frontmatter");
+                return None;
+            }
+        },
+        None => WaveConfig::default(),
+    };
+    config.goal = config.goal.or_else(|| Some(name.to_string()));
+    config.flow = None;
+    config.crons = None;
+    config.triggers = None;
+    config.serialized = None;
+    config.area = None;
+    config.direction = None;
+    config.step_agents = None;
+    Some(config)
+}
+
+fn split_frontmatter(content: &str) -> Option<(String, String)> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let mut parts = content.splitn(3, "---");
+    let _ = parts.next();
+    let frontmatter = parts.next()?;
+    let rest = parts.next()?;
+    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+    Some((frontmatter.to_string(), body))
+}
+
+fn goal_path(repo: &Path, name: &str) -> std::path::PathBuf {
+    repo.join("wave").join(name).join("goal.md")
+}
+
+fn empty_goal_body(name: &str) -> String {
+    format!("Run one loop iteration for the {name} wave.\n")
+}
+
+fn goal_value_from_content(path: &Path, name: &str) -> Result<(Value, String), String> {
+    if !path.exists() {
+        return Ok((Value::Mapping(Mapping::new()), empty_goal_body(name)));
+    }
+
+    let content = std::fs::read_to_string(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let Some((frontmatter, body)) = split_frontmatter(&content) else {
+        return Ok((Value::Mapping(Mapping::new()), content));
+    };
+
+    let value = serde_yaml_ng::from_str::<Value>(&frontmatter)
+        .map_err(|err| format!("invalid yaml in {}: {err}", path.display()))?;
+    Ok((value, body))
+}
+
+fn render_goal_md(value: &Value, body: &str) -> Result<String, String> {
+    let rendered = serde_yaml_ng::to_string(value)
+        .map_err(|err| format!("failed to render wave goal frontmatter: {err}"))?;
+    Ok(format!("---\n{}---\n{}", rendered, body))
+}
+
+fn wave_config_map<'a>(value: &'a mut Value, path: &Path) -> Result<&'a mut Mapping, String> {
+    value.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "wave goal frontmatter at {} must be a mapping",
+            path.display()
+        )
+    })
+}
+
+fn remove_or_set_string(map: &mut Mapping, field: &str, value: Option<String>) {
+    let key = Value::String(field.to_string());
+    match value {
+        Some(value) if !value.trim().is_empty() => {
+            map.insert(key, Value::String(value));
         }
+        Some(_) => {
+            map.remove(&key);
+        }
+        None => {}
     }
 }
 
-/// Update agent fields in `wave/<name>/<name>.yaml`, preserving existing keys.
+fn remove_or_set_step_agents(
+    map: &mut Mapping,
+    step_agents: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    let key = Value::String("step_agents".to_string());
+    match step_agents {
+        Some(step_agents) if !step_agents.is_empty() => {
+            map.insert(
+                key,
+                serde_yaml_ng::to_value(step_agents)
+                    .map_err(|err| format!("failed to encode step_agents: {err}"))?,
+            );
+        }
+        Some(_) => {
+            map.remove(&key);
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// Update agent fields in `wave/<name>/goal.md`, preserving existing frontmatter.
 pub(crate) fn update_wave_agent_config(
     repo: &Path,
     name: &str,
     agent: Option<String>,
     step_agents: Option<HashMap<String, String>>,
 ) -> Result<(), String> {
-    let path = repo.join("wave").join(name).join(format!("{name}.yaml"));
+    let path = goal_path(repo, name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
     }
 
-    let mut value = if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-        serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content)
-            .map_err(|err| format!("invalid yaml in {}: {err}", path.display()))?
-    } else {
-        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
-    };
+    let (mut value, body) = goal_value_from_content(&path, name)?;
+    let map = wave_config_map(&mut value, &path)?;
+    remove_or_set_string(map, "agent", agent);
+    remove_or_set_step_agents(map, step_agents)?;
 
-    let map = value
-        .as_mapping_mut()
-        .ok_or_else(|| format!("wave config at {} must be a mapping", path.display()))?;
-    let agent_key = serde_yaml_ng::Value::String("agent".to_string());
-    let step_agents_key = serde_yaml_ng::Value::String("step_agents".to_string());
-
-    if let Some(agent) = agent {
-        if agent.trim().is_empty() {
-            map.remove(&agent_key);
-        } else {
-            map.insert(agent_key, serde_yaml_ng::Value::String(agent));
-        }
-    }
-
-    if let Some(step_agents) = step_agents {
-        if step_agents.is_empty() {
-            map.remove(&step_agents_key);
-        } else {
-            map.insert(
-                step_agents_key,
-                serde_yaml_ng::to_value(step_agents)
-                    .map_err(|err| format!("failed to encode step_agents: {err}"))?,
-            );
-        }
-    }
-
-    let rendered = serde_yaml_ng::to_string(&value)
-        .map_err(|err| format!("failed to render {}: {err}", path.display()))?;
+    let rendered = render_goal_md(&value, &body)?;
     std::fs::write(&path, rendered)
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(())
@@ -142,16 +211,26 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn read_wave_config_parses_yaml() {
+    fn read_wave_config_parses_goal_frontmatter() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
-        fs::write(dir.join("scan.yaml"), "flow: build\narea: ['.']\n").expect("write");
+        fs::write(
+            dir.join("goal.md"),
+            "---\nprimary_flow: build\nmode: manual\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
+        )
+        .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.flow.as_deref(), Some("build"));
-        assert_eq!(config.area, Some(vec![".".to_string()]));
-        assert_eq!(config.workers, None);
+        assert_eq!(config.goal.as_deref(), Some("scan"));
+        assert_eq!(config.primary_flow.as_deref(), Some("build"));
+        assert_eq!(config.mode.as_deref(), Some("manual"));
+        assert_eq!(config.workers, Some(3));
+        assert_eq!(
+            config.metrics,
+            Some(vec!["tests pass".to_string(), "docs updated".to_string()])
+        );
+        assert_eq!(config.area, None);
     }
 
     #[test]
@@ -160,8 +239,8 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\npm:\n  provider: linear\n  asana_project: \"1234567890\"\n  notion_project: \"notion-db\"\n",
+            dir.join("goal.md"),
+            "---\npm:\n  provider: linear\n  asana_project: \"1234567890\"\n  notion_project: \"notion-db\"\n---\nDrive the work.\n",
         )
         .expect("write");
 
@@ -179,8 +258,8 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\npm:\n  asana_project: \"1234567890\"\n  linear_project: \"uuid-here\"\n  notion_project: \"notion-here\"\n",
+            dir.join("goal.md"),
+            "---\npm:\n  asana_project: \"1234567890\"\n  linear_project: \"uuid-here\"\n  notion_project: \"notion-here\"\n---\nDrive the work.\n",
         )
         .expect("write");
 
@@ -192,39 +271,19 @@ mod tests {
     }
 
     #[test]
-    fn read_wave_config_parses_wave_trigger_source_repo() {
+    fn read_wave_config_ignores_crons_and_triggers() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\narea: ['.']\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n",
+            dir.join("goal.md"),
+            "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let trigger = config.triggers.expect("trigger should exist");
-        assert_eq!(trigger.signal, "wave");
-        assert_eq!(trigger.source.as_deref(), Some("infra"));
-        assert_eq!(trigger.source_repo.as_deref(), Some("/tmp/source"));
-    }
-
-    #[test]
-    fn read_wave_config_parses_crons() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n  - flow: wave-reduce\n    schedule: '0 0 1 * *'\n",
-        )
-        .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let crons = config.crons.expect("cron config should exist");
-        assert_eq!(crons.len(), 2);
-        assert_eq!(crons[0].flow, "wave-polish");
-        assert_eq!(crons[1].schedule, "0 0 1 * *");
+        assert!(config.crons.is_none());
+        assert!(config.triggers.is_none());
     }
 
     #[test]
@@ -238,7 +297,11 @@ mod tests {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
-        fs::write(dir.join("scan.yaml"), "flow: build\narea: ['.']\n").expect("write");
+        fs::write(
+            dir.join("goal.md"),
+            "---\nprimary_flow: build\narea: ['.']\n---\nDrive the work.\n",
+        )
+        .expect("write");
 
         update_wave_agent_config(
             temp.path(),
@@ -253,14 +316,7 @@ mod tests {
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
-        assert_eq!(
-            config
-                .step_agents
-                .as_ref()
-                .and_then(|agents| agents.get("implement"))
-                .map(String::as_str),
-            Some("claude:sonnet")
-        );
+        assert_eq!(config.step_agents, None);
     }
 
     #[test]
@@ -269,8 +325,8 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("scan.yaml"),
-            "flow: build\narea: ['.']\nagent: codex:o3\nstep_agents:\n  implement: claude:sonnet\n",
+            dir.join("goal.md"),
+            "---\nprimary_flow: build\narea: ['.']\nagent: codex:o3\nstep_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
         )
         .expect("write");
 
@@ -285,7 +341,7 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
         assert!(config.step_agents.is_none());
-        assert_eq!(config.flow.as_deref(), Some("build"));
-        assert_eq!(config.area, Some(vec![".".to_string()]));
+        assert_eq!(config.primary_flow.as_deref(), Some("build"));
+        assert_eq!(config.area, None);
     }
 }

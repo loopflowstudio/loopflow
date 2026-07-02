@@ -229,6 +229,10 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 release_status(repo, target.as_deref())?;
                 Ok(())
             }
+            ReleaseCommand::Diagnose { target, .. } => {
+                crate::ops::release_diagnose(repo, target.as_deref())?;
+                Ok(())
+            }
         },
         OpsCommand::Ingest { wave, item } => {
             ingest(

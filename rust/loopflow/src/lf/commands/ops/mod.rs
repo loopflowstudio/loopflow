@@ -20,10 +20,10 @@ use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, dispatch_wave, ingest, land,
     list_branch_candidates, next_branch, prune_branches, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, AbandonOptions,
-    BranchFilterOptions, BranchListOptions, BranchPruneOptions, CommitOptions, DispatchOptions,
-    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
-    ReleaseWorkflowStatus, RotationResult,
+    release_check, release_diagnose, release_failure_kind_name, release_notes, release_run,
+    release_status, release_tag, AbandonOptions, BranchFilterOptions, BranchListOptions,
+    BranchPruneOptions, CommitOptions, DispatchOptions, IngestOptions, LandOptions, NextOptions,
+    PrOptions, Progress, RebaseOptions, ReleaseWorkflowStatus, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -105,6 +105,9 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             }
             ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
             ReleaseCommand::Status { target, json } => release_status_cmd(target.as_deref(), *json),
+            ReleaseCommand::Diagnose { target, json } => {
+                release_diagnose_cmd(target.as_deref(), *json)
+            }
         },
         OpsCommand::Ingest { wave, item } => {
             ingest_cmd(wave.as_deref(), item.as_deref(), &progress)
@@ -717,6 +720,50 @@ fn release_status_cmd(target_name: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
+fn release_diagnose_cmd(target_name: Option<&str>, json: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let diagnosis = release_diagnose(&repo_root, target_name)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&diagnosis)?);
+        return Ok(());
+    }
+
+    println!("Target: {}", diagnosis.target);
+    match diagnosis.latest_tag.as_deref() {
+        Some(tag) => println!("Latest tag: {tag}"),
+        None => println!("Latest tag: (none)"),
+    }
+
+    let Some(failure) = diagnosis.failure.as_ref() else {
+        println!("Release issue: none");
+        return Ok(());
+    };
+
+    println!(
+        "Release issue: {}",
+        release_failure_kind_name(&failure.failure_kind)
+    );
+    println!("Source: {} ({})", failure.label, failure.workflow);
+    if let Some(run_id) = failure.run_id {
+        println!("Run ID: {run_id}");
+    }
+    if let Some(status) = failure.status.as_deref() {
+        let conclusion = failure.conclusion.as_deref().unwrap_or("(pending)");
+        println!("Status: {status} / {conclusion}");
+    }
+    if let Some(title) = failure.title.as_deref() {
+        println!("Title: {title}");
+    }
+    if let Some(url) = failure.url.as_deref() {
+        println!("URL: {url}");
+    }
+    if let Some(context) = diagnosis.repair_context.as_deref() {
+        println!("\n{context}");
+    }
+
+    Ok(())
+}
+
 fn print_release_workflow_status(status: &ReleaseWorkflowStatus) {
     match status.status.as_deref() {
         Some(workflow_status) => {
@@ -744,10 +791,7 @@ fn print_release_workflow_status(status: &ReleaseWorkflowStatus) {
 }
 
 fn release_failure_kind_label(kind: &crate::ops::ReleaseFailureKind) -> &'static str {
-    match kind {
-        crate::ops::ReleaseFailureKind::PackageVerification => "package verification failure",
-        crate::ops::ReleaseFailureKind::Publish => "publish failure",
-    }
+    release_failure_kind_name(kind)
 }
 
 fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {

@@ -482,6 +482,13 @@ pub enum ReleaseCommand {
         #[arg(long = "json")]
         json: bool,
     },
+    /// Show the failed release workflow repair context
+    Diagnose {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+        #[arg(long = "json")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

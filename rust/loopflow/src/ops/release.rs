@@ -134,6 +134,36 @@ pub struct ReleaseStatusResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ReleaseDiagnosisResult {
+    pub target: String,
+    pub latest_tag: Option<String>,
+    pub failure: Option<ReleaseFailureSummary>,
+    pub repair_context: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReleaseFailureSummary {
+    pub area: ReleaseFailureArea,
+    pub label: String,
+    pub workflow: String,
+    pub run_id: Option<u64>,
+    pub status: Option<String>,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub failure_kind: ReleaseFailureKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ReleaseFailureArea {
+    PackageVerification,
+    WeeklyRelease,
+    TaggedRelease,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ReleaseWorkflowStatus {
     pub label: String,
     pub workflow: String,
@@ -251,6 +281,28 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
             ReleaseFailureKind::Publish,
         )?,
     })
+}
+
+pub fn release_diagnose(
+    repo: &Path,
+    target_name: Option<&str>,
+) -> OpsResult<ReleaseDiagnosisResult> {
+    let status = release_status(repo, target_name)?;
+    Ok(diagnose_release_status(&status))
+}
+
+pub fn diagnose_release_status(status: &ReleaseStatusResult) -> ReleaseDiagnosisResult {
+    let failure = release_failure_summary(status);
+    let repair_context = failure
+        .as_ref()
+        .map(|failure| release_repair_context(status, failure));
+
+    ReleaseDiagnosisResult {
+        target: status.target.clone(),
+        latest_tag: status.latest_tag.clone(),
+        failure,
+        repair_context,
+    }
 }
 
 /// Check if any PRs have merged since the last tag.
@@ -1649,6 +1701,98 @@ fn latest_workflow_status(
         title: run.and_then(|run| run.display_title),
         failure_kind: failed.then_some(failure_kind),
     })
+}
+
+fn release_failure_summary(status: &ReleaseStatusResult) -> Option<ReleaseFailureSummary> {
+    workflow_failure_summary(
+        ReleaseFailureArea::PackageVerification,
+        &status.package_verification,
+    )
+    .or_else(|| workflow_failure_summary(ReleaseFailureArea::WeeklyRelease, &status.weekly_release))
+    .or_else(|| tagged_release_failure_summary(status))
+}
+
+fn workflow_failure_summary(
+    area: ReleaseFailureArea,
+    status: &ReleaseWorkflowStatus,
+) -> Option<ReleaseFailureSummary> {
+    Some(ReleaseFailureSummary {
+        area,
+        label: status.label.clone(),
+        workflow: status.workflow.clone(),
+        run_id: status.run_id,
+        status: status.status.clone(),
+        conclusion: status.conclusion.clone(),
+        url: status.url.clone(),
+        title: status.title.clone(),
+        failure_kind: status.failure_kind.clone()?,
+    })
+}
+
+fn tagged_release_failure_summary(status: &ReleaseStatusResult) -> Option<ReleaseFailureSummary> {
+    Some(ReleaseFailureSummary {
+        area: ReleaseFailureArea::TaggedRelease,
+        label: "Tagged release".to_string(),
+        workflow: "release workflow".to_string(),
+        run_id: status.workflow_run_id,
+        status: status.workflow_status.clone(),
+        conclusion: status.workflow_conclusion.clone(),
+        url: status.workflow_url.clone(),
+        title: status.latest_tag.clone(),
+        failure_kind: status.workflow_failure_kind.clone()?,
+    })
+}
+
+fn release_repair_context(status: &ReleaseStatusResult, failure: &ReleaseFailureSummary) -> String {
+    let latest_tag = status.latest_tag.as_deref().unwrap_or("(none)");
+    let run_id = failure
+        .run_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "(unknown)".to_string());
+    let workflow_status = failure.status.as_deref().unwrap_or("(unknown)");
+    let conclusion = failure.conclusion.as_deref().unwrap_or("(unknown)");
+    let title = failure.title.as_deref().unwrap_or("(unknown)");
+    let url = failure.url.as_deref().unwrap_or("(unavailable)");
+    let failure_kind = release_failure_kind_name(&failure.failure_kind);
+    let area = release_failure_area_name(&failure.area);
+
+    format!(
+        "\
+Release automation failure
+Target: {target}
+Latest tag: {latest_tag}
+Area: {area}
+Issue: {failure_kind}
+Workflow: {workflow}
+Run ID: {run_id}
+Status: {workflow_status} / {conclusion}
+Title: {title}
+URL: {url}
+
+Repair instructions:
+1. Inspect the workflow run above and identify the first concrete failure.
+2. Keep the fix scoped to {failure_kind}.
+3. Run the smallest local check that reproduces or validates the failure.
+4. Commit the fix, then re-run the failed workflow.
+",
+        target = status.target.as_str(),
+        workflow = failure.workflow.as_str(),
+    )
+}
+
+fn release_failure_area_name(area: &ReleaseFailureArea) -> &'static str {
+    match area {
+        ReleaseFailureArea::PackageVerification => "package verification",
+        ReleaseFailureArea::WeeklyRelease => "weekly release",
+        ReleaseFailureArea::TaggedRelease => "tagged release",
+    }
+}
+
+pub fn release_failure_kind_name(kind: &ReleaseFailureKind) -> &'static str {
+    match kind {
+        ReleaseFailureKind::PackageVerification => "package verification failure",
+        ReleaseFailureKind::Publish => "publish failure",
+    }
 }
 
 fn is_failed_conclusion(conclusion: Option<&str>) -> bool {

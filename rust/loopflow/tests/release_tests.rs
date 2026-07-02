@@ -4,8 +4,8 @@ use std::fs;
 use std::process::Command;
 
 use loopflow::ops::{
-    bump_version, generate_release, release_bump, release_check, release_status, release_tag,
-    NullProgress, ReleaseFailureKind,
+    bump_version, generate_release, release_bump, release_check, release_diagnose, release_status,
+    release_tag, NullProgress, ReleaseFailureArea, ReleaseFailureKind,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -238,6 +238,49 @@ fn release_status_reports_automation_workflow_health() {
     assert_eq!(status.weekly_release.run_id, Some(43));
     assert_eq!(status.weekly_release.status.as_deref(), Some("in_progress"));
     assert_eq!(status.weekly_release.failure_kind, None);
+}
+
+#[test]
+fn release_diagnose_reports_failed_weekly_release_context() {
+    let gh_script = write_gh_status_workflow_script(
+        r#"[{"databaseId":42,"headBranch":"main","displayTitle":"Packages (nightly)","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
+        r#"[{"databaseId":43,"headBranch":"main","displayTitle":"Weekly release","status":"completed","conclusion":"failure","url":"https://example.com/run/43"}]"#,
+        r#"{"tagName":"v0.9.1"}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let diagnosis = release_diagnose(repo.path(), None).expect("diagnose should succeed");
+    let failure = diagnosis.failure.expect("failed workflow");
+    assert_eq!(failure.area, ReleaseFailureArea::WeeklyRelease);
+    assert_eq!(failure.failure_kind, ReleaseFailureKind::Publish);
+    assert_eq!(failure.workflow, "weekly-release.yml");
+    assert_eq!(failure.run_id, Some(43));
+
+    let context = diagnosis.repair_context.expect("repair context");
+    assert!(context.contains("Issue: publish failure"));
+    assert!(context.contains("Workflow: weekly-release.yml"));
+    assert!(context.contains("Run ID: 43"));
+    assert!(context.contains("https://example.com/run/43"));
+}
+
+#[test]
+fn release_diagnose_reports_no_failure_when_release_is_green() {
+    let gh_script = write_gh_status_workflow_script(
+        r#"[{"databaseId":42,"headBranch":"main","displayTitle":"Packages (nightly)","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
+        r#"[{"databaseId":43,"headBranch":"main","displayTitle":"Weekly release","status":"completed","conclusion":"success","url":"https://example.com/run/43"}]"#,
+        r#"{"tagName":"v0.9.1"}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let diagnosis = release_diagnose(repo.path(), None).expect("diagnose should succeed");
+    assert!(diagnosis.failure.is_none());
+    assert!(diagnosis.repair_context.is_none());
 }
 
 #[test]

@@ -148,6 +148,14 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
+    /// Launch a wave's goal as a looping top-level agent
+    Goal {
+        /// Wave name (matches wave/<name>/)
+        name: String,
+        /// Cap the loop to a single iteration
+        #[arg(long)]
+        once: bool,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -283,6 +291,15 @@ pub enum OpsCommand {
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
+    },
+    /// Spawn a monitorable subagent as its own attachable tmux session
+    Dispatch {
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        #[arg(short = 'f', long = "flow")]
+        flow: String,
+        #[arg(short = 't', long = "task")]
+        task: String,
     },
 }
 

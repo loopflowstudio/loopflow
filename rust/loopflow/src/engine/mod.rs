@@ -42,7 +42,8 @@ pub use flow::{
     GoalRenderContext, InFlightDispatch, Op, OrDef, Step, XorDef, XorPath,
 };
 pub use launch::{
-    prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,
+    prepare_goal_launch, prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput,
+    PreparedLaunchPrompt,
 };
 pub use prompt::{
     count_tokens, default_gather_sources, drop_native_instruction_docs, durable_log_dir,

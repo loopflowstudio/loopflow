@@ -166,16 +166,17 @@ set of Metrics. Each iteration:
 1. Read the roadmap and the current metrics. Pick the next move that most
    advances the goal.
 2. Capture, then dispatch — never solve substantial work yourself. If the move is
-   a real subproject, first write it to the roadmap as an Asana task, then launch
-   a flow against that task (`lf <flow>: <task>`). Small, atomic fixes can
-   dispatch directly. Either way the work runs as a steerable subagent session
-   you and the human can monitor and redirect; read the result back when it lands.
+   a real subproject, first write it to the roadmap as an Asana task, then run
+   `lf op dispatch --wave <this-wave> --flow <flow> --task "<task>"`. Small,
+   atomic fixes can dispatch directly. Either way the work runs as its own
+   attachable tmux session — watch it with `lfq sessions`, join one with
+   `lfq attach <id>`; read the result back when it lands.
 3. Re-measure against the goal's metrics. Decide what changed about the next move.
 4. Repeat until the metrics say done, or record a blocker if no safe move remains.
 
 Three powers:
-- Dispatch flows/steps — your default hand; the inner work pipeline you run each
-  iteration.
+- Dispatch flows/steps via `lf op dispatch` — your default hand; the inner work
+  pipeline you run each iteration.
 - Fan out — when the budget allows and the roadmap holds well-scoped, independent
   tasks, launch parallel subagents instead of advancing one move at a time: one
   subagent per task, each running the flow against its specific roadmap task.
@@ -1707,6 +1708,9 @@ mod tests {
         assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("an orchestrator, not an implementer."));
         assert!(rendered.contains("never solve substantial work yourself"));
+        assert!(rendered.contains("lf op dispatch --wave"));
+        assert!(rendered.contains("lfq sessions"));
+        assert!(rendered.contains("lfq attach"));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
         assert!(rendered.contains("wave/goals"));

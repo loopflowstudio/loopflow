@@ -32,10 +32,11 @@ pub use next::{next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions};
+pub(crate) use release::release_failure_kind_name;
 pub use release::{
-    bump_version, diagnose_release_status, generate_release, release_bump, release_check,
-    release_diagnose, release_failure_kind_name, release_notes, release_run, release_status,
-    release_tag, MergedPr, ReleaseDiagnosisResult, ReleaseFailureArea, ReleaseFailureKind,
-    ReleaseFailureSummary, ReleaseRunResult, ReleaseStatusResult, ReleaseWorkflowStatus,
+    bump_version, generate_release, release_bump, release_check, release_diagnose, release_notes,
+    release_run, release_status, release_tag, MergedPr, ReleaseDiagnosisResult, ReleaseFailureArea,
+    ReleaseFailureKind, ReleaseFailureSummary, ReleaseRunResult, ReleaseStatusResult,
+    ReleaseWorkflowStatus,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

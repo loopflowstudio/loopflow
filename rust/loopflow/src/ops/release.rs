@@ -154,7 +154,7 @@ pub struct ReleaseFailureSummary {
     pub failure_kind: ReleaseFailureKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReleaseFailureArea {
@@ -175,7 +175,7 @@ pub struct ReleaseWorkflowStatus {
     pub failure_kind: Option<ReleaseFailureKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReleaseFailureKind {
@@ -291,7 +291,7 @@ pub fn release_diagnose(
     Ok(diagnose_release_status(&status))
 }
 
-pub fn diagnose_release_status(status: &ReleaseStatusResult) -> ReleaseDiagnosisResult {
+fn diagnose_release_status(status: &ReleaseStatusResult) -> ReleaseDiagnosisResult {
     let failure = release_failure_summary(status);
     let repair_context = failure
         .as_ref()
@@ -1725,7 +1725,7 @@ fn workflow_failure_summary(
         conclusion: status.conclusion.clone(),
         url: status.url.clone(),
         title: status.title.clone(),
-        failure_kind: status.failure_kind.clone()?,
+        failure_kind: status.failure_kind?,
     })
 }
 
@@ -1739,7 +1739,7 @@ fn tagged_release_failure_summary(status: &ReleaseStatusResult) -> Option<Releas
         conclusion: status.workflow_conclusion.clone(),
         url: status.workflow_url.clone(),
         title: status.latest_tag.clone(),
-        failure_kind: status.workflow_failure_kind.clone()?,
+        failure_kind: status.workflow_failure_kind?,
     })
 }
 
@@ -1788,7 +1788,7 @@ fn release_failure_area_name(area: &ReleaseFailureArea) -> &'static str {
     }
 }
 
-pub fn release_failure_kind_name(kind: &ReleaseFailureKind) -> &'static str {
+pub(crate) fn release_failure_kind_name(kind: &ReleaseFailureKind) -> &'static str {
     match kind {
         ReleaseFailureKind::PackageVerification => "package verification failure",
         ReleaseFailureKind::Publish => "publish failure",

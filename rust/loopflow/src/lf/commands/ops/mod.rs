@@ -707,7 +707,7 @@ fn release_status_cmd(target_name: Option<&str>, json: bool) -> Result<()> {
     }
 
     if let Some(kind) = status.workflow_failure_kind.as_ref() {
-        println!("Workflow issue: {}", release_failure_kind_label(kind));
+        println!("Workflow issue: {}", release_failure_kind_name(kind));
     }
 
     print_release_workflow_status(&status.package_verification);
@@ -785,13 +785,9 @@ fn print_release_workflow_status(status: &ReleaseWorkflowStatus) {
         println!(
             "{} issue: {}",
             status.label,
-            release_failure_kind_label(kind)
+            release_failure_kind_name(kind)
         );
     }
-}
-
-fn release_failure_kind_label(kind: &crate::ops::ReleaseFailureKind) -> &'static str {
-    release_failure_kind_name(kind)
 }
 
 fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {

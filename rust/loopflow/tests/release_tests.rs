@@ -221,12 +221,12 @@ fn release_status_reports_automation_workflow_health() {
     git(&repo, &["tag", "v0.9.1"]);
 
     let status = release_status(repo.path(), None).expect("status should succeed");
-    assert_eq!(status.package_verification.workflow, "nightly-packages.yml");
+    assert_eq!(status.package_verification.label, "Package verification");
     assert_eq!(
         status.package_verification.conclusion.as_deref(),
         Some("failure")
     );
-    assert_eq!(status.weekly_release.workflow, "weekly-release.yml");
+    assert_eq!(status.weekly_release.label, "Weekly release");
     assert_eq!(status.weekly_release.status.as_deref(), Some("completed"));
 
     let calls = fs::read_to_string(gh_log).expect("read gh log");

@@ -132,7 +132,6 @@ pub struct ReleaseStatusResult {
 #[derive(Debug, Clone)]
 pub struct ReleaseWorkflowStatus {
     pub label: String,
-    pub workflow: String,
     pub status: Option<String>,
     pub conclusion: Option<String>,
     pub url: Option<String>,
@@ -1588,33 +1587,14 @@ fn find_workflow_run(
     tag: &str,
     target: &ReleaseTarget,
 ) -> OpsResult<Option<GhRunListEntry>> {
-    let mut args = vec![
-        "run".to_string(),
-        "list".to_string(),
-        "--json".to_string(),
-        "headBranch,displayTitle,status,conclusion,url".to_string(),
-        "--limit".to_string(),
-        "50".to_string(),
-    ];
-    if let Some(workflow) = target.workflow.as_deref() {
-        args.push("--workflow".to_string());
-        args.push(workflow.to_string());
-    }
-
-    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    let output = run_stdout(repo, "gh", arg_refs.as_slice())?;
-    let runs: Vec<GhRunListEntry> = serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))?;
-
-    let matching = runs.into_iter().find(|run| {
+    let runs = list_workflow_runs(repo, target.workflow.as_deref(), "50")?;
+    Ok(runs.into_iter().find(|run| {
         run.head_branch.as_deref() == Some(tag)
             || run
                 .display_title
                 .as_deref()
                 .is_some_and(|title| title.contains(tag))
-    });
-
-    Ok(matching)
+    }))
 }
 
 fn latest_workflow_status(
@@ -1622,10 +1602,13 @@ fn latest_workflow_status(
     label: &str,
     workflow: &str,
 ) -> OpsResult<ReleaseWorkflowStatus> {
-    let run = find_latest_workflow_run(repo, workflow)?;
+    let run = match list_workflow_runs(repo, Some(workflow), "1") {
+        Ok(mut runs) => runs.pop(),
+        Err(OpsError::CommandFailed { stderr, .. }) if is_missing_workflow_error(&stderr) => None,
+        Err(err) => return Err(err),
+    };
     Ok(ReleaseWorkflowStatus {
         label: label.to_string(),
-        workflow: workflow.to_string(),
         status: run.as_ref().map(|run| run.status.clone()),
         conclusion: run.as_ref().and_then(|run| run.conclusion.clone()),
         url: run.as_ref().and_then(|run| run.url.clone()),
@@ -1633,32 +1616,35 @@ fn latest_workflow_status(
     })
 }
 
-fn find_latest_workflow_run(repo: &Path, workflow: &str) -> OpsResult<Option<GhRunListEntry>> {
-    let args = [
-        "run",
-        "list",
-        "--workflow",
-        workflow,
-        "--json",
-        "headBranch,displayTitle,status,conclusion,url",
-        "--limit",
-        "1",
+fn list_workflow_runs(
+    repo: &Path,
+    workflow: Option<&str>,
+    limit: &str,
+) -> OpsResult<Vec<GhRunListEntry>> {
+    let mut args = vec![
+        "run".to_string(),
+        "list".to_string(),
+        "--json".to_string(),
+        "headBranch,displayTitle,status,conclusion,url".to_string(),
+        "--limit".to_string(),
+        limit.to_string(),
     ];
-    let output = run_output(repo, "gh", &args)?;
+    if let Some(workflow) = workflow {
+        args.push("--workflow".to_string());
+        args.push(workflow.to_string());
+    }
+
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let output = run_output(repo, "gh", arg_refs.as_slice())?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if is_missing_workflow_error(&stderr) {
-            return Ok(None);
-        }
         return Err(OpsError::CommandFailed {
             command: format!("gh {}", args.join(" ")),
-            stderr,
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
     let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let mut runs: Vec<GhRunListEntry> = serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))?;
-    Ok(runs.pop())
+    serde_json::from_str(&output)
+        .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))
 }
 
 fn is_missing_workflow_error(stderr: &str) -> bool {

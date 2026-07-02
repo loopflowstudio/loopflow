@@ -440,7 +440,7 @@ mod tests {
         let wave_dir = repo.join("wave").join("test-wave");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\nprimary_flow: build\npm:\n  linear_project: \"lin-1\"\n---\nDrive the work.\n",
         )
         .expect("write wave pm config");

@@ -215,7 +215,7 @@ pub(crate) fn wave_pm_is_enabled(repo: &Path, wave: &str) -> bool {
 fn require_project(ctx: &PmContext, wave: &str) -> OpsResult<()> {
     if ctx.project.trim().is_empty() {
         return Err(OpsError::Message(format!(
-            "wave/{wave}/goal.md is missing a project id for {:?}",
+            "wave/{wave}/GOAL.md is missing a project id for {:?}",
             ctx.provider
         )));
     }
@@ -808,7 +808,7 @@ async fn pm_import_async(
             std::fs::create_dir_all(&wave_dir)?;
         }
 
-        let goal_path = wave_dir.join("goal.md");
+        let goal_path = wave_dir.join("GOAL.md");
         if !goal_path.exists() {
             std::fs::write(
                 &goal_path,
@@ -1891,7 +1891,7 @@ mod tests {
         let wave_dir = dir.path().join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\nprimary_flow: build\n---\nDrive the work.\n",
         )
         .expect("write wave goal");
@@ -1904,7 +1904,7 @@ mod tests {
             config.pm.and_then(|pm| pm.provider),
             Some(PmProviderKind::Linear)
         );
-        let content = std::fs::read_to_string(wave_dir.join("goal.md")).expect("read wave goal");
+        let content = std::fs::read_to_string(wave_dir.join("GOAL.md")).expect("read wave goal");
         assert!(content.ends_with("Drive the work.\n"));
     }
 
@@ -1919,14 +1919,14 @@ mod tests {
         let wave_dir = repo.join("wave").join("pm");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\npm:\n  asana_project: \"asa-1\"\n---\nDrive the work.\n",
         )
         .expect("write wave goal");
         assert!(!wave_pm_is_enabled(repo, "pm"));
 
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\npm:\n  linear_project: \"lin-1\"\n  asana_project: \"asa-1\"\n---\nDrive the work.\n",
         )
         .expect("rewrite wave goal");

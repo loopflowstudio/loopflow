@@ -88,7 +88,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `## Risks` — unknowns and failure modes surfaced during detailing
    - `## Metrics` — numeric measurements (counts, percentages, durations), not qualitative indicators
    - Include `### Not here` under Vision when scope boundaries are important
-4. Write `wave/<name>/goal.md`:
+4. Write `wave/<name>/GOAL.md`:
    - frontmatter: `primary_flow` (default `ship-wave` unless user asks for something else), optional `direction`, and `metrics`
    - body: the loop prompt this wave should run
 5. Write roadmap files as `wave/<name>/1-*.md`, `2-*.md`, `3-*.md`, `4-*.md` — use the smallest honest priority for each item. **Create every file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.

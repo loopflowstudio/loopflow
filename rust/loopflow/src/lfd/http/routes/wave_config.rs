@@ -43,7 +43,7 @@ impl WavePmConfig {
     }
 }
 
-/// Intent read from `wave/<name>/goal.md` frontmatter during wave creation.
+/// Intent read from `wave/<name>/GOAL.md` frontmatter during wave creation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct WaveConfig {
     pub flow: Option<String>,
@@ -63,7 +63,7 @@ pub(crate) struct WaveConfig {
     pub pm: Option<WavePmConfig>,
 }
 
-/// Read wave intent from `wave/<name>/goal.md` frontmatter.
+/// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
 pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
@@ -179,7 +179,7 @@ fn remove_or_set_step_agents(
     Ok(())
 }
 
-/// Update `wave/<name>/goal.md` frontmatter, preserving existing body text.
+/// Update `wave/<name>/GOAL.md` frontmatter, preserving existing body text.
 pub(crate) fn update_wave_goal_config(
     repo: &Path,
     name: &str,
@@ -201,7 +201,7 @@ pub(crate) fn update_wave_goal_config(
     Ok(())
 }
 
-/// Update agent fields in `wave/<name>/goal.md`, preserving existing frontmatter.
+/// Update agent fields in `wave/<name>/GOAL.md`, preserving existing frontmatter.
 pub(crate) fn update_wave_agent_config(
     repo: &Path,
     name: &str,

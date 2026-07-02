@@ -15,6 +15,7 @@ use crate::engine::flow::{expand_direction_names, load_direction, load_step, Dir
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
@@ -133,7 +134,6 @@ fn build_document_entries(
     summary_tokens: &[usize],
     wave_memory_tokens: Option<usize>,
     doc_tokens: &[usize],
-    area_doc_tokens: &[usize],
 ) -> Vec<DocumentEntry> {
     let mut entries = Vec::new();
 
@@ -149,7 +149,6 @@ fn build_document_entries(
     }
 
     push_doc_entries(&mut entries, &components.docs, doc_tokens);
-    push_doc_entries(&mut entries, &components.area_docs, area_doc_tokens);
 
     entries
 }
@@ -159,10 +158,10 @@ fn build_document_entries(
 pub struct GatherSpec {
     pub sources: Vec<DocumentSource>,
     pub repo_root: PathBuf,
+    /// Explicit docs paths, globs, or directories to include in context.
+    pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Area path for scoped context.
-    pub area: Option<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
@@ -185,9 +184,6 @@ impl GatherSpec {
             self.include_source(DocumentSource::Wave);
             self.include_source(DocumentSource::WaveMemory);
         }
-        if self.area.is_some() {
-            self.include_source(DocumentSource::Area);
-        }
         if !self.files.is_empty() {
             self.include_source(DocumentSource::Diff);
         }
@@ -195,15 +191,8 @@ impl GatherSpec {
 }
 
 /// Build a canonical list of context sources from high-level switches.
-pub fn default_gather_sources(
-    include_repo_docs: bool,
-    include_diff: bool,
-    include_clipboard: bool,
-) -> Vec<DocumentSource> {
-    let mut sources = Vec::new();
-    if include_repo_docs {
-        sources.push(DocumentSource::RepoDoc);
-    }
+pub fn default_gather_sources(include_diff: bool, include_clipboard: bool) -> Vec<DocumentSource> {
+    let mut sources = vec![DocumentSource::RepoDoc];
     if include_diff {
         sources.push(DocumentSource::Diff);
     }
@@ -224,12 +213,12 @@ pub struct GatherContextOpts {
     pub operate: bool,
     pub surface: Surface,
     pub directions: Vec<String>,
+    /// Explicit docs paths, globs, or directories to include in context.
+    pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
     /// Explicit sources to include in the prompt context pipeline.
     pub sources: Vec<DocumentSource>,
-    /// Area path for scoped context.
-    pub area: Option<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
@@ -241,8 +230,8 @@ impl GatherContextOpts {
         GatherSpec {
             sources: self.sources.clone(),
             repo_root: self.repo_root.clone(),
+            docs: self.docs.clone(),
             files: self.files.clone(),
-            area: self.area.clone(),
             wave: self.wave.clone(),
             related_repos: self.related_repos.clone(),
         }
@@ -326,10 +315,6 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
-    /// Docs gathered from area ancestor and descendant directories
-    pub area_docs: Vec<Document>,
-    /// Area path for display
-    pub area: Option<String>,
 }
 
 /// Prompt context gathered from repo/state inputs.
@@ -531,16 +516,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         breakdown.add_source_tokens(doc.source, tokens);
     }
 
-    // Area
-    let mut area_doc_tokens: Vec<usize> = components
-        .area_docs
-        .iter()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .collect();
-    breakdown.add_source_tokens(DocumentSource::Area, area_doc_tokens.iter().sum::<usize>());
-    breakdown.area_name = components.area.clone();
-    breakdown.area_doc_count = components.area_docs.len();
-
     if let Some(ref clip) = components.clipboard {
         breakdown.set_source_tokens(DocumentSource::Clipboard, count_tokens(clip));
     }
@@ -549,24 +524,14 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
 
     let mut total = breakdown.total();
     if total > max_tokens {
-        // 1. Drop area docs first (supplementary architectural context)
-        while total > max_tokens && !components.area_docs.is_empty() {
-            components.area_docs.pop();
-            if let Some(tokens) = area_doc_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Area, tokens);
-                total = total.saturating_sub(tokens);
-                breakdown.area_doc_count = breakdown.area_doc_count.saturating_sub(1);
-            }
-        }
-
-        // 2. Drop wave memory docs before general docs/summaries.
+        // 1. Drop wave memory docs before general docs/summaries.
         if total > max_tokens && components.wave_memory.is_some() {
             components.wave_memory = None;
             breakdown.subtract_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
             total = total.saturating_sub(wave_memory_tokens);
         }
 
-        // 3. Drop docs (summaries first, then docs)
+        // 2. Drop docs (summaries first, then docs)
         while total > max_tokens && !components.summaries.is_empty() {
             components.summaries.pop();
             if let Some(tokens) = summary_tokens.pop() {
@@ -584,7 +549,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             }
         }
 
-        // 4. Drop diff context
+        // 3. Drop diff context
         while total > max_tokens && !components.diff_files.is_empty() {
             components.diff_files.pop();
             if let Some(tokens) = diff_file_tokens.pop() {
@@ -600,7 +565,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             total = total.saturating_sub(diff_string_tokens);
         }
 
-        // 5. Drop clipboard as last resort
+        // 4. Drop clipboard as last resort
         if total > max_tokens && components.clipboard.is_some() {
             components.clipboard = None;
             breakdown.set_source_tokens(DocumentSource::Clipboard, 0);
@@ -618,7 +583,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         &summary_tokens,
         wave_memory_tokens,
         &doc_tokens,
-        &area_doc_tokens,
     );
 
     // Derive source counts from document entries.
@@ -636,7 +600,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     if breakdown.documents.len() > 100 {
         warn!(
             document_count = breakdown.documents.len(),
-            area = components.area.as_deref().unwrap_or_default(),
             "context breakdown has more than 100 documents; consider narrowing area or diff scope"
         );
     }
@@ -697,7 +660,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let mut summaries = Vec::new();
     let mut wave_memory = None;
     let mut diff_files = Vec::new();
-    let mut area_docs = Vec::new();
     for doc in gathered_docs {
         match doc.source {
             DocumentSource::RepoDoc | DocumentSource::Scratch | DocumentSource::Wave => {
@@ -705,9 +667,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
             }
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
-            DocumentSource::Area => area_docs.push(doc),
             DocumentSource::Diff => diff_files.push(doc),
-            DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
+            DocumentSource::Area
+            | DocumentSource::Step
+            | DocumentSource::Direction
+            | DocumentSource::Clipboard => {}
         }
     }
     dedup_documents(&mut diff_files);
@@ -760,8 +724,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         message: opts.message.clone(),
         diff_tier,
         diff_file_count,
-        area_docs,
-        area: opts.area.clone(),
     }))
 }
 
@@ -769,7 +731,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve legacy ordering exactly: scratch -> wave -> wave memory -> root docs.
+    // Preserve ambient ordering: scratch -> wave -> wave memory -> explicit docs.
     if spec.includes(DocumentSource::RepoDoc) {
         docs.extend(gather_scratch_docs(&spec.repo_root)?);
     }
@@ -781,42 +743,12 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
             docs.push(doc);
         }
     }
-    if spec.includes(DocumentSource::RepoDoc) {
-        docs.extend(gather_repo_root_docs(&spec.repo_root)?);
-    }
-
-    if spec.includes(DocumentSource::Area) {
-        if let Some(ref area) = spec.area {
-            match resolve_area(area, &spec.related_repos) {
-                ResolvedArea::Local { area } => {
-                    docs.extend(gather_area_docs(&spec.repo_root, area));
-                }
-                ResolvedArea::CrossRepo { related, area } => {
-                    // Pull in the related repo's root docs alongside its area docs.
-                    match gather_repo_root_docs(&related.path) {
-                        Ok(related_docs) => {
-                            for mut doc in related_docs {
-                                doc.path = format!("[{}] {}", related.repo_id, doc.path);
-                                docs.push(doc);
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                repo_id = %related.repo_id,
-                                path = %related.path.display(),
-                                error = %err,
-                                "failed to gather related repo root docs"
-                            );
-                        }
-                    }
-                    let area_docs = gather_area_docs(&related.path, area);
-                    for mut doc in area_docs {
-                        doc.path = format!("[{}] {}", related.repo_id, doc.path);
-                        docs.push(doc);
-                    }
-                }
-            }
-        }
+    if spec.includes(DocumentSource::RepoDoc) && !spec.docs.is_empty() {
+        docs.extend(gather_doc_targets(
+            &spec.repo_root,
+            &spec.docs,
+            &spec.related_repos,
+        )?);
     }
 
     if spec.includes(DocumentSource::Diff) && !spec.files.is_empty() {
@@ -927,33 +859,6 @@ fn gather_wave_memory_doc(
     }))
 }
 
-fn gather_repo_root_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
-    let mut docs = Vec::new();
-    let mut entries: Vec<_> = fs::read_dir(repo_root)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
-        })
-        .collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        if let Ok(content) = fs::read_to_string(&path) {
-            docs.push(Document {
-                path: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                content,
-                source: DocumentSource::RepoDoc,
-            });
-        }
-    }
-    Ok(docs)
-}
-
 enum ResolvedArea<'a> {
     Local {
         area: &'a str,
@@ -962,6 +867,147 @@ enum ResolvedArea<'a> {
         related: &'a RelatedRepoContext,
         area: &'a str,
     },
+}
+
+fn gather_doc_targets(
+    repo_root: &Path,
+    targets: &[String],
+    related_repos: &[RelatedRepoContext],
+) -> Result<Vec<Document>, CoreError> {
+    let mut docs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for target in targets {
+        let target = target.trim();
+        if target.is_empty() {
+            continue;
+        }
+
+        match resolve_area(target, related_repos) {
+            ResolvedArea::Local { area } => {
+                gather_local_doc_target(repo_root, area, &mut seen, &mut docs)?;
+            }
+            ResolvedArea::CrossRepo { related, area } => {
+                let mut related_docs = Vec::new();
+                let mut related_seen = HashSet::new();
+                gather_local_doc_target(&related.path, area, &mut related_seen, &mut related_docs)?;
+                for mut doc in related_docs {
+                    doc.path = format!("[{}] {}", related.repo_id, doc.path);
+                    docs.push(doc);
+                }
+            }
+        }
+    }
+
+    Ok(docs)
+}
+
+fn gather_local_doc_target(
+    repo_root: &Path,
+    target: &str,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    if contains_glob_chars(target) {
+        gather_glob_docs(repo_root, target, seen, docs)?;
+        return Ok(());
+    }
+
+    let Some(path) = resolve_path(repo_root, target) else {
+        return Ok(());
+    };
+
+    if path.is_dir() {
+        let mut area_docs = gather_area_docs(repo_root, target);
+        for doc in &mut area_docs {
+            doc.source = DocumentSource::RepoDoc;
+        }
+        for doc in area_docs {
+            let abs_path = repo_root.join(&doc.path);
+            let canonical = abs_path.canonicalize().unwrap_or(abs_path);
+            if seen.insert(canonical) {
+                docs.push(doc);
+            }
+        }
+        return Ok(());
+    }
+
+    if path.is_file() {
+        push_doc_file(repo_root, &path, seen, docs);
+    }
+
+    Ok(())
+}
+
+fn gather_glob_docs(
+    repo_root: &Path,
+    pattern: &str,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    let regex = match Regex::new(&glob_to_regex(pattern.trim_start_matches("./"))) {
+        Ok(regex) => regex,
+        Err(_) => return Ok(()),
+    };
+    let gitignore = build_gitignore(repo_root);
+    let walker = ignore::WalkBuilder::new(repo_root)
+        .hidden(false)
+        .standard_filters(true)
+        .build();
+    let mut entries = Vec::new();
+
+    for entry in walker {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        if !path.is_file() || should_exclude(repo_root, path, &gitignore) {
+            continue;
+        }
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        if regex.is_match(&rel_path) {
+            entries.push(path.to_path_buf());
+        }
+    }
+
+    entries.sort();
+    for path in entries {
+        push_doc_file(repo_root, &path, seen, docs);
+    }
+
+    Ok(())
+}
+
+fn push_doc_file(
+    repo_root: &Path,
+    path: &Path,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) {
+    if should_exclude(repo_root, path, &build_gitignore(repo_root)) {
+        return;
+    }
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !seen.insert(canonical) {
+        return;
+    }
+    let Some(content) = read_text_file(path) else {
+        return;
+    };
+    let rel_path = path
+        .strip_prefix(repo_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    docs.push(Document {
+        path: rel_path,
+        content,
+        source: DocumentSource::RepoDoc,
+    });
 }
 
 /// Parse an area string for cross-repo syntax (`repo_name:path`).
@@ -1517,6 +1563,37 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         .is_ignore()
 }
 
+fn contains_glob_chars(value: &str) -> bool {
+    value.contains('*') || value.contains('?') || value.contains('[')
+}
+
+fn glob_to_regex(pattern: &str) -> String {
+    let mut regex = String::from("^");
+    let mut chars = pattern.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' => {
+                if chars.peek() == Some(&'*') {
+                    let _ = chars.next();
+                    regex.push_str(".*");
+                } else {
+                    regex.push_str("[^/]*");
+                }
+            }
+            '?' => regex.push_str("[^/]"),
+            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | '[' | ']' | '\\' => {
+                regex.push('\\');
+                regex.push(ch);
+            }
+            _ => regex.push(ch),
+        }
+    }
+
+    regex.push('$');
+    regex
+}
+
 /// Files that coding agents load natively. All are skipped from lf docs to
 /// avoid duplication — whichever agent runs will pick up its own file.
 const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
@@ -1625,14 +1702,14 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: operate, voice, surface.
+/// third-party app classifiers: loopflow, voice, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
         parts.push(format!(
-            "<lf:operate>\n{}\n</lf:operate>",
-            crate::engine::builtins::OPERATE_DOC
+            "<lf:loopflow>\n{}\n</lf:loopflow>",
+            crate::engine::builtins::LOOPFLOW_DOC
         ));
     }
 
@@ -1703,49 +1780,37 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Reference material (docs, summaries)
-    if !components.docs.is_empty() {
-        let doc_parts: Vec<String> = components
-            .docs
+    let scratch_docs: Vec<Document> = components
+        .docs
+        .iter()
+        .filter(|doc| doc.source == DocumentSource::Scratch)
+        .cloned()
+        .collect();
+    if !scratch_docs.is_empty() {
+        let scratch_body: Vec<String> = scratch_docs
             .iter()
             .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+                format!(
+                    "<lf:file path=\"{}\">\n{}\n</lf:file>",
+                    doc.path, doc.content
+                )
             })
             .collect();
-
-        let docs_body = doc_parts.join("\n\n");
         parts.push(format!(
-            "Repository documentation. Follow STYLE carefully. \
-             May include design artifacts (scratch/).\n\n\
-             <lf:docs>\n{}\n</lf:docs>",
-            docs_body
+            "Scratch design artifacts and working notes.\n\n<lf:scratch>\n{}\n</lf:scratch>",
+            scratch_body.join("\n\n")
         ));
     }
 
-    // Area docs (ancestor + descendant docs when -a is set)
-    if !components.area_docs.is_empty() {
-        let area_label = components.area.as_deref().unwrap_or("area");
-        let area_parts: Vec<String> = components
-            .area_docs
-            .iter()
-            .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
-            })
-            .collect();
-        let area_body = area_parts.join("\n\n");
-        parts.push(format!(
-            "Area docs for `{}`. Architectural context from ancestor and descendant directories.\n\n\
-             <lf:area>\n{}\n</lf:area>",
-            area_label, area_body
-        ));
+    // Explicit docs and wave docs.
+    let reference_docs: Vec<Document> = components
+        .docs
+        .iter()
+        .filter(|doc| doc.source != DocumentSource::Scratch)
+        .cloned()
+        .collect();
+    if !reference_docs.is_empty() {
+        parts.push(format_files(&reference_docs));
     }
 
     parts

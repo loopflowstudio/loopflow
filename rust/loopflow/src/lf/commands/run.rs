@@ -132,6 +132,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 .map(|path| path.to_string_lossy().to_string()),
             wave: cli.wave.clone(),
             message: message.map(|value| value.to_string()),
+            operate: cli.operate,
             agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
             max_turns: None,
@@ -197,6 +198,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 surface,
                 step_name,
                 message,
+                prepared.components.operate,
                 prepared.components.voice_doc.as_deref(),
             );
             agent_config.system_prompt.clear();
@@ -250,10 +252,10 @@ fn should_launch_via_skill(step_name: &str) -> bool {
     !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
 }
 
-/// Build the launch seed for a vendor skill handoff: the skill invocation, the surface
-/// run-mode preamble, and the voice doc for loopflow-owned surfaces. Orientation now lives in the step
-/// bodies themselves, and the step body loads from the synced skill on invoke,
-/// so this stays small enough for the GUI deep-link cap.
+/// Build the launch seed for a vendor skill handoff: the skill invocation,
+/// system-safe instruction sections, and optional user message. Orientation now
+/// lives in the step bodies themselves, and the step body loads from the synced
+/// skill on invoke, so this stays small enough for the GUI deep-link cap.
 ///
 /// The invocation sigil is harness-specific: Codex's interactive composer
 /// reserves `/` for built-in commands, so skills fire with `$name` there (and
@@ -263,17 +265,21 @@ fn skill_launch_seed(
     surface: Surface,
     step_name: &str,
     message: Option<&str>,
+    operate: bool,
     voice: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
-    let mut seed = format!("{sigil}{step_name}\n\n{}", surface.instructions());
-    if surface != Surface::Ide {
-        if let Some(voice) = voice.map(str::trim).filter(|value| !value.is_empty()) {
-            seed.push_str("\n\n<lf:voice>\n");
-            seed.push_str(voice);
-            seed.push_str("\n</lf:voice>");
-        }
-    }
+    let system_components = PromptComponents {
+        surface,
+        operate,
+        voice_doc: voice
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        ..Default::default()
+    };
+    let system_sections = crate::engine::prompt::format_system_sections(&system_components);
+    let mut seed = format!("{sigil}{step_name}\n\n{}", system_sections.join("\n\n"));
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
         seed.push_str(message);
@@ -302,6 +308,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.components.wave.as_deref(),
         built.components.area.as_deref(),
         cli.clipboard,
+        cli.operate,
         cli_model,
     );
     eprintln!(
@@ -503,16 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn skill_launch_seed_starts_with_slash_step_and_surface() {
+    fn skill_launch_seed_starts_with_slash_step_surface_and_interactive_voice() {
         let seed = skill_launch_seed(
             "claude",
-            Surface::Headless,
+            Surface::Cli,
             "implement",
             Some("build auth"),
+            false,
             Some("Be terse."),
         );
         assert!(seed.starts_with("/implement\n\n"));
-        assert!(seed.contains("Run mode is headless"));
+        assert!(seed.contains("Run mode is interactive"));
         assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
         // Orientation now lives in the step body, not the seed.
         assert!(!seed.contains("<lf:orientation>"));
@@ -523,7 +531,7 @@ mod tests {
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
@@ -534,6 +542,7 @@ mod tests {
             Surface::Ide,
             "gate",
             Some("build auth"),
+            false,
             Some("Be terse."),
         );
 
@@ -546,11 +555,40 @@ mod tests {
 
     #[test]
     fn skill_launch_seed_omits_voice_and_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, None);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None);
         assert!(seed.starts_with("/gate\n\n"));
         assert!(!seed.contains("<lf:voice>"));
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_omits_voice_for_headless_surface() {
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            false,
+            Some("Be terse."),
+        );
+        assert!(seed.contains("Run mode is headless"));
+        assert!(!seed.contains("<lf:voice>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_omits_operate_by_default() {
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+        assert!(!seed.contains("<lf:operate>"));
+        assert!(!seed.contains("lf op commit"));
+    }
+
+    #[test]
+    fn skill_launch_seed_includes_operate_when_enabled() {
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
+        assert!(seed.contains("<lf:operate>"));
+        assert!(seed.contains("lf op commit"));
+        assert!(seed.contains("</lf:operate>"));
     }
 
     #[test]

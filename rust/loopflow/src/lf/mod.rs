@@ -97,6 +97,10 @@ pub struct Cli {
     /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
+
+    /// Include loopflow operating guidance
+    #[arg(long)]
+    pub operate: bool,
 }
 
 impl Cli {

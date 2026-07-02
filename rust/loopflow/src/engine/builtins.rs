@@ -3,8 +3,8 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-/// Bundled VOICE.md — default voice/tone guidance for agent output.
-pub const VOICE_DOC: &str = include_str!("builtins/VOICE.md");
+/// Bundled OPERATE.md - opt-in loopflow operating guidance for agents.
+pub const OPERATE_DOC: &str = include_str!("builtins/OPERATE.md");
 
 /// Surface instruction prompts, one per surface variant.
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");

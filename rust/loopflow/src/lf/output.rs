@@ -183,6 +183,7 @@ pub fn format_reproducible_command(
     wave: Option<&str>,
     area: Option<&str>,
     clipboard: bool,
+    operate: bool,
     model: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
@@ -200,6 +201,9 @@ pub fn format_reproducible_command(
     }
     if clipboard {
         parts.push("-c".to_string());
+    }
+    if operate {
+        parts.push("--operate".to_string());
     }
     if let Some(m) = model {
         // Only include if not the default
@@ -283,7 +287,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), &[], None, None, false, None);
+        let cmd = format_reproducible_command(Some("debug"), &[], None, None, false, false, None);
         assert_eq!(cmd, "lf debug");
     }
 
@@ -295,11 +299,12 @@ mod tests {
             Some("rust"),
             Some("src/"),
             true,
+            true,
             Some("claude:opus"),
         );
         assert_eq!(
             cmd,
-            "lf implement -d security --wave rust -a src/ -c -m claude:opus"
+            "lf implement -d security --wave rust -a src/ -c --operate -m claude:opus"
         );
     }
 }

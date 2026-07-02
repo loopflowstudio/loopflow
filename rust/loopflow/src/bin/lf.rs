@@ -39,6 +39,7 @@ const BOOL_FLAGS: &[&str] = &[
     "--no-diff-files",
     "--diff",
     "--no-diff",
+    "--operate",
     "-h",
     "--help",
     "-V",
@@ -376,6 +377,17 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "--no-direction", "implement"]);
+    }
+
+    #[test]
+    fn reorder_args_operate_flag_after_step() {
+        let args = vec![
+            "lf".to_string(),
+            "gate".to_string(),
+            "--operate".to_string(),
+        ];
+        let result = reorder_args(args);
+        assert_eq!(result, vec!["lf", "--operate", "gate"]);
     }
 
     #[test]

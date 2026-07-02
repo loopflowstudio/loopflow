@@ -1,1 +1,1 @@
-lfd: run waves from goal prompts
+lfq: expose attachable wave sessions

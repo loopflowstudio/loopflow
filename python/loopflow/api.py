@@ -246,6 +246,21 @@ def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)
 
 
+def list_terminal_sessions(
+    wave_id: Optional[str] = None,
+    statuses: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    return _client().list_terminal_sessions(wave_id=wave_id, statuses=statuses)
+
+
+def attach_terminal_session(session_id: str) -> dict[str, Any]:
+    return _client().attach_terminal_session(session_id)
+
+
+def list_attention(status: Optional[str] = None) -> list[dict[str, Any]]:
+    return _client().list_attention(status=status)
+
+
 def create_session(
     harness: str,
     wave_run_id: Optional[str] = None,

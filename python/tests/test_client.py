@@ -248,6 +248,73 @@ class TestClientResponses:
         assert runs[0].status == "completed"
         client.close()
 
+    def test_list_terminal_sessions_filters_statuses(self):
+        def handler(request):
+            assert request.url.path == "/v0/terminal-sessions"
+            assert request.url.params.get("wave_id") == "abc-123"
+            assert request.url.params.get("active_only") == "true"
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {"id": "terminal-1", "status": "running"},
+                        {"id": "terminal-2", "status": "completed"},
+                    ],
+                },
+            )
+
+        client = _mock_client(handler)
+        sessions = client.list_terminal_sessions(
+            wave_id="abc-123",
+            statuses=["pending", "attached", "running"],
+        )
+        assert sessions == [{"id": "terminal-1", "status": "running"}]
+        client.close()
+
+    def test_attach_terminal_session_returns_connection_info(self):
+        def handler(request):
+            assert request.url.path == "/v0/terminal-sessions/terminal-1/attach"
+            assert request.method == "POST"
+            return httpx.Response(
+                200,
+                json={
+                    "session_name": "lfq-terminal-1",
+                    "host": "localhost",
+                    "cwd": "/tmp/repo",
+                    "status": "attached",
+                },
+            )
+
+        client = _mock_client(handler)
+        connection = client.attach_terminal_session("terminal-1")
+        assert connection["session_name"] == "lfq-terminal-1"
+        client.close()
+
+    def test_list_attention_returns_dicts(self):
+        def handler(request):
+            assert request.url.path == "/v0/attention"
+            assert request.url.params.get("status") == "unresolved"
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "attention-1",
+                            "kind": "interactive",
+                            "status": "surfaced",
+                            "context": {"terminal_session_id": "terminal-1"},
+                        }
+                    ],
+                },
+            )
+
+        client = _mock_client(handler)
+        items = client.list_attention(status="unresolved")
+        assert items[0]["context"]["terminal_session_id"] == "terminal-1"
+        client.close()
+
     def test_waves_invalid_list_payload_raises_error(self):
         def handler(request):
             return httpx.Response(200, json=[])

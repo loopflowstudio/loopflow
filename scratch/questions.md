@@ -25,3 +25,11 @@ or step-agent maps. The wider deletion of `Wave.area`, `Wave.direction`, request
 payload fields, DTO fields, store columns, and Concerto affordances remains a
 separate mechanical cut because those fields are still accepted through the live
 API and UI.
+
+## lfq terminal-session status filtering
+
+The design names `GET /v0/terminal-sessions?statuses=<csv>`, but the current Rust
+HTTP route exposes `active_only` and does not parse a `statuses` query. For the
+Python surface, `Client.list_terminal_sessions(statuses=...)` keeps the requested
+method shape, uses `active_only=true` for live-status requests, and filters the
+returned payload locally. No Rust route change in this unit.

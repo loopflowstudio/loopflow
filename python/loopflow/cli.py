@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 import webbrowser
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 import typer
@@ -104,6 +105,78 @@ def _wave_detail_table(wave: Wave) -> Table:
     ]
     for key, value in rows:
         table.add_row(key, _format_wave_value(value))
+    return table
+
+
+def _short_id(value: object) -> str:
+    text = str(value or "")
+    if len(text) <= 12:
+        return text or "-"
+    return text[:12]
+
+
+def _terminal_session_role(session: dict[str, Any]) -> str:
+    if session.get("wave_run_id"):
+        return "dispatch"
+
+    source = str(session.get("source") or "")
+    if source == "wave_agent":
+        return "agent"
+    if source == "palette":
+        return "palette"
+    return source or "-"
+
+
+def _terminal_session_id_from_attention(item: dict[str, Any]) -> Optional[str]:
+    value = item.get("terminal_session_id")
+    if isinstance(value, str):
+        return value
+
+    context = item.get("context")
+    if not isinstance(context, dict):
+        return None
+    context_value = context.get("terminal_session_id")
+    if isinstance(context_value, str):
+        return context_value
+    return None
+
+
+def _needs_input_session_ids(items: list[dict[str, Any]]) -> set[str]:
+    session_ids: set[str] = set()
+    for item in items:
+        if item.get("kind") != "interactive" or item.get("status") == "resolved":
+            continue
+        session_id = _terminal_session_id_from_attention(item)
+        if session_id:
+            session_ids.add(session_id)
+    return session_ids
+
+
+def _terminal_sessions_table(
+    sessions: list[dict[str, Any]],
+    attention_items: list[dict[str, Any]],
+    wave_names: dict[str, str],
+) -> Table:
+    needs_input_ids = _needs_input_session_ids(attention_items)
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("wave")
+    table.add_column("session")
+    table.add_column("role")
+    table.add_column("step")
+    table.add_column("status")
+    table.add_column("needs-input")
+
+    for session in sessions:
+        session_id = str(session.get("id") or "")
+        wave_id = str(session.get("wave_id") or "")
+        table.add_row(
+            wave_names.get(wave_id, _short_id(wave_id)),
+            _short_id(session_id),
+            _terminal_session_role(session),
+            str(session.get("step") or "-"),
+            str(session.get("status") or "-"),
+            "yes" if session_id in needs_input_ids else "-",
+        )
     return table
 
 
@@ -584,6 +657,53 @@ def logs_wave(name_or_id: str) -> None:
             typer.echo(line)
     except LoopflowError as exc:
         typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("sessions", help="List live terminal sessions.")
+def sessions(wave: Optional[str] = typer.Argument(None)) -> None:
+    wave_id = None
+    wave_names: dict[str, str] = {}
+    if wave is None:
+        wave_names = {item.id: item.name for item in api.waves()}
+    else:
+        resolved_wave = api.wave(wave)
+        if resolved_wave is None:
+            typer.echo(f"wave not found: {wave}. Run `lfq list` to see available waves.", err=True)
+            raise typer.Exit(code=1)
+        wave_id = resolved_wave.id
+        wave_names[resolved_wave.id] = resolved_wave.name
+
+    live_statuses = ["pending", "attached", "running"]
+    sessions_payload = api.list_terminal_sessions(wave_id=wave_id, statuses=live_statuses)
+    attention_items = api.list_attention(status="unresolved")
+    if sessions_payload:
+        console.print(_terminal_sessions_table(sessions_payload, attention_items, wave_names))
+    else:
+        console.print("no sessions")
+
+
+@app.command("attach", help="Attach to a terminal session.")
+def attach(session_id: str) -> None:
+    try:
+        connection = api.attach_terminal_session(session_id)
+    except LoopflowError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    tmux_name = connection.get("tmux_name") or connection.get("session_name")
+    if not tmux_name:
+        typer.echo("Error: attach response did not include a tmux session name", err=True)
+        raise typer.Exit(code=1)
+
+    if shutil.which("tmux") is None:
+        typer.echo("Error: tmux is not available on PATH", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        os.execvp("tmux", ["tmux", "attach", "-t", str(tmux_name)])
+    except OSError as exc:
+        typer.echo(f"Error: failed to attach tmux session {tmux_name}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 

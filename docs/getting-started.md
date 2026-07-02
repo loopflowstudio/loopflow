@@ -163,11 +163,11 @@ lfq create shipper .
 ```python
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="build", area=["src/"], direction=["clarity"])
+loopflow.update_wave("shipper", flow="build", goal="ship-roadmap")
 loopflow.run_wave("shipper")
 ```
 
-A wave is **area × direction × flow**. The wave picks a task, runs the flow, opens a PR, and loops. Triggers fire flows in response to signals (repo changes, other waves completing, CI failures).
+A wave is **goal × flow × runtime state**. The wave picks a task, dispatches the flow, opens a PR, and loops. Triggers fire flows in response to signals (repo changes, other waves completing, CI failures).
 
 **Concerto** (macOS) is the native wave experience — create waves, monitor progress, browse flows, review PRs. Requires `lfd`.
 
@@ -175,6 +175,8 @@ A wave is **area × direction × flow**. The wave picks a task, runs the flow, o
 
 ```bash
 lfq list             # list waves
+lfq sessions          # list live agent sessions
+lfq attach <id>       # attach to one over tmux
 lfq logs shipper     # tail agent output
 lfq stop shipper     # stop a wave
 ```

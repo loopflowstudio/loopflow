@@ -89,7 +89,7 @@ If restoring those edits conflicts, the stash is left in place for manual recove
 The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
-2. Adjust the wave config in Concerto or via the Python API
+2. Adjust the wave runtime settings in Concerto or via the Python API
 3. Land accumulated work: see [Waves](waves.md) for loop management
 
 ## Context too large

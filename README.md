@@ -6,25 +6,26 @@ Waves are first built manually through more interactive exploration. Eventually 
 
 ## Waves
 
-A wave is **area × flow × goal**.
+A wave is **goal × flow × runtime state**.
 
 | Field | Usage | Form |
 |-------|------|------|
-| **Area** | Scope and context | pathset |
-| **Flow** | Process followed / steps taken | sequence of prompts |
-| **Goal** | Loop prompt for autonomous runs | prompt |
+| **Goal** | Loop prompt for autonomous runs | `wave/<name>/goal.md` |
+| **Flow** | Default process the goal dispatches | flow name |
+| **Runtime state** | Mode, workers, crons, triggers, status | lfd |
 
-```yaml
-# wave/designer/designer.yaml
-flow: build
-goal: ship-roadmap
+```markdown
+<!-- wave/designer/goal.md -->
+---
+primary_flow: build
 mode: loop
-area:
-  - designs/
-triggers:
-  - signal: wave
-    source_wave_id: infra
-    flow: build
+metrics:
+  - design reviews are complete
+---
+
+Run one loop iteration for the designer wave.
+Pick the next useful design task, dispatch the right flow, and fold what changed
+back into the wave.
 ```
 
 ### Modes
@@ -70,7 +71,7 @@ A trigger pairs a signal (what changed) with a flow (what to run). Triggers are 
 | **wave** | Another wave completed | `build` |
 | **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
-Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`. These don't need to be declared in the YAML.
+Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.
 
 ## Steps
 
@@ -273,13 +274,13 @@ lfq create engbot .                # create a wave
 lfq run engbot                            # ride a wave
 ```
 
-Configure flow/area/direction with `loopflow.update_wave(...)`, then ride it with `loopflow.run_wave(...)`.
+Configure a goal and primary flow with `loopflow.update_wave(...)`, then ride it with `loopflow.run_wave(...)`.
 
 ```bash
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("engbot", flow="build", direction=["ux"], area=["designs/"])
+loopflow.update_wave("engbot", flow="build", goal="ship-roadmap")
 loopflow.run_wave("engbot")
 PY
 ```
@@ -326,6 +327,8 @@ uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
 lfq show engbot      # show wave details
+lfq sessions         # list live terminal sessions
+lfq attach <id>      # attach to one over tmux
 lfq logs engbot      # tail agent output
 lfq stop engbot      # stop a running wave
 lfq delete engbot    # remove wave and history

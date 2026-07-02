@@ -1,7 +1,6 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 use loopflow::ops::{
@@ -23,10 +22,13 @@ fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     )
 }
 
-fn write_gh_status_logging_script(log_path: &Path, run_list: &str, release_view: &str) -> String {
+fn write_gh_status_workflow_script(
+    package_run_list: &str,
+    weekly_run_list: &str,
+    release_view: &str,
+) -> String {
     format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\nprintf '%s\\n' \"$*\" >> '{log_path}'\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n",
-        log_path = log_path.display()
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$*\" in\n  *'--workflow nightly-packages.yml'*)\n    cat <<'JSON'\n{package_run_list}\nJSON\n    exit 0;;\n  *'--workflow weekly-release.yml'*)\n    cat <<'JSON'\n{weekly_run_list}\nJSON\n    exit 0;;\nesac\ncase \"$1 $2\" in\n  'run list')\n    echo '[]'\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
     )
 }
 
@@ -210,11 +212,9 @@ fn release_status_reports_latest_tag_and_release() {
 
 #[test]
 fn release_status_reports_automation_workflow_health() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let gh_log = temp.path().join("gh.log");
-    let gh_script = write_gh_status_logging_script(
-        &gh_log,
+    let gh_script = write_gh_status_workflow_script(
         r#"[{"databaseId":42,"headBranch":"main","displayTitle":"Packages (nightly)","status":"completed","conclusion":"failure","url":"https://example.com/run/42"}]"#,
+        r#"[{"databaseId":43,"headBranch":"main","displayTitle":"Weekly release","status":"in_progress","conclusion":null,"url":"https://example.com/run/43"}]"#,
         r#"{"tagName":"v0.9.1"}"#,
     );
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
@@ -235,11 +235,9 @@ fn release_status_reports_automation_workflow_health() {
         Some(ReleaseFailureKind::PackageVerification)
     );
     assert_eq!(status.weekly_release.label, "Weekly release");
-    assert_eq!(status.weekly_release.status.as_deref(), Some("completed"));
-
-    let calls = fs::read_to_string(gh_log).expect("read gh log");
-    assert!(calls.contains("--workflow nightly-packages.yml"));
-    assert!(calls.contains("--workflow weekly-release.yml"));
+    assert_eq!(status.weekly_release.run_id, Some(43));
+    assert_eq!(status.weekly_release.status.as_deref(), Some("in_progress"));
+    assert_eq!(status.weekly_release.failure_kind, None);
 }
 
 #[test]

@@ -151,8 +151,6 @@ pub struct ReleaseWorkflowStatus {
 pub enum ReleaseFailureKind {
     PackageVerification,
     Publish,
-    DeployHost,
-    StaleLocalCopy,
 }
 
 #[derive(Debug, Clone)]
@@ -228,8 +226,8 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
 
     let workflow_failure_kind = workflow
         .as_ref()
-        .filter(|run| is_failed_conclusion(run.conclusion.as_deref()))
-        .map(|_| ReleaseFailureKind::Publish);
+        .is_some_and(|run| is_failed_conclusion(run.conclusion.as_deref()))
+        .then_some(ReleaseFailureKind::Publish);
 
     Ok(ReleaseStatusResult {
         target: target.name,
@@ -1634,7 +1632,7 @@ fn latest_workflow_status(
     failure_kind: ReleaseFailureKind,
 ) -> OpsResult<ReleaseWorkflowStatus> {
     let run = match list_workflow_runs(repo, Some(workflow), "1") {
-        Ok(mut runs) => runs.pop(),
+        Ok(runs) => runs.into_iter().next(),
         Err(OpsError::CommandFailed { stderr, .. }) if is_missing_workflow_error(&stderr) => None,
         Err(err) => return Err(err),
     };
@@ -1686,8 +1684,8 @@ fn list_workflow_runs(
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
-    let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    serde_json::from_str(&output)
+    let output = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(output.trim())
         .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))
 }
 

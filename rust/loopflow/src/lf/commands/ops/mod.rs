@@ -747,8 +747,6 @@ fn release_failure_kind_label(kind: &crate::ops::ReleaseFailureKind) -> &'static
     match kind {
         crate::ops::ReleaseFailureKind::PackageVerification => "package verification failure",
         crate::ops::ReleaseFailureKind::Publish => "publish failure",
-        crate::ops::ReleaseFailureKind::DeployHost => "deploy/host failure",
-        crate::ops::ReleaseFailureKind::StaleLocalCopy => "stale local copy",
     }
 }
 

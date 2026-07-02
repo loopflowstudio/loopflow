@@ -23,6 +23,10 @@ struct Args {
     #[arg(long)]
     surface: Option<Surface>,
 
+    /// Include loopflow operating guidance
+    #[arg(long)]
+    operate: bool,
+
     /// Directions to apply (repeatable)
     #[arg(long = "direction")]
     directions: Vec<String>,
@@ -59,6 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         repo_root: args.repo,
         step: args.step,
         message: None,
+        operate: args.operate,
         surface: args.surface.unwrap_or_default(),
         directions: args.directions,
         files: Vec::new(),

@@ -220,6 +220,8 @@ pub struct GatherContextOpts {
     pub step: Option<String>,
     /// User message (positional args after step/flow name, or inline prompt)
     pub message: Option<String>,
+    /// Include loopflow operating guidance.
+    pub operate: bool,
     pub surface: Surface,
     pub directions: Vec<String>,
     /// Specific files to include in context.
@@ -311,6 +313,8 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
+    /// Include loopflow operating guidance.
+    pub operate: bool,
     /// Voice/tone guidance resolved from user ~/.lf/ or repo .lf/.
     pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
@@ -748,6 +752,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
+        operate: opts.operate,
         voice_doc,
         message: opts.message.clone(),
         diff_tier,
@@ -1621,10 +1626,12 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    parts.push(format!(
-        "<lf:operate>\n{}\n</lf:operate>",
-        crate::engine::builtins::OPERATE_DOC
-    ));
+    if components.operate {
+        parts.push(format!(
+            "<lf:operate>\n{}\n</lf:operate>",
+            crate::engine::builtins::OPERATE_DOC
+        ));
+    }
 
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
@@ -2371,8 +2378,20 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_always_includes_operate() {
+    fn format_prompt_omits_operate_by_default() {
         let components = PromptComponents::default();
+
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:operate>"));
+        assert!(!prompt.contains("lf op commit"));
+    }
+
+    #[test]
+    fn format_prompt_includes_operate_when_enabled() {
+        let components = PromptComponents {
+            operate: true,
+            ..Default::default()
+        };
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:operate>"));

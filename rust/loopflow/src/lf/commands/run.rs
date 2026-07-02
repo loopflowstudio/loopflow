@@ -145,7 +145,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             summary: None,
             client_context: Default::default(),
             related_repos: Vec::new(),
-            operate: cli.operate,
         },
     )?;
     debug!(
@@ -197,7 +196,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 step_name,
                 message,
                 prepared.components.voice_doc.as_deref(),
-                prepared.components.operate,
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
@@ -264,7 +262,6 @@ fn skill_launch_seed(
     step_name: &str,
     message: Option<&str>,
     voice: Option<&str>,
-    operate: bool,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
@@ -273,7 +270,6 @@ fn skill_launch_seed(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
-        operate,
         ..Default::default()
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
@@ -306,7 +302,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.components.wave.as_deref(),
         built.components.area.as_deref(),
         cli.clipboard,
-        cli.operate,
         cli_model,
     );
     eprintln!(
@@ -517,7 +512,6 @@ mod tests {
             "implement",
             Some("build auth"),
             Some("Be terse."),
-            false,
         );
         assert!(seed.starts_with("/implement\n\n"));
         assert!(seed.contains("Run mode is interactive"));
@@ -531,16 +525,15 @@ mod tests {
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None, false);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
     fn skill_launch_seed_omits_voice_and_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, None, false);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, None);
         assert!(seed.starts_with("/gate\n\n"));
         assert!(!seed.contains("<lf:voice>"));
-        assert!(!seed.contains("<lf:operate>"));
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
@@ -553,15 +546,14 @@ mod tests {
             "implement",
             None,
             Some("Be terse."),
-            false,
         );
         assert!(seed.contains("Run mode is headless"));
         assert!(!seed.contains("<lf:voice>"));
     }
 
     #[test]
-    fn skill_launch_seed_includes_operate_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, None, true);
+    fn skill_launch_seed_always_includes_operate() {
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, None);
         assert!(seed.contains("<lf:operate>"));
         assert!(seed.contains("lf op commit"));
         assert!(seed.contains("</lf:operate>"));

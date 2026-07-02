@@ -28,7 +28,6 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf gate --operate                 # include loopflow operating guidance
 ```
 
 ## Steps
@@ -89,12 +88,6 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
-
-## Agent Instruction Flags
-
-| Flag | Description |
-|------|-------------|
-| `--operate` | Include loopflow operating guidance for `lf op`, worktrees, delegation, and checkpoints |
 
 ## Browser Automation
 

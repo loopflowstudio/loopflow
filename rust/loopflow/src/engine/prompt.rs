@@ -323,8 +323,6 @@ pub struct PromptComponents {
     pub area_docs: Vec<Document>,
     /// Area path for display
     pub area: Option<String>,
-    /// Inject opt-in loopflow operating guidance.
-    pub operate: bool,
 }
 
 /// Prompt context gathered from repo/state inputs.
@@ -756,7 +754,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         diff_file_count,
         area_docs,
         area: opts.area.clone(),
-        operate: false,
     }))
 }
 
@@ -1624,12 +1621,10 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    if components.operate {
-        parts.push(format!(
-            "<lf:operate>\n{}\n</lf:operate>",
-            crate::engine::builtins::OPERATE_DOC
-        ));
-    }
+    parts.push(format!(
+        "<lf:operate>\n{}\n</lf:operate>",
+        crate::engine::builtins::OPERATE_DOC
+    ));
 
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
@@ -2361,7 +2356,6 @@ mod tests {
         assert!(prompt.contains("scratch/questions.md"));
         assert!(prompt.contains("Output is logged, not displayed"));
         assert!(!prompt.contains("<lf:voice>"));
-        assert!(!prompt.contains("<lf:operate>"));
     }
 
     #[test]
@@ -2377,11 +2371,8 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_includes_operate_when_enabled() {
-        let components = PromptComponents {
-            operate: true,
-            ..Default::default()
-        };
+    fn format_prompt_always_includes_operate() {
+        let components = PromptComponents::default();
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:operate>"));

@@ -44,8 +44,6 @@ pub struct LaunchPromptInput {
     pub client_context: ClientContext,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
-    /// Inject opt-in loopflow operating guidance.
-    pub operate: bool,
 }
 
 /// Canonical launch-prep output.
@@ -81,7 +79,6 @@ pub fn prepare_launch_prompt(
         summary,
         client_context,
         related_repos,
-        operate,
     } = input;
 
     if let Some(step) = resolved_step.as_ref() {
@@ -122,7 +119,6 @@ pub fn prepare_launch_prompt(
     };
 
     let mut gathered = gather_context(&opts)?;
-    gathered.components_mut().operate = operate;
     if let Some(step) = resolved_step {
         gathered.components_mut().step = Some(step);
     }
@@ -301,11 +297,11 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_injects_operate_only_when_enabled() {
+    fn prepare_launch_prompt_always_injects_operate() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let default_prompt = prepare_launch_prompt(
+        let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
@@ -313,22 +309,9 @@ Test step body.
                 ..LaunchPromptInput::default()
             },
         )
-        .expect("prepare default prompt");
-        assert!(!default_prompt.prompt.contains("<lf:operate>"));
-        assert!(!default_prompt.config.system_prompt.contains("<lf:operate>"));
-
-        let operate_prompt = prepare_launch_prompt(
-            &config,
-            LaunchPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
-                operate: true,
-                ..LaunchPromptInput::default()
-            },
-        )
-        .expect("prepare operate prompt");
-        assert!(operate_prompt.prompt.contains("<lf:operate>"));
-        assert!(operate_prompt.config.system_prompt.contains("lf op commit"));
+        .expect("prepare prompt");
+        assert!(prepared.prompt.contains("<lf:operate>"));
+        assert!(prepared.config.system_prompt.contains("lf op commit"));
     }
 
     #[test]

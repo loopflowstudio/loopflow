@@ -14,8 +14,9 @@ surfaces that expose all of that coherently.
    including dependencies and reset tooling
 4. **`governance-surfaces`** (p2) — runboard, portfolio, calibration, beat
    programming, and release controls read from one engine-backed model
-5. **`unify-operate-prompt`** (p3) — one operating prompt (`OPERATE.md`) reaches
-   `--operate`, `loopflow.goal`, and opt-in lfd sessions; no second copy
+5. **`unify-operate-prompt`** (p3) — one operating prompt (`LOOPFLOW.md`, now
+   default-on via `--no-loopflow`) reaches launch prompts, `loopflow.goal`, and
+   lfd sessions; retire the goal-loop inline const and settle lfd wire control
 6. **`remove-directions`** (p3) — retire the `direction` wire field once steps
    are vendor Skills; redistribute its perspective text into step-skills and
    agent docs

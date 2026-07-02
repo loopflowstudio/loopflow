@@ -15,7 +15,6 @@ use crate::engine::structured_reply::{structured_replies_for_context, ClientCont
 /// Optional per-source overrides for context gathering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextSourceOverrides {
-    pub docs: Option<Vec<String>>,
     pub diff_files: Option<bool>,
     pub diff: Option<bool>,
     pub clipboard: Option<bool>,
@@ -65,7 +64,7 @@ pub fn prepare_launch_prompt(
         resolved_step,
         surface,
         directions: mut requested_directions,
-        docs,
+        docs: requested_docs,
         wave,
         message,
         no_loopflow,
@@ -91,11 +90,8 @@ pub fn prepare_launch_prompt(
     };
     let directions = merge_directions(config_directions, &requested_directions);
 
-    let docs = source_overrides.docs.unwrap_or_else(|| {
-        let mut merged = config.docs.clone();
-        merged.extend(docs);
-        merged
-    });
+    let mut docs = config.docs.clone();
+    docs.extend(requested_docs);
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
     let clipboard = source_overrides.clipboard.unwrap_or(config.paste);

@@ -139,7 +139,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
                 clipboard: if cli.clipboard { Some(true) } else { None },
-                ..Default::default()
             },
             summary: None,
             client_context: Default::default(),

@@ -35,7 +35,7 @@ struct Args {
     docs: Vec<String>,
 
     /// Include diff files
-    #[arg(long = "diff-files", default_value = "true", action = clap::ArgAction::Set)]
+    #[arg(long = "diff-files", default_value = "false", action = clap::ArgAction::Set)]
     diff_files: bool,
 
     /// Include unified diff

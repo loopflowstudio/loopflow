@@ -99,12 +99,11 @@ The loop hit its PR limit. Options:
 Reduce context:
 
 ```bash
-lf qa --no-diff-files       # skip branch files
-lf qa --area src/small/     # scope to specific area
-lf qa --no-lfdocs           # skip wave/, scratch/, root .md files
+lf qa --docs README.md      # include only the docs you need
+lf qa                       # omit --diff-files unless full changed file bodies are needed
 ```
 
-For a persistent default, set `lfdocs: false` in `.lf/config.yaml`.
+For persistent docs, set `docs:` in `.lf/config.yaml`.
 
 See [Configuration](config.md) for context options.
 

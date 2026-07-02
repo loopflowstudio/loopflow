@@ -1,3 +1,4 @@
+<lf:loopflow>
 # Operating Through Loopflow
 
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
@@ -27,8 +28,8 @@ rotation.
 ## Delegate Work
 
 Dispatch an `lf` flow or step for real implementation work. A dispatched child
-inherits loopflow context: repo docs, style guide, area docs, wave context, and
-step instructions. Inline edits in the coordinating session do not, and they
+inherits loopflow context: operating guidance, scratch notes, explicit docs,
+wave context, and step instructions. Inline edits in the coordinating session do not, and they
 bloat the transcript with work that belongs in a child.
 
 Inside a Wave loop, dispatch with:
@@ -73,3 +74,82 @@ When you learn something repo-specific, write it into `.lf/`: adapt a step
 (`.lf/steps/<name>.md`), a direction (`.lf/directions/<name>.md`), voice
 (`.lf/voice.md`), or config (`.lf/config.yaml`). Commit `.lf/` changes alongside
 the work so they stay transparent and reviewable.
+
+</lf:loopflow>
+
+Run mode is headless. No user is present. Never ask questions or wait for input — no one will answer.
+
+Do the work. Make executive decisions where needed — pick the simpler choice and keep moving. You can always be corrected in review.
+
+If something is genuinely ambiguous, note your assumption in `scratch/questions.md` and proceed with your best judgment. Do not stop.
+
+No rendering environment. Output is logged, not displayed.
+
+<lf:wave name="rust">
+You are building toward the rust program of work.
+Wave context is included in docs below.
+
+## Wave memory
+
+Persistent memory at wave/rust/MEMORY.md. Read it before every iteration.
+Keep it compact enough to include every iteration: correct stale entries,
+add durable observations, and delete session-specific notes.
+
+Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
+- Patterns: codebase conventions, architecture, how things connect
+- Preferences: user workflow, tool choices, communication norms
+- Learnings: what worked, what failed, surprises
+
+What belongs elsewhere:
+- architectural decisions → wave docs or explicit docs
+- design rationale → scratch/ or wave plan
+- session-specific notes → nowhere (let them die)
+
+How to update:
+- Edit within sections. Don't rewrite the whole file.
+- Correct or remove entries that are wrong or stale.
+- Use absolute dates, not "today" or "recently".
+- When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+
+<lf:memory path="wave/rust/MEMORY.md">
+- Keep prompts concise and concrete.
+- Prefer behavior-focused tests over mock wiring.
+
+</lf:memory>
+</lf:wave>
+
+Scratch design artifacts and working notes.
+
+<lf:scratch>
+<lf:file path="scratch/design.md">
+# Design
+
+Current design notes.
+
+</lf:file>
+</lf:scratch>
+
+Reference files for this task. Includes parent documentation for context.
+<lf:files>
+<lf:file path="wave/rust/README.md">
+# Rust Roadmap
+
+Overview of Rust work.
+
+</lf:file>
+<lf:file path="README.md">
+# Test Repo
+
+Root readme.
+
+</lf:file>
+</lf:files>
+
+The step.
+
+<lf:step:test>
+# Test step
+
+Do the thing.
+
+</lf:step:test>

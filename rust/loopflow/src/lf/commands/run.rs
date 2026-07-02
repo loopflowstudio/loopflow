@@ -3,7 +3,7 @@ use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
     prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
-    PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    PromptComponents, SkillSyncOptions, StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -126,21 +126,16 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             resolved_step: discovered_step.clone(),
             surface,
             directions: cli.direction.clone(),
-            area: cli
-                .area
-                .first()
-                .map(|path| path.to_string_lossy().to_string()),
+            docs: cli.docs.clone(),
             wave: cli.wave.clone(),
             message: message.map(|value| value.to_string()),
-            operate: cli.operate,
+            no_loopflow: cli.no_loopflow,
             agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
             max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
             include_config_directions: !cli.no_direction,
-            include_config_area: true,
             source_overrides: ContextSourceOverrides {
-                lfdocs: cli.lfdocs_setting(),
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
                 clipboard: if cli.clipboard { Some(true) } else { None },
@@ -265,13 +260,13 @@ fn skill_launch_seed(
     surface: Surface,
     step_name: &str,
     message: Option<&str>,
-    operate: bool,
+    loopflow: bool,
     voice: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
         surface,
-        operate,
+        operate: loopflow,
         voice_doc: voice
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -290,7 +285,7 @@ fn skill_launch_seed(
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
-    let header = format_context_header(&built.breakdown, DEFAULT_CONTEXT_BUDGET);
+    let header = format_context_header(&built.breakdown);
     let direction_names: Vec<String> = built
         .components
         .directions
@@ -306,9 +301,9 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.step_name.as_deref(),
         &direction_names,
         built.components.wave.as_deref(),
-        built.components.area.as_deref(),
+        &cli.docs,
         cli.clipboard,
-        cli.operate,
+        cli.no_loopflow,
         cli_model,
     );
     eprintln!(
@@ -577,18 +572,18 @@ mod tests {
     }
 
     #[test]
-    fn skill_launch_seed_omits_operate_by_default() {
+    fn skill_launch_seed_omits_loopflow_when_disabled() {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
-        assert!(!seed.contains("<lf:operate>"));
+        assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf op commit"));
     }
 
     #[test]
-    fn skill_launch_seed_includes_operate_when_enabled() {
+    fn skill_launch_seed_includes_loopflow_when_enabled() {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
-        assert!(seed.contains("<lf:operate>"));
+        assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("lf op commit"));
-        assert!(seed.contains("</lf:operate>"));
+        assert!(seed.contains("</lf:loopflow>"));
     }
 
     #[test]

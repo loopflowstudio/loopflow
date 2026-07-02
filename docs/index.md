@@ -213,7 +213,7 @@ direction adds code-model rigor. Stack them to get both.
 
 ---
 
-## Area
+## Wave Area
 
 The path you pass to `lfq`/`loopflow` when configuring waves. Scopes what the wave works on.
 
@@ -227,7 +227,7 @@ loopflow.run_wave("shipper")
 PY
 ```
 
-Combined with flow and direction, area scopes a manual run or live wave update:
+Combined with flow and direction, area scopes live wave updates. Manual runs use `--docs` to prefetch files, globs, or directories:
 
 ```bash
 python - <<'PY'
@@ -236,6 +236,8 @@ import loopflow.api as loopflow
 loopflow.update_wave("shipper", flow="build", area=["src/api/"], direction=["clarity"])
 loopflow.run_wave("shipper")
 PY
+
+lf gate --docs src/api/
 ```
 
 ---
@@ -264,13 +266,13 @@ wave/                     # Wave plans (persists)
 | **Example** | "Add auth" spec | "How auth should work long-term" |
 
 `wave/` can exist at any level:
-- Root `wave/` is auto-included (part of lfdocs)
+- Root `wave/` is auto-included when a wave is in scope
 - `src/api/wave/` holds API-specific plans
-- Including an area via `--area` auto-includes its nested `wave/` folders
+- Include extra docs explicitly with `--docs README.md,docs/`
 
 ### What's Auto-Included
 
-Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `wave/`, and files touched by your branch.
+Every step sees native agent instructions, LOOPFLOW.md, `scratch/`, and scoped `wave/`. Add repo docs with `--docs`; add branch changes with `--diff`.
 
 ---
 

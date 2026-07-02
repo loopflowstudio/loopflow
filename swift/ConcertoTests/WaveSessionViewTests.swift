@@ -103,29 +103,27 @@ struct WaveSessionViewTests {
             sources: [
                 "step": 1_200,
                 "diff": 5_000,
-                "repo_doc": 800,
+                "docs": 800,
                 "system": 3_000,
             ],
             sourceCounts: [
                 "diff": 8,
-                "repo_doc": 2,
+                "docs": 2,
             ],
             documents: [
                 DocumentEntry(path: "src/a.rs", source: "diff", tokens: 2_000),
-                DocumentEntry(path: "README.md", source: "repo_doc", tokens: 800),
+                DocumentEntry(path: "README.md", source: "docs", tokens: 800),
             ],
-            budget: 75_000,
             total: 10_000,
             diffTier: "UnifiedDiff",
             stepName: "implement",
             directionNames: [],
-            areaName: nil,
             waveName: nil,
             hasClipboard: false
         )
 
         let rows = contextSourceRows(snapshot: snapshot)
-        #expect(rows.map(\.source) == ["diff", "system", "step", "repo_doc"])
+        #expect(rows.map(\.source) == ["diff", "system", "step", "docs"])
         #expect(rows.first?.metadata == "unified (8 files)")
         #expect(rows.last?.metadata == "2 files")
     }
@@ -139,12 +137,10 @@ struct WaveSessionViewTests {
             sources: ["diff": 1200],
             sourceCounts: ["diff": 12],
             documents: documents,
-            budget: 75_000,
             total: 1200,
             diffTier: "UnifiedDiff",
             stepName: nil,
             directionNames: [],
-            areaName: nil,
             waveName: nil,
             hasClipboard: false
         )

@@ -262,31 +262,6 @@ session:
 }
 
 // =============================================================================
-// Budget configuration
-// =============================================================================
-
-#[test]
-fn config_budgets() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-budgets:
-  area: 50000
-  docs: 20000
-  diff: 30000
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(config.budgets.area, 50000);
-    assert_eq!(config.budgets.docs, 20000);
-    assert_eq!(config.budgets.diff, 30000);
-}
-
-// =============================================================================
 // Summaries configuration
 // =============================================================================
 

@@ -57,10 +57,9 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-a, --area PATH` | Area scope (paths to include in context) |
+| `--docs PATH[,PATH...]` | Include docs files, globs, or directories |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
-| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root `.md` files |
-| `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
+| `--diff-files / --no-diff-files` | Include files touched by branch |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
 ### Clipboard
@@ -106,7 +105,7 @@ lf ship -w feature-branch
 
 | Flag | Description |
 |------|-------------|
-| `-a, --area PATH` | Area scope (paths to include in context) |
+| `--docs PATH[,PATH...]` | Include docs files, globs, or directories |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
 | `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
@@ -119,8 +118,10 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | `--no-lfdocs` or `lfdocs: false` in `.lf/config.yaml` |
-| **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
+| **Loopflow operating guidance** | ✓ included | `--no-loopflow` |
+| **scratch/** | ✓ included | — |
+| **wave/** (when scoped) | ✓ included | — |
+| **Branch files** (files you've changed) | — | `--diff-files` |
 
 ## What's Opt-In
 
@@ -128,11 +129,11 @@ These require explicit flags or config:
 
 | Context | How to enable |
 |---------|---------------|
+| **Docs** (files, globs, directories) | `--docs README.md,docs/` or `docs:` config |
 | **Raw diff** (line-by-line changes) | `--diff` |
+| **Branch files** (full changed file bodies) | `--diff-files` |
 | **Clipboard** | `-c` / `--clipboard` |
-| **Area scope** | `--area PATH` |
 | **Chrome automation** | `--chrome` |
-| **Loopflow operating guidance** | `--operate` |
 
 See [Configuration](config.md) for setting defaults via config file.
 
@@ -145,10 +146,10 @@ See [Configuration](config.md) for setting defaults via config file.
 lf debug -c
 ```
 
-### Review with area scope
+### Review with docs
 
 ```bash
-lf qa --area src/api/
+lf qa --docs README.md,docs/
 ```
 
 ### Use a different model
@@ -164,14 +165,13 @@ lf gate -d ux
 lf implement -d ux,clarity
 ```
 
-### Add loopflow operating guidance
+### Skip loopflow operating guidance
 
 ```bash
-lf gate --operate
+lf gate --no-loopflow
 ```
 
-`--operate` adds loopflow-specific guidance for git, worktrees, PRs, and
-delegation. Default prompts stay lean.
+Loopflow guidance is included by default for git, worktrees, PRs, and delegation.
 
 ### Include clipboard content
 

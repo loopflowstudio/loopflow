@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::engine::prompt::{
-    ContextBreakdown, DiffTier, DocumentSource, Surface, DEFAULT_CONTEXT_BUDGET,
-};
+use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource, Surface};
 use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +176,7 @@ pub struct DocumentEntry {
 /// Prompt composition snapshot at session start.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextSnapshot {
-    /// Tokens per source category ("step", "direction", "diff", "area", "repo_doc", etc.)
+    /// Tokens per source category ("step", "direction", "diff", "docs", etc.)
     #[serde(default)]
     pub sources: HashMap<String, u64>,
     /// Document counts per source category.
@@ -187,8 +185,6 @@ pub struct ContextSnapshot {
     /// Per-document entries for file-level breakdown.
     #[serde(default)]
     pub documents: Vec<DocumentEntry>,
-    /// Total context budget available.
-    pub budget: u64,
     /// Total tokens used.
     pub total: u64,
     /// Diff representation tier ("UnifiedDiff", "StatOnly", "None").
@@ -197,9 +193,6 @@ pub struct ContextSnapshot {
     pub step_name: Option<String>,
     #[serde(default)]
     pub direction_names: Vec<String>,
-    #[serde(default)]
-    pub area_name: Option<String>,
-    #[serde(default)]
     pub wave_name: Option<String>,
     #[serde(default)]
     pub has_clipboard: bool,
@@ -230,12 +223,10 @@ impl From<&ContextBreakdown> for ContextSnapshot {
                     tokens: d.tokens as u64,
                 })
                 .collect(),
-            budget: DEFAULT_CONTEXT_BUDGET as u64,
             total: breakdown.total() as u64,
             diff_tier: diff_tier_key(&breakdown.diff_tier).to_string(),
             step_name: breakdown.step_name.clone(),
             direction_names: breakdown.direction_names.clone(),
-            area_name: breakdown.area_name.clone(),
             wave_name: breakdown.wave_name.clone(),
             has_clipboard: breakdown.has_clipboard,
         }
@@ -247,12 +238,11 @@ fn source_key(source: DocumentSource) -> String {
         DocumentSource::Step => "step",
         DocumentSource::Direction => "direction",
         DocumentSource::Diff => "diff",
-        DocumentSource::RepoDoc => "repo_doc",
+        DocumentSource::Docs => "docs",
         DocumentSource::Scratch => "scratch",
         DocumentSource::Wave => "wave",
         DocumentSource::WaveMemory => "wave_memory",
         DocumentSource::Summary => "summary",
-        DocumentSource::Area => "area",
         DocumentSource::Clipboard => "clipboard",
     }
     .to_string()
@@ -441,17 +431,16 @@ mod tests {
                 (DocumentSource::Direction, 80),
                 (DocumentSource::Diff, 450),
             ]),
-            source_counts: HashMap::from([(DocumentSource::Diff, 8), (DocumentSource::RepoDoc, 2)]),
+            source_counts: HashMap::from([(DocumentSource::Diff, 8), (DocumentSource::Docs, 2)]),
             documents: vec![crate::engine::prompt::DocumentEntry {
                 path: "README.md".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
                 tokens: 100,
             }],
             system_tokens: 25,
             diff_tier: DiffTier::StatOnly,
             step_name: Some("implement".to_string()),
             direction_names: vec!["clarity".to_string(), "care".to_string()],
-            area_name: Some("src/".to_string()),
             wave_name: Some("context-ui".to_string()),
             has_clipboard: true,
             ..ContextBreakdown::default()
@@ -463,21 +452,19 @@ mod tests {
         assert_eq!(snapshot.sources.get("diff"), Some(&450));
         assert_eq!(snapshot.sources.get("system"), Some(&25));
         assert_eq!(snapshot.source_counts.get("diff"), Some(&8));
-        assert_eq!(snapshot.source_counts.get("repo_doc"), Some(&2));
+        assert_eq!(snapshot.source_counts.get("docs"), Some(&2));
         assert_eq!(
             snapshot.documents,
             vec![DocumentEntry {
                 path: "README.md".to_string(),
-                source: "repo_doc".to_string(),
+                source: "docs".to_string(),
                 tokens: 100,
             }]
         );
         assert_eq!(snapshot.total, 675);
-        assert_eq!(snapshot.budget, DEFAULT_CONTEXT_BUDGET as u64);
         assert_eq!(snapshot.diff_tier, "StatOnly");
         assert_eq!(snapshot.step_name.as_deref(), Some("implement"));
         assert_eq!(snapshot.direction_names, vec!["clarity", "care"]);
-        assert_eq!(snapshot.area_name.as_deref(), Some("src/"));
         assert_eq!(snapshot.wave_name.as_deref(), Some("context-ui"));
         assert!(snapshot.has_clipboard);
     }
@@ -503,18 +490,16 @@ mod tests {
     fn context_snapshot_round_trips_through_json() {
         let snapshot = ContextSnapshot {
             sources: HashMap::from([("step".to_string(), 200), ("direction".to_string(), 50)]),
-            source_counts: HashMap::from([("repo_doc".to_string(), 3)]),
+            source_counts: HashMap::from([("docs".to_string(), 3)]),
             documents: vec![DocumentEntry {
                 path: "README.md".to_string(),
-                source: "repo_doc".to_string(),
+                source: "docs".to_string(),
                 tokens: 180,
             }],
-            budget: 75_000,
             total: 250,
             diff_tier: "UnifiedDiff".to_string(),
             step_name: Some("implement".to_string()),
             direction_names: vec!["clarity".to_string()],
-            area_name: Some("src/".to_string()),
             wave_name: Some("context-ui".to_string()),
             has_clipboard: false,
         };

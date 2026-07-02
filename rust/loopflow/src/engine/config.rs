@@ -1,7 +1,7 @@
 //! Configuration loading for loopflow.
 //!
 //! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
-//! Repo config overrides global. Additive keys (context, exclude, summaries) combine.
+//! Repo config overrides global. Additive keys (docs, context, exclude, summaries) combine.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,38 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "summaries", "supported_harnesses"];
-
-/// Token budgets for prompt sections.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BudgetConfig {
-    #[serde(default = "default_area_budget")]
-    pub area: usize,
-    #[serde(default = "default_docs_budget")]
-    pub docs: usize,
-    #[serde(default = "default_diff_budget")]
-    pub diff: usize,
-}
-
-fn default_area_budget() -> usize {
-    50000
-}
-fn default_docs_budget() -> usize {
-    30000
-}
-fn default_diff_budget() -> usize {
-    20000
-}
-
-impl Default for BudgetConfig {
-    fn default() -> Self {
-        Self {
-            area: default_area_budget(),
-            docs: default_docs_budget(),
-            diff: default_diff_budget(),
-        }
-    }
-}
+const ADDITIVE_KEYS: &[&str] = &[
+    "docs",
+    "context",
+    "exclude",
+    "summaries",
+    "supported_harnesses",
+];
 
 /// Summary configuration for a specific path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,10 +98,6 @@ impl<'de> Deserialize<'de> for AutopruneConfig {
             }),
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// Where interactive sessions launch.
@@ -242,16 +213,16 @@ pub struct Config {
     #[serde(default)]
     pub interactive: Vec<String>,
 
-    /// Include reports/, wave/, scratch/, and root .md files
-    #[serde(default = "default_true")]
-    pub lfdocs: bool,
+    /// Docs paths, globs, or directories to include by default.
+    #[serde(default)]
+    pub docs: Vec<String>,
 
     /// Include raw branch diff
     #[serde(default)]
     pub diff: bool,
 
-    /// Include full content of files touched by branch
-    #[serde(default = "default_true")]
+    /// Include full content of explicitly requested files.
+    #[serde(default)]
     pub diff_files: bool,
 
     /// Include clipboard content by default
@@ -261,10 +232,6 @@ pub struct Config {
     /// Default directions for all tasks
     #[serde(default)]
     pub direction: Option<Vec<String>>,
-
-    /// Default area for parent doc inclusion
-    #[serde(default)]
-    pub area: Option<String>,
 
     /// Summaries to include
     #[serde(default)]
@@ -281,10 +248,6 @@ pub struct Config {
     /// Autoprune configuration
     #[serde(default)]
     pub autoprune: AutopruneConfig,
-
-    /// Token budgets
-    #[serde(default)]
-    pub budgets: BudgetConfig,
 
     /// Release targets and scoping rules.
     #[serde(default)]
@@ -328,17 +291,15 @@ impl Default for Config {
             exclude: Vec::new(),
             session: SessionConfig::default(),
             interactive: Vec::new(),
-            lfdocs: true,
+            docs: Vec::new(),
             diff: false,
-            diff_files: true,
+            diff_files: false,
             paste: false,
             direction: None,
-            area: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
             branch_names: None,
             autoprune: AutopruneConfig::default(),
-            budgets: BudgetConfig::default(),
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
             linear: LinearConfig::default(),
@@ -590,8 +551,8 @@ pm:
         assert!(config.agent.is_none());
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
-        assert!(config.lfdocs);
-        assert!(config.diff_files);
+        assert!(config.docs.is_empty());
+        assert!(!config.diff_files);
         assert!(!config.diff);
         assert!(!config.chrome);
         assert!(!config.pr);
@@ -601,7 +562,6 @@ pm:
         assert_eq!(config.session.launch, LaunchTarget::Tui);
         assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
-        assert!(config.area.is_none());
         assert!(config.release.targets.is_empty());
     }
 
@@ -621,30 +581,12 @@ pm:
     }
 
     #[test]
-    fn default_budget_config() {
-        let budgets = BudgetConfig::default();
-        assert_eq!(budgets.area, 50000);
-        assert_eq!(budgets.docs, 30000);
-        assert_eq!(budgets.diff, 20000);
-    }
-
-    #[test]
     fn autoprune_config_from_empty_yaml() {
         // When deserialized from YAML, gets proper defaults
         let yaml = "autoprune: {}\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
         assert!(!config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60);
-    }
-
-    #[test]
-    fn budget_config_from_empty_yaml() {
-        // When deserialized from YAML, gets proper defaults
-        let yaml = "budgets: {}\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
-        assert_eq!(config.budgets.area, 50000);
-        assert_eq!(config.budgets.docs, 30000);
-        assert_eq!(config.budgets.diff, 20000);
     }
 
     // ==========================================================================
@@ -684,6 +626,17 @@ context:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.context, vec!["src/", "tests/"]);
+    }
+
+    #[test]
+    fn config_from_yaml_docs_as_list() {
+        let yaml = r#"
+docs:
+  - README.md
+  - docs/
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(config.docs, vec!["README.md", "docs/"]);
     }
 
     #[test]
@@ -779,32 +732,6 @@ autoprune:
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
-    }
-
-    #[test]
-    fn config_from_yaml_budgets() {
-        let yaml = r#"
-budgets:
-  area: 100000
-  docs: 50000
-  diff: 30000
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.budgets.area, 100000);
-        assert_eq!(config.budgets.docs, 50000);
-        assert_eq!(config.budgets.diff, 30000);
-    }
-
-    #[test]
-    fn config_from_yaml_budgets_partial() {
-        let yaml = r#"
-budgets:
-  area: 80000
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.budgets.area, 80000);
-        assert_eq!(config.budgets.docs, 30000); // default
-        assert_eq!(config.budgets.diff, 20000); // default
     }
 
     #[test]
@@ -915,6 +842,8 @@ agent: codex
             r#"
 context:
   - global.md
+docs:
+  - README.md
 exclude:
   - "*.log"
 "#,
@@ -925,6 +854,8 @@ exclude:
             r#"
 context:
   - local.md
+docs:
+  - docs/
 exclude:
   - build/
 "#,
@@ -935,6 +866,7 @@ exclude:
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.context, vec!["global.md", "local.md"]);
+        assert_eq!(config.docs, vec!["README.md", "docs/"]);
         assert_eq!(config.exclude, vec!["*.log", "build/"]);
     }
 

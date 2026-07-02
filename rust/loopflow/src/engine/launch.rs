@@ -6,17 +6,15 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
-    default_gather_sources, drop_native_instruction_docs, format_claude_system_prompt,
-    format_claude_task_prompt, format_prompt, gather_context, trim_context_with_breakdown,
-    ContextBreakdown, Document, DocumentSource, GatherContextOpts, PromptComponents,
-    PromptFormatMode, RelatedRepoContext, Surface, DEFAULT_CONTEXT_BUDGET,
+    drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
+    format_prompt, gather_context, measure_context, ContextBreakdown, Document, DocumentSource,
+    GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
 /// Optional per-source overrides for context gathering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextSourceOverrides {
-    pub lfdocs: Option<bool>,
     pub diff_files: Option<bool>,
     pub diff: Option<bool>,
     pub clipboard: Option<bool>,
@@ -30,16 +28,15 @@ pub struct LaunchPromptInput {
     pub resolved_step: Option<Step>,
     pub surface: Surface,
     pub directions: Vec<String>,
-    pub area: Option<String>,
+    pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
-    pub operate: bool,
+    pub no_loopflow: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
     pub yolo_mode: bool,
     pub include_config_directions: bool,
-    pub include_config_area: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     pub client_context: ClientContext,
@@ -67,16 +64,15 @@ pub fn prepare_launch_prompt(
         resolved_step,
         surface,
         directions: mut requested_directions,
-        area,
+        docs: requested_docs,
         wave,
         message,
-        operate,
+        no_loopflow,
         agent,
         cwd,
         max_turns,
         yolo_mode,
         include_config_directions,
-        include_config_area,
         source_overrides,
         summary,
         client_context,
@@ -94,15 +90,8 @@ pub fn prepare_launch_prompt(
     };
     let directions = merge_directions(config_directions, &requested_directions);
 
-    let area = area.or_else(|| {
-        if include_config_area {
-            config.area.clone()
-        } else {
-            None
-        }
-    });
-
-    let lfdocs = source_overrides.lfdocs.unwrap_or(config.lfdocs);
+    let mut docs = config.docs.clone();
+    docs.extend(requested_docs);
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
     let clipboard = source_overrides.clipboard.unwrap_or(config.paste);
@@ -111,13 +100,15 @@ pub fn prepare_launch_prompt(
         repo_root: repo_root.clone(),
         step: if resolved_step.is_some() { None } else { step },
         message,
-        operate,
+        operate: !no_loopflow,
         surface,
         directions,
+        docs,
         files: Vec::new(),
-        sources: default_gather_sources(lfdocs, diff_files || diff, clipboard),
-        area,
         wave,
+        include_diff: diff,
+        include_diff_files: diff_files,
+        include_clipboard: clipboard,
         related_repos,
     };
 
@@ -135,14 +126,14 @@ pub fn prepare_launch_prompt(
         });
     }
 
-    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
-    let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
+    let breakdown = measure_context(gathered.components());
+    let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
 
     let agent = agent
-        .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))
+        .or_else(|| gathered.step.as_ref().and_then(|step| step.agent.clone()))
         .or_else(|| config.agent.clone())
         .or_else(|| {
-            budgeted
+            gathered
                 .step
                 .as_ref()
                 .and_then(|step| step.default_agent.clone())
@@ -153,9 +144,9 @@ pub fn prepare_launch_prompt(
     // Keep only system-safe sections (operate/voice/surface/directions) in
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
-    let system_prompt = format_claude_system_prompt(&budgeted);
-    let task_prompt = format_claude_task_prompt(&budgeted);
-    let (components, breakdown) = budgeted.into_parts();
+    let system_prompt = format_claude_system_prompt(gathered.components());
+    let task_prompt = format_claude_task_prompt(gathered.components());
+    let components = gathered.into_components();
     let action_style = components
         .step
         .as_ref()
@@ -193,13 +184,12 @@ pub fn prepare_goal_launch(
         LaunchPromptInput {
             repo_root: repo_root.clone(),
             surface: Surface::Cli,
-            operate: true,
+            no_loopflow: false,
             message: Some(goal_message),
             agent,
             cwd: Some(repo_root),
             yolo_mode,
             include_config_directions: true,
-            include_config_area: true,
             ..LaunchPromptInput::default()
         },
     )
@@ -280,7 +270,6 @@ Test step body.
     fn default_test_config() -> Config {
         Config {
             agent: Some("claude:opus".to_string()),
-            lfdocs: false,
             diff_files: false,
             diff: false,
             paste: false,
@@ -326,7 +315,7 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_omits_operate_by_default() {
+    fn prepare_launch_prompt_includes_loopflow_by_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
@@ -339,12 +328,12 @@ Test step body.
             },
         )
         .expect("prepare prompt");
-        assert!(!prepared.prompt.contains("<lf:operate>"));
-        assert!(!prepared.config.system_prompt.contains("lf op commit"));
+        assert!(prepared.prompt.contains("<lf:loopflow>"));
+        assert!(prepared.config.system_prompt.contains("lf op commit"));
     }
 
     #[test]
-    fn prepare_launch_prompt_injects_operate_when_enabled() {
+    fn prepare_launch_prompt_omits_loopflow_when_disabled() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
@@ -353,15 +342,13 @@ Test step body.
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
-                operate: true,
+                no_loopflow: true,
                 ..LaunchPromptInput::default()
             },
         )
         .expect("prepare prompt");
-        assert!(prepared.prompt.contains("<lf:operate>"));
-        assert!(prepared.config.system_prompt.contains("lf op commit"));
-        assert!(prepared.config.system_prompt.contains("lf op dispatch"));
-        assert!(prepared.config.system_prompt.contains("lfq attach"));
+        assert!(!prepared.prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.config.system_prompt.contains("lf op commit"));
     }
 
     #[test]
@@ -483,12 +470,12 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_config_area_when_enabled() {
+    fn prepare_launch_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
-        fs::write(tmp.path().join("docs/README.md"), "area doc").expect("write area doc");
+        fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
         let config = Config {
-            area: Some("docs".to_string()),
+            docs: vec!["docs".to_string()],
             ..default_test_config()
         };
 
@@ -496,13 +483,16 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                include_config_area: true,
                 ..LaunchPromptInput::default()
             },
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.components.area.as_deref(), Some("docs"));
+        assert!(prepared
+            .components
+            .docs
+            .iter()
+            .any(|doc| doc.path == "docs/README.md" && doc.content == "docs content"));
     }
 
     #[test]

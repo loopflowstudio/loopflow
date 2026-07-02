@@ -4,9 +4,8 @@ step: test
 surface: headless
 directions:
   - craft
-lfdocs: false
+docs: []
 diff_files: false
 diff: false
 clipboard: false
-area: null
 wave: null

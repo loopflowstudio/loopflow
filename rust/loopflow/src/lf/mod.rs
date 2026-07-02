@@ -1,5 +1,4 @@
 use clap::{Args, Parser, Subcommand};
-use std::path::PathBuf;
 
 pub mod commands;
 pub mod discovery;
@@ -30,9 +29,9 @@ pub struct Cli {
     #[arg(long = "no-direction")]
     pub no_direction: bool,
 
-    /// Area scope (paths to include in context)
-    #[arg(short = 'a', long = "area", short_alias = 'A')]
-    pub area: Vec<PathBuf>,
+    /// Docs paths, globs, or directories to include in context
+    #[arg(long = "docs", value_delimiter = ',')]
+    pub docs: Vec<String>,
 
     /// Include clipboard content in prompt
     #[arg(short = 'c', long = "clipboard", short_alias = 'C')]
@@ -70,14 +69,6 @@ pub struct Cli {
     #[arg(long = "no-chrome", overrides_with = "chrome")]
     pub no_chrome: bool,
 
-    /// Include lfdocs (wave/, scratch/, root .md files)
-    #[arg(long = "lfdocs")]
-    pub lfdocs: bool,
-
-    /// Exclude lfdocs (wave/, scratch/, root .md files)
-    #[arg(long = "no-lfdocs", overrides_with = "lfdocs")]
-    pub no_lfdocs: bool,
-
     /// Include files changed on branch
     #[arg(long = "diff-files")]
     pub diff_files: bool,
@@ -98,9 +89,9 @@ pub struct Cli {
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 
-    /// Include loopflow operating guidance
-    #[arg(long)]
-    pub operate: bool,
+    /// Exclude loopflow operating guidance
+    #[arg(long = "no-loopflow")]
+    pub no_loopflow: bool,
 }
 
 impl Cli {
@@ -117,11 +108,6 @@ impl Cli {
     /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
     pub fn chrome_setting(&self) -> Option<bool> {
         Self::toggle_setting(self.chrome, self.no_chrome)
-    }
-
-    /// Get lfdocs setting: Some(true) if --lfdocs, Some(false) if --no-lfdocs, None if neither.
-    pub fn lfdocs_setting(&self) -> Option<bool> {
-        Self::toggle_setting(self.lfdocs, self.no_lfdocs)
     }
 
     /// Get diff_files setting: Some(true) if --diff-files, Some(false) if --no-diff-files, None if neither.
@@ -168,12 +154,6 @@ pub enum OpsCommand {
         /// Patterns to exclude
         #[arg(short = 'e', long = "exclude")]
         exclude: Vec<String>,
-        /// Include lfdocs (scratch/, root .md, wave/)
-        #[arg(long)]
-        lfdocs: bool,
-        /// Exclude lfdocs
-        #[arg(long = "no-lfdocs")]
-        no_lfdocs: bool,
         /// Files or directories to include
         paths: Vec<String>,
     },

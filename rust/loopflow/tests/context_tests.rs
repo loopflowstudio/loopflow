@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use loopflow::engine::{
-    format_prompt, gather_context, trim_context_with_breakdown, DocumentSource, GatherContextOpts,
-    GatheredContext, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
+    format_prompt, gather_context, DocumentSource, GatherContextOpts, GatheredContext,
+    PromptFormatMode, Surface,
 };
 use tempfile::TempDir;
 
@@ -57,8 +57,7 @@ fn write_direction_group(repo: &Path, group: &str, name: &str, content: &str) {
 }
 
 fn render_prompt(components: GatheredContext) -> String {
-    let budgeted = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
-    format_prompt(PromptFormatMode::Full, &budgeted).into_string()
+    format_prompt(PromptFormatMode::Full, components.components()).into_string()
 }
 
 // =============================================================================
@@ -82,10 +81,10 @@ fn gather_context_with_step() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -108,10 +107,10 @@ fn gather_context_with_inline_prompt() {
         surface: Surface::Cli,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -138,10 +137,10 @@ fn gather_context_with_directions() {
         surface: Surface::Headless,
         directions: vec!["concise".to_string(), "security".to_string()],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -164,10 +163,10 @@ fn gather_context_expands_builtin_direction_group() {
         surface: Surface::Headless,
         directions: vec!["infra".to_string()],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -200,10 +199,10 @@ fn gather_context_expands_user_direction_group() {
         surface: Surface::Headless,
         directions: vec!["mygroup".to_string()],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -223,7 +222,7 @@ fn gather_context_expands_user_direction_group() {
 // =============================================================================
 
 #[test]
-fn gather_context_includes_readme() {
+fn gather_context_includes_explicit_readme_docs_target() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -240,10 +239,10 @@ fn gather_context_includes_readme() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec!["README.md".to_string()],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -279,10 +278,10 @@ fn gather_context_includes_scratch_docs() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -318,10 +317,10 @@ fn gather_context_with_wave() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("auth".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -348,10 +347,10 @@ fn gather_context_preserves_surface() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -363,10 +362,10 @@ fn gather_context_preserves_surface() {
         surface: Surface::Cli,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -395,10 +394,10 @@ fn format_prompt_includes_step_content() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -423,10 +422,10 @@ fn format_prompt_includes_auto_mode_header() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -452,10 +451,10 @@ fn format_prompt_includes_directions() {
         surface: Surface::Headless,
         directions: vec!["concise".to_string()],
         files: vec![],
-        sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -486,10 +485,10 @@ fn format_prompt_includes_wave_context() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("payments".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -555,10 +554,10 @@ fn wave_filtering_includes_only_specified_wave() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("auth".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -611,10 +610,10 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: None, // No wave specified
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -658,10 +657,10 @@ fn wave_filtering_handles_nonexistent_wave() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("nonexistent".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -723,10 +722,10 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("features".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 
@@ -775,10 +774,10 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         surface: Surface::Headless,
         directions: vec![],
         files: vec![],
-        sources: vec![DocumentSource::RepoDoc],
-        area: None,
+        docs: vec![],
         wave: Some("living".to_string()),
         related_repos: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
 

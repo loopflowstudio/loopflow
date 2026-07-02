@@ -10,11 +10,6 @@ struct SessionContextView: View {
     @State private var isExpanded = false
     @State private var expandedSources: Set<String> = []
 
-    private var usagePercent: UInt64 {
-        guard snapshot.budget > 0 else { return 0 }
-        return (snapshot.total * 100) / snapshot.budget
-    }
-
     private var rows: [ContextSourceRow] {
         contextSourceRows(snapshot: snapshot)
     }
@@ -56,10 +51,9 @@ struct SessionContextView: View {
                     .frame(height: 10)
 
                     HStack(spacing: Spacing.sm) {
-                        Text("\(usagePercent)% of \(formatContextBudget(snapshot.budget))")
+                        Text("Context")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
-                            .monospacedDigit()
                         Spacer(minLength: 0)
                         Text(formatTokenCount(snapshot.total))
                             .font(Typography.caption())
@@ -80,8 +74,8 @@ struct SessionContextView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Context usage")
-            .accessibilityValue("\(usagePercent)% of budget")
+            .accessibilityLabel("Context size")
+            .accessibilityValue("\(formatTokenCount(snapshot.total)) tokens")
 
             if isExpanded {
                 contextDetail
@@ -108,7 +102,7 @@ struct SessionContextView: View {
                     .font(Typography.sectionTitle(18))
                     .foregroundStyle(palette.accent)
                 Spacer(minLength: 0)
-                Text("\(usagePercent)% of \(formatContextBudget(snapshot.budget))")
+                Text("\(formatTokenCount(snapshot.total)) tokens")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
                     .monospacedDigit()
@@ -223,7 +217,7 @@ struct SessionContextView: View {
             return .statusWarning
         case "diff":
             return .statusInfo
-        case "repo_doc":
+        case "docs":
             return .statusSuccess
         case "scratch":
             return .statusWarning.opacity(0.6)
@@ -233,8 +227,6 @@ struct SessionContextView: View {
             return palette.textSecondary
         case "summary":
             return palette.textSecondary
-        case "area":
-            return .statusSuccess.opacity(0.7)
         case "clipboard":
             return .statusError
         default:
@@ -313,7 +305,7 @@ func contextSourceMetadata(snapshot: ContextSnapshot, source: String) -> String?
             return fileCountLabel(fileCount)
         }
         return tier
-    case "repo_doc", "scratch", "summary":
+    case "docs", "scratch", "summary":
         return fileCount > 0 ? fileCountLabel(fileCount) : nil
     case "wave":
         var details: [String] = []
@@ -326,14 +318,6 @@ func contextSourceMetadata(snapshot: ContextSnapshot, source: String) -> String?
         return details.isEmpty ? nil : details.joined(separator: " · ")
     case "wave_memory":
         return fileCount > 0 ? fileCountLabel(fileCount) : "wave"
-    case "area":
-        if let areaName = snapshot.areaName, !areaName.isEmpty {
-            if fileCount > 0 {
-                return "\(areaName) (\(fileCountLabel(fileCount)))"
-            }
-            return areaName
-        }
-        return fileCount > 0 ? fileCountLabel(fileCount) : nil
     case "clipboard":
         return snapshot.hasClipboard ? "pasted" : nil
     default:
@@ -343,7 +327,7 @@ func contextSourceMetadata(snapshot: ContextSnapshot, source: String) -> String?
 
 func contextSourceLabel(_ source: String) -> String {
     switch source {
-    case "repo_doc":
+    case "docs":
         return "docs"
     case "wave_memory":
         return "memory"
@@ -358,9 +342,8 @@ func contextSourceSortIndex(_ source: String) -> Int {
         "direction",
         "system",
         "diff",
-        "repo_doc",
+        "docs",
         "scratch",
-        "area",
         "wave",
         "wave_memory",
         "summary",
@@ -387,13 +370,6 @@ func fileCountLabel(_ count: UInt64) -> String {
 
 func formatTokenCount(_ tokens: UInt64) -> String {
     tokens.formatted(.number.grouping(.automatic))
-}
-
-func formatContextBudget(_ budget: UInt64) -> String {
-    if budget >= 1_000, budget % 1_000 == 0 {
-        return "\(budget / 1_000)k"
-    }
-    return budget.formatted(.number.grouping(.automatic))
 }
 
 private struct ContextSegment: Identifiable {

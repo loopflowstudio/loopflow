@@ -16,9 +16,10 @@ Mercury bank feed) is **org-level, coarse, and after-the-fact** — it can't sto
 a single runaway loop in real time. Wave budgets are the finer grain that
 partitions the org ceiling.
 
-**Naming:** "budget" already means prompt-context trimming
-(`DEFAULT_CONTEXT_BUDGET`) and deploy spend (`deploy/budget.yaml`). Call the wave
-field **`spend_cap`** to disambiguate.
+**Naming:** "budget" still means deploy spend (`deploy/budget.yaml`). (The old
+prompt-context `DEFAULT_CONTEXT_BUDGET` was removed with the docs-flag work —
+context is now measured, not trimmed.) Call the wave field **`spend_cap`** to
+disambiguate from deploy spend.
 
 ## What to shape
 

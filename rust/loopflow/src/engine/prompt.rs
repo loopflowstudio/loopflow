@@ -15,6 +15,7 @@ use crate::engine::flow::{expand_direction_names, load_direction, load_step, Dir
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
@@ -24,13 +25,12 @@ use tracing::{debug, warn};
 pub enum DocumentSource {
     Step,
     Direction,
-    Diff,
-    RepoDoc,
     Scratch,
     Wave,
     WaveMemory,
+    Docs,
     Summary,
-    Area,
+    Diff,
     Clipboard,
 }
 
@@ -57,9 +57,6 @@ pub struct DocumentEntry {
     pub tokens: usize,
 }
 
-/// Default maximum tokens for pre-fill context.
-pub const DEFAULT_CONTEXT_BUDGET: usize = 75_000;
-
 /// How diff context is represented after tiering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum DiffTier {
@@ -84,8 +81,6 @@ pub struct ContextBreakdown {
     pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
-    pub area_name: Option<String>,
-    pub area_doc_count: usize,
     pub has_clipboard: bool,
     pub wave_name: Option<String>,
 }
@@ -105,11 +100,6 @@ impl ContextBreakdown {
 
     fn add_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         *self.source_tokens.entry(source).or_insert(0) += tokens;
-    }
-
-    fn subtract_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
-        let entry = self.source_tokens.entry(source).or_insert(0);
-        *entry = entry.saturating_sub(tokens);
     }
 
     fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
@@ -133,7 +123,6 @@ fn build_document_entries(
     summary_tokens: &[usize],
     wave_memory_tokens: Option<usize>,
     doc_tokens: &[usize],
-    area_doc_tokens: &[usize],
 ) -> Vec<DocumentEntry> {
     let mut entries = Vec::new();
 
@@ -149,68 +138,25 @@ fn build_document_entries(
     }
 
     push_doc_entries(&mut entries, &components.docs, doc_tokens);
-    push_doc_entries(&mut entries, &components.area_docs, area_doc_tokens);
 
     entries
 }
 
-/// Specification for which context sources to gather.
+const MAX_EXPLICIT_DOC_FILES: usize = 100;
+
+/// Specification for document targets to gather.
 #[derive(Debug, Clone, Default)]
 pub struct GatherSpec {
-    pub sources: Vec<DocumentSource>,
     pub repo_root: PathBuf,
+    /// Explicit docs paths, globs, or directories to include in context.
+    pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Area path for scoped context.
-    pub area: Option<String>,
+    pub include_files: bool,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
-}
-
-impl GatherSpec {
-    fn includes(&self, source: DocumentSource) -> bool {
-        self.sources.contains(&source)
-    }
-
-    fn include_source(&mut self, source: DocumentSource) {
-        if !self.includes(source) {
-            self.sources.push(source);
-        }
-    }
-
-    fn normalize(&mut self) {
-        if self.wave.is_some() && self.includes(DocumentSource::RepoDoc) {
-            self.include_source(DocumentSource::Wave);
-            self.include_source(DocumentSource::WaveMemory);
-        }
-        if self.area.is_some() {
-            self.include_source(DocumentSource::Area);
-        }
-        if !self.files.is_empty() {
-            self.include_source(DocumentSource::Diff);
-        }
-    }
-}
-
-/// Build a canonical list of context sources from high-level switches.
-pub fn default_gather_sources(
-    include_repo_docs: bool,
-    include_diff: bool,
-    include_clipboard: bool,
-) -> Vec<DocumentSource> {
-    let mut sources = Vec::new();
-    if include_repo_docs {
-        sources.push(DocumentSource::RepoDoc);
-    }
-    if include_diff {
-        sources.push(DocumentSource::Diff);
-    }
-    if include_clipboard {
-        sources.push(DocumentSource::Clipboard);
-    }
-    sources
 }
 
 /// Options for gathering context.
@@ -224,14 +170,15 @@ pub struct GatherContextOpts {
     pub operate: bool,
     pub surface: Surface,
     pub directions: Vec<String>,
+    /// Explicit docs paths, globs, or directories to include in context.
+    pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Explicit sources to include in the prompt context pipeline.
-    pub sources: Vec<DocumentSource>,
-    /// Area path for scoped context.
-    pub area: Option<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+    pub include_diff: bool,
+    pub include_diff_files: bool,
+    pub include_clipboard: bool,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
 }
@@ -239,10 +186,10 @@ pub struct GatherContextOpts {
 impl GatherContextOpts {
     pub fn gather_spec(&self) -> GatherSpec {
         GatherSpec {
-            sources: self.sources.clone(),
             repo_root: self.repo_root.clone(),
+            docs: self.docs.clone(),
             files: self.files.clone(),
-            area: self.area.clone(),
+            include_files: self.include_diff_files,
             wave: self.wave.clone(),
             related_repos: self.related_repos.clone(),
         }
@@ -326,10 +273,6 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
-    /// Docs gathered from area ancestor and descendant directories
-    pub area_docs: Vec<Document>,
-    /// Area path for display
-    pub area: Option<String>,
 }
 
 /// Prompt context gathered from repo/state inputs.
@@ -361,32 +304,6 @@ impl Deref for GatheredContext {
 impl DerefMut for GatheredContext {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.components_mut()
-    }
-}
-
-/// Prompt context after token budgeting.
-#[derive(Debug, Clone, Default)]
-pub struct BudgetedContext(pub PromptComponents, pub ContextBreakdown);
-
-impl BudgetedContext {
-    pub fn components(&self) -> &PromptComponents {
-        &self.0
-    }
-
-    pub fn breakdown(&self) -> &ContextBreakdown {
-        &self.1
-    }
-
-    pub fn into_parts(self) -> (PromptComponents, ContextBreakdown) {
-        (self.0, self.1)
-    }
-}
-
-impl Deref for BudgetedContext {
-    type Target = PromptComponents;
-
-    fn deref(&self) -> &Self::Target {
-        self.components()
     }
 }
 
@@ -462,9 +379,8 @@ fn cached_doc_tokens(
     tokens
 }
 
-/// Trim context and return token breakdown without re-tokenizing.
-pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) -> BudgetedContext {
-    let mut components = context.into_components();
+/// Measure context and return token breakdown without mutating gathered content.
+pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
     let repo_root = PathBuf::from(&components.repo_root);
     static TOKEN_CACHE: Lazy<std::sync::Mutex<HashMap<String, TokenCacheEntry>>> =
         Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
@@ -474,7 +390,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         .unwrap_or_default();
 
     let mut breakdown = ContextBreakdown {
-        system_tokens: count_tokens(&format_system_sections(&components).join("\n\n")),
+        system_tokens: count_tokens(&format_system_sections(components).join("\n\n")),
         ..Default::default()
     };
 
@@ -490,15 +406,12 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         breakdown.direction_names.push(dir.name.clone());
     }
 
-    let diff_string_tokens = if let Some(ref diff) = components.diff {
+    if let Some(ref diff) = components.diff {
         let tokens = count_tokens(diff);
         breakdown.add_source_tokens(DocumentSource::Diff, tokens);
-        tokens
-    } else {
-        0
-    };
+    }
 
-    let mut diff_file_tokens: Vec<usize> = components
+    let diff_file_tokens: Vec<usize> = components
         .diff_files
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -507,7 +420,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.diff_file_count = components.diff_file_count;
     breakdown.diff_tier = components.diff_tier.clone();
 
-    let mut summary_tokens: Vec<usize> = components
+    let summary_tokens: Vec<usize> = components
         .summaries
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -515,9 +428,8 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     let wave_memory_tokens = components
         .wave_memory
         .as_ref()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .unwrap_or(0);
-    let mut doc_tokens: Vec<usize> = components
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache));
+    let doc_tokens: Vec<usize> = components
         .docs
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -526,20 +438,12 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         DocumentSource::Summary,
         summary_tokens.iter().sum::<usize>(),
     );
-    breakdown.add_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
+    if let Some(tokens) = wave_memory_tokens {
+        breakdown.add_source_tokens(DocumentSource::WaveMemory, tokens);
+    }
     for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
         breakdown.add_source_tokens(doc.source, tokens);
     }
-
-    // Area
-    let mut area_doc_tokens: Vec<usize> = components
-        .area_docs
-        .iter()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .collect();
-    breakdown.add_source_tokens(DocumentSource::Area, area_doc_tokens.iter().sum::<usize>());
-    breakdown.area_name = components.area.clone();
-    breakdown.area_doc_count = components.area_docs.len();
 
     if let Some(ref clip) = components.clipboard {
         breakdown.set_source_tokens(DocumentSource::Clipboard, count_tokens(clip));
@@ -547,78 +451,12 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.has_clipboard = components.clipboard.is_some();
     breakdown.wave_name = components.wave.clone();
 
-    let mut total = breakdown.total();
-    if total > max_tokens {
-        // 1. Drop area docs first (supplementary architectural context)
-        while total > max_tokens && !components.area_docs.is_empty() {
-            components.area_docs.pop();
-            if let Some(tokens) = area_doc_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Area, tokens);
-                total = total.saturating_sub(tokens);
-                breakdown.area_doc_count = breakdown.area_doc_count.saturating_sub(1);
-            }
-        }
-
-        // 2. Drop wave memory docs before general docs/summaries.
-        if total > max_tokens && components.wave_memory.is_some() {
-            components.wave_memory = None;
-            breakdown.subtract_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
-            total = total.saturating_sub(wave_memory_tokens);
-        }
-
-        // 3. Drop docs (summaries first, then docs)
-        while total > max_tokens && !components.summaries.is_empty() {
-            components.summaries.pop();
-            if let Some(tokens) = summary_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Summary, tokens);
-                total = total.saturating_sub(tokens);
-            }
-        }
-        while total > max_tokens && !components.docs.is_empty() {
-            let removed = components.docs.pop();
-            if let Some(tokens) = doc_tokens.pop() {
-                if let Some(doc) = removed {
-                    breakdown.subtract_source_tokens(doc.source, tokens);
-                }
-                total = total.saturating_sub(tokens);
-            }
-        }
-
-        // 4. Drop diff context
-        while total > max_tokens && !components.diff_files.is_empty() {
-            components.diff_files.pop();
-            if let Some(tokens) = diff_file_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Diff, tokens);
-                total = total.saturating_sub(tokens);
-                breakdown.diff_file_count = breakdown.diff_file_count.saturating_sub(1);
-            }
-        }
-        if total > max_tokens && components.diff.is_some() {
-            components.diff = None;
-            breakdown.diff_tier = DiffTier::None;
-            breakdown.subtract_source_tokens(DocumentSource::Diff, diff_string_tokens);
-            total = total.saturating_sub(diff_string_tokens);
-        }
-
-        // 5. Drop clipboard as last resort
-        if total > max_tokens && components.clipboard.is_some() {
-            components.clipboard = None;
-            breakdown.set_source_tokens(DocumentSource::Clipboard, 0);
-        }
-    }
-
-    let wave_memory_tokens = if components.wave_memory.is_some() {
-        Some(wave_memory_tokens)
-    } else {
-        None
-    };
     breakdown.documents = build_document_entries(
-        &components,
+        components,
         &diff_file_tokens,
         &summary_tokens,
         wave_memory_tokens,
         &doc_tokens,
-        &area_doc_tokens,
     );
 
     // Derive source counts from document entries.
@@ -636,17 +474,15 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     if breakdown.documents.len() > 100 {
         warn!(
             document_count = breakdown.documents.len(),
-            area = components.area.as_deref().unwrap_or_default(),
-            "context breakdown has more than 100 documents; consider narrowing area or diff scope"
+            "context breakdown has more than 100 documents; consider narrowing docs or diff scope"
         );
     }
 
-    components.diff_file_count = components.diff_files.len();
     if let Ok(mut guard) = TOKEN_CACHE.lock() {
         *guard = cache;
     }
 
-    BudgetedContext(components, breakdown)
+    breakdown
 }
 
 /// Gather all prompt components.
@@ -680,9 +516,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "loaded directions"
     );
 
-    let mut spec = opts.gather_spec();
-    let include_branch_diff = opts.sources.contains(&DocumentSource::Diff);
-    spec.normalize();
+    let spec = opts.gather_spec();
 
     // Gather document sources through a single pipeline.
     let docs_start = Instant::now();
@@ -697,15 +531,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let mut summaries = Vec::new();
     let mut wave_memory = None;
     let mut diff_files = Vec::new();
-    let mut area_docs = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::RepoDoc | DocumentSource::Scratch | DocumentSource::Wave => {
-                docs.push(doc)
-            }
+            DocumentSource::Docs | DocumentSource::Scratch | DocumentSource::Wave => docs.push(doc),
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
-            DocumentSource::Area => area_docs.push(doc),
             DocumentSource::Diff => diff_files.push(doc),
             DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
         }
@@ -714,7 +544,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
-    let (diff, diff_tier, diff_file_count) = if include_branch_diff {
+    let (diff, diff_tier, diff_file_count) = if opts.include_diff {
         gather_diff_tiered(repo_root)?
     } else {
         (None, DiffTier::None, 0)
@@ -728,7 +558,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 
     // Gather clipboard
     let clipboard_start = Instant::now();
-    let clipboard = if spec.includes(DocumentSource::Clipboard) {
+    let clipboard = if opts.include_clipboard {
         read_clipboard()
     } else {
         None
@@ -760,8 +590,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         message: opts.message.clone(),
         diff_tier,
         diff_file_count,
-        area_docs,
-        area: opts.area.clone(),
     }))
 }
 
@@ -769,59 +597,34 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve legacy ordering exactly: scratch -> wave -> wave memory -> root docs.
-    if spec.includes(DocumentSource::RepoDoc) {
-        docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    // Preserve ambient ordering: scratch -> wave -> wave memory -> explicit docs.
+    docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
+    if let Some(doc) = gather_wave_memory_doc(&spec.repo_root, spec.wave.as_deref())? {
+        docs.push(doc);
     }
-    if spec.includes(DocumentSource::Wave) {
-        docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
-    }
-    if spec.includes(DocumentSource::WaveMemory) {
-        if let Some(doc) = gather_wave_memory_doc(&spec.repo_root, spec.wave.as_deref())? {
-            docs.push(doc);
+    if !spec.docs.is_empty() {
+        let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
+        if explicit_docs.len() > MAX_EXPLICIT_DOC_FILES {
+            return Err(CoreError::ExecutionFailed(format!(
+                "--docs resolved to {} files; narrow --docs to {} files or fewer",
+                explicit_docs.len(),
+                MAX_EXPLICIT_DOC_FILES
+            )));
         }
-    }
-    if spec.includes(DocumentSource::RepoDoc) {
-        docs.extend(gather_repo_root_docs(&spec.repo_root)?);
+        docs.extend(explicit_docs);
     }
 
-    if spec.includes(DocumentSource::Area) {
-        if let Some(ref area) = spec.area {
-            match resolve_area(area, &spec.related_repos) {
-                ResolvedArea::Local { area } => {
-                    docs.extend(gather_area_docs(&spec.repo_root, area));
-                }
-                ResolvedArea::CrossRepo { related, area } => {
-                    // Pull in the related repo's root docs alongside its area docs.
-                    match gather_repo_root_docs(&related.path) {
-                        Ok(related_docs) => {
-                            for mut doc in related_docs {
-                                doc.path = format!("[{}] {}", related.repo_id, doc.path);
-                                docs.push(doc);
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                repo_id = %related.repo_id,
-                                path = %related.path.display(),
-                                error = %err,
-                                "failed to gather related repo root docs"
-                            );
-                        }
-                    }
-                    let area_docs = gather_area_docs(&related.path, area);
-                    for mut doc in area_docs {
-                        doc.path = format!("[{}] {}", related.repo_id, doc.path);
-                        docs.push(doc);
-                    }
-                }
-            }
-        }
+    if !spec.include_files {
+        return Ok(docs);
     }
 
-    if spec.includes(DocumentSource::Diff) && !spec.files.is_empty() {
-        docs.extend(gather_files(&spec.repo_root, &spec.files)?);
-    }
+    let files = if spec.files.is_empty() {
+        gather_changed_file_paths(&spec.repo_root)?
+    } else {
+        spec.files.clone()
+    };
+    docs.extend(gather_files(&spec.repo_root, &files)?);
 
     Ok(docs)
 }
@@ -927,49 +730,170 @@ fn gather_wave_memory_doc(
     }))
 }
 
-fn gather_repo_root_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
-    let mut docs = Vec::new();
-    let mut entries: Vec<_> = fs::read_dir(repo_root)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
-        })
-        .collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        if let Ok(content) = fs::read_to_string(&path) {
-            docs.push(Document {
-                path: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                content,
-                source: DocumentSource::RepoDoc,
-            });
-        }
-    }
-    Ok(docs)
-}
-
-enum ResolvedArea<'a> {
+enum ResolvedDocTarget<'a> {
     Local {
-        area: &'a str,
+        target: &'a str,
     },
     CrossRepo {
         related: &'a RelatedRepoContext,
-        area: &'a str,
+        target: &'a str,
     },
 }
 
-/// Parse an area string for cross-repo syntax (`repo_name:path`).
+fn gather_doc_targets(
+    repo_root: &Path,
+    targets: &[String],
+    related_repos: &[RelatedRepoContext],
+) -> Result<Vec<Document>, CoreError> {
+    let mut docs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for target in targets {
+        let target = target.trim();
+        if target.is_empty() {
+            continue;
+        }
+
+        match resolve_doc_target(target, related_repos) {
+            ResolvedDocTarget::Local { target } => {
+                gather_local_doc_target(repo_root, target, &mut seen, &mut docs)?;
+            }
+            ResolvedDocTarget::CrossRepo { related, target } => {
+                let mut related_docs = Vec::new();
+                let mut related_seen = HashSet::new();
+                gather_local_doc_target(
+                    &related.path,
+                    target,
+                    &mut related_seen,
+                    &mut related_docs,
+                )?;
+                for mut doc in related_docs {
+                    doc.path = format!("[{}] {}", related.repo_id, doc.path);
+                    docs.push(doc);
+                }
+            }
+        }
+    }
+
+    Ok(docs)
+}
+
+fn gather_local_doc_target(
+    repo_root: &Path,
+    target: &str,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    let gitignore = build_gitignore(repo_root);
+
+    if contains_glob_chars(target) {
+        gather_glob_docs(repo_root, target, &gitignore, seen, docs)?;
+        return Ok(());
+    }
+
+    let Some(path) = resolve_path(repo_root, target) else {
+        return Ok(());
+    };
+
+    if path.is_dir() {
+        for doc in gather_directory_docs(repo_root, target, &gitignore) {
+            let abs_path = repo_root.join(&doc.path);
+            let canonical = abs_path.canonicalize().unwrap_or(abs_path);
+            if seen.insert(canonical) {
+                docs.push(doc);
+            }
+        }
+        return Ok(());
+    }
+
+    if path.is_file() {
+        push_doc_file(repo_root, &path, &gitignore, seen, docs);
+    }
+
+    Ok(())
+}
+
+fn gather_glob_docs(
+    repo_root: &Path,
+    pattern: &str,
+    gitignore: &ignore::gitignore::Gitignore,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    let regex = match Regex::new(&glob_to_regex(pattern.trim_start_matches("./"))) {
+        Ok(regex) => regex,
+        Err(_) => return Ok(()),
+    };
+    let walker = ignore::WalkBuilder::new(repo_root)
+        .hidden(false)
+        .standard_filters(true)
+        .build();
+    let mut entries = Vec::new();
+
+    for entry in walker {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        if !path.is_file() || should_exclude(repo_root, path, gitignore) {
+            continue;
+        }
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        if regex.is_match(&rel_path) {
+            entries.push(path.to_path_buf());
+        }
+    }
+
+    entries.sort();
+    for path in entries {
+        push_doc_file(repo_root, &path, gitignore, seen, docs);
+    }
+
+    Ok(())
+}
+
+fn push_doc_file(
+    repo_root: &Path,
+    path: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) {
+    if should_exclude(repo_root, path, gitignore) {
+        return;
+    }
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !seen.insert(canonical) {
+        return;
+    }
+    let Some(content) = read_text_file(path) else {
+        return;
+    };
+    let rel_path = path
+        .strip_prefix(repo_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    docs.push(Document {
+        path: rel_path,
+        content,
+        source: DocumentSource::Docs,
+    });
+}
+
+/// Parse an explicit docs target for cross-repo syntax (`repo_name:path`).
 ///
-/// Returns `ResolvedArea::CrossRepo` if the area contains `:` and the repo name
-/// matches a related repo. Returns `ResolvedArea::Local` otherwise.
-fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> ResolvedArea<'a> {
-    if let Some((repo_name, area_path)) = area.split_once(':') {
+/// Returns `ResolvedDocTarget::CrossRepo` if the target contains `:` and the repo
+/// name matches a related repo. Returns `ResolvedDocTarget::Local` otherwise.
+fn resolve_doc_target<'a>(
+    target: &'a str,
+    related_repos: &'a [RelatedRepoContext],
+) -> ResolvedDocTarget<'a> {
+    if let Some((repo_name, target_path)) = target.split_once(':') {
         if !repo_name.is_empty() {
             let matches: Vec<_> = related_repos
                 .iter()
@@ -978,50 +902,58 @@ fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> R
             match matches.len() {
                 1 => {
                     // "studio:" means the whole repo; "studio:swift" means a subdirectory.
-                    let resolved_area = if area_path.is_empty() { "." } else { area_path };
-                    return ResolvedArea::CrossRepo {
+                    let resolved_target = if target_path.is_empty() {
+                        "."
+                    } else {
+                        target_path
+                    };
+                    return ResolvedDocTarget::CrossRepo {
                         related: matches[0],
-                        area: resolved_area,
+                        target: resolved_target,
                     };
                 }
                 0 => {
                     warn!(
                         repo_name = repo_name,
-                        "no related repo named '{}', treating as local area", repo_name
+                        "no related repo named '{}', treating as local docs target", repo_name
                     );
                 }
                 _ => {
                     warn!(
                         repo_name = repo_name,
-                        "ambiguous: multiple related repos named '{}', treating as local area",
+                        "ambiguous: multiple related repos named '{}', treating as local docs target",
                         repo_name
                     );
                 }
             }
         }
     }
-    ResolvedArea::Local { area }
+    ResolvedDocTarget::Local { target }
 }
 
-/// Gather .md docs from area ancestors and descendants.
+/// Gather .md docs from directory ancestors and descendants.
 ///
-/// For area "src/api/handlers", collects .md files from:
+/// For directory "src/api/handlers", collects .md files from:
 /// - src/ (e.g., src/README.md)
 /// - src/api/ (e.g., src/api/README.md)
 /// - src/api/handlers/ (e.g., src/api/handlers/README.md)
-/// - src/api/handlers/** (descendants under the area, recursively)
+/// - src/api/handlers/** (descendants under the directory, recursively)
 ///
-/// Does NOT include repo root docs (already gathered by `gather_repo_root_docs`)
-/// and does NOT include sibling directories.
-fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
-    let area_path = Path::new(area);
+/// Does NOT include repo root docs unless the target is "." and does NOT include
+/// sibling directories.
+fn gather_directory_docs(
+    repo_root: &Path,
+    target: &str,
+    gitignore: &ignore::gitignore::Gitignore,
+) -> Vec<Document> {
+    let target_path = Path::new(target);
     let mut ancestors = Vec::new();
 
-    // Include the area directory itself and its ancestors (excluding repo root)
-    if !area_path.as_os_str().is_empty() {
-        ancestors.push(area_path.to_path_buf());
+    // Include the target directory itself and its ancestors (excluding repo root)
+    if !target_path.as_os_str().is_empty() {
+        ancestors.push(target_path.to_path_buf());
     }
-    let mut current = area_path.to_path_buf();
+    let mut current = target_path.to_path_buf();
     while let Some(parent) = current.parent() {
         if parent.as_os_str().is_empty() {
             break;
@@ -1047,7 +979,9 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     let path = e.path();
-                    path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                    path.is_file()
+                        && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                        && !should_exclude(repo_root, &path, gitignore)
                 })
                 .collect(),
             Err(_) => continue,
@@ -1066,47 +1000,55 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
                 continue;
             }
 
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Some(content) = read_text_file(&path) {
                 seen.insert(rel_path.clone());
                 docs.push(Document {
                     path: rel_path,
                     content,
-                    source: DocumentSource::Area,
+                    source: DocumentSource::Docs,
                 });
             }
         }
     }
 
-    // Gather descendants recursively. The `seen` set already contains the area
+    // Gather descendants recursively. The `seen` set already contains the docs
     // directory's own .md files from the ancestor walk, so they won't be
     // double-counted.
-    let area_abs = repo_root.join(area_path);
-    if area_abs.is_dir() {
+    let target_abs = repo_root.join(target_path);
+    if target_abs.is_dir() {
         let mut descendant_docs = Vec::new();
-        gather_area_descendants(&area_abs, repo_root, &mut descendant_docs, &mut seen);
+        gather_directory_descendants(
+            &target_abs,
+            repo_root,
+            gitignore,
+            &mut descendant_docs,
+            &mut seen,
+        );
 
-        // Prefer shallower descendant docs. Trimming pops from the end, so
-        // deepest docs are removed first when over budget.
+        // Prefer shallower descendant docs, then stable path ordering.
         descendant_docs.sort_by(|a, b| {
             let depth_a = a.path.matches('/').count();
             let depth_b = b.path.matches('/').count();
             depth_a.cmp(&depth_b).then_with(|| a.path.cmp(&b.path))
         });
 
-        // Safety cap for large monorepos.
-        descendant_docs.truncate(100);
         docs.extend(descendant_docs);
     }
 
     docs
 }
 
-fn gather_area_descendants(
+fn gather_directory_descendants(
     dir: &Path,
     repo_root: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
     docs: &mut Vec<Document>,
     seen: &mut HashSet<String>,
 ) {
+    if should_exclude(repo_root, dir, gitignore) {
+        return;
+    }
+
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
@@ -1118,11 +1060,14 @@ fn gather_area_descendants(
     for entry in sorted {
         let path = entry.path();
         if path.is_dir() {
-            gather_area_descendants(&path, repo_root, docs, seen);
+            gather_directory_descendants(&path, repo_root, gitignore, docs, seen);
             continue;
         }
 
         if !path.extension().map(|ext| ext == "md").unwrap_or(false) {
+            continue;
+        }
+        if should_exclude(repo_root, &path, gitignore) {
             continue;
         }
 
@@ -1135,12 +1080,12 @@ fn gather_area_descendants(
             continue;
         }
 
-        if let Ok(content) = fs::read_to_string(&path) {
+        if let Some(content) = read_text_file(&path) {
             seen.insert(rel_path.clone());
             docs.push(Document {
                 path: rel_path,
                 content,
-                source: DocumentSource::Area,
+                source: DocumentSource::Docs,
             });
         }
     }
@@ -1232,6 +1177,47 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
     }
 
     Ok(docs)
+}
+
+fn gather_changed_file_paths(repo_root: &Path) -> Result<Vec<String>, CoreError> {
+    let branch_output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(repo_root)
+        .output()?;
+
+    let branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+    if branch.is_empty() || branch == "main" {
+        return Ok(Vec::new());
+    }
+
+    let base_branch =
+        crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let diff_ref = format!("origin/{}...HEAD", base_branch);
+    let committed_files = git_changed_file_names(repo_root, &diff_ref)?;
+    if !committed_files.is_empty() {
+        return Ok(committed_files);
+    }
+
+    git_changed_file_names(repo_root, "HEAD")
+}
+
+fn git_changed_file_names(repo_root: &Path, diff_ref: &str) -> Result<Vec<String>, CoreError> {
+    let output = Command::new("git")
+        .args(["diff", "--name-only", diff_ref])
+        .current_dir(repo_root)
+        .output()?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
 }
 
 /// Walk a directory and collect text files, respecting gitignore.
@@ -1517,6 +1503,37 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         .is_ignore()
 }
 
+fn contains_glob_chars(value: &str) -> bool {
+    value.contains('*') || value.contains('?') || value.contains('[')
+}
+
+fn glob_to_regex(pattern: &str) -> String {
+    let mut regex = String::from("^");
+    let mut chars = pattern.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' => {
+                if chars.peek() == Some(&'*') {
+                    let _ = chars.next();
+                    regex.push_str(".*");
+                } else {
+                    regex.push_str("[^/]*");
+                }
+            }
+            '?' => regex.push_str("[^/]"),
+            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | '[' | ']' | '\\' => {
+                regex.push('\\');
+                regex.push(ch);
+            }
+            _ => regex.push(ch),
+        }
+    }
+
+    regex.push('$');
+    regex
+}
+
 /// Files that coding agents load natively. All are skipped from lf docs to
 /// avoid duplication — whichever agent runs will pick up its own file.
 const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
@@ -1625,14 +1642,14 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: operate, voice, surface.
+/// third-party app classifiers: loopflow, voice, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
         parts.push(format!(
-            "<lf:operate>\n{}\n</lf:operate>",
-            crate::engine::builtins::OPERATE_DOC
+            "<lf:loopflow>\n{}\n</lf:loopflow>",
+            crate::engine::builtins::LOOPFLOW_DOC
         ));
     }
 
@@ -1681,71 +1698,59 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
              ## Wave memory\n\n\
-             Persistent memory at {}. Budget: ~25k tokens.\n\
-             Read it before you start. Update it aggressively — correct stale entries,\n\
-             add observations, remove what's wrong. Don't wait until the end of your session.\n\n\
+             Persistent memory at {}. Read it before every iteration.\n\
+             Keep it compact enough to include every iteration: correct stale entries,\n\
+             add durable observations, and delete session-specific notes.\n\n\
              Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
              - Patterns: codebase conventions, architecture, how things connect\n\
              - Preferences: user workflow, tool choices, communication norms\n\
              - Learnings: what worked, what failed, surprises\n\n\
              What belongs elsewhere:\n\
-             - architectural decisions → wave docs or area docs\n\
+             - architectural decisions → wave docs or explicit docs\n\
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
              - Edit within sections. Don't rewrite the whole file.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
-             - When a section grows large, promote stable entries to wave/area docs and trim.\n\n\
+             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\n\
              {}\n\
              </lf:wave>",
             wave, wave, memory_path, memory_content
         ));
     }
 
-    // Reference material (docs, summaries)
-    if !components.docs.is_empty() {
-        let doc_parts: Vec<String> = components
-            .docs
+    let scratch_docs: Vec<Document> = components
+        .docs
+        .iter()
+        .filter(|doc| doc.source == DocumentSource::Scratch)
+        .cloned()
+        .collect();
+    if !scratch_docs.is_empty() {
+        let scratch_body: Vec<String> = scratch_docs
             .iter()
             .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+                format!(
+                    "<lf:file path=\"{}\">\n{}\n</lf:file>",
+                    doc.path, doc.content
+                )
             })
             .collect();
-
-        let docs_body = doc_parts.join("\n\n");
         parts.push(format!(
-            "Repository documentation. Follow STYLE carefully. \
-             May include design artifacts (scratch/).\n\n\
-             <lf:docs>\n{}\n</lf:docs>",
-            docs_body
+            "Scratch design artifacts and working notes.\n\n<lf:scratch>\n{}\n</lf:scratch>",
+            scratch_body.join("\n\n")
         ));
     }
 
-    // Area docs (ancestor + descendant docs when -a is set)
-    if !components.area_docs.is_empty() {
-        let area_label = components.area.as_deref().unwrap_or("area");
-        let area_parts: Vec<String> = components
-            .area_docs
-            .iter()
-            .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
-            })
-            .collect();
-        let area_body = area_parts.join("\n\n");
-        parts.push(format!(
-            "Area docs for `{}`. Architectural context from ancestor and descendant directories.\n\n\
-             <lf:area>\n{}\n</lf:area>",
-            area_label, area_body
-        ));
+    // Explicit docs and wave docs.
+    let reference_docs: Vec<Document> = components
+        .docs
+        .iter()
+        .filter(|doc| doc.source != DocumentSource::Scratch)
+        .cloned()
+        .collect();
+    if !reference_docs.is_empty() {
+        parts.push(format_files(&reference_docs));
     }
 
     parts
@@ -1813,7 +1818,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
 /// Format prompt content for the requested mode.
 ///
 /// Used by the daemon, ops callers, and prompt log writers.
-pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> RenderedPrompt {
+pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> RenderedPrompt {
     let rendered = match mode {
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
@@ -1889,12 +1894,12 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
 }
 
 /// Format context components for system prompt (everything except task).
-pub fn format_context_prompt(components: &BudgetedContext) -> String {
+pub fn format_context_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Context, components).into_string()
 }
 
 /// Format task prompt for user message (step + free text).
-pub fn format_task_prompt(components: &BudgetedContext) -> String {
+pub fn format_task_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
 }
 
@@ -1902,7 +1907,7 @@ pub fn format_task_prompt(components: &BudgetedContext) -> String {
 ///
 /// Excludes docs, diffs, wave context, and clipboard — those go in the task
 /// prompt to avoid triggering third-party app classifiers.
-pub fn format_claude_system_prompt(components: &BudgetedContext) -> String {
+pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
     let mut parts = format_system_sections(components);
 
     if !components.directions.is_empty() {
@@ -1913,7 +1918,7 @@ pub fn format_claude_system_prompt(components: &BudgetedContext) -> String {
 }
 
 /// Format task prompt for Claude (includes content sections + clipboard + step + message).
-pub fn format_claude_task_prompt(components: &BudgetedContext) -> String {
+pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
     let mut parts = format_content_sections(components);
 
     if let Some(ref clipboard) = components.clipboard {
@@ -2045,16 +2050,8 @@ mod tests {
         std::fs::write(full_path, content).expect("write binary file");
     }
 
-    fn budget_context(components: PromptComponents) -> BudgetedContext {
-        trim_context_with_breakdown(GatheredContext(components), usize::MAX)
-    }
-
     fn render_full_prompt(components: PromptComponents) -> String {
-        format_prompt(PromptFormatMode::Full, &budget_context(components)).into_string()
-    }
-
-    fn system_tokens(components: &PromptComponents) -> usize {
-        count_tokens(&format_system_sections(components).join("\n\n"))
+        format_prompt(PromptFormatMode::Full, &components).into_string()
     }
 
     #[test]
@@ -2073,26 +2070,13 @@ mod tests {
     }
 
     #[test]
-    fn trim_context_under_budget() {
-        let mut components = PromptComponents::default();
-        components.docs.push(Document {
-            path: "test.md".to_string(),
-            content: "Short content".to_string(),
-            source: DocumentSource::RepoDoc,
-        });
-
-        let trimmed = trim_context_with_breakdown(GatheredContext(components.clone()), 1000000);
-        assert_eq!(trimmed.components().docs.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_breakdown_includes_documents_and_source_counts() {
+    fn measure_context_includes_documents_and_source_counts() {
         let components = PromptComponents {
             docs: vec![
                 Document {
                     path: "README.md".to_string(),
                     content: "Repo docs".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
                 Document {
                     path: "scratch/plan.md".to_string(),
@@ -2117,22 +2101,15 @@ mod tests {
                 source: DocumentSource::Diff,
             }],
             diff_file_count: 3,
-            area_docs: vec![Document {
-                path: "src/README.md".to_string(),
-                content: "Area".to_string(),
-                source: DocumentSource::Area,
-            }],
             ..Default::default()
         };
 
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), usize::MAX);
-        let breakdown = trimmed.breakdown();
+        let breakdown = measure_context(&components);
 
-        assert_eq!(breakdown.source_count(DocumentSource::RepoDoc), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Docs), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Scratch), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Summary), 1);
         assert_eq!(breakdown.source_count(DocumentSource::WaveMemory), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::Area), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Diff), 3);
         assert!(breakdown
             .documents
@@ -2154,202 +2131,35 @@ mod tests {
             .documents
             .iter()
             .any(|entry| entry.path == "src/a.rs"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "src/README.md"));
     }
 
     #[test]
-    fn trim_context_drops_summaries_first() {
+    fn format_prompt_does_not_trim_large_context() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "doc.md".to_string(),
-                content: "Doc content".to_string(),
-                source: DocumentSource::RepoDoc,
+                content: "Doc content ".repeat(200),
+                source: DocumentSource::Docs,
             }],
             summaries: vec![Document {
                 path: "summary.md".to_string(),
-                content: "Summary content that is long enough to matter".to_string(),
+                content: "Summary content ".repeat(200),
                 source: DocumentSource::Summary,
             }],
-            ..Default::default()
-        };
-
-        // Set budget to only fit docs, not summaries (system sections are a
-        // mandatory floor, so add them to the budget).
-        let system = system_tokens(&components);
-        let doc_tokens = count_tokens("Doc content");
-        let trimmed =
-            trim_context_with_breakdown(GatheredContext(components), system + doc_tokens + 5);
-
-        assert!(trimmed.components().summaries.is_empty());
-        assert_eq!(trimmed.components().docs.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_drops_wave_memory_before_summaries() {
-        let components = PromptComponents {
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                interactive: None,
-                action_style: None,
-                fast_path: None,
-            }),
             wave_memory: Some(Document {
                 path: "wave/living/MEMORY.md".to_string(),
-                content: "Wave memory content that should be trimmed first".to_string(),
+                content: "Wave memory content ".repeat(200),
                 source: DocumentSource::WaveMemory,
             }),
-            summaries: vec![Document {
-                path: "summary.md".to_string(),
-                content: "Summary should survive after wave memory is dropped".to_string(),
-                source: DocumentSource::Summary,
-            }],
+            wave: Some("living".to_string()),
             ..Default::default()
         };
 
-        let budget = system_tokens(&components)
-            + count_tokens("x")
-            + count_tokens("Summary should survive after wave memory is dropped")
-            + 1;
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
+        let prompt = render_full_prompt(components);
 
-        assert!(trimmed.components().wave_memory.is_none());
-        assert_eq!(trimmed.components().summaries.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_drops_docs_after_summaries() {
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "doc1.md".to_string(),
-                    content: "First document with enough content to exceed token budget easily"
-                        .to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-                Document {
-                    path: "doc2.md".to_string(),
-                    content: "Second document also has substantial content for testing".to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-            ],
-            summaries: vec![],
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()), // Minimal step content
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        // Get token count of step only
-        let step_tokens = count_tokens("x");
-        // Budget allows step but not docs
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
-        assert!(trimmed.components().docs.is_empty());
-        assert!(trimmed.components().step.is_some());
-    }
-
-    #[test]
-    fn trim_context_drops_repo_docs_before_scratch_docs() {
-        let scratch_content =
-            "Scratch design notes with enough detail to keep around for implementation decisions";
-        let repo_doc_content = "Repo docs that should be dropped before scratch docs";
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "scratch/plan.md".to_string(),
-                    content: scratch_content.to_string(),
-                    source: DocumentSource::Scratch,
-                },
-                Document {
-                    path: "README.md".to_string(),
-                    content: repo_doc_content.to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-            ],
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        let budget =
-            system_tokens(&components) + count_tokens("x") + count_tokens(scratch_content) + 1;
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
-
-        assert_eq!(trimmed.components().docs.len(), 1);
-        assert_eq!(trimmed.components().docs[0].source, DocumentSource::Scratch);
-    }
-
-    #[test]
-    fn trim_context_drops_diff_after_docs() {
-        let components = PromptComponents {
-            docs: vec![],
-            diff: Some("This is a large diff with many changes across multiple files that will definitely exceed our small token budget".to_string()),
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()), // Minimal step content
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        // Get token count of step only
-        let step_tokens = count_tokens("x");
-        // Budget allows step but not diff
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
-        assert!(trimmed.components().diff.is_none());
-        assert!(trimmed.components().step.is_some());
-    }
-
-    #[test]
-    fn trim_context_never_drops_step() {
-        let components = PromptComponents {
-            step: Some(Step {
-                name: "implement".to_string(),
-                content: Some("Implement the feature with tests".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            docs: vec![Document {
-                path: "doc.md".to_string(),
-                content: "Doc content that will exceed budget".to_string(),
-                source: DocumentSource::RepoDoc,
-            }],
-            ..Default::default()
-        };
-
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), 5);
-        assert!(trimmed.components().step.is_some());
-        assert!(trimmed.components().docs.is_empty());
+        assert!(prompt.contains("<lf:file path=\"doc.md\">"));
+        assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
+        assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
     }
 
     // ==========================================================================
@@ -2384,25 +2194,28 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_omits_operate_by_default() {
-        let components = PromptComponents::default();
-
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("<lf:operate>"));
-        assert!(!prompt.contains("lf op commit"));
-    }
-
-    #[test]
-    fn format_prompt_includes_operate_when_enabled() {
+    fn format_prompt_includes_loopflow_when_enabled() {
         let components = PromptComponents {
             operate: true,
             ..Default::default()
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:operate>"));
+        assert!(prompt.contains("<lf:loopflow>"));
         assert!(prompt.contains("lf op commit"));
-        assert!(prompt.contains("</lf:operate>"));
+        assert!(prompt.contains("</lf:loopflow>"));
+    }
+
+    #[test]
+    fn format_prompt_omits_loopflow_when_disabled() {
+        let components = PromptComponents {
+            operate: false,
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:loopflow>"));
+        assert!(!prompt.contains("lf op commit"));
     }
 
     #[test]
@@ -2496,56 +2309,54 @@ mod tests {
                 Document {
                     path: "README.md".to_string(),
                     content: "# Test Project".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
                 Document {
                     path: "STYLE.md".to_string(),
                     content: "# Style Guide".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
             ],
             ..Default::default()
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:docs>"));
-        assert!(prompt.contains("</lf:docs>"));
-        assert!(prompt.contains("<lf:README>"));
+        assert!(prompt.contains("<lf:files>"));
+        assert!(prompt.contains("<lf:file path=\"README.md\">"));
         assert!(prompt.contains("# Test Project"));
-        assert!(prompt.contains("</lf:README>"));
-        assert!(prompt.contains("<lf:STYLE>"));
+        assert!(prompt.contains("</lf:file>"));
+        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
         assert!(prompt.contains("# Style Guide"));
-        assert!(prompt.contains("Follow STYLE carefully"));
     }
 
     #[test]
-    fn format_prompt_claude_md_gets_follow_note() {
+    fn format_prompt_claude_md_renders_as_file() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "CLAUDE.md".to_string(),
                 content: "# Instructions".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             ..Default::default()
         };
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("CLAUDE"));
-        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+        assert!(prompt.contains("<lf:file path=\"CLAUDE.md\">"));
+        assert!(prompt.contains("# Instructions"));
     }
 
     #[test]
-    fn format_prompt_style_md_gets_follow_note() {
+    fn format_prompt_style_md_renders_as_file() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "STYLE.md".to_string(),
                 content: "# Style Guide".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             ..Default::default()
         };
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("STYLE"));
-        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
+        assert!(prompt.contains("# Style Guide"));
     }
 
     #[test]
@@ -2705,22 +2516,6 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_area_docs_uses_ancestor_descendant_label() {
-        let components = PromptComponents {
-            area: Some("src/api".to_string()),
-            area_docs: vec![Document {
-                path: "src/api/README.md".to_string(),
-                content: "# API".to_string(),
-                source: DocumentSource::Area,
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("ancestor and descendant directories"));
-    }
-
-    #[test]
     fn format_prompt_full_assembly() {
         // Test a complete prompt with all sections
         let components = PromptComponents {
@@ -2729,7 +2524,7 @@ mod tests {
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),
@@ -2756,7 +2551,7 @@ mod tests {
         // Verify order: system -> content -> task.
         let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
-        let docs_pos = prompt.find("<lf:docs>").unwrap();
+        let docs_pos = prompt.find("<lf:files>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
         let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
@@ -2794,18 +2589,19 @@ mod tests {
     }
 
     // ==========================================================================
-    // area docs gathering tests
+    // directory docs gathering tests
     // ==========================================================================
 
     #[test]
-    fn gather_area_docs_includes_ancestors_and_descendants() {
+    fn gather_directory_docs_includes_ancestors_and_descendants() {
         let repo = init_repo();
         write_file(repo.path(), "src/README.md", "# src");
         write_file(repo.path(), "src/api/README.md", "# api");
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/api/handlers/v1/README.md", "# v1");
 
-        let docs = gather_area_docs(repo.path(), "src/api");
+        let gitignore = build_gitignore(repo.path());
+        let docs = gather_directory_docs(repo.path(), "src/api", &gitignore);
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/README.md"));
@@ -2813,22 +2609,23 @@ mod tests {
         assert!(paths.contains(&"src/api/handlers/README.md"));
         assert!(paths.contains(&"src/api/handlers/v1/README.md"));
 
-        let area_doc_count = docs
+        let doc_count = docs
             .iter()
             .filter(|doc| doc.path == "src/api/README.md")
             .count();
-        assert_eq!(area_doc_count, 1);
+        assert_eq!(doc_count, 1);
     }
 
     #[test]
-    fn gather_area_docs_excludes_sibling_directories() {
+    fn gather_directory_docs_excludes_sibling_directories() {
         let repo = init_repo();
         write_file(repo.path(), "src/README.md", "# src");
         write_file(repo.path(), "src/api/README.md", "# api");
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/web/README.md", "# web");
 
-        let docs = gather_area_docs(repo.path(), "src/api");
+        let gitignore = build_gitignore(repo.path());
+        let docs = gather_directory_docs(repo.path(), "src/api", &gitignore);
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/api/handlers/README.md"));
@@ -2836,7 +2633,7 @@ mod tests {
     }
 
     #[test]
-    fn gather_area_docs_caps_descendants_at_100() {
+    fn gather_documents_caps_explicit_docs_at_100() {
         let repo = init_repo();
         write_file(repo.path(), "src/api/README.md", "# api");
         for i in 0..120 {
@@ -2847,13 +2644,38 @@ mod tests {
             );
         }
 
-        let docs = gather_area_docs(repo.path(), "src/api");
-        let descendant_count = docs
-            .iter()
-            .filter(|doc| doc.path.starts_with("src/api/handlers/"))
-            .count();
+        let opts = GatherSpec {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["src/api".to_string()],
+            ..Default::default()
+        };
 
-        assert_eq!(descendant_count, 100);
+        let error = gather_documents(&opts).expect_err("too many explicit docs");
+        assert!(error.to_string().contains("--docs resolved to 121 files"));
+    }
+
+    #[test]
+    fn gather_documents_directory_docs_respects_excludes() {
+        let repo = init_repo();
+        write_file(repo.path(), ".gitignore", "docs/private/\n");
+        write_file(repo.path(), "docs/README.md", "# public");
+        write_file(repo.path(), "docs/private/README.md", "# private");
+        write_file(repo.path(), "docs/Cargo.lock", "# lock");
+        write_file(repo.path(), ".lf/README.md", "# internal");
+
+        let spec = GatherSpec {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec![".".to_string()],
+            ..Default::default()
+        };
+
+        let docs = gather_documents(&spec).expect("gather docs");
+        let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
+
+        assert!(paths.contains(&"docs/README.md"));
+        assert!(!paths.contains(&"docs/private/README.md"));
+        assert!(!paths.contains(&"docs/Cargo.lock"));
+        assert!(!paths.contains(&".lf/README.md"));
     }
 
     // ==========================================================================
@@ -2906,15 +2728,11 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
-            sources: vec![],
+            include_diff_files: true,
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(
-            PromptFormatMode::Full,
-            &trim_context_with_breakdown(ctx, usize::MAX),
-        )
-        .into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -2962,16 +2780,12 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             files: vec!["src/a.rs".to_string()],
-            sources: vec![],
+            include_diff_files: true,
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
         let has_diff = ctx.diff.is_some();
-        let prompt = format_prompt(
-            PromptFormatMode::Full,
-            &trim_context_with_breakdown(ctx, usize::MAX),
-        )
-        .into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
 
         assert!(
             !has_diff,
@@ -2980,6 +2794,34 @@ mod tests {
         assert!(!prompt.contains("<lf:diff>"));
         assert!(prompt.contains("mod a;"));
         assert!(!prompt.contains("mod unrelated;"));
+    }
+
+    #[test]
+    fn gather_context_with_diff_files_loads_changed_files() {
+        let repo = init_git_repo();
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        write_file(repo.path(), "src/changed.rs", "mod changed;");
+        write_file(repo.path(), "src/unchanged.rs", "mod unchanged;");
+        Command::new("git")
+            .args(["add", "src/changed.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            include_diff_files: true,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
+
+        assert!(prompt.contains("mod changed;"));
+        assert!(!prompt.contains("mod unchanged;"));
     }
 
     #[test]
@@ -3014,7 +2856,6 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             step: Some("test".to_string()),
-            sources: vec![],
             ..Default::default()
         };
 
@@ -3026,18 +2867,16 @@ mod tests {
     }
 
     #[test]
-    fn gather_context_with_lfdocs() {
+    fn gather_context_loads_scratch_without_root_docs() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let repo = temp.path();
 
-        // Create docs
         std::fs::write(repo.join("README.md"), "# Project").expect("write readme");
         std::fs::create_dir_all(repo.join("scratch")).expect("create scratch");
         std::fs::write(repo.join("scratch/plan.md"), "# Plan").expect("write plan");
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            sources: vec![DocumentSource::RepoDoc],
             ..Default::default()
         };
 
@@ -3047,11 +2886,7 @@ mod tests {
         assert!(!components.docs.is_empty());
 
         let readme = components.docs.iter().find(|d| d.path.contains("README"));
-        assert!(readme.is_some());
-        assert_eq!(
-            readme.expect("README should be gathered").source,
-            DocumentSource::RepoDoc
-        );
+        assert!(readme.is_none());
 
         let scratch = components
             .docs
@@ -3062,6 +2897,31 @@ mod tests {
             scratch.expect("scratch doc should be gathered").source,
             DocumentSource::Scratch
         );
+    }
+
+    #[test]
+    fn gather_context_loads_explicit_docs_targets() {
+        let repo = init_repo();
+        write_file(repo.path(), "README.md", "# Project");
+        write_file(repo.path(), "docs/README.md", "# Docs");
+        write_file(repo.path(), "docs/nested/README.md", "# Nested");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["README.md".to_string(), "docs".to_string()],
+            ..Default::default()
+        };
+
+        let components = gather_context(&opts).expect("gather context");
+        let paths: Vec<&str> = components
+            .docs
+            .iter()
+            .map(|doc| doc.path.as_str())
+            .collect();
+
+        assert!(paths.contains(&"README.md"));
+        assert!(paths.contains(&"docs/README.md"));
+        assert!(paths.contains(&"docs/nested/README.md"));
     }
 
     #[test]
@@ -3077,7 +2937,6 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             directions: vec!["concise".to_string()],
-            sources: vec![],
             ..Default::default()
         };
 
@@ -3109,7 +2968,6 @@ directions:
             repo_root: repo.path().to_path_buf(),
             step: Some("impl".to_string()),
             directions: vec!["fast".to_string()],
-            sources: vec![],
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
@@ -3127,7 +2985,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             surface: Surface::Cli,
-            sources: vec![],
             ..Default::default()
         };
 
@@ -3145,7 +3002,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             wave: Some("rust-migration".to_string()),
-            sources: vec![],
             ..Default::default()
         };
 
@@ -3168,7 +3024,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             wave: Some("living".to_string()),
-            sources: vec![DocumentSource::RepoDoc],
             ..Default::default()
         };
 
@@ -3282,7 +3137,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         // Should NOT include step content
         assert!(!context.contains("<lf:step:implement>"));
         assert!(!context.contains("Implement the feature."));
@@ -3297,7 +3152,7 @@ directions:
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),
@@ -3318,10 +3173,10 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         // Should include context parts
         assert!(context.contains("Run mode is interactive"));
-        assert!(context.contains("<lf:docs>"));
+        assert!(context.contains("<lf:files>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
         // Should include directions (context, not task)
@@ -3339,7 +3194,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("ask questions"));
         assert!(context.contains("wait for feedback"));
@@ -3365,7 +3220,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:implement>"));
         assert!(task.contains("Implement the feature."));
         assert!(task.contains("</lf:step:implement>"));
@@ -3374,7 +3229,7 @@ directions:
     #[test]
     fn format_task_prompt_empty_when_no_step_or_message() {
         let components = PromptComponents::default();
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.is_empty());
     }
 
@@ -3384,7 +3239,7 @@ directions:
             message: Some("fix the login bug".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert_eq!(task, "fix the login bug");
     }
 
@@ -3404,7 +3259,7 @@ directions:
             message: Some("login page crashes".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:debug>"));
         assert!(task.contains("login page crashes"));
     }
@@ -3425,7 +3280,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:review>"));
         assert!(task.contains("</lf:step:review>"));
     }
@@ -3550,7 +3405,7 @@ directions:
     // ── Cross-repo context loading ──────────────────────────────────────
 
     #[test]
-    fn gather_documents_cross_repo_area_includes_root_docs() {
+    fn gather_documents_cross_repo_docs_include_target_docs_only() {
         let session_repo = init_repo();
         write_file(session_repo.path(), "CLAUDE.md", "session claude");
 
@@ -3566,35 +3421,31 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc, DocumentSource::Area],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("widgets:src".to_string()),
+            docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session repo docs still present
+        // Session scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+            .all(|d| d.path != "CLAUDE.md" && d.content != "session claude"));
 
-        // Related repo root docs loaded because area targets that repo
-        assert!(docs
+        // Related repo root docs are not loaded for a directory docs target.
+        assert!(!docs
             .iter()
             .any(|d| d.path == "[acme/widgets] CLAUDE.md" && d.content == "related claude"));
-        assert!(docs
-            .iter()
-            .any(|d| d.path == "[acme/widgets] STYLE.md" && d.content == "related style"));
 
-        // Related repo area doc
+        // Related repo docs target.
         assert!(docs
             .iter()
             .any(|d| d.path.contains("[acme/widgets]") && d.content == "src area doc"));
     }
 
     #[test]
-    fn gather_documents_related_repo_docs_not_loaded_without_area() {
+    fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
         let session_repo = init_repo();
         write_file(session_repo.path(), "CLAUDE.md", "session claude");
 
@@ -3607,40 +3458,38 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
             repo_root: session_repo.path().to_path_buf(),
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session docs present
-        assert!(docs
+        // Session root docs are not ambient.
+        assert!(!docs
             .iter()
             .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
 
-        // Related repo docs NOT loaded — no area targeting that repo
+        // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
     }
 
     #[test]
-    fn gather_documents_no_related_repos_unchanged() {
+    fn gather_documents_no_related_repos_loads_no_root_docs() {
         let repo = init_repo();
         write_file(repo.path(), "README.md", "hello");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
             repo_root: repo.path().to_path_buf(),
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
-        let repo_docs: Vec<_> = docs
+        let explicit_docs: Vec<_> = docs
             .iter()
-            .filter(|d| d.source == DocumentSource::RepoDoc)
+            .filter(|d| d.source == DocumentSource::Docs)
             .collect();
-        assert!(repo_docs.iter().any(|d| d.path == "README.md"));
+        assert!(!explicit_docs.iter().any(|d| d.path == "README.md"));
         // No prefixed docs
-        assert!(!repo_docs.iter().any(|d| d.path.starts_with('[')));
+        assert!(!explicit_docs.iter().any(|d| d.path.starts_with('[')));
     }
 
     #[test]
@@ -3654,9 +3503,8 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
             repo_root: repo.path().to_path_buf(),
-            area: Some("gone:src".to_string()),
+            docs: vec!["gone:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
@@ -3666,17 +3514,13 @@ directions:
     }
 
     #[test]
-    fn gather_documents_cross_repo_area() {
+    fn gather_documents_cross_repo_docs() {
         let session_repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
         std::fs::create_dir_all(related_repo.path().join("swift")).unwrap();
-        std::fs::write(
-            related_repo.path().join("swift/README.md"),
-            "swift area doc",
-        )
-        .unwrap();
+        std::fs::write(related_repo.path().join("swift/README.md"), "swift docs").unwrap();
 
         let related = RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
@@ -3684,27 +3528,17 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("studio:swift".to_string()),
+            docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Root docs from the related repo
         assert!(
             docs.iter()
-                .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"),
-            "expected related repo root doc, got: {:?}",
-            docs.iter().map(|d| &d.path).collect::<Vec<_>>()
-        );
-
-        // Area docs from the related repo
-        assert!(
-            docs.iter()
-                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift area doc"),
-            "expected cross-repo area doc, got: {:?}",
+                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift docs"),
+            "expected cross-repo docs, got: {:?}",
             docs.iter().map(|d| &d.path).collect::<Vec<_>>()
         );
     }
@@ -3723,82 +3557,78 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("studio:".to_string()),
+            docs: vec!["studio:".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Root docs loaded
-        assert!(docs
-            .iter()
-            .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"));
-
-        // Top-level area docs loaded (README.md is a descendant of ".")
+        // Top-level docs loaded (README.md is a descendant of ".")
         assert!(docs
             .iter()
             .any(|d| d.path.contains("[acme/studio]") && d.content == "studio readme"));
     }
 
     #[test]
-    fn gather_documents_local_area_unchanged() {
+    fn gather_documents_local_docs_directory() {
         let repo = init_repo();
         std::fs::create_dir_all(repo.path().join("docs")).unwrap();
-        write_file(repo.path(), "docs/README.md", "local area doc");
+        write_file(repo.path(), "docs/README.md", "local docs");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
             repo_root: repo.path().to_path_buf(),
-            area: Some("docs".to_string()),
+            docs: vec!["docs".to_string()],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
-        assert!(docs.iter().any(|d| d.content == "local area doc"));
+        assert!(docs.iter().any(|d| d.content == "local docs"));
         // No prefixed docs
         assert!(!docs.iter().any(|d| d.path.starts_with('[')));
     }
 
     #[test]
-    fn resolve_area_local_without_colon() {
-        let result = resolve_area("docs", &[]);
-        assert!(matches!(result, ResolvedArea::Local { area: "docs" }));
+    fn resolve_doc_target_local_without_colon() {
+        let result = resolve_doc_target("docs", &[]);
+        assert!(matches!(
+            result,
+            ResolvedDocTarget::Local { target: "docs" }
+        ));
     }
 
     #[test]
-    fn resolve_area_cross_repo_match() {
+    fn resolve_doc_target_cross_repo_match() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("studio:swift", &related);
+        let result = resolve_doc_target("studio:swift", &related);
         match result {
-            ResolvedArea::CrossRepo { related: r, area } => {
+            ResolvedDocTarget::CrossRepo { related: r, target } => {
                 assert_eq!(r.repo_id.name(), "studio");
-                assert_eq!(area, "swift");
+                assert_eq!(target, "swift");
             }
             _ => panic!("expected CrossRepo"),
         }
     }
 
     #[test]
-    fn resolve_area_unknown_repo_falls_back_to_local() {
+    fn resolve_doc_target_unknown_repo_falls_back_to_local() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("unknown:swift", &related);
+        let result = resolve_doc_target("unknown:swift", &related);
         assert!(matches!(
             result,
-            ResolvedArea::Local {
-                area: "unknown:swift"
+            ResolvedDocTarget::Local {
+                target: "unknown:swift"
             }
         ));
     }
 
     #[test]
-    fn resolve_area_ambiguous_repo_falls_back_to_local() {
+    fn resolve_doc_target_ambiguous_repo_falls_back_to_local() {
         let related = vec![
             RelatedRepoContext {
                 repo_id: RepoId::parse("acme/studio").unwrap(),
@@ -3809,27 +3639,30 @@ directions:
                 path: PathBuf::from("/repos/studio2"),
             },
         ];
-        let result = resolve_area("studio:swift", &related);
-        assert!(matches!(result, ResolvedArea::Local { .. }));
+        let result = resolve_doc_target("studio:swift", &related);
+        assert!(matches!(result, ResolvedDocTarget::Local { .. }));
     }
 
     #[test]
-    fn resolve_area_empty_repo_name_treated_as_local() {
-        let result = resolve_area(":swift", &[]);
-        assert!(matches!(result, ResolvedArea::Local { area: ":swift" }));
+    fn resolve_doc_target_empty_repo_name_treated_as_local() {
+        let result = resolve_doc_target(":swift", &[]);
+        assert!(matches!(
+            result,
+            ResolvedDocTarget::Local { target: ":swift" }
+        ));
     }
 
     #[test]
-    fn resolve_area_bare_repo_name_resolves_to_root() {
+    fn resolve_doc_target_bare_repo_name_resolves_to_root() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("studio:", &related);
+        let result = resolve_doc_target("studio:", &related);
         match result {
-            ResolvedArea::CrossRepo { related: r, area } => {
+            ResolvedDocTarget::CrossRepo { related: r, target } => {
                 assert_eq!(r.repo_id.name(), "studio");
-                assert_eq!(area, ".");
+                assert_eq!(target, ".");
             }
             _ => panic!("expected CrossRepo, got Local"),
         }

@@ -13,11 +13,10 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive mode | `-i` | frontmatter: `interactive: true` |
-| Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
-| Include branch files | `--diff-files` (default) | `diff_files: true` |
+| Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
+| Include branch files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Area scope | `--area PATH` | `area: PATH` |
 | Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
@@ -31,13 +30,9 @@ Every step gets context assembled automatically. Run any command to see the brea
 ```
 Tokens: 12,847
 
-files          6,892 █████
-  STYLE.md     2,854 ██
+docs           3,842 ███
   README.md      988 █
-  scratch/     3,050 ██
-diff_files     4,721 ███
-  src/auth.py  2,847 ██
-  tests/       1,874 █
+scratch        3,050 ██
 clipboard      1,234 █
 ```
 
@@ -45,8 +40,10 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | `wave/`, `scratch/`, root `.md` files | `lfdocs: true` (default) |
-| **diff_files** | Files changed on this branch | `diff_files: true` (default) |
+| **scratch** | `scratch/` design artifacts | always included |
+| **wave** | `wave/<name>/` docs when a wave is scoped | `--wave NAME` |
+| **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
+| **diff** | Branch diff when requested | `--diff` |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
 
@@ -56,7 +53,7 @@ Defaults work well for most repos. Summaries require configuration.
 
 **Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
 
-For most settings, repo overrides global. For additive settings (`context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, repo overrides global. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -83,6 +80,10 @@ context:
   - src/schema.py
   - docs/api.md
 
+docs:
+  - README.md
+  - docs/
+
 exclude:
   - "*.test.ts"
   - node_modules
@@ -106,17 +107,17 @@ Flows are YAML files in `.lf/flows/`:
 
 ## Options Reference
 
-### LF Docs (files)
+### Docs
 
-`wave/`, `scratch/`, and root markdown files.
+Explicit docs paths, globs, or directories. Directory entries include markdown from ancestors and descendants.
 
 | | |
 |---|---|
-| **CLI** | `--lfdocs` / `--no-lfdocs` |
-| **Config** | `lfdocs: true` |
-| **Default** | `true` (included) |
+| **CLI** | `--docs README.md,docs/` |
+| **Config** | `docs: [README.md, docs/]` |
+| **Default** | empty |
 
-Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `scratch/` (current PR scratchpad) and `wave/` (wave plans).
+Root README files are no longer special. `scratch/` remains ambient, and `wave/` loads when a wave is in scope.
 
 ### Branch Files (diff_files)
 
@@ -126,9 +127,9 @@ Full content of files modified on the current branch.
 |---|---|
 | **CLI** | `--diff-files` / `--no-diff-files` |
 | **Config** | `diff_files: true` |
-| **Default** | `true` (included) |
+| **Default** | `false` |
 
-This is how the coding agent sees your changes. It gets complete files, not just diffs.
+Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
 
 ### Summaries
 

@@ -627,12 +627,10 @@ struct SessionStateTests {
                 DocumentEntry(path: "src/api/mod.rs", source: "diff", tokens: 1200),
                 DocumentEntry(path: "src/api/routes.rs", source: "diff", tokens: 900),
             ],
-            budget: 75_000,
             total: 8_200,
             diffTier: "UnifiedDiff",
             stepName: "implement",
             directionNames: ["clarity"],
-            areaName: "src/",
             waveName: "context-ui",
             hasClipboard: false
         )

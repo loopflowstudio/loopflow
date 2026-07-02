@@ -9,8 +9,7 @@ use loopflow::lf::{Cli, Commands};
 const VALUE_FLAGS: &[&str] = &[
     "-d",
     "--direction",
-    "-a",
-    "--area",
+    "--docs",
     "-m",
     "--model",
     "-w",
@@ -33,13 +32,11 @@ const BOOL_FLAGS: &[&str] = &[
     "--ide",
     "--chrome",
     "--no-chrome",
-    "--lfdocs",
-    "--no-lfdocs",
     "--diff-files",
     "--no-diff-files",
     "--diff",
     "--no-diff",
-    "--operate",
+    "--no-loopflow",
     "-h",
     "--help",
     "-V",
@@ -383,14 +380,14 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_operate_flag_after_step() {
+    fn reorder_args_no_loopflow_flag_after_step() {
         let args = vec![
             "lf".to_string(),
             "gate".to_string(),
-            "--operate".to_string(),
+            "--no-loopflow".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--operate", "gate"]);
+        assert_eq!(result, vec!["lf", "--no-loopflow", "gate"]);
     }
 
     #[test]

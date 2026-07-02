@@ -33,6 +33,7 @@ class PullRequest(BaseModel):
 class WaveRun(BaseModel):
     id: str
     wave_id: str
+    task: Optional[str] = None
     iteration: int
     step_index: int
     status: str

@@ -344,6 +344,7 @@ pub struct PullRequest {
 pub struct WaveRunSnapshot {
     pub repo: String,
     pub flow: String,
+    pub task: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
 }

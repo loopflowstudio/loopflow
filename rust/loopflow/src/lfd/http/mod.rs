@@ -151,6 +151,10 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
+            "/waves/{wave_id}/dispatch",
+            post(waves::dispatch_wave_handler),
+        )
+        .route(
             "/waves/{wave_id}/triggers",
             post(waves::add_trigger_handler),
         )

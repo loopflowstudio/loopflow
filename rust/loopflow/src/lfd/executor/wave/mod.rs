@@ -126,6 +126,22 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 }
 
 fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
+    if let Some(task) = run.snapshot.task.as_ref() {
+        let mut cmd = build_lf_step_command(
+            &run.snapshot.flow,
+            true,
+            &run.snapshot.direction,
+            &run.snapshot.area,
+            wave.name(),
+        );
+        let flow_arg = cmd
+            .get_mut(1)
+            .ok_or_else(|| anyhow!("lf dispatch command missing flow argument"))?;
+        flow_arg.push(':');
+        cmd.push(task.clone());
+        return Ok((cmd, format!("dispatch:{}", run.snapshot.flow)));
+    }
+
     let repo = Path::new(&run.worktree);
     let goal = crate::engine::load_goal(wave.goal(), repo)?;
     let memory = read_wave_memory(repo, wave.name())?;
@@ -791,6 +807,7 @@ impl WaveExecutor {
             snapshot: WaveRunSnapshot {
                 repo: failed_run.snapshot.repo.clone(),
                 flow: repair_flow.to_string(),
+                task: None,
                 direction: failed_run.snapshot.direction.clone(),
                 area: failed_run.snapshot.area.clone(),
             },
@@ -1293,6 +1310,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: repo.to_string_lossy().to_string(),
                 flow: flow_name.to_string(),
+                task: None,
                 direction: vec![],
                 area: vec![],
             },
@@ -1351,6 +1369,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
                 flow: wave.primary_flow().clone(),
+                task: None,
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
             },
@@ -1838,6 +1857,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: worktree.to_string_lossy().to_string(),
                 flow: "build".to_string(),
+                task: None,
                 direction: vec![],
                 area: vec![],
             },
@@ -2068,6 +2088,24 @@ mod tests {
         assert!(rendered.contains("Drive the memory wave."));
         assert!(rendered.contains("<lf:wave-memory>"));
         assert!(rendered.contains("Last loop found the roadmap gap."));
+    }
+
+    #[test]
+    fn build_wave_run_command_dispatches_task() {
+        let repo = tempdir().expect("tempdir");
+        let wave = make_wave("dispatch-wave", repo.path(), "build", WaveStatus::Running);
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+        run.snapshot.flow = "implement".to_string();
+        run.snapshot.task = Some("Add the dispatch endpoint.".to_string());
+
+        let (cmd, terminal_step) =
+            build_wave_run_command(&wave, &run).expect("build dispatch command");
+
+        assert_eq!(terminal_step, "dispatch:implement");
+        assert!(cmd.contains(&"implement:".to_string()));
+        assert!(cmd.contains(&"-b".to_string()));
+        assert!(cmd.contains(&"Add the dispatch endpoint.".to_string()));
     }
 
     #[test]

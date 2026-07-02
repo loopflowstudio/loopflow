@@ -741,6 +741,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
                 flow: wave.primary_flow().clone(),
+                task: None,
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
             },

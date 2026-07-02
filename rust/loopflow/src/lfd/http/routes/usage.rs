@@ -760,6 +760,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo.clone(),
                 flow: flow.to_string(),
+                task: None,
                 direction: Vec::new(),
                 area: Vec::new(),
             },

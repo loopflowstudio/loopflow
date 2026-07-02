@@ -174,6 +174,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "038_wave_metrics",
         sql: include_str!("migrations/038_wave_metrics.sql"),
     },
+    Migration {
+        version: "039_wave_run_snapshot_task",
+        sql: include_str!("migrations/039_wave_run_snapshot_task.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

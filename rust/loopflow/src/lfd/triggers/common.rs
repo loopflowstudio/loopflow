@@ -238,6 +238,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
                 flow: "build".to_string(),
+                task: None,
                 direction: Vec::new(),
                 area: Vec::new(),
             },

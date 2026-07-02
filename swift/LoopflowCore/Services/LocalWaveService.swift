@@ -1946,6 +1946,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: id,
             waveId: waveId,
             flow: flow,
+            task: json["task"] as? String,
             area: area,
             repo: repoPath,
             direction: direction,

@@ -57,9 +57,10 @@ Nightly packages prove release artifacts while keeping deployment out of the loo
 
 ```bash
 lf op release status
+lf op release status --json
 ```
 
-Shows the latest tagged release workflow plus the most recent package verification and weekly release runs. Use it first when a release did not publish or a nightly package check failed.
+Shows the latest tagged release workflow plus the most recent package verification and weekly release runs. Use it first when a release did not publish or a nightly package check failed. JSON output includes workflow run IDs and normalized failure kinds for repair agents.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

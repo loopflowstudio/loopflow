@@ -2,10 +2,11 @@
 
 ```bash
 lf op release status
+lf op release status --json
 cargo test -p loopflow release_status
 ```
 
-`lf op release status` still shows the target, latest tag, tagged release workflow, and GitHub Release state. It now also prints the most recent package verification and weekly release workflow status, including titles and URLs when GitHub returns them.
+`lf op release status` still shows the target, latest tag, tagged release workflow, and GitHub Release state. It now also prints the most recent package verification and weekly release workflow status, including titles, URLs, and normalized issue labels when GitHub returns failed runs. `--json` exposes the same data with workflow run IDs for repair agents.
 
 Validation run:
 
@@ -13,6 +14,7 @@ Validation run:
 cargo fmt --check
 cargo test -p loopflow release_status
 cargo clippy -- -D warnings
+cargo test -p loopflow
 uv run pytest python/tests/
 cargo test --all
 ```
@@ -27,7 +29,7 @@ The recurring release workflows are named `nightly-packages.yml` and `weekly-rel
 
 ## Key decisions
 
-The release status command keeps tagged release publication and recurring automation health as separate lines. Missing nightly/weekly workflow files are reported as `(not found)` for compatibility with repos that have not adopted the release automation skeleton, while unrelated GitHub errors still fail loudly.
+The release status command keeps tagged release publication and recurring automation health as separate lines. Missing nightly/weekly workflow files are reported as `(not found)` for compatibility with repos that have not adopted the release automation skeleton, while unrelated GitHub errors still fail loudly. Failed package verification and publish workflows now carry explicit failure kinds instead of relying on humans or agents to infer category from workflow names.
 
 ## Not included
 

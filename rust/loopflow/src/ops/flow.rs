@@ -225,7 +225,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 release_tag(repo, version, target.as_deref())?;
                 Ok(())
             }
-            ReleaseCommand::Status { target } => {
+            ReleaseCommand::Status { target, .. } => {
                 release_status(repo, target.as_deref())?;
                 Ok(())
             }

@@ -104,7 +104,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
                 release_bump_cmd(version, target.as_deref(), &progress)
             }
             ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
-            ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
+            ReleaseCommand::Status { target, json } => release_status_cmd(target.as_deref(), *json),
         },
         OpsCommand::Ingest { wave, item } => {
             ingest_cmd(wave.as_deref(), item.as_deref(), &progress)
@@ -677,9 +677,14 @@ fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
+fn release_status_cmd(target_name: Option<&str>, json: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let status = release_status(&repo_root, target_name)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+
     println!("Target: {}", status.target);
     match status.latest_tag.as_deref() {
         Some(tag) => println!("Latest tag: {tag}"),
@@ -696,6 +701,10 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
     if let Some(url) = status.workflow_url.as_deref() {
         println!("Workflow URL: {url}");
+    }
+
+    if let Some(kind) = status.workflow_failure_kind.as_ref() {
+        println!("Workflow issue: {}", release_failure_kind_label(kind));
     }
 
     print_release_workflow_status(&status.package_verification);
@@ -723,6 +732,23 @@ fn print_release_workflow_status(status: &ReleaseWorkflowStatus) {
 
     if let Some(url) = status.url.as_deref() {
         println!("{} URL: {url}", status.label);
+    }
+
+    if let Some(kind) = status.failure_kind.as_ref() {
+        println!(
+            "{} issue: {}",
+            status.label,
+            release_failure_kind_label(kind)
+        );
+    }
+}
+
+fn release_failure_kind_label(kind: &crate::ops::ReleaseFailureKind) -> &'static str {
+    match kind {
+        crate::ops::ReleaseFailureKind::PackageVerification => "package verification failure",
+        crate::ops::ReleaseFailureKind::Publish => "publish failure",
+        crate::ops::ReleaseFailureKind::DeployHost => "deploy/host failure",
+        crate::ops::ReleaseFailureKind::StaleLocalCopy => "stale local copy",
     }
 }
 

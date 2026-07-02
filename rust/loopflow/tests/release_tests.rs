@@ -6,7 +6,7 @@ use std::process::Command;
 
 use loopflow::ops::{
     bump_version, generate_release, release_bump, release_check, release_status, release_tag,
-    NullProgress,
+    NullProgress, ReleaseFailureKind,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -203,6 +203,8 @@ fn release_status_reports_latest_tag_and_release() {
     assert_eq!(status.latest_tag.as_deref(), Some("v0.9.1"));
     assert_eq!(status.workflow_status.as_deref(), Some("completed"));
     assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
+    assert_eq!(status.workflow_run_id, Some(42));
+    assert_eq!(status.workflow_failure_kind, None);
     assert!(status.release_exists);
 }
 
@@ -222,9 +224,15 @@ fn release_status_reports_automation_workflow_health() {
 
     let status = release_status(repo.path(), None).expect("status should succeed");
     assert_eq!(status.package_verification.label, "Package verification");
+    assert_eq!(status.package_verification.workflow, "nightly-packages.yml");
+    assert_eq!(status.package_verification.run_id, Some(42));
     assert_eq!(
         status.package_verification.conclusion.as_deref(),
         Some("failure")
+    );
+    assert_eq!(
+        status.package_verification.failure_kind,
+        Some(ReleaseFailureKind::PackageVerification)
     );
     assert_eq!(status.weekly_release.label, "Weekly release");
     assert_eq!(status.weekly_release.status.as_deref(), Some("completed"));
@@ -248,7 +256,31 @@ fn release_status_tolerates_missing_automation_workflows() {
     let status = release_status(repo.path(), None).expect("status should succeed");
     assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
     assert_eq!(status.package_verification.status, None);
+    assert_eq!(status.package_verification.failure_kind, None);
     assert_eq!(status.weekly_release.status, None);
+    assert_eq!(status.weekly_release.failure_kind, None);
+}
+
+#[test]
+fn release_status_classifies_publish_failures() {
+    let gh_script = write_gh_status_script(
+        r#"[{"databaseId":9,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"failure","url":"https://example.com/run/9"}]"#,
+        r#"{"tagName":"v0.9.1"}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should succeed");
+    assert_eq!(
+        status.workflow_failure_kind,
+        Some(ReleaseFailureKind::Publish)
+    );
+    assert_eq!(
+        status.weekly_release.failure_kind,
+        Some(ReleaseFailureKind::Publish)
+    );
 }
 
 #[test]

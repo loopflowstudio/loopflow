@@ -4,7 +4,7 @@
 
 `lf op release status` now reports the latest tagged release workflow plus the most recent nightly package verification and weekly release workflow runs. The command distinguishes the tagged release publication path from recurring release automation health, so a failed nightly or weekly job is visible from Loopflow without opening GitHub Actions first.
 
-The release ops layer exposes `ReleaseWorkflowStatus` for the two automation checks, and the CLI prints status, conclusion, title, and URL when present. Missing nightly or weekly workflow files are tolerated as `(not found)` so older repos can still inspect release status.
+The release ops layer exposes `ReleaseWorkflowStatus` for the two automation checks, including workflow filename, run ID, and normalized failure kind when a run failed. The CLI prints status, conclusion, title, URL, and issue category when present, and `lf op release status --json` returns the same data for repair agents. Missing nightly or weekly workflow files are tolerated as `(not found)` so older repos can still inspect release status.
 
 ## Key choices
 
@@ -33,5 +33,6 @@ The release ops layer exposes `ReleaseWorkflowStatus` for the two automation che
 - `cargo fmt --check`
 - `cargo test -p loopflow release_status`
 - `cargo clippy -- -D warnings`
+- `cargo test -p loopflow`
 - `uv run pytest python/tests/`
 - `cargo test --all`

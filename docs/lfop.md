@@ -97,6 +97,7 @@ lf op release notes 1.2.3        # generate narrative RELEASE_NOTES.md from deci
 lf op release bump 1.2.3         # bump manifests
 lf op release tag 1.2.3          # create + push git tag
 lf op release status             # release, package verification, and weekly status
+lf op release status --json      # machine-readable workflow failures
 ```
 
 Keep release-cycle rationale in `release/unreleased/DECISIONS.md` when you want narrative-first notes. `lf op release notes` and the full release workflow promote it to `release/v<version>/`, use `DECISIONS.md` as the intent source, use merged PRs/diffs as the shipped-behavior source, and archive the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`. If the ledger is absent, Loopflow falls back to merged PR history.

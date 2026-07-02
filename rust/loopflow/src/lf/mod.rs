@@ -479,6 +479,8 @@ pub enum ReleaseCommand {
     Status {
         #[arg(short = 't', long = "target")]
         target: Option<String>,
+        #[arg(long = "json")]
+        json: bool,
     },
 }
 

@@ -59,6 +59,8 @@ struct GhApiPrFile {
 
 #[derive(Debug, Deserialize, Clone)]
 struct GhRunListEntry {
+    #[serde(default, rename = "databaseId")]
+    database_id: Option<u64>,
     #[serde(default, rename = "headBranch")]
     head_branch: Option<String>,
     #[serde(default, rename = "displayTitle")]
@@ -117,25 +119,40 @@ struct ReleaseTarget {
     workflow: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReleaseStatusResult {
     pub target: String,
     pub latest_tag: Option<String>,
     pub workflow_status: Option<String>,
     pub workflow_conclusion: Option<String>,
     pub workflow_url: Option<String>,
+    pub workflow_run_id: Option<u64>,
+    pub workflow_failure_kind: Option<ReleaseFailureKind>,
     pub release_exists: bool,
     pub package_verification: ReleaseWorkflowStatus,
     pub weekly_release: ReleaseWorkflowStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReleaseWorkflowStatus {
     pub label: String,
+    pub workflow: String,
+    pub run_id: Option<u64>,
     pub status: Option<String>,
     pub conclusion: Option<String>,
     pub url: Option<String>,
     pub title: Option<String>,
+    pub failure_kind: Option<ReleaseFailureKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ReleaseFailureKind {
+    PackageVerification,
+    Publish,
+    DeployHost,
+    StaleLocalCopy,
 }
 
 #[derive(Debug, Clone)]
@@ -209,19 +226,32 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         None => (None, false),
     };
 
+    let workflow_failure_kind = workflow
+        .as_ref()
+        .filter(|run| is_failed_conclusion(run.conclusion.as_deref()))
+        .map(|_| ReleaseFailureKind::Publish);
+
     Ok(ReleaseStatusResult {
         target: target.name,
         latest_tag,
         workflow_status: workflow.as_ref().map(|run| run.status.clone()),
         workflow_conclusion: workflow.as_ref().and_then(|run| run.conclusion.clone()),
-        workflow_url: workflow.and_then(|run| run.url),
+        workflow_url: workflow.as_ref().and_then(|run| run.url.clone()),
+        workflow_run_id: workflow.as_ref().and_then(|run| run.database_id),
+        workflow_failure_kind,
         release_exists,
         package_verification: latest_workflow_status(
             &main_repo,
             "Package verification",
             "nightly-packages.yml",
+            ReleaseFailureKind::PackageVerification,
         )?,
-        weekly_release: latest_workflow_status(&main_repo, "Weekly release", "weekly-release.yml")?,
+        weekly_release: latest_workflow_status(
+            &main_repo,
+            "Weekly release",
+            "weekly-release.yml",
+            ReleaseFailureKind::Publish,
+        )?,
     })
 }
 
@@ -1601,19 +1631,33 @@ fn latest_workflow_status(
     repo: &Path,
     label: &str,
     workflow: &str,
+    failure_kind: ReleaseFailureKind,
 ) -> OpsResult<ReleaseWorkflowStatus> {
     let run = match list_workflow_runs(repo, Some(workflow), "1") {
         Ok(mut runs) => runs.pop(),
         Err(OpsError::CommandFailed { stderr, .. }) if is_missing_workflow_error(&stderr) => None,
         Err(err) => return Err(err),
     };
+    let failed = run
+        .as_ref()
+        .is_some_and(|run| is_failed_conclusion(run.conclusion.as_deref()));
     Ok(ReleaseWorkflowStatus {
         label: label.to_string(),
+        workflow: workflow.to_string(),
+        run_id: run.as_ref().and_then(|run| run.database_id),
         status: run.as_ref().map(|run| run.status.clone()),
         conclusion: run.as_ref().and_then(|run| run.conclusion.clone()),
         url: run.as_ref().and_then(|run| run.url.clone()),
         title: run.and_then(|run| run.display_title),
+        failure_kind: failed.then_some(failure_kind),
     })
+}
+
+fn is_failed_conclusion(conclusion: Option<&str>) -> bool {
+    matches!(
+        conclusion,
+        Some("action_required" | "cancelled" | "failure" | "startup_failure" | "timed_out")
+    )
 }
 
 fn list_workflow_runs(
@@ -1625,7 +1669,7 @@ fn list_workflow_runs(
         "run".to_string(),
         "list".to_string(),
         "--json".to_string(),
-        "headBranch,displayTitle,status,conclusion,url".to_string(),
+        "databaseId,headBranch,displayTitle,status,conclusion,url".to_string(),
         "--limit".to_string(),
         limit.to_string(),
     ];

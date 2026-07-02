@@ -25,13 +25,12 @@ use tracing::{debug, warn};
 pub enum DocumentSource {
     Step,
     Direction,
-    Diff,
-    RepoDoc,
     Scratch,
     Wave,
     WaveMemory,
+    Docs,
     Summary,
-    Area,
+    Diff,
     Clipboard,
 }
 
@@ -58,9 +57,6 @@ pub struct DocumentEntry {
     pub tokens: usize,
 }
 
-/// Default maximum tokens for pre-fill context.
-pub const DEFAULT_CONTEXT_BUDGET: usize = 75_000;
-
 /// How diff context is represented after tiering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum DiffTier {
@@ -85,8 +81,6 @@ pub struct ContextBreakdown {
     pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
-    pub area_name: Option<String>,
-    pub area_doc_count: usize,
     pub has_clipboard: bool,
     pub wave_name: Option<String>,
 }
@@ -106,11 +100,6 @@ impl ContextBreakdown {
 
     fn add_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         *self.source_tokens.entry(source).or_insert(0) += tokens;
-    }
-
-    fn subtract_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
-        let entry = self.source_tokens.entry(source).or_insert(0);
-        *entry = entry.saturating_sub(tokens);
     }
 
     fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
@@ -153,53 +142,21 @@ fn build_document_entries(
     entries
 }
 
-/// Specification for which context sources to gather.
+const MAX_EXPLICIT_DOC_FILES: usize = 100;
+
+/// Specification for document targets to gather.
 #[derive(Debug, Clone, Default)]
 pub struct GatherSpec {
-    pub sources: Vec<DocumentSource>,
     pub repo_root: PathBuf,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
+    pub include_files: bool,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
-}
-
-impl GatherSpec {
-    fn includes(&self, source: DocumentSource) -> bool {
-        self.sources.contains(&source)
-    }
-
-    fn include_source(&mut self, source: DocumentSource) {
-        if !self.includes(source) {
-            self.sources.push(source);
-        }
-    }
-
-    fn normalize(&mut self) {
-        if self.wave.is_some() && self.includes(DocumentSource::RepoDoc) {
-            self.include_source(DocumentSource::Wave);
-            self.include_source(DocumentSource::WaveMemory);
-        }
-        if !self.files.is_empty() {
-            self.include_source(DocumentSource::Diff);
-        }
-    }
-}
-
-/// Build a canonical list of context sources from high-level switches.
-pub fn default_gather_sources(include_diff: bool, include_clipboard: bool) -> Vec<DocumentSource> {
-    let mut sources = vec![DocumentSource::RepoDoc];
-    if include_diff {
-        sources.push(DocumentSource::Diff);
-    }
-    if include_clipboard {
-        sources.push(DocumentSource::Clipboard);
-    }
-    sources
 }
 
 /// Options for gathering context.
@@ -217,10 +174,11 @@ pub struct GatherContextOpts {
     pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Explicit sources to include in the prompt context pipeline.
-    pub sources: Vec<DocumentSource>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+    pub include_diff: bool,
+    pub include_diff_files: bool,
+    pub include_clipboard: bool,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
 }
@@ -228,10 +186,10 @@ pub struct GatherContextOpts {
 impl GatherContextOpts {
     pub fn gather_spec(&self) -> GatherSpec {
         GatherSpec {
-            sources: self.sources.clone(),
             repo_root: self.repo_root.clone(),
             docs: self.docs.clone(),
             files: self.files.clone(),
+            include_files: self.include_diff_files,
             wave: self.wave.clone(),
             related_repos: self.related_repos.clone(),
         }
@@ -349,32 +307,6 @@ impl DerefMut for GatheredContext {
     }
 }
 
-/// Prompt context after token budgeting.
-#[derive(Debug, Clone, Default)]
-pub struct BudgetedContext(pub PromptComponents, pub ContextBreakdown);
-
-impl BudgetedContext {
-    pub fn components(&self) -> &PromptComponents {
-        &self.0
-    }
-
-    pub fn breakdown(&self) -> &ContextBreakdown {
-        &self.1
-    }
-
-    pub fn into_parts(self) -> (PromptComponents, ContextBreakdown) {
-        (self.0, self.1)
-    }
-}
-
-impl Deref for BudgetedContext {
-    type Target = PromptComponents;
-
-    fn deref(&self) -> &Self::Target {
-        self.components()
-    }
-}
-
 /// Fully rendered prompt content.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RenderedPrompt(pub String);
@@ -447,9 +379,8 @@ fn cached_doc_tokens(
     tokens
 }
 
-/// Trim context and return token breakdown without re-tokenizing.
-pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) -> BudgetedContext {
-    let mut components = context.into_components();
+/// Measure context and return token breakdown without mutating gathered content.
+pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
     let repo_root = PathBuf::from(&components.repo_root);
     static TOKEN_CACHE: Lazy<std::sync::Mutex<HashMap<String, TokenCacheEntry>>> =
         Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
@@ -475,15 +406,12 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         breakdown.direction_names.push(dir.name.clone());
     }
 
-    let diff_string_tokens = if let Some(ref diff) = components.diff {
+    if let Some(ref diff) = components.diff {
         let tokens = count_tokens(diff);
         breakdown.add_source_tokens(DocumentSource::Diff, tokens);
-        tokens
-    } else {
-        0
-    };
+    }
 
-    let mut diff_file_tokens: Vec<usize> = components
+    let diff_file_tokens: Vec<usize> = components
         .diff_files
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -492,7 +420,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.diff_file_count = components.diff_file_count;
     breakdown.diff_tier = components.diff_tier.clone();
 
-    let mut summary_tokens: Vec<usize> = components
+    let summary_tokens: Vec<usize> = components
         .summaries
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -500,9 +428,8 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     let wave_memory_tokens = components
         .wave_memory
         .as_ref()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .unwrap_or(0);
-    let mut doc_tokens: Vec<usize> = components
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache));
+    let doc_tokens: Vec<usize> = components
         .docs
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
@@ -511,7 +438,9 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         DocumentSource::Summary,
         summary_tokens.iter().sum::<usize>(),
     );
-    breakdown.add_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
+    if let Some(tokens) = wave_memory_tokens {
+        breakdown.add_source_tokens(DocumentSource::WaveMemory, tokens);
+    }
     for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
         breakdown.add_source_tokens(doc.source, tokens);
     }
@@ -522,63 +451,8 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.has_clipboard = components.clipboard.is_some();
     breakdown.wave_name = components.wave.clone();
 
-    let mut total = breakdown.total();
-    if total > max_tokens {
-        // 1. Drop wave memory docs before general docs/summaries.
-        if total > max_tokens && components.wave_memory.is_some() {
-            components.wave_memory = None;
-            breakdown.subtract_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
-            total = total.saturating_sub(wave_memory_tokens);
-        }
-
-        // 2. Drop docs (summaries first, then docs)
-        while total > max_tokens && !components.summaries.is_empty() {
-            components.summaries.pop();
-            if let Some(tokens) = summary_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Summary, tokens);
-                total = total.saturating_sub(tokens);
-            }
-        }
-        while total > max_tokens && !components.docs.is_empty() {
-            let removed = components.docs.pop();
-            if let Some(tokens) = doc_tokens.pop() {
-                if let Some(doc) = removed {
-                    breakdown.subtract_source_tokens(doc.source, tokens);
-                }
-                total = total.saturating_sub(tokens);
-            }
-        }
-
-        // 3. Drop diff context
-        while total > max_tokens && !components.diff_files.is_empty() {
-            components.diff_files.pop();
-            if let Some(tokens) = diff_file_tokens.pop() {
-                breakdown.subtract_source_tokens(DocumentSource::Diff, tokens);
-                total = total.saturating_sub(tokens);
-                breakdown.diff_file_count = breakdown.diff_file_count.saturating_sub(1);
-            }
-        }
-        if total > max_tokens && components.diff.is_some() {
-            components.diff = None;
-            breakdown.diff_tier = DiffTier::None;
-            breakdown.subtract_source_tokens(DocumentSource::Diff, diff_string_tokens);
-            total = total.saturating_sub(diff_string_tokens);
-        }
-
-        // 4. Drop clipboard as last resort
-        if total > max_tokens && components.clipboard.is_some() {
-            components.clipboard = None;
-            breakdown.set_source_tokens(DocumentSource::Clipboard, 0);
-        }
-    }
-
-    let wave_memory_tokens = if components.wave_memory.is_some() {
-        Some(wave_memory_tokens)
-    } else {
-        None
-    };
     breakdown.documents = build_document_entries(
-        &components,
+        components,
         &diff_file_tokens,
         &summary_tokens,
         wave_memory_tokens,
@@ -604,12 +478,11 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         );
     }
 
-    components.diff_file_count = components.diff_files.len();
     if let Ok(mut guard) = TOKEN_CACHE.lock() {
         *guard = cache;
     }
 
-    BudgetedContext(components, breakdown)
+    breakdown
 }
 
 /// Gather all prompt components.
@@ -643,9 +516,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "loaded directions"
     );
 
-    let mut spec = opts.gather_spec();
-    let include_branch_diff = opts.sources.contains(&DocumentSource::Diff);
-    spec.normalize();
+    let spec = opts.gather_spec();
 
     // Gather document sources through a single pipeline.
     let docs_start = Instant::now();
@@ -662,23 +533,18 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let mut diff_files = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::RepoDoc | DocumentSource::Scratch | DocumentSource::Wave => {
-                docs.push(doc)
-            }
+            DocumentSource::Docs | DocumentSource::Scratch | DocumentSource::Wave => docs.push(doc),
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
-            DocumentSource::Area
-            | DocumentSource::Step
-            | DocumentSource::Direction
-            | DocumentSource::Clipboard => {}
+            DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
         }
     }
     dedup_documents(&mut diff_files);
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
-    let (diff, diff_tier, diff_file_count) = if include_branch_diff {
+    let (diff, diff_tier, diff_file_count) = if opts.include_diff {
         gather_diff_tiered(repo_root)?
     } else {
         (None, DiffTier::None, 0)
@@ -692,7 +558,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 
     // Gather clipboard
     let clipboard_start = Instant::now();
-    let clipboard = if spec.includes(DocumentSource::Clipboard) {
+    let clipboard = if opts.include_clipboard {
         read_clipboard()
     } else {
         None
@@ -732,28 +598,32 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
     // Preserve ambient ordering: scratch -> wave -> wave memory -> explicit docs.
-    if spec.includes(DocumentSource::RepoDoc) {
-        docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
+    if let Some(doc) = gather_wave_memory_doc(&spec.repo_root, spec.wave.as_deref())? {
+        docs.push(doc);
     }
-    if spec.includes(DocumentSource::Wave) {
-        docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
-    }
-    if spec.includes(DocumentSource::WaveMemory) {
-        if let Some(doc) = gather_wave_memory_doc(&spec.repo_root, spec.wave.as_deref())? {
-            docs.push(doc);
-        }
-    }
-    if spec.includes(DocumentSource::RepoDoc) && !spec.docs.is_empty() {
-        docs.extend(gather_doc_targets(
+    if !spec.docs.is_empty() {
+        let explicit_docs = gather_doc_targets(
             &spec.repo_root,
             &spec.docs,
             &spec.related_repos,
-        )?);
+        )?;
+        if explicit_docs.len() > MAX_EXPLICIT_DOC_FILES {
+            return Err(CoreError::ExecutionFailed(format!(
+                "--docs resolved to {} files; narrow --docs to {} files or fewer",
+                explicit_docs.len(),
+                MAX_EXPLICIT_DOC_FILES
+            )));
+        }
+        docs.extend(explicit_docs);
     }
 
-    if spec.includes(DocumentSource::Diff) && !spec.files.is_empty() {
-        docs.extend(gather_files(&spec.repo_root, &spec.files)?);
+    if !spec.include_files || spec.files.is_empty() {
+        return Ok(docs);
     }
+
+    docs.extend(gather_files(&spec.repo_root, &spec.files)?);
 
     Ok(docs)
 }
@@ -925,11 +795,7 @@ fn gather_local_doc_target(
     };
 
     if path.is_dir() {
-        let mut area_docs = gather_area_docs(repo_root, target);
-        for doc in &mut area_docs {
-            doc.source = DocumentSource::RepoDoc;
-        }
-        for doc in area_docs {
+        for doc in gather_directory_docs(repo_root, target) {
             let abs_path = repo_root.join(&doc.path);
             let canonical = abs_path.canonicalize().unwrap_or(abs_path);
             if seen.insert(canonical) {
@@ -1014,7 +880,7 @@ fn push_doc_file(
     docs.push(Document {
         path: rel_path,
         content,
-        source: DocumentSource::RepoDoc,
+        source: DocumentSource::Docs,
     });
 }
 
@@ -1064,25 +930,25 @@ fn resolve_doc_target<'a>(
     ResolvedDocTarget::Local { target }
 }
 
-/// Gather .md docs from area ancestors and descendants.
+/// Gather .md docs from directory ancestors and descendants.
 ///
-/// For area "src/api/handlers", collects .md files from:
+/// For directory "src/api/handlers", collects .md files from:
 /// - src/ (e.g., src/README.md)
 /// - src/api/ (e.g., src/api/README.md)
 /// - src/api/handlers/ (e.g., src/api/handlers/README.md)
-/// - src/api/handlers/** (descendants under the area, recursively)
+/// - src/api/handlers/** (descendants under the directory, recursively)
 ///
 /// Does NOT include repo root docs unless the target is "." and does NOT include
 /// sibling directories.
-fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
-    let area_path = Path::new(area);
+fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
+    let target_path = Path::new(target);
     let mut ancestors = Vec::new();
 
-    // Include the area directory itself and its ancestors (excluding repo root)
-    if !area_path.as_os_str().is_empty() {
-        ancestors.push(area_path.to_path_buf());
+    // Include the target directory itself and its ancestors (excluding repo root)
+    if !target_path.as_os_str().is_empty() {
+        ancestors.push(target_path.to_path_buf());
     }
-    let mut current = area_path.to_path_buf();
+    let mut current = target_path.to_path_buf();
     while let Some(parent) = current.parent() {
         if parent.as_os_str().is_empty() {
             break;
@@ -1132,7 +998,7 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
                 docs.push(Document {
                     path: rel_path,
                     content,
-                    source: DocumentSource::Area,
+                    source: DocumentSource::Docs,
                 });
             }
         }
@@ -1141,28 +1007,25 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
     // Gather descendants recursively. The `seen` set already contains the area
     // directory's own .md files from the ancestor walk, so they won't be
     // double-counted.
-    let area_abs = repo_root.join(area_path);
-    if area_abs.is_dir() {
+    let target_abs = repo_root.join(target_path);
+    if target_abs.is_dir() {
         let mut descendant_docs = Vec::new();
-        gather_area_descendants(&area_abs, repo_root, &mut descendant_docs, &mut seen);
+        gather_directory_descendants(&target_abs, repo_root, &mut descendant_docs, &mut seen);
 
-        // Prefer shallower descendant docs. Trimming pops from the end, so
-        // deepest docs are removed first when over budget.
+        // Prefer shallower descendant docs, then stable path ordering.
         descendant_docs.sort_by(|a, b| {
             let depth_a = a.path.matches('/').count();
             let depth_b = b.path.matches('/').count();
             depth_a.cmp(&depth_b).then_with(|| a.path.cmp(&b.path))
         });
 
-        // Safety cap for large monorepos.
-        descendant_docs.truncate(100);
         docs.extend(descendant_docs);
     }
 
     docs
 }
 
-fn gather_area_descendants(
+fn gather_directory_descendants(
     dir: &Path,
     repo_root: &Path,
     docs: &mut Vec<Document>,
@@ -1179,7 +1042,7 @@ fn gather_area_descendants(
     for entry in sorted {
         let path = entry.path();
         if path.is_dir() {
-            gather_area_descendants(&path, repo_root, docs, seen);
+            gather_directory_descendants(&path, repo_root, docs, seen);
             continue;
         }
 
@@ -1201,7 +1064,7 @@ fn gather_area_descendants(
             docs.push(Document {
                 path: rel_path,
                 content,
-                source: DocumentSource::Area,
+                source: DocumentSource::Docs,
             });
         }
     }
@@ -1773,9 +1636,9 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
              ## Wave memory\n\n\
-             Persistent memory at {}. Budget: ~25k tokens.\n\
-             Read it before you start. Update it aggressively — correct stale entries,\n\
-             add observations, remove what's wrong. Don't wait until the end of your session.\n\n\
+             Persistent memory at {}. Read it before every iteration.\n\
+             Keep it compact enough to include every iteration: correct stale entries,\n\
+             add durable observations, and delete session-specific notes.\n\n\
              Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
              - Patterns: codebase conventions, architecture, how things connect\n\
              - Preferences: user workflow, tool choices, communication norms\n\
@@ -1893,7 +1756,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
 /// Format prompt content for the requested mode.
 ///
 /// Used by the daemon, ops callers, and prompt log writers.
-pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> RenderedPrompt {
+pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> RenderedPrompt {
     let rendered = match mode {
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
@@ -1969,12 +1832,12 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
 }
 
 /// Format context components for system prompt (everything except task).
-pub fn format_context_prompt(components: &BudgetedContext) -> String {
+pub fn format_context_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Context, components).into_string()
 }
 
 /// Format task prompt for user message (step + free text).
-pub fn format_task_prompt(components: &BudgetedContext) -> String {
+pub fn format_task_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
 }
 
@@ -1982,7 +1845,7 @@ pub fn format_task_prompt(components: &BudgetedContext) -> String {
 ///
 /// Excludes docs, diffs, wave context, and clipboard — those go in the task
 /// prompt to avoid triggering third-party app classifiers.
-pub fn format_claude_system_prompt(components: &BudgetedContext) -> String {
+pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
     let mut parts = format_system_sections(components);
 
     if !components.directions.is_empty() {
@@ -1993,7 +1856,7 @@ pub fn format_claude_system_prompt(components: &BudgetedContext) -> String {
 }
 
 /// Format task prompt for Claude (includes content sections + clipboard + step + message).
-pub fn format_claude_task_prompt(components: &BudgetedContext) -> String {
+pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
     let mut parts = format_content_sections(components);
 
     if let Some(ref clipboard) = components.clipboard {
@@ -2125,16 +1988,8 @@ mod tests {
         std::fs::write(full_path, content).expect("write binary file");
     }
 
-    fn budget_context(components: PromptComponents) -> BudgetedContext {
-        trim_context_with_breakdown(GatheredContext(components), usize::MAX)
-    }
-
     fn render_full_prompt(components: PromptComponents) -> String {
-        format_prompt(PromptFormatMode::Full, &budget_context(components)).into_string()
-    }
-
-    fn system_tokens(components: &PromptComponents) -> usize {
-        count_tokens(&format_system_sections(components).join("\n\n"))
+        format_prompt(PromptFormatMode::Full, &components).into_string()
     }
 
     #[test]
@@ -2153,26 +2008,13 @@ mod tests {
     }
 
     #[test]
-    fn trim_context_under_budget() {
-        let mut components = PromptComponents::default();
-        components.docs.push(Document {
-            path: "test.md".to_string(),
-            content: "Short content".to_string(),
-            source: DocumentSource::RepoDoc,
-        });
-
-        let trimmed = trim_context_with_breakdown(GatheredContext(components.clone()), 1000000);
-        assert_eq!(trimmed.components().docs.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_breakdown_includes_documents_and_source_counts() {
+    fn measure_context_includes_documents_and_source_counts() {
         let components = PromptComponents {
             docs: vec![
                 Document {
                     path: "README.md".to_string(),
                     content: "Repo docs".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
                 Document {
                     path: "scratch/plan.md".to_string(),
@@ -2200,10 +2042,9 @@ mod tests {
             ..Default::default()
         };
 
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), usize::MAX);
-        let breakdown = trimmed.breakdown();
+        let breakdown = measure_context(&components);
 
-        assert_eq!(breakdown.source_count(DocumentSource::RepoDoc), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Docs), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Scratch), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Summary), 1);
         assert_eq!(breakdown.source_count(DocumentSource::WaveMemory), 1);
@@ -2231,195 +2072,32 @@ mod tests {
     }
 
     #[test]
-    fn trim_context_drops_summaries_first() {
+    fn format_prompt_does_not_trim_large_context() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "doc.md".to_string(),
-                content: "Doc content".to_string(),
-                source: DocumentSource::RepoDoc,
+                content: "Doc content ".repeat(200),
+                source: DocumentSource::Docs,
             }],
             summaries: vec![Document {
                 path: "summary.md".to_string(),
-                content: "Summary content that is long enough to matter".to_string(),
+                content: "Summary content ".repeat(200),
                 source: DocumentSource::Summary,
             }],
-            ..Default::default()
-        };
-
-        // Set budget to only fit docs, not summaries (system sections are a
-        // mandatory floor, so add them to the budget).
-        let system = system_tokens(&components);
-        let doc_tokens = count_tokens("Doc content");
-        let trimmed =
-            trim_context_with_breakdown(GatheredContext(components), system + doc_tokens + 5);
-
-        assert!(trimmed.components().summaries.is_empty());
-        assert_eq!(trimmed.components().docs.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_drops_wave_memory_before_summaries() {
-        let components = PromptComponents {
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                interactive: None,
-                action_style: None,
-                fast_path: None,
-            }),
             wave_memory: Some(Document {
                 path: "wave/living/MEMORY.md".to_string(),
-                content: "Wave memory content that should be trimmed first".to_string(),
+                content: "Wave memory content ".repeat(200),
                 source: DocumentSource::WaveMemory,
             }),
-            summaries: vec![Document {
-                path: "summary.md".to_string(),
-                content: "Summary should survive after wave memory is dropped".to_string(),
-                source: DocumentSource::Summary,
-            }],
+            wave: Some("living".to_string()),
             ..Default::default()
         };
 
-        let budget = system_tokens(&components)
-            + count_tokens("x")
-            + count_tokens("Summary should survive after wave memory is dropped")
-            + 1;
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
+        let prompt = render_full_prompt(components);
 
-        assert!(trimmed.components().wave_memory.is_none());
-        assert_eq!(trimmed.components().summaries.len(), 1);
-    }
-
-    #[test]
-    fn trim_context_drops_docs_after_summaries() {
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "doc1.md".to_string(),
-                    content: "First document with enough content to exceed token budget easily"
-                        .to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-                Document {
-                    path: "doc2.md".to_string(),
-                    content: "Second document also has substantial content for testing".to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-            ],
-            summaries: vec![],
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()), // Minimal step content
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        // Get token count of step only
-        let step_tokens = count_tokens("x");
-        // Budget allows step but not docs
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
-        assert!(trimmed.components().docs.is_empty());
-        assert!(trimmed.components().step.is_some());
-    }
-
-    #[test]
-    fn trim_context_drops_repo_docs_before_scratch_docs() {
-        let scratch_content =
-            "Scratch design notes with enough detail to keep around for implementation decisions";
-        let repo_doc_content = "Repo docs that should be dropped before scratch docs";
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "scratch/plan.md".to_string(),
-                    content: scratch_content.to_string(),
-                    source: DocumentSource::Scratch,
-                },
-                Document {
-                    path: "README.md".to_string(),
-                    content: repo_doc_content.to_string(),
-                    source: DocumentSource::RepoDoc,
-                },
-            ],
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        let budget =
-            system_tokens(&components) + count_tokens("x") + count_tokens(scratch_content) + 1;
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
-
-        assert_eq!(trimmed.components().docs.len(), 1);
-        assert_eq!(trimmed.components().docs[0].source, DocumentSource::Scratch);
-    }
-
-    #[test]
-    fn trim_context_drops_diff_after_docs() {
-        let components = PromptComponents {
-            docs: vec![],
-            diff: Some("This is a large diff with many changes across multiple files that will definitely exceed our small token budget".to_string()),
-            step: Some(Step {
-                name: "test".to_string(),
-                content: Some("x".to_string()), // Minimal step content
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            ..Default::default()
-        };
-
-        // Get token count of step only
-        let step_tokens = count_tokens("x");
-        // Budget allows step but not diff
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
-        assert!(trimmed.components().diff.is_none());
-        assert!(trimmed.components().step.is_some());
-    }
-
-    #[test]
-    fn trim_context_never_drops_step() {
-        let components = PromptComponents {
-            step: Some(Step {
-                name: "implement".to_string(),
-                content: Some("Implement the feature with tests".to_string()),
-                agent: None,
-                default_agent: None,
-                directions: vec![],
-                action_style: None,
-                interactive: None,
-                fast_path: None,
-            }),
-            docs: vec![Document {
-                path: "doc.md".to_string(),
-                content: "Doc content that will exceed budget".to_string(),
-                source: DocumentSource::RepoDoc,
-            }],
-            ..Default::default()
-        };
-
-        let trimmed = trim_context_with_breakdown(GatheredContext(components), 5);
-        assert!(trimmed.components().step.is_some());
-        assert!(trimmed.components().docs.is_empty());
+        assert!(prompt.contains("<lf:file path=\"doc.md\">"));
+        assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
+        assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
     }
 
     // ==========================================================================
@@ -2569,12 +2247,12 @@ mod tests {
                 Document {
                     path: "README.md".to_string(),
                     content: "# Test Project".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
                 Document {
                     path: "STYLE.md".to_string(),
                     content: "# Style Guide".to_string(),
-                    source: DocumentSource::RepoDoc,
+                    source: DocumentSource::Docs,
                 },
             ],
             ..Default::default()
@@ -2595,7 +2273,7 @@ mod tests {
             docs: vec![Document {
                 path: "CLAUDE.md".to_string(),
                 content: "# Instructions".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             ..Default::default()
         };
@@ -2610,7 +2288,7 @@ mod tests {
             docs: vec![Document {
                 path: "STYLE.md".to_string(),
                 content: "# Style Guide".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             ..Default::default()
         };
@@ -2784,7 +2462,7 @@ mod tests {
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),
@@ -3091,7 +2769,7 @@ mod tests {
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -3124,7 +2802,7 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             docs: vec!["README.md".to_string(), "docs".to_string()],
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -3244,7 +2922,7 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             wave: Some("living".to_string()),
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -3373,7 +3051,7 @@ directions:
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                source: DocumentSource::RepoDoc,
+                source: DocumentSource::Docs,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),
@@ -3642,7 +3320,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
@@ -3680,7 +3358,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             related_repos: vec![related],
             ..Default::default()
@@ -3702,14 +3380,14 @@ directions:
         write_file(repo.path(), "README.md", "hello");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
         let repo_docs: Vec<_> = docs
             .iter()
-            .filter(|d| d.source == DocumentSource::RepoDoc)
+            .filter(|d| d.source == DocumentSource::Docs)
             .collect();
         assert!(!repo_docs.iter().any(|d| d.path == "README.md"));
         // No prefixed docs
@@ -3727,7 +3405,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             docs: vec!["gone:src".to_string()],
             related_repos: vec![related],
@@ -3757,7 +3435,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
@@ -3787,7 +3465,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["studio:".to_string()],
             related_repos: vec![related],
@@ -3808,7 +3486,7 @@ directions:
         write_file(repo.path(), "docs/README.md", "local area doc");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc],
+            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             docs: vec!["docs".to_string()],
             ..Default::default()

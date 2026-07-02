@@ -1431,8 +1431,7 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
 
 fn copy_context(paths: &[String], exclude: &[String]) -> Result<()> {
     use crate::engine::prompt::{
-        count_tokens, default_gather_sources, gather_context, Document, DocumentSource,
-        GatherContextOpts,
+        count_tokens, gather_context, Document, GatherContextOpts,
     };
     use std::collections::HashSet;
 
@@ -1445,11 +1444,8 @@ fn copy_context(paths: &[String], exclude: &[String]) -> Result<()> {
         repo_root: repo_root.clone(),
         docs: Vec::new(),
         files: paths.to_vec(),
-        sources: if has_paths {
-            vec![DocumentSource::Diff]
-        } else {
-            default_gather_sources(true, false)
-        },
+        include_diff: !has_paths,
+        include_diff_files: true,
         ..Default::default()
     };
 

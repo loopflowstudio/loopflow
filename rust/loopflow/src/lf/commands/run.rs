@@ -3,7 +3,7 @@ use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
     prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
-    PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    PromptComponents, SkillSyncOptions, StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -286,7 +286,7 @@ fn skill_launch_seed(
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
-    let header = format_context_header(&built.breakdown, DEFAULT_CONTEXT_BUDGET);
+    let header = format_context_header(&built.breakdown);
     let direction_names: Vec<String> = built
         .components
         .directions

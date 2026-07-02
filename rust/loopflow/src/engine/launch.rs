@@ -6,10 +6,10 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
-    default_gather_sources, drop_native_instruction_docs, format_claude_system_prompt,
-    format_claude_task_prompt, format_prompt, gather_context, trim_context_with_breakdown,
+    drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
+    format_prompt, gather_context, measure_context,
     ContextBreakdown, Document, DocumentSource, GatherContextOpts, PromptComponents,
-    PromptFormatMode, RelatedRepoContext, Surface, DEFAULT_CONTEXT_BUDGET,
+    PromptFormatMode, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -110,8 +110,10 @@ pub fn prepare_launch_prompt(
         directions,
         docs,
         files: Vec::new(),
-        sources: default_gather_sources(diff_files || diff, clipboard),
         wave,
+        include_diff: diff,
+        include_diff_files: diff_files,
+        include_clipboard: clipboard,
         related_repos,
     };
 
@@ -129,14 +131,14 @@ pub fn prepare_launch_prompt(
         });
     }
 
-    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
-    let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
+    let breakdown = measure_context(gathered.components());
+    let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
 
     let agent = agent
-        .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))
+        .or_else(|| gathered.step.as_ref().and_then(|step| step.agent.clone()))
         .or_else(|| config.agent.clone())
         .or_else(|| {
-            budgeted
+            gathered
                 .step
                 .as_ref()
                 .and_then(|step| step.default_agent.clone())
@@ -147,9 +149,9 @@ pub fn prepare_launch_prompt(
     // Keep only system-safe sections (operate/voice/surface/directions) in
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
-    let system_prompt = format_claude_system_prompt(&budgeted);
-    let task_prompt = format_claude_task_prompt(&budgeted);
-    let (components, breakdown) = budgeted.into_parts();
+    let system_prompt = format_claude_system_prompt(gathered.components());
+    let task_prompt = format_claude_task_prompt(gathered.components());
+    let components = gathered.into_components();
     let action_style = components
         .step
         .as_ref()

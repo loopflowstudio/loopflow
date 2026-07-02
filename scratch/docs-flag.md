@@ -1,159 +1,225 @@
-# `--docs`: one explicit doc-prefetch flag, no ambient repo docs
+# Context generation: explicit docs, ambient state, measurement only
 
-Kill the *automatic* repo-doc dump: `lfdocs`, the `<lf:docs>` section, and the
-always-on root-`*.md` glob all go away. What dies is the automatism, not the
-capability — the old behavior is reproducible on demand as `--docs '*.md'`.
-`scratch/` and `wave/` graduate to first-class ambient sections (no flag).
-`--area` is generalized and renamed to `--docs`, an explicit prefetch flag for
-pointing at a file, glob, or directory.
+Drop `lfdocs` as a product concept and simplify the context engine around the
+things users actually mean:
 
-`--docs '*.md'` simulates old-`lfdocs`: glob semantics make `*.md` root-only
-(matches `README.md`, not `docs/foo.md` — use `**/*.md` for recursive), so it
-reproduces exactly the old root-level dump. Combined with now-ambient `scratch/`,
-`--docs '*.md'` is the full old `lfdocs=true` behavior — automatic became explicit.
+- `scratch/` is ambient working state.
+- `wave/<name>/` and `MEMORY.md` are ambient wave state when a wave is in scope.
+- `--docs` is explicit additive prefetch.
+- diff and clipboard are explicit switches.
+- token counts are visibility, not control.
 
-Note the naming trap: the new `--docs` flag is the mechanical successor to
-**`--area`** (file/glob/dir loading, reusing `gather_area_docs`), not a rename of
-`lfdocs`. Despite the shared word, `--docs` does not control any `<lf:docs>`
-section — that section no longer exists; `--docs` content renders as ordinary
-included files.
+No prompt content should silently disappear because a budget was exceeded. If
+context is too large, the header and session snapshot should make that obvious;
+the fix is to clean the artifact or narrow `--docs`, not have context generation
+guess what matters least.
 
-## Goal
+## Product intent
 
-Shrink the ambient prompt and make context loading explicit. Same direction as
-`RLM → OPERATE` (make guidance opt-in). Today every `lf` run silently dumps
-every root-level `*.md` into a `<lf:docs>` block. Repo docs should be something
-you *point at*, not something the tool decides for you.
+A bare `lf <step>` should include the operating guidance, native agent doc,
+`scratch/`, and the current wave context. Repo docs are no longer automatic.
+Pulling in README files, package docs, or cross-repo docs is an explicit
+`--docs` choice.
 
-Success: a bare `lf <step>` loads the native agent doc (STYLE.md via the
-AGENTS.md/CLAUDE.md symlink), `scratch/`, and `wave/` — nothing else. To pull in
-a README or a directory's docs, you pass `--docs`.
+`--docs foo` adds `foo`. It never removes ambient `scratch/` or wave context.
 
-## Current state
+## Core model
 
-- `gather_repo_root_docs` (prompt.rs:930) globs **every root `*.md`** and renders
-  it into a dedicated `<lf:docs>` section. No relevance filter.
-- `DocumentSource::RepoDoc` bundles **both** the root glob **and** `gather_scratch_docs`.
-- `DocumentSource::Wave` / `WaveMemory` auto-added when a wave is in scope
-  (prompt.rs:184).
-- `DocumentSource::Area` auto-added whenever `--area` is set (prompt.rs:188);
-  `gather_area_docs` pulls `*.md` from the area's ancestors + descendants.
-- `--area` also flows to the step as a scope *string* (run.rs:130). It does **not**
-  narrow the diff. `hash_areas` (git.rs) is wave-trigger change-detection — a
-  separate system, out of scope here.
-- `lfdocs: bool` (config default `true`) gates `RepoDoc`. Flag surface:
-  `--lfdocs` / `--no-lfdocs`, `lfdocs_setting()`, threaded through `lf-prompt`,
-  `run.rs`, `launch.rs`, and `lf op` context copy.
-- Not a DTO / wire field. Rust-only.
+Make the core API describe product inputs directly. `DocumentSource` should be
+accounting metadata, not the language for deciding what to gather.
 
-## Target design
+```rust
+pub struct GatherContextOpts {
+    pub repo_root: PathBuf,
+    pub step: Option<String>,
+    pub message: Option<String>,
+    pub operate: bool,
+    pub surface: Surface,
+    pub directions: Vec<String>,
+    pub docs: Vec<String>,
+    pub files: Vec<String>,
+    pub wave: Option<String>,
+    pub include_diff: bool,
+    pub include_diff_files: bool,
+    pub include_clipboard: bool,
+    pub related_repos: Vec<RelatedRepoContext>,
+}
+```
 
-### Prompt sections
+`GatherSpec.sources: Vec<DocumentSource>` and `default_gather_sources()` go away.
+There is no longer a `RepoDoc` switch that also means “load scratch” and “maybe
+load wave.”
 
-| Section | Behavior |
-|---------|----------|
-| Native agent doc (STYLE.md) | Ambient, unchanged. Loaded via AGENT_NATIVE_FILES symlink follow. |
-| `<lf:scratch>` | **First-class, ambient.** Always loaded. |
-| `<lf:wave>` + memory | **First-class, ambient.** Always loaded when a wave is in scope. |
-| `<lf:docs>` | **Deleted.** No automatic repo-doc section. |
-| `--docs` content | Rendered as ordinary included files (like `--file` / diff files). No special labeled block, no magic. |
+Document sources become:
 
-A top-level README stops being special. It's just a path: `--docs README.md`,
-`--docs '*.md'`, `--docs docs/`.
+```rust
+pub enum DocumentSource {
+    Step,
+    Direction,
+    Scratch,
+    Wave,
+    WaveMemory,
+    Docs,
+    Summary,
+    Diff,
+    Clipboard,
+}
+```
 
-### The flag
+Delete `RepoDoc` and `Area`. Directory docs are just `Docs`.
 
-`--docs <path>[,<path>...]` — path-delimited. Each entry is:
+## Gather pipeline
 
-- a **file** → include it,
-- a **glob** → include matches (e.g. `*.md`),
-- a **directory** → the old `gather_area_docs` walk (ancestors + descendants `*.md`).
+`gather_context()` should read like the product:
 
-Default: **empty** (prefetch nothing). Config: `docs: [ ... ]` for a repo/user
-default; flows set it where the workflow needs it.
+```rust
+let scratch = gather_scratch_docs(repo_root)?;
+let wave_docs = gather_wave_docs(repo_root, opts.wave.as_deref())?;
+let wave_memory = gather_wave_memory_doc(repo_root, opts.wave.as_deref())?;
+let docs = gather_doc_targets(repo_root, &opts.docs, &opts.related_repos)?;
+let files = gather_files(repo_root, &opts.files)?;
+```
 
-### `--area` collapses into `--docs` (decision B)
+Stable order:
 
-`--area` is removed as a CLI flag. Its two jobs:
+1. scratch
+2. wave docs
+3. wave memory
+4. explicit docs
+5. explicit files / diff files
 
-1. **Doc loading** → subsumed by `--docs <dir>`.
-2. **Scope string passed to the step** → dropped. Not replaced. Rationale: when
-   `--docs` is non-empty, that content is literally in the agent's context, so the
-   agent knows what it's working on without a separate scope signal. Aligns with
-   the direction of removing `area` from the wave model entirely
-   (goal-driven waves, `d6e54f05`).
+`--docs` resolution:
 
-### LOOPFLOW.md is ambient again (default-on)
+- file: include that file
+- glob: include matches
+- directory: include ancestor/descendant `*.md` docs using the existing area-doc
+  walk semantics
+- cross-repo target: keep `repo:path` resolution against related repos
 
-Reverse `56f2cc79`'s opt-in default and restore the always-injected operating
-doc, under its original name.
+One hardcoded guardrail is enough:
 
-- Rename builtin `OPERATE.md` → `LOOPFLOW.md`; const `OPERATE_DOC` → `LOOPFLOW_DOC`;
-  section `<lf:operate>` → `<lf:loopflow>`.
-- **Default included.** The meaningful switch flips: `--operate` (opt-in) becomes
-  `--no-loopflow` (opt-out); internal `operate: bool` default `true`.
-- **Single source.** STYLE.md's "Working in Loopflow" section is the same content
-  (worktrees, `lf op`, surfaces, where-to-write). With LOOPFLOW.md ambient again,
-  that section double-injects. STYLE.md drops it; LOOPFLOW.md owns it. (Its own
-  note — "it now lives here in the agent doc" — is what we're reversing.)
-- Wave looping-goal agents already force it on (launch.rs:196); unchanged.
+```rust
+const MAX_EXPLICIT_DOC_FILES: usize = 100;
+```
 
-## Delete (remove entirely — no compat shims)
+Apply it after resolving the full `docs` list. If explicit docs resolve above
+the cap, fail with a clear error asking the user to narrow `--docs`. Do not make
+this configurable and do not apply it to ambient `scratch/`, wave docs, or
+`MEMORY.md`.
 
-- `lfdocs: bool` config field + default; `--lfdocs` / `--no-lfdocs` flags and `lfdocs_setting()`.
-- `--area` / `-a` CLI flag, and the `area` scope string threaded to the step (run.rs:130).
-- `config.area` (`area: Option<String>`) — its only effect was doc-loading + the scope string, both gone. Confirm no other consumer, then remove.
-- `--operate` opt-in flag and the `operate: false` default (flips to default-on).
-- `gather_repo_root_docs` and the `<lf:docs>` section render.
-- The `DocumentSource::Area` auto-add (prompt.rs:188). Keep `gather_area_docs`'s walk logic — it's reused when `--docs <dir>` points at a directory — but it is no longer an automatic path.
+## Measurement, not budgets
 
-`OPERATE.md` / `OPERATE_DOC` / `<lf:operate>` are **renamed**, not deleted (→ `LOOPFLOW.md` / `LOOPFLOW_DOC` / `<lf:loopflow>`).
+Keep token accounting everywhere. Delete trimming.
 
-## Files to change (Rust-only)
+Replace:
 
-- `engine/prompt.rs` — split root-doc glob out of `RepoDoc` so `scratch/` stays
-  ambient and the root glob dies; delete the `<lf:docs>` section render; route
-  `--docs` targets (file / glob / dir) into the included-files path; drop the
-  `Area` auto-add and `area` scope plumbing.
-- `engine/config.rs` — replace `lfdocs: bool` with `docs: Vec<...>`; remove the
-  `area: Option<String>` default doc field.
-- `engine/launch.rs` — replace `lfdocs` override resolution with `docs`.
-- `bin/lf-prompt.rs`, `bin/lf.rs` (arg-reorder list), `lf/mod.rs`,
-  `lf/commands/run.rs` — swap `--lfdocs`/`--no-lfdocs`/`--area` for `--docs`.
-- `lf/commands/ops/mod.rs` — `lf op` context copy uses `--docs` semantics.
-- `engine/builtins.rs` + `builtins/OPERATE.md` — rename to `LOOPFLOW.md` /
-  `LOOPFLOW_DOC`; `engine/prompt.rs` section render `<lf:operate>` → `<lf:loopflow>`;
-  flip default to on with a `--no-loopflow` opt-out.
-- `STYLE.md` — delete the "Working in Loopflow" section (moves to LOOPFLOW.md).
-- Goldens: regenerate; `<lf:docs>` blocks vanish from default prompts and
-  `<lf:loopflow>` now appears by default.
-  `uv run python tests/goldens/update_goldens.py`.
+```rust
+let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
+let prompt = format_prompt(PromptFormatMode::Full, &budgeted);
+```
+
+with:
+
+```rust
+let gathered = gather_context(&opts)?;
+let breakdown = measure_context(&gathered);
+let prompt = format_prompt(PromptFormatMode::Full, &gathered);
+```
+
+Delete:
+
+- `BudgetedContext`
+- `DEFAULT_CONTEXT_BUDGET`
+- `trim_context_with_breakdown`
+- drop-order tests
+- `Config.budgets`
+- `BudgetConfig`
+- `ContextSnapshot.budget`
+- CLI `% of 75k` display
+
+Keep:
+
+- per-source token totals
+- per-source file counts
+- per-document token entries
+- total token count
+- diff tier metadata
+
+The CLI header should show token counts and total, but no budget percentage.
+Concerto should keep its context-size UI, updated from `repo_doc` / `area` to
+`docs`.
+
+## Diff
+
+Keep diff tiering. That is representation selection, not context budgeting:
+
+- small branch diff: unified diff
+- large branch diff: stat
+- `diff_files` / explicit files: included when requested
+
+Do not route diff behavior through `DocumentSource` input switches. Use
+`include_diff` and `include_diff_files`.
+
+## Memory
+
+Removing budgets means `MEMORY.md` is no longer overflow context. It is durable
+wave state that should be included whenever a wave is in scope.
+
+Change the wave prompt from a token-budget framing to a maintenance invariant:
+
+- read memory every iteration
+- keep it compact enough to read every iteration
+- correct stale entries
+- promote stable architectural notes to wave docs or explicit docs
+- delete session-specific notes
+
+If memory grows too large, context measurement should reveal it. The wave should
+maintain memory; the context engine should not silently drop it.
+
+## Delete / rename
+
+Delete:
+
+- `lfdocs: bool` config field and CLI flags
+- `--area` / `-a` CLI flag and run-scope string plumbing
+- `config.area` for prompt context
+- `DocumentSource::RepoDoc`
+- `DocumentSource::Area`
+- `ContextBreakdown.area_name`
+- `ContextBreakdown.area_doc_count`
+- area rows in CLI context output
+- `budgets.area`, `budgets.docs`, `budgets.diff`
+- all context trimming code
+
+Rename:
+
+- `RepoDoc` source key -> `Docs`
+- session snapshot source `"repo_doc"` -> `"docs"`
+- `gather_area_docs` -> directory docs helper, returning `DocumentSource::Docs`
+- `OPERATE.md` / `<lf:operate>` -> `LOOPFLOW.md` / `<lf:loopflow>`
 
 ## Migration
 
-- `.lf/config.yaml`: `area: <dir>` → `docs: [<dir>]`. No back-compat shim (internal config).
-- `lfdocs: true` had no direct successor key — its two behaviors split: `scratch/`
-  is now unconditional ambient, and to keep the root-`*.md` dump add `docs: ['*.md']`.
-  Most configs can just drop `lfdocs` (root-doc dump was rarely the point).
-- Flows that relied on area docs set `docs:` explicitly.
-- `scratch/` + `wave/` need no change — they stay ambient by construction.
+`.lf/config.yaml`:
 
-## Decisions (resolved)
+- `area: <dir>` -> `docs: [<dir>]`
+- `lfdocs: true` has no direct replacement. To reproduce the old root markdown
+  dump, use `docs: ['*.md']`.
+- remove `budgets:` context settings
 
-- `docs` default is **empty** everywhere. STYLE.md is already native; nothing to seed.
-- Audit builtin flows for any that leaned on area docs; add an explicit `docs:` only
-  where a flow visibly breaks without it. Note leftovers in `scratch/questions.md`.
-- `lf op cp`: paths given → prefetch just those; no paths → the default ambient set
-  (agent doc + LOOPFLOW.md + scratch/ + wave/).
+No compatibility shims. This is internal config.
 
 ## Done when
 
-- Bare `lf gate` prompt contains `<lf:loopflow>`, `<lf:scratch>`, `<lf:wave>`, and the
-  agent doc — and **no** `<lf:docs>`, no root `*.md` dump.
-- `lf gate --docs README.md,swift/` prefetches those (file + directory walk) as
-  ordinary included content; `<lf:docs>` does not reappear.
-- `lf gate --no-loopflow` drops `<lf:loopflow>`.
-- `--area`, `--lfdocs`, `--no-lfdocs`, `--operate` are gone (clap errors on them).
-- `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test -p loopflow` pass.
-- Goldens regenerated (`uv run python tests/goldens/update_goldens.py`) and the diff
-  reviewed — `<lf:docs>` gone, `<lf:loopflow>` present by default.
+- Bare `lf gate` includes `<lf:loopflow>`, `<lf:scratch>`, wave docs/memory when
+  scoped, and the native agent doc. It does not include root `*.md` docs.
+- `lf gate --docs README.md,swift/` adds those docs without removing scratch or
+  wave context.
+- `--docs` resolving over `MAX_EXPLICIT_DOC_FILES` fails clearly.
+- No `<lf:docs>` section exists.
+- `--area`, `--lfdocs`, `--no-lfdocs`, and `--operate` are gone.
+- Context size output still reports source tokens, file counts, document entries,
+  and total tokens.
+- No context source is silently trimmed after gathering.
+- `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test -p loopflow`,
+  and `uv run python tests/goldens/update_goldens.py` pass.

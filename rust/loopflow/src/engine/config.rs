@@ -20,37 +20,6 @@ const ADDITIVE_KEYS: &[&str] = &[
     "supported_harnesses",
 ];
 
-/// Token budgets for prompt sections.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BudgetConfig {
-    #[serde(default = "default_area_budget")]
-    pub area: usize,
-    #[serde(default = "default_docs_budget")]
-    pub docs: usize,
-    #[serde(default = "default_diff_budget")]
-    pub diff: usize,
-}
-
-fn default_area_budget() -> usize {
-    50000
-}
-fn default_docs_budget() -> usize {
-    30000
-}
-fn default_diff_budget() -> usize {
-    20000
-}
-
-impl Default for BudgetConfig {
-    fn default() -> Self {
-        Self {
-            area: default_area_budget(),
-            docs: default_docs_budget(),
-            diff: default_diff_budget(),
-        }
-    }
-}
-
 /// Summary configuration for a specific path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryConfig {
@@ -284,10 +253,6 @@ pub struct Config {
     #[serde(default)]
     pub autoprune: AutopruneConfig,
 
-    /// Token budgets
-    #[serde(default)]
-    pub budgets: BudgetConfig,
-
     /// Release targets and scoping rules.
     #[serde(default)]
     pub release: ReleaseConfig,
@@ -339,7 +304,6 @@ impl Default for Config {
             summary_tokens: default_summary_tokens(),
             branch_names: None,
             autoprune: AutopruneConfig::default(),
-            budgets: BudgetConfig::default(),
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
             linear: LinearConfig::default(),

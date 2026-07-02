@@ -47,7 +47,7 @@ impl Default for Colors {
 use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource};
 
 /// Format the context header table for stderr output.
-pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> String {
+pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
     let mut lines = Vec::new();
     let step_tokens = breakdown.source_tokens(DocumentSource::Step);
     let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
@@ -57,7 +57,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     let wave_file_count = breakdown.source_count(DocumentSource::Wave)
         + breakdown.source_count(DocumentSource::Summary);
     let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
-    let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc);
+    let docs_tokens = breakdown.source_tokens(DocumentSource::Docs);
     let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
     let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
 
@@ -113,7 +113,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     }
 
     if docs_tokens > 0 {
-        let docs_detail = format!("{} files", breakdown.source_count(DocumentSource::RepoDoc));
+        let docs_detail = format!("{} files", breakdown.source_count(DocumentSource::Docs));
         lines.push(format_row("docs", docs_tokens, &docs_detail));
     }
 
@@ -134,14 +134,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     // Separator + total
     lines.push(format!("  {}", "\u{2500}".repeat(35)));
     let total = breakdown.total();
-    let pct = (total * 100).checked_div(budget).unwrap_or(0);
-    lines.push(format!(
-        "  {:<12} {:>6}  {}% of {}k",
-        "total",
-        format_tokens(total),
-        pct,
-        budget / 1000,
-    ));
+    lines.push(format_row("total", total, ""));
 
     lines.join("\n")
 }
@@ -217,10 +210,10 @@ mod tests {
     #[test]
     fn format_context_header_empty() {
         let breakdown = ContextBreakdown::default();
-        let header = format_context_header(&breakdown, 75_000);
+        let header = format_context_header(&breakdown);
         assert!(header.contains("\u{2500}\u{2500} context \u{2500}"));
         assert!(header.contains("total"));
-        assert!(header.contains("0% of 75k"));
+        assert!(header.contains("0"));
     }
 
     #[test]
@@ -230,22 +223,22 @@ mod tests {
                 (DocumentSource::Step, 1000),
                 (DocumentSource::Direction, 500),
                 (DocumentSource::Diff, 5000),
-                (DocumentSource::RepoDoc, 2000),
+                (DocumentSource::Docs, 2000),
             ]),
             system_tokens: 3000,
             step_name: Some("implement".to_string()),
             direction_names: vec!["security".to_string()],
             diff_tier: DiffTier::UnifiedDiff,
             diff_file_count: 8,
-            source_counts: std::collections::HashMap::from([(DocumentSource::RepoDoc, 1)]),
+            source_counts: std::collections::HashMap::from([(DocumentSource::Docs, 1)]),
             ..Default::default()
         };
-        let header = format_context_header(&breakdown, 75_000);
+        let header = format_context_header(&breakdown);
         assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
         assert!(header.contains("security"));
         assert!(header.contains("unified (8 files)"));
         assert!(header.contains("1 files"));
-        assert!(header.contains("15% of 75k"));
+        assert!(header.contains("11,500"));
     }
 
     #[test]
@@ -255,17 +248,17 @@ mod tests {
                 (DocumentSource::Scratch, 600),
                 (DocumentSource::Wave, 700),
                 (DocumentSource::Summary, 100),
-                (DocumentSource::RepoDoc, 500),
+                (DocumentSource::Docs, 500),
             ]),
             source_counts: std::collections::HashMap::from([
                 (DocumentSource::Scratch, 2),
                 (DocumentSource::Wave, 3),
-                (DocumentSource::RepoDoc, 1),
+                (DocumentSource::Docs, 1),
             ]),
             ..Default::default()
         };
 
-        let header = format_context_header(&breakdown, 75_000);
+        let header = format_context_header(&breakdown);
         assert!(header.contains("scratch"));
         assert!(header.contains("wave"));
         assert!(header.contains("docs"));

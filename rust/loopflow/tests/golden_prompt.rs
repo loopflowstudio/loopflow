@@ -14,11 +14,12 @@ struct GoldenCase {
     step: Option<String>,
     surface: Option<Surface>,
     directions: Vec<String>,
-    lfdocs: bool,
+    docs: Vec<String>,
     diff_files: bool,
     diff: bool,
     clipboard: bool,
-    area: Option<String>,
+    #[serde(default)]
+    no_loopflow: bool,
     wave: Option<String>,
 }
 
@@ -61,16 +62,12 @@ fn golden_prompts_match_python() {
             repo_root: repo.clone(),
             step: case.step.clone(),
             message: None,
-            operate: false,
+            operate: !case.no_loopflow,
             surface: case.surface.unwrap_or_default(),
             directions: case.directions.clone(),
+            docs: case.docs.clone(),
             files: Vec::new(),
-            sources: default_gather_sources(
-                case.lfdocs,
-                case.diff_files || case.diff,
-                case.clipboard,
-            ),
-            area: case.area.clone(),
+            sources: default_gather_sources(case.diff_files || case.diff, case.clipboard),
             wave: case.wave.clone(),
             related_repos: Vec::new(),
         };

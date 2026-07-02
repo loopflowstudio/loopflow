@@ -2575,7 +2575,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_claude_md_gets_follow_note() {
+    fn format_prompt_claude_md_renders_as_file() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "CLAUDE.md".to_string(),
@@ -2585,12 +2585,12 @@ mod tests {
             ..Default::default()
         };
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("CLAUDE"));
-        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+        assert!(prompt.contains("<lf:file path=\"CLAUDE.md\">"));
+        assert!(prompt.contains("# Instructions"));
     }
 
     #[test]
-    fn format_prompt_style_md_gets_follow_note() {
+    fn format_prompt_style_md_renders_as_file() {
         let components = PromptComponents {
             docs: vec![Document {
                 path: "STYLE.md".to_string(),
@@ -2600,8 +2600,8 @@ mod tests {
             ..Default::default()
         };
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("STYLE"));
-        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
+        assert!(prompt.contains("# Style Guide"));
     }
 
     #[test]
@@ -3114,7 +3114,11 @@ mod tests {
         };
 
         let components = gather_context(&opts).expect("gather context");
-        let paths: Vec<&str> = components.docs.iter().map(|doc| doc.path.as_str()).collect();
+        let paths: Vec<&str> = components
+            .docs
+            .iter()
+            .map(|doc| doc.path.as_str())
+            .collect();
 
         assert!(paths.contains(&"README.md"));
         assert!(paths.contains(&"docs/README.md"));

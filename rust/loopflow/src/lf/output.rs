@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), &[], None, None, false, false, None);
+        let cmd = format_reproducible_command(Some("debug"), &[], None, &[], false, false, None);
         assert_eq!(cmd, "lf debug");
     }
 

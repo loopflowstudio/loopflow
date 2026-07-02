@@ -83,7 +83,7 @@ fn gather_context_with_step() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -109,7 +109,7 @@ fn gather_context_with_inline_prompt() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -139,7 +139,7 @@ fn gather_context_with_directions() {
         directions: vec!["concise".to_string(), "security".to_string()],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -165,7 +165,7 @@ fn gather_context_expands_builtin_direction_group() {
         directions: vec!["infra".to_string()],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -201,7 +201,7 @@ fn gather_context_expands_user_direction_group() {
         directions: vec!["mygroup".to_string()],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -223,7 +223,7 @@ fn gather_context_expands_user_direction_group() {
 // =============================================================================
 
 #[test]
-fn gather_context_includes_readme() {
+fn gather_context_includes_explicit_readme_docs_target() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -241,7 +241,7 @@ fn gather_context_includes_readme() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec!["README.md".to_string()],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -280,7 +280,7 @@ fn gather_context_includes_scratch_docs() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -319,7 +319,7 @@ fn gather_context_with_wave() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("auth".to_string()),
         related_repos: Vec::new(),
     })
@@ -349,7 +349,7 @@ fn gather_context_preserves_surface() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -364,7 +364,7 @@ fn gather_context_preserves_surface() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -396,7 +396,7 @@ fn format_prompt_includes_step_content() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -424,7 +424,7 @@ fn format_prompt_includes_auto_mode_header() {
         directions: vec![],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -453,7 +453,7 @@ fn format_prompt_includes_directions() {
         directions: vec!["concise".to_string()],
         files: vec![],
         sources: vec![],
-        area: None,
+        docs: vec![],
         wave: None,
         related_repos: Vec::new(),
     })
@@ -487,7 +487,7 @@ fn format_prompt_includes_wave_context() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("payments".to_string()),
         related_repos: Vec::new(),
     })
@@ -556,7 +556,7 @@ fn wave_filtering_includes_only_specified_wave() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("auth".to_string()),
         related_repos: Vec::new(),
     })
@@ -612,7 +612,7 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: None, // No wave specified
         related_repos: Vec::new(),
     })
@@ -659,7 +659,7 @@ fn wave_filtering_handles_nonexistent_wave() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("nonexistent".to_string()),
         related_repos: Vec::new(),
     })
@@ -724,7 +724,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
-        area: None,
+        docs: vec![],
         wave: Some("features".to_string()),
         related_repos: Vec::new(),
     })
@@ -776,7 +776,7 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc],
-        area: None,
+        docs: vec![],
         wave: Some("living".to_string()),
         related_repos: Vec::new(),
     })

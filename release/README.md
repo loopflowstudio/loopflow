@@ -55,6 +55,12 @@ version as `lf --version` — no separate manifest to bump or drift.
 
 Nightly packages prove release artifacts while keeping deployment out of the loop. Weekly release reuses that package gate before publishing.
 
+```bash
+lf op release status
+```
+
+Shows the latest tagged release workflow plus the most recent package verification and weekly release runs. Use it first when a release did not publish or a nightly package check failed.
+
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 
 Interactive runs may append those decisions as they happen. Headless runs do not. If `release/unreleased/` exists, `lf op release run` promotes it to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and writes the final notes to both `RELEASE_NOTES.md` and `release/v<version>/NOTES.md`. If the directory is absent, the workflow still runs and falls back to merged PR history.

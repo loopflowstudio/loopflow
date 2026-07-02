@@ -22,7 +22,8 @@ use crate::ops::{
     list_branch_candidates, next_branch, prune_branches, rebase_with_recovery, release_bump,
     release_check, release_notes, release_run, release_status, release_tag, AbandonOptions,
     BranchFilterOptions, BranchListOptions, BranchPruneOptions, CommitOptions, DispatchOptions,
-    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
+    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
+    ReleaseWorkflowStatus, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -697,11 +698,32 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
         println!("Workflow URL: {url}");
     }
 
+    print_release_workflow_status(&status.package_verification);
+    print_release_workflow_status(&status.weekly_release);
+
     println!(
         "GitHub Release: {}",
         if status.release_exists { "yes" } else { "no" }
     );
     Ok(())
+}
+
+fn print_release_workflow_status(status: &ReleaseWorkflowStatus) {
+    match status.status.as_deref() {
+        Some(workflow_status) => {
+            let conclusion = status.conclusion.as_deref().unwrap_or("(pending)");
+            println!("{}: {workflow_status} / {conclusion}", status.label);
+        }
+        None => println!("{}: (not found)", status.label),
+    }
+
+    if let Some(title) = status.title.as_deref() {
+        println!("{} title: {title}", status.label);
+    }
+
+    if let Some(url) = status.url.as_deref() {
+        println!("{} URL: {url}", status.label);
+    }
 }
 
 fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {

@@ -35,5 +35,6 @@ pub use rebase::{rebase_with_recovery, RebaseOptions};
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
+    ReleaseWorkflowStatus,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

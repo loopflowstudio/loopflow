@@ -125,6 +125,18 @@ pub struct ReleaseStatusResult {
     pub workflow_conclusion: Option<String>,
     pub workflow_url: Option<String>,
     pub release_exists: bool,
+    pub package_verification: ReleaseWorkflowStatus,
+    pub weekly_release: ReleaseWorkflowStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReleaseWorkflowStatus {
+    pub label: String,
+    pub workflow: String,
+    pub status: Option<String>,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +217,12 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         workflow_conclusion: workflow.as_ref().and_then(|run| run.conclusion.clone()),
         workflow_url: workflow.and_then(|run| run.url),
         release_exists,
+        package_verification: latest_workflow_status(
+            &main_repo,
+            "Package verification",
+            "nightly-packages.yml",
+        )?,
+        weekly_release: latest_workflow_status(&main_repo, "Weekly release", "weekly-release.yml")?,
     })
 }
 
@@ -1597,6 +1615,57 @@ fn find_workflow_run(
     });
 
     Ok(matching)
+}
+
+fn latest_workflow_status(
+    repo: &Path,
+    label: &str,
+    workflow: &str,
+) -> OpsResult<ReleaseWorkflowStatus> {
+    let run = find_latest_workflow_run(repo, workflow)?;
+    Ok(ReleaseWorkflowStatus {
+        label: label.to_string(),
+        workflow: workflow.to_string(),
+        status: run.as_ref().map(|run| run.status.clone()),
+        conclusion: run.as_ref().and_then(|run| run.conclusion.clone()),
+        url: run.as_ref().and_then(|run| run.url.clone()),
+        title: run.and_then(|run| run.display_title),
+    })
+}
+
+fn find_latest_workflow_run(repo: &Path, workflow: &str) -> OpsResult<Option<GhRunListEntry>> {
+    let args = [
+        "run",
+        "list",
+        "--workflow",
+        workflow,
+        "--json",
+        "headBranch,displayTitle,status,conclusion,url",
+        "--limit",
+        "1",
+    ];
+    let output = run_output(repo, "gh", &args)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if is_missing_workflow_error(&stderr) {
+            return Ok(None);
+        }
+        return Err(OpsError::CommandFailed {
+            command: format!("gh {}", args.join(" ")),
+            stderr,
+        });
+    }
+    let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut runs: Vec<GhRunListEntry> = serde_json::from_str(&output)
+        .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))?;
+    Ok(runs.pop())
+}
+
+fn is_missing_workflow_error(stderr: &str) -> bool {
+    let stderr = stderr.to_lowercase();
+    stderr.contains("could not find workflow")
+        || stderr.contains("workflow not found")
+        || stderr.contains("not found")
 }
 
 fn github_release_exists(repo: &Path, tag: &str) -> OpsResult<bool> {

@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use loopflow::ops::{
@@ -19,6 +20,19 @@ fn write_gh_script(pr_list: &str) -> String {
 fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     format!(
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+    )
+}
+
+fn write_gh_status_logging_script(log_path: &Path, run_list: &str, release_view: &str) -> String {
+    format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\nprintf '%s\\n' \"$*\" >> '{log_path}'\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n",
+        log_path = log_path.display()
+    )
+}
+
+fn write_gh_missing_workflows_script(run_list: &str, release_view: &str) -> String {
+    format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$*\" in\n  *'--workflow nightly-packages.yml'*|*'--workflow weekly-release.yml'*)\n    echo 'could not find workflow' >&2\n    exit 1;;\nesac\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
     )
 }
 
@@ -190,6 +204,51 @@ fn release_status_reports_latest_tag_and_release() {
     assert_eq!(status.workflow_status.as_deref(), Some("completed"));
     assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
     assert!(status.release_exists);
+}
+
+#[test]
+fn release_status_reports_automation_workflow_health() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let gh_log = temp.path().join("gh.log");
+    let gh_script = write_gh_status_logging_script(
+        &gh_log,
+        r#"[{"databaseId":42,"headBranch":"main","displayTitle":"Packages (nightly)","status":"completed","conclusion":"failure","url":"https://example.com/run/42"}]"#,
+        r#"{"tagName":"v0.9.1"}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should succeed");
+    assert_eq!(status.package_verification.workflow, "nightly-packages.yml");
+    assert_eq!(
+        status.package_verification.conclusion.as_deref(),
+        Some("failure")
+    );
+    assert_eq!(status.weekly_release.workflow, "weekly-release.yml");
+    assert_eq!(status.weekly_release.status.as_deref(), Some("completed"));
+
+    let calls = fs::read_to_string(gh_log).expect("read gh log");
+    assert!(calls.contains("--workflow nightly-packages.yml"));
+    assert!(calls.contains("--workflow weekly-release.yml"));
+}
+
+#[test]
+fn release_status_tolerates_missing_automation_workflows() {
+    let gh_script = write_gh_missing_workflows_script(
+        r#"[{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
+        r#"{"tagName":"v0.9.1"}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should succeed");
+    assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
+    assert_eq!(status.package_verification.status, None);
+    assert_eq!(status.weekly_release.status, None);
 }
 
 #[test]

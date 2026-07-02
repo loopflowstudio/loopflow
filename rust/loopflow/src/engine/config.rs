@@ -100,10 +100,6 @@ impl<'de> Deserialize<'de> for AutopruneConfig {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
 /// Where interactive sessions launch.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -225,8 +221,8 @@ pub struct Config {
     #[serde(default)]
     pub diff: bool,
 
-    /// Include full content of files touched by branch
-    #[serde(default = "default_true")]
+    /// Include full content of explicitly requested files.
+    #[serde(default)]
     pub diff_files: bool,
 
     /// Include clipboard content by default
@@ -297,7 +293,7 @@ impl Default for Config {
             interactive: Vec::new(),
             docs: Vec::new(),
             diff: false,
-            diff_files: true,
+            diff_files: false,
             paste: false,
             direction: None,
             summaries: Vec::new(),
@@ -556,7 +552,7 @@ pm:
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
         assert!(config.docs.is_empty());
-        assert!(config.diff_files);
+        assert!(!config.diff_files);
         assert!(!config.diff);
         assert!(!config.chrome);
         assert!(!config.pr);
@@ -585,30 +581,12 @@ pm:
     }
 
     #[test]
-    fn default_budget_config() {
-        let budgets = BudgetConfig::default();
-        assert_eq!(budgets.area, 50000);
-        assert_eq!(budgets.docs, 30000);
-        assert_eq!(budgets.diff, 20000);
-    }
-
-    #[test]
     fn autoprune_config_from_empty_yaml() {
         // When deserialized from YAML, gets proper defaults
         let yaml = "autoprune: {}\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
         assert!(!config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60);
-    }
-
-    #[test]
-    fn budget_config_from_empty_yaml() {
-        // When deserialized from YAML, gets proper defaults
-        let yaml = "budgets: {}\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
-        assert_eq!(config.budgets.area, 50000);
-        assert_eq!(config.budgets.docs, 30000);
-        assert_eq!(config.budgets.diff, 20000);
     }
 
     // ==========================================================================
@@ -754,32 +732,6 @@ autoprune:
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
-    }
-
-    #[test]
-    fn config_from_yaml_budgets() {
-        let yaml = r#"
-budgets:
-  area: 100000
-  docs: 50000
-  diff: 30000
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.budgets.area, 100000);
-        assert_eq!(config.budgets.docs, 50000);
-        assert_eq!(config.budgets.diff, 30000);
-    }
-
-    #[test]
-    fn config_from_yaml_budgets_partial() {
-        let yaml = r#"
-budgets:
-  area: 80000
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.budgets.area, 80000);
-        assert_eq!(config.budgets.docs, 30000); // default
-        assert_eq!(config.budgets.diff, 20000); // default
     }
 
     #[test]

@@ -91,9 +91,9 @@ Wave context is included in docs below.
 
 ## Wave memory
 
-Persistent memory at wave/rust/MEMORY.md. Budget: ~25k tokens.
-Read it before you start. Update it aggressively — correct stale entries,
-add observations, remove what's wrong. Don't wait until the end of your session.
+Persistent memory at wave/rust/MEMORY.md. Read it before every iteration.
+Keep it compact enough to include every iteration: correct stale entries,
+add durable observations, and delete session-specific notes.
 
 Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
 - Patterns: codebase conventions, architecture, how things connect

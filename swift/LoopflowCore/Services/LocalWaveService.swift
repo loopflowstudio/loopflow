@@ -1865,12 +1865,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             sources: sources,
             sourceCounts: sourceCounts,
             documents: documents,
-            budget: normalizeUInt64(json["budget"]),
             total: normalizeUInt64(json["total"]),
             diffTier: json["diff_tier"] as? String ?? "None",
             stepName: json["step_name"] as? String,
             directionNames: normalizeStringList(json["direction_names"]),
-            areaName: json["area_name"] as? String,
             waveName: json["wave_name"] as? String,
             hasClipboard: json["has_clipboard"] as? Bool ?? false
         )

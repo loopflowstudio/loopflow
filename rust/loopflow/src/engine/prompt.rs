@@ -390,7 +390,7 @@ pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
         .unwrap_or_default();
 
     let mut breakdown = ContextBreakdown {
-        system_tokens: count_tokens(&format_system_sections(&components).join("\n\n")),
+        system_tokens: count_tokens(&format_system_sections(components).join("\n\n")),
         ..Default::default()
     };
 
@@ -604,11 +604,7 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         docs.push(doc);
     }
     if !spec.docs.is_empty() {
-        let explicit_docs = gather_doc_targets(
-            &spec.repo_root,
-            &spec.docs,
-            &spec.related_repos,
-        )?;
+        let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
         if explicit_docs.len() > MAX_EXPLICIT_DOC_FILES {
             return Err(CoreError::ExecutionFailed(format!(
                 "--docs resolved to {} files; narrow --docs to {} files or fewer",
@@ -2527,18 +2523,18 @@ mod tests {
     }
 
     // ==========================================================================
-    // area docs gathering tests
+    // directory docs gathering tests
     // ==========================================================================
 
     #[test]
-    fn gather_area_docs_includes_ancestors_and_descendants() {
+    fn gather_directory_docs_includes_ancestors_and_descendants() {
         let repo = init_repo();
         write_file(repo.path(), "src/README.md", "# src");
         write_file(repo.path(), "src/api/README.md", "# api");
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/api/handlers/v1/README.md", "# v1");
 
-        let docs = gather_area_docs(repo.path(), "src/api");
+        let docs = gather_directory_docs(repo.path(), "src/api");
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/README.md"));
@@ -2546,22 +2542,22 @@ mod tests {
         assert!(paths.contains(&"src/api/handlers/README.md"));
         assert!(paths.contains(&"src/api/handlers/v1/README.md"));
 
-        let area_doc_count = docs
+        let doc_count = docs
             .iter()
             .filter(|doc| doc.path == "src/api/README.md")
             .count();
-        assert_eq!(area_doc_count, 1);
+        assert_eq!(doc_count, 1);
     }
 
     #[test]
-    fn gather_area_docs_excludes_sibling_directories() {
+    fn gather_directory_docs_excludes_sibling_directories() {
         let repo = init_repo();
         write_file(repo.path(), "src/README.md", "# src");
         write_file(repo.path(), "src/api/README.md", "# api");
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/web/README.md", "# web");
 
-        let docs = gather_area_docs(repo.path(), "src/api");
+        let docs = gather_directory_docs(repo.path(), "src/api");
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/api/handlers/README.md"));
@@ -2569,7 +2565,7 @@ mod tests {
     }
 
     #[test]
-    fn gather_area_docs_caps_descendants_at_100() {
+    fn gather_documents_caps_explicit_docs_at_100() {
         let repo = init_repo();
         write_file(repo.path(), "src/api/README.md", "# api");
         for i in 0..120 {
@@ -2580,13 +2576,14 @@ mod tests {
             );
         }
 
-        let docs = gather_area_docs(repo.path(), "src/api");
-        let descendant_count = docs
-            .iter()
-            .filter(|doc| doc.path.starts_with("src/api/handlers/"))
-            .count();
+        let opts = GatherSpec {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["src/api".to_string()],
+            ..Default::default()
+        };
 
-        assert_eq!(descendant_count, 100);
+        let error = gather_documents(&opts).expect_err("too many explicit docs");
+        assert!(error.to_string().contains("--docs resolved to 121 files"));
     }
 
     // ==========================================================================
@@ -2639,15 +2636,11 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
-            sources: vec![],
+            include_diff_files: true,
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(
-            PromptFormatMode::Full,
-            &trim_context_with_breakdown(ctx, usize::MAX),
-        )
-        .into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -2695,16 +2688,12 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             files: vec!["src/a.rs".to_string()],
-            sources: vec![],
+            include_diff_files: true,
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
         let has_diff = ctx.diff.is_some();
-        let prompt = format_prompt(
-            PromptFormatMode::Full,
-            &trim_context_with_breakdown(ctx, usize::MAX),
-        )
-        .into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
 
         assert!(
             !has_diff,
@@ -2747,7 +2736,6 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             step: Some("test".to_string()),
-            sources: vec![],
             ..Default::default()
         };
 
@@ -2769,7 +2757,6 @@ mod tests {
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -2802,7 +2789,6 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             docs: vec!["README.md".to_string(), "docs".to_string()],
-            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -2831,7 +2817,6 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             directions: vec!["concise".to_string()],
-            sources: vec![],
             ..Default::default()
         };
 
@@ -2863,7 +2848,6 @@ directions:
             repo_root: repo.path().to_path_buf(),
             step: Some("impl".to_string()),
             directions: vec!["fast".to_string()],
-            sources: vec![],
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
@@ -2881,7 +2865,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             surface: Surface::Cli,
-            sources: vec![],
             ..Default::default()
         };
 
@@ -2899,7 +2882,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             wave: Some("rust-migration".to_string()),
-            sources: vec![],
             ..Default::default()
         };
 
@@ -2922,7 +2904,6 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             wave: Some("living".to_string()),
-            sources: vec![DocumentSource::Docs],
             ..Default::default()
         };
 
@@ -3036,7 +3017,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         // Should NOT include step content
         assert!(!context.contains("<lf:step:implement>"));
         assert!(!context.contains("Implement the feature."));
@@ -3072,7 +3053,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         // Should include context parts
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("<lf:files>"));
@@ -3093,7 +3074,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&budget_context(components));
+        let context = format_context_prompt(&components);
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("ask questions"));
         assert!(context.contains("wait for feedback"));
@@ -3119,7 +3100,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:implement>"));
         assert!(task.contains("Implement the feature."));
         assert!(task.contains("</lf:step:implement>"));
@@ -3128,7 +3109,7 @@ directions:
     #[test]
     fn format_task_prompt_empty_when_no_step_or_message() {
         let components = PromptComponents::default();
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.is_empty());
     }
 
@@ -3138,7 +3119,7 @@ directions:
             message: Some("fix the login bug".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert_eq!(task, "fix the login bug");
     }
 
@@ -3158,7 +3139,7 @@ directions:
             message: Some("login page crashes".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:debug>"));
         assert!(task.contains("login page crashes"));
     }
@@ -3179,7 +3160,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&budget_context(components));
+        let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:review>"));
         assert!(task.contains("</lf:step:review>"));
     }
@@ -3320,7 +3301,6 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
@@ -3345,7 +3325,7 @@ directions:
     }
 
     #[test]
-    fn gather_documents_related_repo_docs_not_loaded_without_area() {
+    fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
         let session_repo = init_repo();
         write_file(session_repo.path(), "CLAUDE.md", "session claude");
 
@@ -3358,7 +3338,6 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             related_repos: vec![related],
             ..Default::default()
@@ -3370,7 +3349,7 @@ directions:
             .iter()
             .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
 
-        // Related repo docs NOT loaded — no area targeting that repo
+        // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
     }
 
@@ -3380,18 +3359,17 @@ directions:
         write_file(repo.path(), "README.md", "hello");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
-        let repo_docs: Vec<_> = docs
+        let explicit_docs: Vec<_> = docs
             .iter()
             .filter(|d| d.source == DocumentSource::Docs)
             .collect();
-        assert!(!repo_docs.iter().any(|d| d.path == "README.md"));
+        assert!(!explicit_docs.iter().any(|d| d.path == "README.md"));
         // No prefixed docs
-        assert!(!repo_docs.iter().any(|d| d.path.starts_with('[')));
+        assert!(!explicit_docs.iter().any(|d| d.path.starts_with('[')));
     }
 
     #[test]
@@ -3405,7 +3383,6 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             docs: vec!["gone:src".to_string()],
             related_repos: vec![related],
@@ -3423,11 +3400,7 @@ directions:
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
         std::fs::create_dir_all(related_repo.path().join("swift")).unwrap();
-        std::fs::write(
-            related_repo.path().join("swift/README.md"),
-            "swift area doc",
-        )
-        .unwrap();
+        std::fs::write(related_repo.path().join("swift/README.md"), "swift docs").unwrap();
 
         let related = RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
@@ -3435,7 +3408,6 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
@@ -3445,8 +3417,8 @@ directions:
 
         assert!(
             docs.iter()
-                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift area doc"),
-            "expected cross-repo area doc, got: {:?}",
+                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift docs"),
+            "expected cross-repo docs, got: {:?}",
             docs.iter().map(|d| &d.path).collect::<Vec<_>>()
         );
     }
@@ -3465,7 +3437,6 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: session_repo.path().to_path_buf(),
             docs: vec!["studio:".to_string()],
             related_repos: vec![related],
@@ -3473,7 +3444,7 @@ directions:
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Top-level area docs loaded (README.md is a descendant of ".")
+        // Top-level docs loaded (README.md is a descendant of ".")
         assert!(docs
             .iter()
             .any(|d| d.path.contains("[acme/studio]") && d.content == "studio readme"));
@@ -3483,16 +3454,15 @@ directions:
     fn gather_documents_local_docs_directory() {
         let repo = init_repo();
         std::fs::create_dir_all(repo.path().join("docs")).unwrap();
-        write_file(repo.path(), "docs/README.md", "local area doc");
+        write_file(repo.path(), "docs/README.md", "local docs");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Docs],
             repo_root: repo.path().to_path_buf(),
             docs: vec!["docs".to_string()],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
-        assert!(docs.iter().any(|d| d.content == "local area doc"));
+        assert!(docs.iter().any(|d| d.content == "local docs"));
         // No prefixed docs
         assert!(!docs.iter().any(|d| d.path.starts_with('[')));
     }

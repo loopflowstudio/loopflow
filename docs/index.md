@@ -272,7 +272,7 @@ wave/                     # Wave plans (persists)
 
 ### What's Auto-Included
 
-Every step sees: native agent instructions, LOOPFLOW.md, `scratch/`, scoped `wave/`, and files touched by your branch. Add repo docs with `--docs`.
+Every step sees native agent instructions, LOOPFLOW.md, `scratch/`, and scoped `wave/`. Add repo docs with `--docs`; add branch changes with `--diff`.
 
 ---
 

@@ -7,9 +7,8 @@ use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
-    format_prompt, gather_context, measure_context,
-    ContextBreakdown, Document, DocumentSource, GatherContextOpts, PromptComponents,
-    PromptFormatMode, RelatedRepoContext, Surface,
+    format_prompt, gather_context, measure_context, ContextBreakdown, Document, DocumentSource,
+    GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 

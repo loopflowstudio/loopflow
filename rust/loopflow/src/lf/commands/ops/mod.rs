@@ -1430,9 +1430,7 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
 // ==========================================================================
 
 fn copy_context(paths: &[String], exclude: &[String]) -> Result<()> {
-    use crate::engine::prompt::{
-        count_tokens, gather_context, Document, GatherContextOpts,
-    };
+    use crate::engine::prompt::{count_tokens, gather_context, Document, GatherContextOpts};
     use std::collections::HashSet;
 
     let repo_root = find_repo_root()?;

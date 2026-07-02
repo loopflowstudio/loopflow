@@ -14,7 +14,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive mode | `-i` | frontmatter: `interactive: true` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include branch files | `--diff-files` (default) | `diff_files: true` |
+| Include explicit files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Context files | — | `context: [FILE]` |
@@ -30,13 +30,9 @@ Every step gets context assembled automatically. Run any command to see the brea
 ```
 Tokens: 12,847
 
-files          6,892 █████
-  STYLE.md     2,854 ██
+docs           3,842 ███
   README.md      988 █
-  scratch/     3,050 ██
-diff_files     4,721 ███
-  src/auth.py  2,847 ██
-  tests/       1,874 █
+scratch        3,050 ██
 clipboard      1,234 █
 ```
 
@@ -46,8 +42,8 @@ The token breakdown shows what's included:
 |---------|------------------|--------|
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/<name>/` docs when a wave is scoped | `--wave NAME` |
-| **files** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff_files** | Files changed on this branch | `diff_files: true` (default) |
+| **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
+| **diff** | Branch diff when requested | `--diff` |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
 
@@ -123,17 +119,17 @@ Explicit docs paths, globs, or directories. Directory entries include markdown f
 
 Root README files are no longer special. `scratch/` remains ambient, and `wave/` loads when a wave is in scope.
 
-### Branch Files (diff_files)
+### Explicit Files (diff_files)
 
-Full content of files modified on the current branch.
+Full content of files explicitly passed through context plumbing.
 
 | | |
 |---|---|
 | **CLI** | `--diff-files` / `--no-diff-files` |
 | **Config** | `diff_files: true` |
-| **Default** | `true` (included) |
+| **Default** | `false` |
 
-This is how the coding agent sees your changes. It gets complete files, not just diffs.
+Use `--diff` when the agent needs the branch diff.
 
 ### Summaries
 

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod flow;
+pub mod goal;
 pub mod list;
 pub mod ops;
 pub mod run;

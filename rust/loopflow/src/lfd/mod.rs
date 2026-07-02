@@ -1,6 +1,7 @@
 pub mod address;
 pub mod attention;
 pub mod auth;
+pub mod client;
 pub mod config;
 pub mod credential_socket;
 pub mod events;

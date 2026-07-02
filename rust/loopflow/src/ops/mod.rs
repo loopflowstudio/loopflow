@@ -2,6 +2,7 @@ mod abandon;
 mod branches;
 mod combine;
 mod commit;
+mod dispatch;
 mod error;
 mod flow;
 pub(crate) mod ingest;
@@ -22,6 +23,7 @@ pub use branches::{
 };
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub use dispatch::{dispatch_wave, DispatchOptions};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use ingest::{ingest, IngestOptions, IngestResult};

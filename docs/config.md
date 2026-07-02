@@ -14,7 +14,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive mode | `-i` | frontmatter: `interactive: true` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include explicit files | `--diff-files` | `diff_files: true` |
+| Include branch files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Context files | — | `context: [FILE]` |
@@ -119,9 +119,9 @@ Explicit docs paths, globs, or directories. Directory entries include markdown f
 
 Root README files are no longer special. `scratch/` remains ambient, and `wave/` loads when a wave is in scope.
 
-### Explicit Files (diff_files)
+### Branch Files (diff_files)
 
-Full content of files explicitly passed through context plumbing.
+Full content of files modified on the current branch.
 
 | | |
 |---|---|
@@ -129,7 +129,7 @@ Full content of files explicitly passed through context plumbing.
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff` when the agent needs the branch diff.
+Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
 
 ### Summaries
 

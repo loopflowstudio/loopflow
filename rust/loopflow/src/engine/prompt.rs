@@ -615,11 +615,16 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         docs.extend(explicit_docs);
     }
 
-    if !spec.include_files || spec.files.is_empty() {
+    if !spec.include_files {
         return Ok(docs);
     }
 
-    docs.extend(gather_files(&spec.repo_root, &spec.files)?);
+    let files = if spec.files.is_empty() {
+        gather_changed_file_paths(&spec.repo_root)?
+    } else {
+        spec.files.clone()
+    };
+    docs.extend(gather_files(&spec.repo_root, &files)?);
 
     Ok(docs)
 }
@@ -1152,6 +1157,47 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
     }
 
     Ok(docs)
+}
+
+fn gather_changed_file_paths(repo_root: &Path) -> Result<Vec<String>, CoreError> {
+    let branch_output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(repo_root)
+        .output()?;
+
+    let branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+    if branch.is_empty() || branch == "main" {
+        return Ok(Vec::new());
+    }
+
+    let base_branch =
+        crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let diff_ref = format!("origin/{}...HEAD", base_branch);
+    let committed_files = git_changed_file_names(repo_root, &diff_ref)?;
+    if !committed_files.is_empty() {
+        return Ok(committed_files);
+    }
+
+    git_changed_file_names(repo_root, "HEAD")
+}
+
+fn git_changed_file_names(repo_root: &Path, diff_ref: &str) -> Result<Vec<String>, CoreError> {
+    let output = Command::new("git")
+        .args(["diff", "--name-only", diff_ref])
+        .current_dir(repo_root)
+        .output()?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
 }
 
 /// Walk a directory and collect text files, respecting gitignore.
@@ -2702,6 +2748,34 @@ mod tests {
         assert!(!prompt.contains("<lf:diff>"));
         assert!(prompt.contains("mod a;"));
         assert!(!prompt.contains("mod unrelated;"));
+    }
+
+    #[test]
+    fn gather_context_with_diff_files_loads_changed_files() {
+        let repo = init_git_repo();
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        write_file(repo.path(), "src/changed.rs", "mod changed;");
+        write_file(repo.path(), "src/unchanged.rs", "mod unchanged;");
+        Command::new("git")
+            .args(["add", "src/changed.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            include_diff_files: true,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
+
+        assert!(prompt.contains("mod changed;"));
+        assert!(!prompt.contains("mod unchanged;"));
     }
 
     #[test]

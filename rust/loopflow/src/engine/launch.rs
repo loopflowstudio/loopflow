@@ -33,6 +33,7 @@ pub struct LaunchPromptInput {
     pub area: Option<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
+    pub operate: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
@@ -69,6 +70,7 @@ pub fn prepare_launch_prompt(
         area,
         wave,
         message,
+        operate,
         agent,
         cwd,
         max_turns,
@@ -109,6 +111,7 @@ pub fn prepare_launch_prompt(
         repo_root: repo_root.clone(),
         step: if resolved_step.is_some() { None } else { step },
         message,
+        operate,
         surface,
         directions,
         files: Vec::new(),
@@ -147,7 +150,7 @@ pub fn prepare_launch_prompt(
         .unwrap_or_else(|| "claude:opus".to_string());
     validate_agent_policy(&agent)?;
 
-    // Keep only system-safe sections (loopflow/rlm/voice/surface/directions) in
+    // Keep only system-safe sections (operate/voice/surface/directions) in
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
     let system_prompt = format_claude_system_prompt(&budgeted);
@@ -294,6 +297,43 @@ Test step body.
         .expect("prepare launch prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_omits_operate_by_default() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare prompt");
+        assert!(!prepared.prompt.contains("<lf:operate>"));
+        assert!(!prepared.config.system_prompt.contains("lf op commit"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_injects_operate_when_enabled() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                surface: Surface::Headless,
+                operate: true,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare prompt");
+        assert!(prepared.prompt.contains("<lf:operate>"));
+        assert!(prepared.config.system_prompt.contains("lf op commit"));
     }
 
     #[test]

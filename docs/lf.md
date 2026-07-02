@@ -132,6 +132,7 @@ These require explicit flags or config:
 | **Clipboard** | `-c` / `--clipboard` |
 | **Area scope** | `--area PATH` |
 | **Chrome automation** | `--chrome` |
+| **Loopflow operating guidance** | `--operate` |
 
 See [Configuration](config.md) for setting defaults via config file.
 
@@ -162,6 +163,15 @@ lf implement: add caching -m codex
 lf gate -d ux
 lf implement -d ux,clarity
 ```
+
+### Add loopflow operating guidance
+
+```bash
+lf gate --operate
+```
+
+`--operate` adds loopflow-specific guidance for git, worktrees, PRs, and
+delegation. Default prompts stay lean.
 
 ### Include clipboard content
 

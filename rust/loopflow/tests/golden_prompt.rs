@@ -61,6 +61,7 @@ fn golden_prompts_match_python() {
             repo_root: repo.clone(),
             step: case.step.clone(),
             message: None,
+            operate: false,
             surface: case.surface.unwrap_or_default(),
             directions: case.directions.clone(),
             files: Vec::new(),

@@ -220,6 +220,8 @@ pub struct GatherContextOpts {
     pub step: Option<String>,
     /// User message (positional args after step/flow name, or inline prompt)
     pub message: Option<String>,
+    /// Include loopflow operating guidance.
+    pub operate: bool,
     pub surface: Surface,
     pub directions: Vec<String>,
     /// Specific files to include in context.
@@ -311,7 +313,9 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
-    /// Voice/tone guidance — resolved from user ~/.lf/ > repo .lf/ > builtin.
+    /// Include loopflow operating guidance.
+    pub operate: bool,
+    /// Voice/tone guidance resolved from user ~/.lf/ or repo .lf/.
     pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,
@@ -467,7 +471,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         .unwrap_or_default();
 
     let mut breakdown = ContextBreakdown {
-        system_tokens: count_tokens(crate::engine::builtins::RLM_DOC),
+        system_tokens: count_tokens(&format_system_sections(&components).join("\n\n")),
         ..Default::default()
     };
 
@@ -732,7 +736,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md > builtin
+    // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md.
     let voice_doc = resolve_voice_doc(repo_root);
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
@@ -748,6 +752,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
+        operate: opts.operate,
         voice_doc,
         message: opts.message.clone(),
         diff_tier,
@@ -818,7 +823,7 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     Ok(docs)
 }
 
-/// Resolve voice doc: user `~/.lf/voice.md` > repo `.lf/voice.md` > builtin.
+/// Resolve voice doc: user `~/.lf/voice.md` > repo `.lf/voice.md`.
 /// Only one is loaded — first match wins.
 fn resolve_voice_doc(repo_root: &Path) -> Option<String> {
     // 1. User-global
@@ -833,8 +838,7 @@ fn resolve_voice_doc(repo_root: &Path) -> Option<String> {
     if let Ok(content) = std::fs::read_to_string(&repo_voice) {
         return Some(content);
     }
-    // 3. Builtin default
-    Some(crate::engine::builtins::VOICE_DOC.to_string())
+    None
 }
 
 fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
@@ -1618,14 +1622,16 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: RLM, voice, surface.
+/// third-party app classifiers: operate, voice, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    parts.push(format!(
-        "<lf:rlm>\n{}\n</lf:rlm>",
-        crate::engine::builtins::RLM_DOC
-    ));
+    if components.operate {
+        parts.push(format!(
+            "<lf:operate>\n{}\n</lf:operate>",
+            crate::engine::builtins::OPERATE_DOC
+        ));
+    }
 
     if components.surface.is_interactive() {
         if let Some(ref voice) = components.voice_doc {
@@ -2041,6 +2047,10 @@ mod tests {
         format_prompt(PromptFormatMode::Full, &budget_context(components)).into_string()
     }
 
+    fn system_tokens(components: &PromptComponents) -> usize {
+        count_tokens(&format_system_sections(components).join("\n\n"))
+    }
+
     #[test]
     fn count_tokens_basic() {
         // tiktoken should give roughly 1 token per 4 chars for English text
@@ -2162,7 +2172,7 @@ mod tests {
 
         // Set budget to only fit docs, not summaries (system sections are a
         // mandatory floor, so add them to the budget).
-        let system = count_tokens(crate::engine::builtins::RLM_DOC);
+        let system = system_tokens(&components);
         let doc_tokens = count_tokens("Doc content");
         let trimmed =
             trim_context_with_breakdown(GatheredContext(components), system + doc_tokens + 5);
@@ -2197,7 +2207,7 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
+        let budget = system_tokens(&components)
             + count_tokens("x")
             + count_tokens("Summary should survive after wave memory is dropped")
             + 1;
@@ -2276,10 +2286,8 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = count_tokens(crate::engine::builtins::RLM_DOC)
-            + count_tokens("x")
-            + count_tokens(scratch_content)
-            + 1;
+        let budget =
+            system_tokens(&components) + count_tokens("x") + count_tokens(scratch_content) + 1;
         let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
 
         assert_eq!(trimmed.components().docs.len(), 1);
@@ -2354,6 +2362,41 @@ mod tests {
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
         assert!(prompt.contains("Output is logged, not displayed"));
+        assert!(!prompt.contains("<lf:voice>"));
+    }
+
+    #[test]
+    fn format_prompt_includes_voice_when_provided() {
+        let components = PromptComponents {
+            surface: Surface::Cli,
+            voice_doc: Some("Be crisp.".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(prompt.contains("<lf:voice>\nBe crisp.\n</lf:voice>"));
+    }
+
+    #[test]
+    fn format_prompt_omits_operate_by_default() {
+        let components = PromptComponents::default();
+
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:operate>"));
+        assert!(!prompt.contains("lf op commit"));
+    }
+
+    #[test]
+    fn format_prompt_includes_operate_when_enabled() {
+        let components = PromptComponents {
+            operate: true,
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(prompt.contains("<lf:operate>"));
+        assert!(prompt.contains("lf op commit"));
+        assert!(prompt.contains("</lf:operate>"));
     }
 
     #[test]
@@ -2689,8 +2732,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
 
-        // Verify order: system (rlm) -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
-        let rlm_pos = prompt.find("<lf:rlm>").unwrap();
+        // Verify order: system -> content -> task.
         let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
@@ -2699,7 +2741,6 @@ mod tests {
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
         let step_pos = prompt.find("<lf:step:implement>").unwrap();
 
-        assert!(rlm_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);

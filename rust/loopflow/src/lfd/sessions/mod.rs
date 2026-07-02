@@ -286,6 +286,7 @@ impl SessionManager {
                 area: config.area.clone(),
                 wave: config.wave.clone(),
                 message: config.message.clone(),
+                operate: false,
                 agent: config.agent.clone(),
                 cwd,
                 max_turns: config.max_turns,

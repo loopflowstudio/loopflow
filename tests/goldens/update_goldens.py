@@ -32,6 +32,8 @@ def main() -> None:
             cmd.extend(["--step", case["step"]])
         if case.get("surface"):
             cmd.extend(["--surface", case["surface"]])
+        if case.get("operate"):
+            cmd.append("--operate")
         for direction in case.get("directions", []):
             cmd.extend(["--direction", direction])
         cmd.extend(_bool_flag("lfdocs", case["lfdocs"]))

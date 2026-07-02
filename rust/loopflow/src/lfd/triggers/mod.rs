@@ -1,4 +1,4 @@
-mod activation;
+pub(crate) mod activation;
 mod ci_failure;
 mod common;
 mod cron;

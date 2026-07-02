@@ -14,7 +14,8 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
+use crate::lfd::executor::ensure_wave_worktree;
+use crate::lfd::triggers::activation::create_wave_run;
 use crate::lfd::http::dto::{
     activation_log_dto, trigger_dto, wave_cron_dto, wave_run_dto, ActivationLogDto,
     CombineResponse, CombineResponseResult, DeletedResourceResponse, ErrorResponse,
@@ -812,7 +813,11 @@ pub async fn dispatch_wave_handler(
             )
         })?;
 
-    let mut run = create_wave_run_with_id(&state.store, &wave, &run_id, None)
+    // Select the worktree strategy the same way activation does: a shared
+    // per-wave worktree only for the strictly-serial workers==1 case, and an
+    // isolated per-run worktree otherwise — so concurrent dispatches (workers>=2
+    // or workers==0) never collide in the shared worktree.
+    let mut run = create_wave_run(&state.store, &wave, &run_id, false, None)
         .await
         .map_err(|err| {
             api_error(

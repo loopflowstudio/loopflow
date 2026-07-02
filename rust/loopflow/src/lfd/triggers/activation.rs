@@ -56,7 +56,7 @@ async fn pause_wave_after_activation_conflict(
     event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
-async fn create_wave_run(
+pub(crate) async fn create_wave_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,

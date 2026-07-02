@@ -859,13 +859,13 @@ fn gather_wave_memory_doc(
     }))
 }
 
-enum ResolvedArea<'a> {
+enum ResolvedDocTarget<'a> {
     Local {
-        area: &'a str,
+        target: &'a str,
     },
     CrossRepo {
         related: &'a RelatedRepoContext,
-        area: &'a str,
+        target: &'a str,
     },
 }
 
@@ -883,14 +883,19 @@ fn gather_doc_targets(
             continue;
         }
 
-        match resolve_area(target, related_repos) {
-            ResolvedArea::Local { area } => {
-                gather_local_doc_target(repo_root, area, &mut seen, &mut docs)?;
+        match resolve_doc_target(target, related_repos) {
+            ResolvedDocTarget::Local { target } => {
+                gather_local_doc_target(repo_root, target, &mut seen, &mut docs)?;
             }
-            ResolvedArea::CrossRepo { related, area } => {
+            ResolvedDocTarget::CrossRepo { related, target } => {
                 let mut related_docs = Vec::new();
                 let mut related_seen = HashSet::new();
-                gather_local_doc_target(&related.path, area, &mut related_seen, &mut related_docs)?;
+                gather_local_doc_target(
+                    &related.path,
+                    target,
+                    &mut related_seen,
+                    &mut related_docs,
+                )?;
                 for mut doc in related_docs {
                     doc.path = format!("[{}] {}", related.repo_id, doc.path);
                     docs.push(doc);
@@ -908,8 +913,10 @@ fn gather_local_doc_target(
     seen: &mut HashSet<PathBuf>,
     docs: &mut Vec<Document>,
 ) -> Result<(), CoreError> {
+    let gitignore = build_gitignore(repo_root);
+
     if contains_glob_chars(target) {
-        gather_glob_docs(repo_root, target, seen, docs)?;
+        gather_glob_docs(repo_root, target, &gitignore, seen, docs)?;
         return Ok(());
     }
 
@@ -933,7 +940,7 @@ fn gather_local_doc_target(
     }
 
     if path.is_file() {
-        push_doc_file(repo_root, &path, seen, docs);
+        push_doc_file(repo_root, &path, &gitignore, seen, docs);
     }
 
     Ok(())
@@ -942,6 +949,7 @@ fn gather_local_doc_target(
 fn gather_glob_docs(
     repo_root: &Path,
     pattern: &str,
+    gitignore: &ignore::gitignore::Gitignore,
     seen: &mut HashSet<PathBuf>,
     docs: &mut Vec<Document>,
 ) -> Result<(), CoreError> {
@@ -949,7 +957,6 @@ fn gather_glob_docs(
         Ok(regex) => regex,
         Err(_) => return Ok(()),
     };
-    let gitignore = build_gitignore(repo_root);
     let walker = ignore::WalkBuilder::new(repo_root)
         .hidden(false)
         .standard_filters(true)
@@ -961,7 +968,7 @@ fn gather_glob_docs(
             continue;
         };
         let path = entry.path();
-        if !path.is_file() || should_exclude(repo_root, path, &gitignore) {
+        if !path.is_file() || should_exclude(repo_root, path, gitignore) {
             continue;
         }
         let rel_path = path
@@ -976,7 +983,7 @@ fn gather_glob_docs(
 
     entries.sort();
     for path in entries {
-        push_doc_file(repo_root, &path, seen, docs);
+        push_doc_file(repo_root, &path, gitignore, seen, docs);
     }
 
     Ok(())
@@ -985,10 +992,11 @@ fn gather_glob_docs(
 fn push_doc_file(
     repo_root: &Path,
     path: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
     seen: &mut HashSet<PathBuf>,
     docs: &mut Vec<Document>,
 ) {
-    if should_exclude(repo_root, path, &build_gitignore(repo_root)) {
+    if should_exclude(repo_root, path, gitignore) {
         return;
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -1012,10 +1020,13 @@ fn push_doc_file(
 
 /// Parse an explicit docs target for cross-repo syntax (`repo_name:path`).
 ///
-/// Returns `ResolvedArea::CrossRepo` if the target contains `:` and the repo name
-/// matches a related repo. Returns `ResolvedArea::Local` otherwise.
-fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> ResolvedArea<'a> {
-    if let Some((repo_name, area_path)) = area.split_once(':') {
+/// Returns `ResolvedDocTarget::CrossRepo` if the target contains `:` and the repo
+/// name matches a related repo. Returns `ResolvedDocTarget::Local` otherwise.
+fn resolve_doc_target<'a>(
+    target: &'a str,
+    related_repos: &'a [RelatedRepoContext],
+) -> ResolvedDocTarget<'a> {
+    if let Some((repo_name, target_path)) = target.split_once(':') {
         if !repo_name.is_empty() {
             let matches: Vec<_> = related_repos
                 .iter()
@@ -1024,29 +1035,33 @@ fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> R
             match matches.len() {
                 1 => {
                     // "studio:" means the whole repo; "studio:swift" means a subdirectory.
-                    let resolved_area = if area_path.is_empty() { "." } else { area_path };
-                    return ResolvedArea::CrossRepo {
+                    let resolved_target = if target_path.is_empty() {
+                        "."
+                    } else {
+                        target_path
+                    };
+                    return ResolvedDocTarget::CrossRepo {
                         related: matches[0],
-                        area: resolved_area,
+                        target: resolved_target,
                     };
                 }
                 0 => {
                     warn!(
                         repo_name = repo_name,
-                        "no related repo named '{}', treating as local area", repo_name
+                        "no related repo named '{}', treating as local docs target", repo_name
                     );
                 }
                 _ => {
                     warn!(
                         repo_name = repo_name,
-                        "ambiguous: multiple related repos named '{}', treating as local area",
+                        "ambiguous: multiple related repos named '{}', treating as local docs target",
                         repo_name
                     );
                 }
             }
         }
     }
-    ResolvedArea::Local { area }
+    ResolvedDocTarget::Local { target }
 }
 
 /// Gather .md docs from area ancestors and descendants.
@@ -3805,44 +3820,47 @@ directions:
     }
 
     #[test]
-    fn resolve_area_local_without_colon() {
-        let result = resolve_area("docs", &[]);
-        assert!(matches!(result, ResolvedArea::Local { area: "docs" }));
+    fn resolve_doc_target_local_without_colon() {
+        let result = resolve_doc_target("docs", &[]);
+        assert!(matches!(
+            result,
+            ResolvedDocTarget::Local { target: "docs" }
+        ));
     }
 
     #[test]
-    fn resolve_area_cross_repo_match() {
+    fn resolve_doc_target_cross_repo_match() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("studio:swift", &related);
+        let result = resolve_doc_target("studio:swift", &related);
         match result {
-            ResolvedArea::CrossRepo { related: r, area } => {
+            ResolvedDocTarget::CrossRepo { related: r, target } => {
                 assert_eq!(r.repo_id.name(), "studio");
-                assert_eq!(area, "swift");
+                assert_eq!(target, "swift");
             }
             _ => panic!("expected CrossRepo"),
         }
     }
 
     #[test]
-    fn resolve_area_unknown_repo_falls_back_to_local() {
+    fn resolve_doc_target_unknown_repo_falls_back_to_local() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("unknown:swift", &related);
+        let result = resolve_doc_target("unknown:swift", &related);
         assert!(matches!(
             result,
-            ResolvedArea::Local {
-                area: "unknown:swift"
+            ResolvedDocTarget::Local {
+                target: "unknown:swift"
             }
         ));
     }
 
     #[test]
-    fn resolve_area_ambiguous_repo_falls_back_to_local() {
+    fn resolve_doc_target_ambiguous_repo_falls_back_to_local() {
         let related = vec![
             RelatedRepoContext {
                 repo_id: RepoId::parse("acme/studio").unwrap(),
@@ -3853,27 +3871,30 @@ directions:
                 path: PathBuf::from("/repos/studio2"),
             },
         ];
-        let result = resolve_area("studio:swift", &related);
-        assert!(matches!(result, ResolvedArea::Local { .. }));
+        let result = resolve_doc_target("studio:swift", &related);
+        assert!(matches!(result, ResolvedDocTarget::Local { .. }));
     }
 
     #[test]
-    fn resolve_area_empty_repo_name_treated_as_local() {
-        let result = resolve_area(":swift", &[]);
-        assert!(matches!(result, ResolvedArea::Local { area: ":swift" }));
+    fn resolve_doc_target_empty_repo_name_treated_as_local() {
+        let result = resolve_doc_target(":swift", &[]);
+        assert!(matches!(
+            result,
+            ResolvedDocTarget::Local { target: ":swift" }
+        ));
     }
 
     #[test]
-    fn resolve_area_bare_repo_name_resolves_to_root() {
+    fn resolve_doc_target_bare_repo_name_resolves_to_root() {
         let related = vec![RelatedRepoContext {
             repo_id: RepoId::parse("acme/studio").unwrap(),
             path: PathBuf::from("/repos/studio"),
         }];
-        let result = resolve_area("studio:", &related);
+        let result = resolve_doc_target("studio:", &related);
         match result {
-            ResolvedArea::CrossRepo { related: r, area } => {
+            ResolvedDocTarget::CrossRepo { related: r, target } => {
                 assert_eq!(r.repo_id.name(), "studio");
-                assert_eq!(area, ".");
+                assert_eq!(target, ".");
             }
             _ => panic!("expected CrossRepo, got Local"),
         }

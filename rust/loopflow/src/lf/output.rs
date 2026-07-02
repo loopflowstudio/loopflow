@@ -59,7 +59,6 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
     let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc);
     let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
-    let area_tokens = breakdown.source_tokens(DocumentSource::Area);
     let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
 
     // Step name as prominent header
@@ -120,16 +119,6 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
 
     if wave_memory_tokens > 0 {
         lines.push(format_row("memory", wave_memory_tokens, "wave"));
-    }
-
-    // Area
-    let area_doc_count = breakdown.source_count(DocumentSource::Area);
-    if area_tokens > 0 && area_doc_count > 0 {
-        let area_detail = match &breakdown.area_name {
-            Some(name) => format!("{} ({} files)", name, area_doc_count),
-            None => format!("{} files", area_doc_count),
-        };
-        lines.push(format_row("area", area_tokens, &area_detail));
     }
 
     // Wave

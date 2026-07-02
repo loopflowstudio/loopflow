@@ -100,11 +100,10 @@ Reduce context:
 
 ```bash
 lf qa --no-diff-files       # skip branch files
-lf qa --area src/small/     # scope to specific area
-lf qa --no-lfdocs           # skip wave/, scratch/, root .md files
+lf qa --docs README.md      # include only the docs you need
 ```
 
-For a persistent default, set `lfdocs: false` in `.lf/config.yaml`.
+For persistent docs, set `docs:` in `.lf/config.yaml`.
 
 See [Configuration](config.md) for context options.
 

@@ -85,47 +85,71 @@ If something is genuinely ambiguous, note your assumption in `scratch/questions.
 
 No rendering environment. Output is logged, not displayed.
 
+<lf:wave name="rust">
+You are building toward the rust program of work.
+Wave context is included in docs below.
+
+## Wave memory
+
+Persistent memory at wave/rust/MEMORY.md. Budget: ~25k tokens.
+Read it before you start. Update it aggressively — correct stale entries,
+add observations, remove what's wrong. Don't wait until the end of your session.
+
+Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
+- Patterns: codebase conventions, architecture, how things connect
+- Preferences: user workflow, tool choices, communication norms
+- Learnings: what worked, what failed, surprises
+
+What belongs elsewhere:
+- architectural decisions → wave docs or explicit docs
+- design rationale → scratch/ or wave plan
+- session-specific notes → nowhere (let them die)
+
+How to update:
+- Edit within sections. Don't rewrite the whole file.
+- Correct or remove entries that are wrong or stale.
+- Use absolute dates, not "today" or "recently".
+- When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+
+<lf:memory path="wave/rust/MEMORY.md">
+- Keep prompts concise and concrete.
+- Prefer behavior-focused tests over mock wiring.
+
+</lf:memory>
+</lf:wave>
+
+Scratch design artifacts and working notes.
+
+<lf:scratch>
+<lf:file path="scratch/design.md">
+# Design
+
+Current design notes.
+
+</lf:file>
+</lf:scratch>
+
+Reference files for this task. Includes parent documentation for context.
+<lf:files>
+<lf:file path="wave/rust/README.md">
+# Rust Roadmap
+
+Overview of Rust work.
+
+</lf:file>
+<lf:file path="README.md">
+# Test Repo
+
+Root readme.
+
+</lf:file>
+</lf:files>
+
 The step.
 
-<lf:step:debug>
-Debug an error using the stacktrace or error message from clipboard.
+<lf:step:test>
+# Test step
 
-If clipboard is empty or no -c flag, ask what error to debug.
+Do the thing.
 
-## What makes a good fix
-
-**Unblock first.** Ask: what would it take to unblock the person who wants this debugged? Sometimes that's a quick workaround or explanation before a deeper fix. Get them moving, then address the root cause.
-
-**Loop until the root issue is addressed.** Don't just take the next step and stop. Fix, verify, see what happens. If a new error surfaces, keep going. The job is done when the original workflow succeeds.
-
-**Minimal and targeted.** Fix the bug, not the neighborhood. Don't refactor, don't "improve while you're here."
-
-**Grease the wheels.** If debugging was hard, add tooling that makes it easier next time—for both humans and LLMs. A well-placed log statement, a clearer error message, a helper function that surfaces state. Small improvements that compound.
-
-## Input
-
-Run with `-c` to include clipboard content:
-```bash
-lf debug -c
-```
-
-Parse the error/stacktrace. Identify file and line. Check if the file was changed on this branch:
-```bash
-git diff main...HEAD -- <file>
-```
-
-## Debugging strategy
-
-**Follow the stack trace.** The deepest frame in your code (not library code) is usually where the problem originates. Start there.
-
-**Check recent changes.** If the error is new, the bug is likely in the delta.
-
-**Reproduce first.** Before fixing, understand how to trigger the error. A fix you can't verify isn't a fix.
-
-## Output
-
-Fix the bug directly. If the cause isn't obvious from the fix, add a brief inline comment.
-
-If you can't determine the cause, describe what you learned and what additional context is needed.
-
-</lf:step:debug>
+</lf:step:test>

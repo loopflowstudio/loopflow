@@ -1,7 +1,22 @@
 # `--docs`: one explicit doc-prefetch flag, no ambient repo docs
 
-Collapse `--area` and `--lfdocs` into a single `--docs` flag. Stop auto-injecting
-top-level repo docs. Keep `scratch/` and `wave/` as first-class ambient sections.
+Kill the *automatic* repo-doc dump: `lfdocs`, the `<lf:docs>` section, and the
+always-on root-`*.md` glob all go away. What dies is the automatism, not the
+capability — the old behavior is reproducible on demand as `--docs '*.md'`.
+`scratch/` and `wave/` graduate to first-class ambient sections (no flag).
+`--area` is generalized and renamed to `--docs`, an explicit prefetch flag for
+pointing at a file, glob, or directory.
+
+`--docs '*.md'` simulates old-`lfdocs`: glob semantics make `*.md` root-only
+(matches `README.md`, not `docs/foo.md` — use `**/*.md` for recursive), so it
+reproduces exactly the old root-level dump. Combined with now-ambient `scratch/`,
+`--docs '*.md'` is the full old `lfdocs=true` behavior — automatic became explicit.
+
+Note the naming trap: the new `--docs` flag is the mechanical successor to
+**`--area`** (file/glob/dir loading, reusing `gather_area_docs`), not a rename of
+`lfdocs`. Despite the shared word, `--docs` does not control any `<lf:docs>`
+section — that section no longer exists; `--docs` content renders as ordinary
+included files.
 
 ## Goal
 
@@ -116,7 +131,10 @@ doc, under its original name.
 
 ## Migration
 
-- `.lf/config.yaml`: `lfdocs`/`area` → `docs`. No back-compat shim (internal config).
+- `.lf/config.yaml`: `area: <dir>` → `docs: [<dir>]`. No back-compat shim (internal config).
+- `lfdocs: true` had no direct successor key — its two behaviors split: `scratch/`
+  is now unconditional ambient, and to keep the root-`*.md` dump add `docs: ['*.md']`.
+  Most configs can just drop `lfdocs` (root-doc dump was rarely the point).
 - Flows that relied on area docs set `docs:` explicitly.
 - `scratch/` + `wave/` need no change — they stay ambient by construction.
 

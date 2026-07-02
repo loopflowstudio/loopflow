@@ -600,7 +600,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     if breakdown.documents.len() > 100 {
         warn!(
             document_count = breakdown.documents.len(),
-            "context breakdown has more than 100 documents; consider narrowing area or diff scope"
+            "context breakdown has more than 100 documents; consider narrowing docs or diff scope"
         );
     }
 
@@ -1010,9 +1010,9 @@ fn push_doc_file(
     });
 }
 
-/// Parse an area string for cross-repo syntax (`repo_name:path`).
+/// Parse an explicit docs target for cross-repo syntax (`repo_name:path`).
 ///
-/// Returns `ResolvedArea::CrossRepo` if the area contains `:` and the repo name
+/// Returns `ResolvedArea::CrossRepo` if the target contains `:` and the repo name
 /// matches a related repo. Returns `ResolvedArea::Local` otherwise.
 fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> ResolvedArea<'a> {
     if let Some((repo_name, area_path)) = area.split_once(':') {
@@ -1057,8 +1057,8 @@ fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> R
 /// - src/api/handlers/ (e.g., src/api/handlers/README.md)
 /// - src/api/handlers/** (descendants under the area, recursively)
 ///
-/// Does NOT include repo root docs (already gathered by `gather_repo_root_docs`)
-/// and does NOT include sibling directories.
+/// Does NOT include repo root docs unless the target is "." and does NOT include
+/// sibling directories.
 fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
     let area_path = Path::new(area);
     let mut ancestors = Vec::new();
@@ -1766,14 +1766,14 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              - Preferences: user workflow, tool choices, communication norms\n\
              - Learnings: what worked, what failed, surprises\n\n\
              What belongs elsewhere:\n\
-             - architectural decisions → wave docs or area docs\n\
+             - architectural decisions → wave docs or explicit docs\n\
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
              - Edit within sections. Don't rewrite the whole file.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
-             - When a section grows large, promote stable entries to wave/area docs and trim.\n\n\
+             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\n\
              {}\n\
              </lf:wave>",
             wave, wave, memory_path, memory_content
@@ -2182,11 +2182,6 @@ mod tests {
                 source: DocumentSource::Diff,
             }],
             diff_file_count: 3,
-            area_docs: vec![Document {
-                path: "src/README.md".to_string(),
-                content: "Area".to_string(),
-                source: DocumentSource::Area,
-            }],
             ..Default::default()
         };
 
@@ -2197,7 +2192,6 @@ mod tests {
         assert_eq!(breakdown.source_count(DocumentSource::Scratch), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Summary), 1);
         assert_eq!(breakdown.source_count(DocumentSource::WaveMemory), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::Area), 1);
         assert_eq!(breakdown.source_count(DocumentSource::Diff), 3);
         assert!(breakdown
             .documents
@@ -2219,10 +2213,6 @@ mod tests {
             .documents
             .iter()
             .any(|entry| entry.path == "src/a.rs"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "src/README.md"));
     }
 
     #[test]
@@ -2449,25 +2439,28 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_omits_operate_by_default() {
-        let components = PromptComponents::default();
-
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("<lf:operate>"));
-        assert!(!prompt.contains("lf op commit"));
-    }
-
-    #[test]
-    fn format_prompt_includes_operate_when_enabled() {
+    fn format_prompt_includes_loopflow_when_enabled() {
         let components = PromptComponents {
             operate: true,
             ..Default::default()
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:operate>"));
+        assert!(prompt.contains("<lf:loopflow>"));
         assert!(prompt.contains("lf op commit"));
-        assert!(prompt.contains("</lf:operate>"));
+        assert!(prompt.contains("</lf:loopflow>"));
+    }
+
+    #[test]
+    fn format_prompt_omits_loopflow_when_disabled() {
+        let components = PromptComponents {
+            operate: false,
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:loopflow>"));
+        assert!(!prompt.contains("lf op commit"));
     }
 
     #[test]
@@ -2573,14 +2566,12 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:docs>"));
-        assert!(prompt.contains("</lf:docs>"));
-        assert!(prompt.contains("<lf:README>"));
+        assert!(prompt.contains("<lf:files>"));
+        assert!(prompt.contains("<lf:file path=\"README.md\">"));
         assert!(prompt.contains("# Test Project"));
-        assert!(prompt.contains("</lf:README>"));
-        assert!(prompt.contains("<lf:STYLE>"));
+        assert!(prompt.contains("</lf:file>"));
+        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
         assert!(prompt.contains("# Style Guide"));
-        assert!(prompt.contains("Follow STYLE carefully"));
     }
 
     #[test]
@@ -2770,22 +2761,6 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_area_docs_uses_ancestor_descendant_label() {
-        let components = PromptComponents {
-            area: Some("src/api".to_string()),
-            area_docs: vec![Document {
-                path: "src/api/README.md".to_string(),
-                content: "# API".to_string(),
-                source: DocumentSource::Area,
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("ancestor and descendant directories"));
-    }
-
-    #[test]
     fn format_prompt_full_assembly() {
         // Test a complete prompt with all sections
         let components = PromptComponents {
@@ -2821,7 +2796,7 @@ mod tests {
         // Verify order: system -> content -> task.
         let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
-        let docs_pos = prompt.find("<lf:docs>").unwrap();
+        let docs_pos = prompt.find("<lf:files>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
         let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
@@ -3091,11 +3066,10 @@ mod tests {
     }
 
     #[test]
-    fn gather_context_with_lfdocs() {
+    fn gather_context_loads_scratch_without_root_docs() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let repo = temp.path();
 
-        // Create docs
         std::fs::write(repo.join("README.md"), "# Project").expect("write readme");
         std::fs::create_dir_all(repo.join("scratch")).expect("create scratch");
         std::fs::write(repo.join("scratch/plan.md"), "# Plan").expect("write plan");
@@ -3112,11 +3086,7 @@ mod tests {
         assert!(!components.docs.is_empty());
 
         let readme = components.docs.iter().find(|d| d.path.contains("README"));
-        assert!(readme.is_some());
-        assert_eq!(
-            readme.expect("README should be gathered").source,
-            DocumentSource::RepoDoc
-        );
+        assert!(readme.is_none());
 
         let scratch = components
             .docs
@@ -3127,6 +3097,28 @@ mod tests {
             scratch.expect("scratch doc should be gathered").source,
             DocumentSource::Scratch
         );
+    }
+
+    #[test]
+    fn gather_context_loads_explicit_docs_targets() {
+        let repo = init_repo();
+        write_file(repo.path(), "README.md", "# Project");
+        write_file(repo.path(), "docs/README.md", "# Docs");
+        write_file(repo.path(), "docs/nested/README.md", "# Nested");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["README.md".to_string(), "docs".to_string()],
+            sources: vec![DocumentSource::RepoDoc],
+            ..Default::default()
+        };
+
+        let components = gather_context(&opts).expect("gather context");
+        let paths: Vec<&str> = components.docs.iter().map(|doc| doc.path.as_str()).collect();
+
+        assert!(paths.contains(&"README.md"));
+        assert!(paths.contains(&"docs/README.md"));
+        assert!(paths.contains(&"docs/nested/README.md"));
     }
 
     #[test]
@@ -3386,7 +3378,7 @@ directions:
         let context = format_context_prompt(&budget_context(components));
         // Should include context parts
         assert!(context.contains("Run mode is interactive"));
-        assert!(context.contains("<lf:docs>"));
+        assert!(context.contains("<lf:files>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
         // Should include directions (context, not task)
@@ -3615,7 +3607,7 @@ directions:
     // ── Cross-repo context loading ──────────────────────────────────────
 
     #[test]
-    fn gather_documents_cross_repo_area_includes_root_docs() {
+    fn gather_documents_cross_repo_docs_include_target_docs_only() {
         let session_repo = init_repo();
         write_file(session_repo.path(), "CLAUDE.md", "session claude");
 
@@ -3631,28 +3623,25 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::RepoDoc, DocumentSource::Area],
+            sources: vec![DocumentSource::RepoDoc],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("widgets:src".to_string()),
+            docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session repo docs still present
+        // Session scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+            .all(|d| d.path != "CLAUDE.md" && d.content != "session claude"));
 
-        // Related repo root docs loaded because area targets that repo
-        assert!(docs
+        // Related repo root docs are not loaded for a directory docs target.
+        assert!(!docs
             .iter()
             .any(|d| d.path == "[acme/widgets] CLAUDE.md" && d.content == "related claude"));
-        assert!(docs
-            .iter()
-            .any(|d| d.path == "[acme/widgets] STYLE.md" && d.content == "related style"));
 
-        // Related repo area doc
+        // Related repo docs target.
         assert!(docs
             .iter()
             .any(|d| d.path.contains("[acme/widgets]") && d.content == "src area doc"));
@@ -3679,8 +3668,8 @@ directions:
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session docs present
-        assert!(docs
+        // Session root docs are not ambient.
+        assert!(!docs
             .iter()
             .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
 
@@ -3689,7 +3678,7 @@ directions:
     }
 
     #[test]
-    fn gather_documents_no_related_repos_unchanged() {
+    fn gather_documents_no_related_repos_loads_no_root_docs() {
         let repo = init_repo();
         write_file(repo.path(), "README.md", "hello");
 
@@ -3703,7 +3692,7 @@ directions:
             .iter()
             .filter(|d| d.source == DocumentSource::RepoDoc)
             .collect();
-        assert!(repo_docs.iter().any(|d| d.path == "README.md"));
+        assert!(!repo_docs.iter().any(|d| d.path == "README.md"));
         // No prefixed docs
         assert!(!repo_docs.iter().any(|d| d.path.starts_with('[')));
     }
@@ -3719,9 +3708,9 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
+            sources: vec![DocumentSource::RepoDoc],
             repo_root: repo.path().to_path_buf(),
-            area: Some("gone:src".to_string()),
+            docs: vec!["gone:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
@@ -3731,7 +3720,7 @@ directions:
     }
 
     #[test]
-    fn gather_documents_cross_repo_area() {
+    fn gather_documents_cross_repo_docs() {
         let session_repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
@@ -3749,23 +3738,14 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
+            sources: vec![DocumentSource::RepoDoc],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("studio:swift".to_string()),
+            docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Root docs from the related repo
-        assert!(
-            docs.iter()
-                .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"),
-            "expected related repo root doc, got: {:?}",
-            docs.iter().map(|d| &d.path).collect::<Vec<_>>()
-        );
-
-        // Area docs from the related repo
         assert!(
             docs.iter()
                 .any(|d| d.path.contains("[acme/studio]") && d.content == "swift area doc"),
@@ -3788,18 +3768,13 @@ directions:
         };
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
+            sources: vec![DocumentSource::RepoDoc],
             repo_root: session_repo.path().to_path_buf(),
-            area: Some("studio:".to_string()),
+            docs: vec!["studio:".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
-
-        // Root docs loaded
-        assert!(docs
-            .iter()
-            .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"));
 
         // Top-level area docs loaded (README.md is a descendant of ".")
         assert!(docs
@@ -3808,15 +3783,15 @@ directions:
     }
 
     #[test]
-    fn gather_documents_local_area_unchanged() {
+    fn gather_documents_local_docs_directory() {
         let repo = init_repo();
         std::fs::create_dir_all(repo.path().join("docs")).unwrap();
         write_file(repo.path(), "docs/README.md", "local area doc");
 
         let spec = GatherSpec {
-            sources: vec![DocumentSource::Area],
+            sources: vec![DocumentSource::RepoDoc],
             repo_root: repo.path().to_path_buf(),
-            area: Some("docs".to_string()),
+            docs: vec!["docs".to_string()],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();

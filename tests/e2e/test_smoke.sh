@@ -34,7 +34,6 @@
     --repo "$repo_dir" \
     --step debug \
     --surface headless \
-    --lfdocs false \
     --diff-files false \
     --diff false \
     | grep -q "Test"

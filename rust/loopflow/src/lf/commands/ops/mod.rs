@@ -32,12 +32,7 @@ use std::process::Command;
 pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match op {
-        OpsCommand::Cp {
-            paths,
-            exclude,
-            lfdocs,
-            no_lfdocs,
-        } => copy_context(paths, exclude, *lfdocs, *no_lfdocs),
+        OpsCommand::Cp { paths, exclude } => copy_context(paths, exclude),
         OpsCommand::Doctor => doctor(),
         OpsCommand::Rebase { onto } => rebase_current(onto.as_deref(), &progress),
         OpsCommand::Push { force } => push_current(*force),
@@ -1434,28 +1429,27 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
 // lf op cp
 // ==========================================================================
 
-fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: bool) -> Result<()> {
+fn copy_context(paths: &[String], exclude: &[String]) -> Result<()> {
     use crate::engine::prompt::{
-        count_tokens, default_gather_sources, gather_context, Document, GatherContextOpts,
+        count_tokens, default_gather_sources, gather_context, Document, DocumentSource,
+        GatherContextOpts,
     };
     use std::collections::HashSet;
 
     let repo_root = find_repo_root()?;
 
-    // When paths are given, skip lfdocs unless --lfdocs is explicit.
-    // When no paths, include lfdocs by default unless --no-lfdocs.
     let has_paths = !paths.is_empty();
-    let include_lfdocs = if has_paths { lfdocs } else { !no_lfdocs };
 
     // Gather context
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
+        docs: Vec::new(),
         files: paths.to_vec(),
-        sources: default_gather_sources(
-            include_lfdocs,
-            !has_paths, // Use diff files if no paths specified
-            false,
-        ),
+        sources: if has_paths {
+            vec![DocumentSource::Diff]
+        } else {
+            default_gather_sources(true, false)
+        },
         ..Default::default()
     };
 

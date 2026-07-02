@@ -9,10 +9,6 @@ ROOT = Path(__file__).resolve().parents[2]
 GOLDENS_DIR = ROOT / "tests" / "goldens"
 
 
-def _bool_flag(name: str, value: bool) -> list[str]:
-    return [f"--{name}", "true" if value else "false"]
-
-
 def main() -> None:
     for case_path in sorted(GOLDENS_DIR.glob("*.yaml")):
         case = yaml.safe_load(case_path.read_text())
@@ -32,16 +28,15 @@ def main() -> None:
             cmd.extend(["--step", case["step"]])
         if case.get("surface"):
             cmd.extend(["--surface", case["surface"]])
-        if case.get("operate"):
-            cmd.append("--operate")
+        if case.get("no_loopflow"):
+            cmd.append("--no-loopflow")
         for direction in case.get("directions", []):
             cmd.extend(["--direction", direction])
-        cmd.extend(_bool_flag("lfdocs", case["lfdocs"]))
-        cmd.extend(_bool_flag("diff-files", case["diff_files"] or case["diff"]))
-        cmd.extend(_bool_flag("diff", case["diff"]))
-        cmd.extend(_bool_flag("clipboard", case["clipboard"]))
-        if case.get("area"):
-            cmd.extend(["--area", case["area"]])
+        for docs_target in case.get("docs", []):
+            cmd.extend(["--docs", docs_target])
+        cmd.extend(["--diff-files", "true" if case["diff_files"] or case["diff"] else "false"])
+        cmd.extend(["--diff", "true" if case["diff"] else "false"])
+        cmd.extend(["--clipboard", "true" if case["clipboard"] else "false"])
         if case.get("wave"):
             cmd.extend(["--wave", case["wave"]])
 

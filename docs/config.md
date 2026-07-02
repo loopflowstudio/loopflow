@@ -13,11 +13,10 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive mode | `-i` | frontmatter: `interactive: true` |
-| Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
+| Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Area scope | `--area PATH` | `area: PATH` |
 | Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
@@ -45,7 +44,9 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | `wave/`, `scratch/`, root `.md` files | `lfdocs: true` (default) |
+| **scratch** | `scratch/` design artifacts | always included |
+| **wave** | `wave/<name>/` docs when a wave is scoped | `--wave NAME` |
+| **files** | Explicit docs files, globs, and directory markdown walks | `docs:` |
 | **diff_files** | Files changed on this branch | `diff_files: true` (default) |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
@@ -56,7 +57,7 @@ Defaults work well for most repos. Summaries require configuration.
 
 **Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
 
-For most settings, repo overrides global. For additive settings (`context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, repo overrides global. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -83,6 +84,10 @@ context:
   - src/schema.py
   - docs/api.md
 
+docs:
+  - README.md
+  - docs/
+
 exclude:
   - "*.test.ts"
   - node_modules
@@ -106,17 +111,17 @@ Flows are YAML files in `.lf/flows/`:
 
 ## Options Reference
 
-### LF Docs (files)
+### Docs
 
-`wave/`, `scratch/`, and root markdown files.
+Explicit docs paths, globs, or directories. Directory entries include markdown from ancestors and descendants.
 
 | | |
 |---|---|
-| **CLI** | `--lfdocs` / `--no-lfdocs` |
-| **Config** | `lfdocs: true` |
-| **Default** | `true` (included) |
+| **CLI** | `--docs README.md,docs/` |
+| **Config** | `docs: [README.md, docs/]` |
+| **Default** | empty |
 
-Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `scratch/` (current PR scratchpad) and `wave/` (wave plans).
+Root README files are no longer special. `scratch/` remains ambient, and `wave/` loads when a wave is in scope.
 
 ### Branch Files (diff_files)
 

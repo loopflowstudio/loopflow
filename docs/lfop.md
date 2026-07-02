@@ -12,10 +12,9 @@ Operations and utilities. `lf op` handles everything that's not launching a prom
 Copy context to clipboard for use with web clients.
 
 ```bash
-lf op cp                     # copy repo docs
+lf op cp                     # copy ambient context
 lf op cp src tests           # copy specific paths
 lf op cp -e "*.pyc"          # exclude patterns
-lf op cp --no-lfdocs         # skip repo docs
 ```
 
 Options:
@@ -23,7 +22,6 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `-e, --exclude` | Exclude patterns |
-| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root .md files |
 
 ---
 

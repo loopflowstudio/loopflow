@@ -1,7 +1,7 @@
 //! Configuration loading for loopflow.
 //!
 //! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
-//! Repo config overrides global. Additive keys (context, exclude, summaries) combine.
+//! Repo config overrides global. Additive keys (docs, context, exclude, summaries) combine.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,7 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "summaries", "supported_harnesses"];
+const ADDITIVE_KEYS: &[&str] = &[
+    "docs",
+    "context",
+    "exclude",
+    "summaries",
+    "supported_harnesses",
+];
 
 /// Token budgets for prompt sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,9 +248,9 @@ pub struct Config {
     #[serde(default)]
     pub interactive: Vec<String>,
 
-    /// Include reports/, wave/, scratch/, and root .md files
-    #[serde(default = "default_true")]
-    pub lfdocs: bool,
+    /// Docs paths, globs, or directories to include by default.
+    #[serde(default)]
+    pub docs: Vec<String>,
 
     /// Include raw branch diff
     #[serde(default)]
@@ -261,10 +267,6 @@ pub struct Config {
     /// Default directions for all tasks
     #[serde(default)]
     pub direction: Option<Vec<String>>,
-
-    /// Default area for parent doc inclusion
-    #[serde(default)]
-    pub area: Option<String>,
 
     /// Summaries to include
     #[serde(default)]
@@ -328,12 +330,11 @@ impl Default for Config {
             exclude: Vec::new(),
             session: SessionConfig::default(),
             interactive: Vec::new(),
-            lfdocs: true,
+            docs: Vec::new(),
             diff: false,
             diff_files: true,
             paste: false,
             direction: None,
-            area: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
             branch_names: None,
@@ -590,7 +591,7 @@ pm:
         assert!(config.agent.is_none());
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
-        assert!(config.lfdocs);
+        assert!(config.docs.is_empty());
         assert!(config.diff_files);
         assert!(!config.diff);
         assert!(!config.chrome);
@@ -601,7 +602,6 @@ pm:
         assert_eq!(config.session.launch, LaunchTarget::Tui);
         assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
-        assert!(config.area.is_none());
         assert!(config.release.targets.is_empty());
     }
 
@@ -684,6 +684,17 @@ context:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.context, vec!["src/", "tests/"]);
+    }
+
+    #[test]
+    fn config_from_yaml_docs_as_list() {
+        let yaml = r#"
+docs:
+  - README.md
+  - docs/
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(config.docs, vec!["README.md", "docs/"]);
     }
 
     #[test]
@@ -915,6 +926,8 @@ agent: codex
             r#"
 context:
   - global.md
+docs:
+  - README.md
 exclude:
   - "*.log"
 "#,
@@ -925,6 +938,8 @@ exclude:
             r#"
 context:
   - local.md
+docs:
+  - docs/
 exclude:
   - build/
 "#,
@@ -935,6 +950,7 @@ exclude:
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.context, vec!["global.md", "local.md"]);
+        assert_eq!(config.docs, vec!["README.md", "docs/"]);
         assert_eq!(config.exclude, vec!["*.log", "build/"]);
     }
 

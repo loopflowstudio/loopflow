@@ -361,14 +361,14 @@ pub(crate) fn build_lf_step_command(
     step_name: &str,
     batch: bool,
     directions: &[String],
-    area: &[String],
+    docs: &[String],
     wave_name: &str,
 ) -> Vec<String> {
     let mut cmd = vec![
         resolve_lf_binary().to_string_lossy().to_string(),
         step_name.to_string(),
     ];
-    append_lf_run_options(&mut cmd, batch, directions, area, wave_name);
+    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
     cmd
 }
 
@@ -376,11 +376,11 @@ pub(crate) fn build_lf_inline_command(
     prompt: &str,
     batch: bool,
     directions: &[String],
-    area: &[String],
+    docs: &[String],
     wave_name: &str,
 ) -> Vec<String> {
     let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
-    append_lf_run_options(&mut cmd, batch, directions, area, wave_name);
+    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
     cmd.push(":".to_string());
     cmd.push(prompt.to_string());
     cmd
@@ -390,7 +390,7 @@ fn append_lf_run_options(
     cmd: &mut Vec<String>,
     batch: bool,
     directions: &[String],
-    area: &[String],
+    docs: &[String],
     wave_name: &str,
 ) {
     if batch {
@@ -401,9 +401,9 @@ fn append_lf_run_options(
         cmd.push("-d".to_string());
         cmd.push(direction.clone());
     }
-    for scope in area {
-        cmd.push("-a".to_string());
-        cmd.push(scope.clone());
+    for target in docs {
+        cmd.push("--docs".to_string());
+        cmd.push(target.clone());
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());

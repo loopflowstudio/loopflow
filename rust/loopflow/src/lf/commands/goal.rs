@@ -199,7 +199,7 @@ mod tests {
         let prepared = prepare_goal_launch(&config, tmp.path().to_path_buf(), message, None, false)
             .expect("prepare goal launch");
 
-        assert!(prepared.prompt.contains("<lf:operate>"));
+        assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.prompt.contains("<lf:goal-context>"));
         assert!(prepared.prompt.contains("Drive the ship wave."));
     }

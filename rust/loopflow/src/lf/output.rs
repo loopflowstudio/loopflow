@@ -181,9 +181,9 @@ pub fn format_reproducible_command(
     step: Option<&str>,
     directions: &[String],
     wave: Option<&str>,
-    area: Option<&str>,
+    docs: &[String],
     clipboard: bool,
-    operate: bool,
+    no_loopflow: bool,
     model: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
@@ -196,14 +196,14 @@ pub fn format_reproducible_command(
     if let Some(w) = wave {
         parts.push(format!("--wave {}", w));
     }
-    if let Some(a) = area {
-        parts.push(format!("-a {}", a));
+    for doc in docs {
+        parts.push(format!("--docs {}", doc));
     }
     if clipboard {
         parts.push("-c".to_string());
     }
-    if operate {
-        parts.push("--operate".to_string());
+    if no_loopflow {
+        parts.push("--no-loopflow".to_string());
     }
     if let Some(m) = model {
         // Only include if not the default
@@ -297,14 +297,14 @@ mod tests {
             Some("implement"),
             &["security".to_string()],
             Some("rust"),
-            Some("src/"),
+            &["src/".to_string()],
             true,
             true,
             Some("claude:opus"),
         );
         assert_eq!(
             cmd,
-            "lf implement -d security --wave rust -a src/ -c --operate -m claude:opus"
+            "lf implement -d security --wave rust --docs src/ -c --no-loopflow -m claude:opus"
         );
     }
 }

@@ -46,15 +46,14 @@ lf debug -c
 Tokens: 8,247
 
 files          4,892 ████
-  STYLE.md     1,854 █
-  README.md      588 ▏
+  scratch/     1,854 █
 diff_files     2,721 ██
   src/calc.py  1,847 █
   tests/         874 ▏
 clipboard        634 ▏
 ```
 
-The `-c` flag pastes your clipboard. `lf` assembles context—repo docs, branch files, clipboard—and passes it to the coding agent.
+The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance, scratch notes, branch files, clipboard—and passes it to the coding agent. Add repo docs explicitly with `--docs`.
 
 Or try the demo repo:
 
@@ -78,7 +77,7 @@ lf : "add type hints to utils.py"
 | Flag | What it adds |
 |------|--------------|
 | `-c` | Clipboard content |
-| `--area PATH` | Scope to specific area |
+| `--docs PATH` | Include docs files, globs, or directories |
 | `--diff` | Raw `git diff` output |
 | `-i` | Interactive mode |
 | `-b` | Batch/headless mode |

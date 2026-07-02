@@ -27,8 +27,8 @@ rotation.
 ## Delegate Work
 
 Dispatch an `lf` flow or step for real implementation work. A dispatched child
-inherits loopflow context: repo docs, style guide, area docs, wave context, and
-step instructions. Inline edits in the coordinating session do not, and they
+inherits loopflow context: operating guidance, scratch notes, explicit docs,
+wave context, and step instructions. Inline edits in the coordinating session do not, and they
 bloat the transcript with work that belongs in a child.
 
 Inside a Wave loop, dispatch with:

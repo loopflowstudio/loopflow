@@ -13,6 +13,7 @@ mod pr;
 mod progress;
 mod rebase;
 mod release;
+pub mod roadmap;
 pub mod trace;
 pub(crate) mod util;
 
@@ -35,5 +36,9 @@ pub use rebase::{rebase_with_recovery, RebaseOptions};
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
+};
+pub use roadmap::{
+    roadmap_fetch, roadmap_update, RoadmapFetchOptions, RoadmapFetchResult, RoadmapUpdateOptions,
+    RoadmapUpdateResult,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

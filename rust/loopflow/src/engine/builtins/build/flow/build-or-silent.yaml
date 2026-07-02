@@ -1,4 +1,3 @@
-- op: pm pull
 - ingest
 - xor:
     paths:

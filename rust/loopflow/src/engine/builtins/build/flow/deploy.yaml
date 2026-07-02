@@ -1,3 +1,2 @@
 - gate
 - op: land --create-pr
-- op: pm push-diff

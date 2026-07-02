@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full PM reset: delete loopflow-managed projects, clear IDs, re-init, push.
+"""Full PM reset: delete loopflow-managed projects, clear IDs, re-init.
 
 One command to wipe PM state and rebuild it from ``wave/``. Use after a wave
 reorg, or any time PM drift has accumulated past the point of incremental
@@ -14,7 +14,9 @@ Flow:
     2. DELETE each project via the provider API.
     3. Clear the project ID from goal frontmatter.
     4. Run ``lf op pm init --all`` to bootstrap fresh projects.
-    5. Run ``lf op pm push-diff --all`` to populate items.
+
+There is no local roadmap mirror to repopulate — waves read and write their
+live roadmap via `lf op roadmap` using the `roadmap:` handle in GOAL.md.
 
 Only Asana is implemented at the moment. Linear/Notion raise on --provider.
 """
@@ -119,11 +121,6 @@ def main() -> int:
         help="Credentials directory (default: ~/.lf/credentials)",
     )
     parser.add_argument("--skip-init", action="store_true", help="Skip `lf op pm init --all`")
-    parser.add_argument(
-        "--skip-push-diff",
-        action="store_true",
-        help="Skip `lf op pm push-diff --all`",
-    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -155,10 +152,6 @@ def main() -> int:
     if not args.skip_init:
         print("\nRe-initializing from wave/...")
         run_cmd(["lf", "op", "pm", "init", "--all"], args.dry_run, cwd=repo)
-
-    if not args.skip_push_diff:
-        print("\nPushing current state...")
-        run_cmd(["lf", "op", "pm", "push-diff", "--all"], args.dry_run, cwd=repo)
 
     print("\nDone.")
     return 0

@@ -2997,7 +2997,7 @@ Be careful.
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("deploy", tmp.path()).unwrap();
         let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 3); // gate, op: land, op: pm sync
+        assert_eq!(items.len(), 2); // gate, op: land
     }
 
     #[test]

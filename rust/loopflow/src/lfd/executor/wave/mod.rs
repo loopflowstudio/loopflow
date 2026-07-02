@@ -20,6 +20,7 @@ use crate::engine::flow::InFlightDispatch;
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
+use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::http::routes::{infer_wave_git_state_for_worktree, is_open_pr_state};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
@@ -150,11 +151,15 @@ fn build_wave_run_command(
     let repo = Path::new(&run.worktree);
     let goal = crate::engine::load_goal(wave.goal(), repo)?;
     let memory = read_wave_memory(repo, wave.name())?;
+    let roadmap = read_wave_config(repo, wave.name())
+        .and_then(|config| config.roadmap)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "(none)".to_string());
     let prompt = crate::engine::render_goal(
         &goal,
         &crate::engine::GoalRenderContext {
             flows: crate::engine::available_flow_names(repo),
-            roadmap: format!("wave/{}", wave.name()),
+            roadmap,
             memory,
             metrics: wave.metrics().clone(),
             in_flight,
@@ -1498,6 +1503,13 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("create flows dir");
         std::fs::write(repo.path().join(".lf/flows/custom.yaml"), "- implement\n")
             .expect("write flow");
+        let wave_dir = repo.path().join("wave").join("goal-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(
+            wave_dir.join("GOAL.md"),
+            "---\nroadmap: asana://12345\n---\nDrive the work.\n",
+        )
+        .expect("write wave goal");
 
         let db_path = repo.path().join("lfd.db");
         let store = Arc::new(
@@ -1545,7 +1557,60 @@ mod tests {
         let prompt = cmd.last().expect("inline prompt should be last arg");
         assert!(prompt.contains("Execute the custom goal body."));
         assert!(prompt.contains("- custom"));
-        assert!(prompt.contains("wave/goal-wave"));
+        assert!(prompt.contains("asana://12345"));
+    }
+
+    #[tokio::test]
+    async fn execute_wave_run_with_goal_falls_back_to_none_without_roadmap_handle() {
+        let repo = TestRepo::new();
+        let goals_dir = repo.path().join(".lf/goals");
+        std::fs::create_dir_all(&goals_dir).expect("create goal dir");
+        std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
+            .expect("write goal");
+
+        let db_path = repo.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store"),
+        );
+        let scheduler = Arc::new(crate::lfd::scheduler::Scheduler::new(1));
+        let event_hub = EventHub::new(16);
+        let runner = Arc::new(CapturingRunner {
+            cmd: Mutex::new(None),
+        });
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            OutputHub::new(1024, repo.path().join("output")),
+            event_hub,
+            runner.clone(),
+        );
+
+        let mut wave = make_wave(
+            "goal-wave-no-roadmap",
+            repo.path(),
+            "ship-roadmap",
+            WaveStatus::Running,
+        );
+        wave.mode = WaveMode::Manual;
+        wave.goal = "drive".to_string();
+        store.create_wave(&wave).await.expect("create wave");
+
+        let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
+        run.target_branch = "goal-branch".to_string();
+        store.update_wave_run(&run).await.expect("update run");
+
+        executor.execute(&run.id).await.expect("execute run");
+
+        let cmd = runner
+            .cmd
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone()
+            .expect("runner command");
+        let prompt = cmd.last().expect("inline prompt should be last arg");
+        assert!(prompt.contains("Roadmap handle:\n(none)"));
     }
 
     #[tokio::test]

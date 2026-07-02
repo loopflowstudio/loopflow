@@ -112,8 +112,9 @@ Priority meanings:
 - **`4-*`** — Low: speculative work
 
 `ingest` picks from the highest-priority non-empty level first. Within a level, the default fast path uses filename order.
-For PM-backed waves, `lf op ingest` refreshes the local wave mirror from the provider before it picks. If that pull fails, ingest warns and falls back to the existing local files.
 Use `lf op ingest --item <filename-or-slug>` when you want to target a specific item instead of auto-picking.
+
+Waves with a `roadmap:` handle in `GOAL.md` (e.g. `roadmap: asana://<project_id>`) skip local files entirely — `lf op roadmap` reads and writes that PM project directly, with no local mirror in between.
 
 Each item needs:
 
@@ -180,7 +181,7 @@ When a wave runs, it cycles through four phases:
 ingest → kickoff → build → update-wave → [loop]
 ```
 
-**ingest** refreshes PM-backed waves from the provider, then picks the highest-priority item from `wave/<name>/` and moves it to `scratch/`.
+**ingest** picks the highest-priority item — from `wave/<name>/` locally, or live via `lf op roadmap` when the wave has a `roadmap:` handle — and moves it to `scratch/`.
 
 **kickoff** elaborates the item into an actionable design — alternatives considered, research done, success and failure imagined.
 

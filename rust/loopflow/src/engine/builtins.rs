@@ -224,7 +224,7 @@ mod tests {
         assert!(update_wave.contains("4-*"));
         assert!(!update_wave.contains("numbered item files"));
         assert!(ingest.contains("highest-priority non-empty level"));
-        assert!(design.contains("1-*.md"));
+        assert!(design.contains("GOAL.md"));
         assert!(scan_waves.contains("1-*` through `4-*"));
         assert!(!scan_waves.contains("All numbered item files"));
         assert!(split_wave.contains("Bucketed roadmap files"));

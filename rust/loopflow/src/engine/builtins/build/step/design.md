@@ -89,13 +89,12 @@ This is the natural session exit point. The user's answer determines what to run
    - `## Metrics` — numeric measurements (counts, percentages, durations), not qualitative indicators
    - Include `### Not here` under Vision when scope boundaries are important
 4. Write `wave/<name>/GOAL.md`:
-   - frontmatter: `primary_flow` (default `ship-wave` unless user asks for something else), optional `direction`, and `metrics`
+   - frontmatter: `primary_flow` (default `ship-wave` unless user asks for something else), optional `direction`, `metrics`, and `roadmap` (a live handle like `asana://<project_id>` if this wave tracks its backlog in a PM tool)
    - body: the loop prompt this wave should run
-5. Write roadmap files as `wave/<name>/1-*.md`, `2-*.md`, `3-*.md`, `4-*.md` — use the smallest honest priority for each item. **Create every file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
-6. The first item you expect to build now — usually `1-*` or `2-*` — becomes the design doc for this branch (`scratch/<branch>.md`)
-7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
-8. End session and tell the user what to run next:
-   - `lf implement` (for the immediate urgent/high item)
+5. The first item you expect to build now becomes the design doc for this branch (`scratch/<branch>.md`) — write it as a normal design spec, not a roadmap file
+6. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
+7. End session and tell the user what to run next:
+   - `lf implement` (for the item just designed)
    - `lf ship-wave`
 
 Once breaking things up, be aggressive about commit boundaries—each item should be independently shippable.

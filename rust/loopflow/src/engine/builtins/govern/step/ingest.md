@@ -1,10 +1,10 @@
 ---
-requires: wave/<wave>/ items
+requires: wave/<wave>/ items or a live `roadmap:` handle
 produces: scratch/<slug>.md
 default_agent: claude
 fast-path: lf op ingest
 ---
-Refresh PM-backed waves, then pick the highest-priority item from the wave's backlog and move it to scratch/.
+Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 ## Orientation
 
@@ -19,7 +19,21 @@ Before starting, orient yourself in this branch:
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
-Fast path: `lf op ingest --item <filename-or-slug>` targets a specific roadmap item instead of auto-picking. If the wave is PM-backed, ingest refreshes the local mirror before picking and warns if the pull fails.
+## Live PM roadmap
+
+Check `wave/<wave>/GOAL.md` frontmatter for a `roadmap:` handle (e.g.
+`roadmap: asana://<project_id>`). If one is set, the backlog lives in a PM
+tool, not in local files — there is no local mirror to refresh or fall back
+to:
+
+1. Run `lf op roadmap --wave <wave>` to fetch the live task list
+2. Pick the highest-priority open task using the same selection criteria below
+3. Write its title, id, and notes into `scratch/<wave>-<slug>.md`
+4. When the work ships, fold the result back: `lf op roadmap update --wave <wave> --id <task-id> --status done`
+
+Without a `roadmap:` handle, the backlog is the local `wave/<wave>/*.md` files
+described below. Fast path: `lf op ingest --item <filename-or-slug>` targets a
+specific local roadmap item instead of auto-picking.
 
 ## Wave context
 
@@ -77,11 +91,12 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 1. Get wave name from `<lf:wave>` in context
 2. Find `wave/<wave>/` in the docs
-3. Read README.md for strategic context (Vision, Goals, Risks, Metrics)
+3. Check `GOAL.md` frontmatter for a `roadmap:` handle — if set, follow "Live PM roadmap" above instead of the steps below
+4. Read README.md for strategic context (Vision, Goals, Risks, Metrics)
    Read the roadmap (`1-*.md` through `4-*.md`) for urgency, dependencies, and scope
-4. Identify the highest-priority non-empty bucket
-5. Pick the highest-priority item from that bucket
-6. Move it to `scratch/<wave>-<slug>.md`
+5. Identify the highest-priority non-empty bucket
+6. Pick the highest-priority item from that bucket
+7. Move it to `scratch/<wave>-<slug>.md`
 
 ## Output
 

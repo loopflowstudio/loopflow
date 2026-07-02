@@ -1649,9 +1649,7 @@ fn list_workflow_runs(
 
 fn is_missing_workflow_error(stderr: &str) -> bool {
     let stderr = stderr.to_lowercase();
-    stderr.contains("could not find workflow")
-        || stderr.contains("workflow not found")
-        || stderr.contains("not found")
+    stderr.contains("could not find workflow") || stderr.contains("workflow not found")
 }
 
 fn github_release_exists(repo: &Path, tag: &str) -> OpsResult<bool> {

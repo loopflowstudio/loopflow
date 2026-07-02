@@ -141,6 +141,7 @@ pub struct Goal {
 pub struct GoalRenderContext {
     pub flows: Vec<String>,
     pub roadmap: String,
+    pub memory: String,
     pub metrics: Vec<String>,
 }
 
@@ -322,11 +323,17 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let memory = if ctx.memory.trim().is_empty() {
+        "No wave memory is recorded.".to_string()
+    } else {
+        ctx.memory.trim().to_string()
+    };
 
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
         LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
+        memory,
         flows,
         ctx.roadmap,
         metrics
@@ -691,8 +698,8 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let wave_goal = repo.join("wave").join(name).join("goal.md");
-    if wave_goal.exists() {
+    let wave_goal = repo.join("wave").join(name).join("GOAL.md");
+    if exact_path_exists(&wave_goal) {
         return Ok(wave_goal);
     }
 
@@ -720,6 +727,20 @@ fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError::GoalNotFound(name.to_string()))
+}
+
+fn exact_path_exists(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Some(file_name) = path.file_name() else {
+        return false;
+    };
+    std::fs::read_dir(parent).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name() == file_name)
+    })
 }
 
 fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
@@ -1606,7 +1627,7 @@ mod tests {
         fs::create_dir_all(&wave_dir).unwrap();
         fs::write(goals_dir.join("goals.md"), "Repo goal prompt.").unwrap();
         fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\nmetrics:\n  - tests pass\n---\nWave goal prompt.",
         )
         .unwrap();
@@ -1620,10 +1641,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let singular_dir = tmp.path().join(".lf/goal");
         let root_dir = tmp.path().join("goal");
+        let wave_dir = tmp.path().join("wave/custom");
         fs::create_dir_all(&singular_dir).unwrap();
         fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(&wave_dir).unwrap();
         fs::write(singular_dir.join("custom.md"), "Singular goal.").unwrap();
         fs::write(root_dir.join("custom.md"), "Root goal.").unwrap();
+        fs::write(wave_dir.join("goal.md"), "Lowercase wave goal.").unwrap();
 
         let err = load_goal("custom", tmp.path()).unwrap_err();
         assert!(matches!(err, LoadError::GoalNotFound(name) if name == "custom"));
@@ -1639,12 +1663,15 @@ mod tests {
             &GoalRenderContext {
                 flows: vec!["build".to_string(), "qa".to_string()],
                 roadmap: "wave/goals".to_string(),
+                memory: "Last loop found the docs drift.".to_string(),
                 metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
             },
         );
 
         assert!(rendered.contains("Drive the work."));
         assert!(rendered.contains("<lf:loopflow-operating-prompt>"));
+        assert!(rendered.contains("<lf:wave-memory>"));
+        assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("an orchestrator, not an implementer."));
         assert!(rendered.contains("never solve substantial work yourself"));
         assert!(rendered.contains("- build"));
@@ -1652,6 +1679,26 @@ mod tests {
         assert!(rendered.contains("wave/goals"));
         assert!(rendered.contains("- tests pass"));
         assert!(rendered.contains("- docs updated"));
+    }
+
+    #[test]
+    fn render_goal_handles_empty_memory() {
+        let goal = Goal {
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: Vec::new(),
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: Vec::new(),
+            },
+        );
+
+        assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
+        assert!(rendered.contains("No flows are available."));
+        assert!(rendered.contains("No metrics are configured."));
     }
 
     #[test]

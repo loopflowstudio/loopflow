@@ -54,7 +54,7 @@ these facets independent of whether any agent is running:
 
 | Facet | Lives in | Durable without a live agent? |
 |---|---|---|
-| Intent | the goal it loops (`goal.md`, via a pointer) | yes |
+| Intent | the goal it loops (`GOAL.md`, via a pointer) | yes |
 | Work index | `wave/<name>` branches, PRs, `<repo>.<name>` worktrees | yes |
 | Memory | `wave/<name>/MEMORY.md` — roadmap, decisions, learnings, curated | yes — the continuity substrate |
 | Agent | its current canonical `TerminalSession` incarnation | the *agent* is durable — it **is** the Wave, via its memory; the incarnation is not |
@@ -108,7 +108,7 @@ or derived from the incarnation + open attention items. Flagged under Open forks
 
 - **`GOAL.md`** — intent. Frontmatter (metrics, `roadmap` pointer, `agent`, `workers`,
   `primary_flow` bias) + body (the loop prompt). Renames the landed lowercase
-  `goal.md`; the resolver moves with it.
+  `GOAL.md`; the resolver moves with it.
 - **`MEMORY.md`** — the wave's curated memory: roadmap progress, decisions, learnings,
   the context it has accumulated. Replaces the old N-numbered roadmap files; a
   repo-local roadmap folds in here, an Asana roadmap lives external with MEMORY.md as

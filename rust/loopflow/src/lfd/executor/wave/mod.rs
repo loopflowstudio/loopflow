@@ -128,11 +128,13 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, String)> {
     let repo = Path::new(&run.worktree);
     let goal = crate::engine::load_goal(wave.goal(), repo)?;
+    let memory = read_wave_memory(repo, wave.name())?;
     let prompt = crate::engine::render_goal(
         &goal,
         &crate::engine::GoalRenderContext {
             flows: crate::engine::available_flow_names(repo),
             roadmap: format!("wave/{}", wave.name()),
+            memory,
             metrics: wave.metrics().clone(),
         },
     );
@@ -144,6 +146,15 @@ fn build_wave_run_command(wave: &Wave, run: &WaveRun) -> Result<(Vec<String>, St
         wave.name(),
     );
     Ok((cmd, format!("goal:{}", wave.goal())))
+}
+
+fn read_wave_memory(repo: &Path, wave_name: &str) -> Result<String> {
+    let path = repo.join("wave").join(wave_name).join("MEMORY.md");
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(anyhow!("failed to read wave memory: {err}")),
+    }
 }
 
 #[derive(Clone)]
@@ -2031,6 +2042,49 @@ mod tests {
         let mut run = WaveRun::new(LfdId::new(), LfdId::new());
         run.snapshot.flow = "build".to_string();
         assert_eq!(classify_repair_flow(&run), "debug");
+    }
+
+    #[test]
+    fn build_wave_run_command_includes_wave_memory_in_prompt() {
+        let repo = tempdir().expect("tempdir");
+        let wave_dir = repo.path().join("wave").join("memory-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
+        std::fs::write(
+            wave_dir.join("MEMORY.md"),
+            "Last loop found the roadmap gap.\n",
+        )
+        .expect("write memory");
+
+        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
+        wave.goal = "memory-wave".to_string();
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+
+        let (cmd, terminal_step) = build_wave_run_command(&wave, &run).expect("build wave command");
+        let rendered = cmd.join("\n");
+
+        assert_eq!(terminal_step, "goal:memory-wave");
+        assert!(rendered.contains("Drive the memory wave."));
+        assert!(rendered.contains("<lf:wave-memory>"));
+        assert!(rendered.contains("Last loop found the roadmap gap."));
+    }
+
+    #[test]
+    fn build_wave_run_command_errors_when_wave_memory_is_unreadable() {
+        let repo = tempdir().expect("tempdir");
+        let wave_dir = repo.path().join("wave").join("memory-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
+        std::fs::create_dir(wave_dir.join("MEMORY.md")).expect("create unreadable memory path");
+
+        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
+        wave.goal = "memory-wave".to_string();
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+
+        let err = build_wave_run_command(&wave, &run).expect_err("memory read should fail");
+        assert!(err.to_string().contains("failed to read wave memory"));
     }
 
     #[tokio::test]

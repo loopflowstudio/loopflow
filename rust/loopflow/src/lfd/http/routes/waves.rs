@@ -1914,7 +1914,7 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\npm:\n  provider: asana\n  asana_project: '123'\n---\nDrive the work.\n",
         )
         .expect("write wave goal");
@@ -2035,7 +2035,7 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\nprimary_flow: build\nmode: manual\ndirection: [clarity]\narea: [src/]\nmetrics:\n  - tests pass\n---\nDrive the work.\n",
         )
         .expect("write wave goal");
@@ -2105,7 +2105,7 @@ mod tests {
         let wave_dir = repo_tmp.path().join("wave").join("designer");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
         std::fs::write(
-            wave_dir.join("goal.md"),
+            wave_dir.join("GOAL.md"),
             "---\nprimary_flow: build\nworkers: 0\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\n---\nDrive the work.\n",
         )
         .expect("write wave goal");

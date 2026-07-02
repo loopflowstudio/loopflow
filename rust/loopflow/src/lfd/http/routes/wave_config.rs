@@ -107,7 +107,7 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
 }
 
 fn goal_path(repo: &Path, name: &str) -> std::path::PathBuf {
-    repo.join("wave").join(name).join("goal.md")
+    repo.join("wave").join(name).join("GOAL.md")
 }
 
 fn empty_goal_body(name: &str) -> String {
@@ -226,7 +226,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\nprimary_flow: build\nmode: manual\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -249,7 +249,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\npm:\n  provider: linear\n  asana_project: \"1234567890\"\n  notion_project: \"notion-db\"\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -268,7 +268,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\npm:\n  asana_project: \"1234567890\"\n  linear_project: \"uuid-here\"\n  notion_project: \"notion-here\"\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -286,7 +286,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -308,7 +308,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\nprimary_flow: build\narea: ['.']\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -341,7 +341,7 @@ mod tests {
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
-            dir.join("goal.md"),
+            dir.join("GOAL.md"),
             "---\nprimary_flow: build\narea: ['.']\nagent: codex:o3\nstep_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
         )
         .expect("write");

@@ -2,7 +2,7 @@
 primary_flow: ship-roadmap
 mode: manual
 metrics:
-  - goal.md is the authored wave surface
+  - GOAL.md is the authored wave surface
   - Asana is the live roadmap
   - Concerto can launch and show looping sessions
 ---

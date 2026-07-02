@@ -143,6 +143,19 @@ pub struct GoalRenderContext {
     pub roadmap: String,
     pub memory: String,
     pub metrics: Vec<String>,
+    pub in_flight: Vec<InFlightDispatch>,
+}
+
+/// A wave run that is still dispatched — not yet completed, failed, or landed.
+/// Fed into `render_goal` so the loop's read step sees what's already in flight
+/// before picking the next move.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InFlightDispatch {
+    pub task: Option<String>,
+    pub flow: String,
+    pub status: String,
+    pub pr_url: Option<String>,
+    pub pr_state: Option<String>,
 }
 
 const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave — an orchestrator, not an implementer.
@@ -328,12 +341,31 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     } else {
         ctx.memory.trim().to_string()
     };
+    let in_flight = if ctx.in_flight.is_empty() {
+        "No work is in flight.".to_string()
+    } else {
+        ctx.in_flight
+            .iter()
+            .map(|dispatch| {
+                let task = dispatch.task.as_deref().unwrap_or("(no task)");
+                let pr = match (&dispatch.pr_state, &dispatch.pr_url) {
+                    (Some(state), Some(url)) => format!(" ({state} {url})"),
+                    (Some(state), None) => format!(" ({state})"),
+                    (None, Some(url)) => format!(" ({url})"),
+                    (None, None) => String::new(),
+                };
+                format!("- [{}] {}: {}{}", dispatch.status, dispatch.flow, task, pr)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
         LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
         memory,
+        in_flight,
         flows,
         ctx.roadmap,
         metrics
@@ -1665,6 +1697,7 @@ mod tests {
                 roadmap: "wave/goals".to_string(),
                 memory: "Last loop found the docs drift.".to_string(),
                 metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
+                in_flight: Vec::new(),
             },
         );
 
@@ -1693,12 +1726,42 @@ mod tests {
                 roadmap: "wave/goals".to_string(),
                 memory: String::new(),
                 metrics: Vec::new(),
+                in_flight: Vec::new(),
             },
         );
 
         assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
         assert!(rendered.contains("No flows are available."));
         assert!(rendered.contains("No metrics are configured."));
+        assert!(rendered.contains("<lf:in-flight>\nNo work is in flight."));
+    }
+
+    #[test]
+    fn render_goal_includes_in_flight_dispatches() {
+        let goal = Goal {
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: Vec::new(),
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: Vec::new(),
+                in_flight: vec![InFlightDispatch {
+                    task: Some("Add the dispatch endpoint.".to_string()),
+                    flow: "implement".to_string(),
+                    status: "running".to_string(),
+                    pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
+                    pr_state: Some("open".to_string()),
+                }],
+            },
+        );
+
+        assert!(rendered.contains("<lf:in-flight>"));
+        assert!(rendered.contains(
+            "- [running] implement: Add the dispatch endpoint. (open https://github.com/example/repo/pull/42)"
+        ));
     }
 
     #[test]

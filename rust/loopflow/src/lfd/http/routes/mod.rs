@@ -246,7 +246,7 @@ pub(crate) fn infer_wave_git_state_for_worktree(
     })
 }
 
-fn is_open_pr_state(state: Option<&str>) -> bool {
+pub(crate) fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
         None => false,

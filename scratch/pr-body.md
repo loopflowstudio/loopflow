@@ -17,7 +17,11 @@ cargo clippy -- -D warnings
 cargo test -p loopflow
 uv run pytest python/tests/
 cargo test --all
+uv run pytest tests/regression/test_orphaned_runs_reset_wave_status.py tests/regression/test_run_with_roadmap_item_on_pm_wave.py tests/regression/test_terminal_session_dto_exposes_tmux_name.py -v
+cargo run --quiet -p loopflow --bin lf -- op release status --json
 ```
+
+The live `--json` smoke reported package verification success and a weekly release failure with `failure_kind: "publish"`, which confirms the new repair signal is visible from the CLI.
 
 ## Intent
 

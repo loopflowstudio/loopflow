@@ -36,3 +36,7 @@ The release ops layer exposes `ReleaseWorkflowStatus` for the two automation che
 - `cargo test -p loopflow`
 - `uv run pytest python/tests/`
 - `cargo test --all`
+- `uv run pytest tests/regression/test_orphaned_runs_reset_wave_status.py tests/regression/test_run_with_roadmap_item_on_pm_wave.py tests/regression/test_terminal_session_dto_exposes_tmux_name.py -v`
+- `cargo run --quiet -p loopflow --bin lf -- op release status --json`
+
+Live status smoke on 2026-07-02 reported latest tag `v0.9.12`, package verification run `28581807615` as `success`, and weekly release run `28478941444` as `failure` with `failure_kind: "publish"`.

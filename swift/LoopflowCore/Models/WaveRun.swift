@@ -28,6 +28,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
     public let waveId: String?
 
     public let flow: String
+    public let task: String?
     public let area: String
     public let repo: String
     public let direction: [String]
@@ -50,6 +51,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
         id: String,
         waveId: String?,
         flow: String,
+        task: String? = nil,
         area: String,
         repo: String,
         direction: [String] = [],
@@ -68,6 +70,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
         self.id = id
         self.waveId = waveId
         self.flow = flow
+        self.task = task
         self.area = area
         self.repo = repo
         self.direction = direction

@@ -1,0 +1,1 @@
+ALTER TABLE waves ADD COLUMN goal TEXT NOT NULL DEFAULT 'ship-roadmap';

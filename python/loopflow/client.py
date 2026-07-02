@@ -25,6 +25,7 @@ from .models import (
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+_ACTIVE_TERMINAL_SESSION_STATUSES = {"pending", "attached", "running"}
 
 
 def _compact_dict(**values: Any) -> dict[str, Any]:
@@ -128,7 +129,6 @@ class Client:
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
 
-
     def usage_summary(
         self,
         group_by: str = "wave",
@@ -173,12 +173,14 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
+        goal: Optional[str] = None,
     ) -> Wave:
         body = {
             "repo": repo,
             "name": name,
             **_compact_dict(
                 flow=flow,
+                goal=goal,
                 crons=crons,
                 direction=direction,
                 area=area,
@@ -196,9 +198,11 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         status: Optional[str] = None,
+        goal: Optional[str] = None,
     ) -> Wave:
         body = _compact_dict(
             flow=flow,
+            goal=goal,
             crons=crons,
             direction=direction,
             area=area,
@@ -247,8 +251,9 @@ class Client:
         flow: Optional[str] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
+        goal: Optional[str] = None,
     ) -> dict[str, Any]:
-        body = _compact_dict(flow=flow, direction=direction, area=area)
+        body = _compact_dict(flow=flow, goal=goal, direction=direction, area=area)
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
     def add_trigger(
@@ -324,6 +329,31 @@ class Client:
                         yield line
         except httpx.RequestError as exc:
             raise ConnectionError(str(exc)) from exc
+
+    def list_terminal_sessions(
+        self,
+        wave_id: Optional[str] = None,
+        statuses: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        params = _compact_dict(wave_id=wave_id)
+        if statuses and set(statuses).issubset(_ACTIVE_TERMINAL_SESSION_STATUSES):
+            params["active_only"] = "true"
+        payload = self._request_json("GET", "/v0/terminal-sessions", params=params)
+        sessions = self._parse_dict_list(payload)
+        if statuses is None:
+            return sessions
+        return [session for session in sessions if session.get("status") in statuses]
+
+    def attach_terminal_session(self, session_id: str) -> dict[str, Any]:
+        payload = self._request_json("POST", f"/v0/terminal-sessions/{session_id}/attach")
+        if not isinstance(payload, dict):
+            raise LoopflowError("invalid terminal session attach response payload")
+        return payload
+
+    def list_attention(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+        params = _compact_dict(status=status)
+        payload = self._request_json("GET", "/v0/attention", params=params)
+        return self._parse_dict_list(payload)
 
     def create_session(
         self,
@@ -444,6 +474,19 @@ class Client:
         if payload is None:
             return None
         return model_type.model_validate(payload)
+
+    @staticmethod
+    def _parse_dict_list(payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, dict):
+            raise LoopflowError("invalid list response payload")
+
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            raise LoopflowError("invalid list response payload")
+        if not all(isinstance(item, dict) for item in data):
+            raise LoopflowError("invalid list response payload")
+
+        return data
 
     @staticmethod
     def _raise_for_error(response: httpx.Response) -> None:

@@ -5,18 +5,18 @@ title: Waves
 
 # Waves
 
-A wave is **area × direction × flow**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to signals.
+A wave is **goal × flow × runtime state**. The goal prompt drives autonomous loop iterations, the primary flow is the default hand it dispatches, and lfd tracks mode, crons, triggers, status, and sessions.
 
 ```bash
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("shipper", repo=".", flow="build", direction=["clarity"], area=["src/api/"])
+loopflow.create_wave("shipper", repo=".", flow="build", goal="ship-roadmap")
 loopflow.run_wave("shipper")
 PY
 ```
 
-This creates a wave with the `build` flow on `src/api/` and the `clarity` direction.
+This creates a wave with the `build` flow and the `ship-roadmap` loop goal.
 
 Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
@@ -41,28 +41,59 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR. When 
 
 Crons schedule supplementary flows on a wave. They do not replace the wave's primary flow, and they do not consume the wave's `workers` budget.
 
-```yaml
-# wave/shipper/shipper.yaml
-flow: build
+```markdown
+<!-- wave/shipper/goal.md -->
+---
+primary_flow: build
 workers: 2
 mode: loop
-crons:
-  - flow: sync
-    schedule: "0 0 1 * *"
+metrics:
+  - backlog is empty
+---
+
+Run one loop iteration for the shipper wave.
 ```
 
-Use `workers: 0` for waves that only run from cron schedules:
+Configure cron schedules through the live API:
 
-```yaml
-# wave/governance/governance.yaml
-flow: garden
+```python
+import loopflow.api as loopflow
+
+loopflow.create_wave(
+    "shipper",
+    repo=".",
+    flow="build",
+    crons=[{"flow": "sync", "schedule": "0 0 1 * *"}],
+)
+```
+
+Use `workers: 0` in `goal.md` for waves that only run from cron schedules:
+
+```markdown
+<!-- wave/governance/goal.md -->
+---
+primary_flow: garden
 workers: 0
 mode: manual
-crons:
-  - flow: govern-identity
-    schedule: "0 0 * * 0"
-  - flow: govern-coordination
-    schedule: "0 0 * * *"
+---
+
+Run one loop iteration for the governance wave.
+```
+
+Then configure the cron schedules in lfd:
+
+```python
+import loopflow.api as loopflow
+
+loopflow.create_wave(
+    "governance",
+    repo=".",
+    flow="garden",
+    crons=[
+        {"flow": "govern-identity", "schedule": "0 0 * * 0"},
+        {"flow": "govern-coordination", "schedule": "0 0 * * *"},
+    ],
+)
 ```
 
 ## Triggers
@@ -86,8 +117,8 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 # Watch specific paths with a custom flow
-loopflow.create_wave("syncer", repo=".", flow="build", area=["docs/"])
-loopflow.add_trigger("syncer", signal="repo", paths=["src/api/"], flow="build")
+loopflow.create_wave("syncer", repo=".", flow="build")
+loopflow.add_trigger("syncer", signal="repo", flow="build")
 loopflow.run_wave("syncer")
 PY
 ```
@@ -102,8 +133,8 @@ React to another wave completing. More deliberate than a repo trigger — signal
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("ux", repo=".", flow="build", area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="govern-control", area=["rust/"])
+loopflow.create_wave("ux", repo=".", flow="build")
+loopflow.create_wave("infra", repo=".", flow="govern-control")
 loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 PY
@@ -121,7 +152,7 @@ Triggers are a list. Multiple triggers of the same signal are fine — watch dif
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
+loopflow.create_wave("swift-falcon", repo=".", flow="build")
 loopflow.add_trigger("swift-falcon", signal="wave", source_wave_id="infra")
 loopflow.run_wave("swift-falcon")
 PY
@@ -150,6 +181,8 @@ Or run manually: `lfd serve`
 
 ```bash
 lfq list                # show all waves
+lfq sessions            # show live terminal sessions
+lfq attach <session-id> # attach to one over tmux
 lfq logs <name>         # show logs
 lfq stop <name>         # stop a wave
 lfq delete <name>       # remove wave and history

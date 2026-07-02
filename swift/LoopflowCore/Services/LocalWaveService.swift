@@ -7,6 +7,7 @@ public struct WaveConfigUpdate: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
+    public var goal: String?
     public var status: WaveStatus?
     public var agent: String?
     public var stepAgents: [String: String]?
@@ -16,6 +17,7 @@ public struct WaveConfigUpdate: Sendable {
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
+        goal: String? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
         stepAgents: [String: String]? = nil
@@ -24,6 +26,7 @@ public struct WaveConfigUpdate: Sendable {
         self.area = area
         self.direction = direction
         self.flow = flow
+        self.goal = goal
         self.status = status
         self.agent = agent
         self.stepAgents = stepAgents
@@ -34,17 +37,20 @@ public struct RunOverrides: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
+    public var goal: String?
     public var roadmapItem: String?
 
     public init(
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
+        goal: String? = nil,
         roadmapItem: String? = nil
     ) {
         self.area = area
         self.direction = direction
         self.flow = flow
+        self.goal = goal
         self.roadmapItem = roadmapItem
     }
 }
@@ -1049,6 +1055,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
             flow: json["primary_flow"] as? String ?? "",
+            goal: json["goal"] as! String,
+            metrics: json["metrics"] as! [String],
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
             agent: json["agent"] as? String,
@@ -1075,6 +1083,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let area = config.area { body["area"] = area }
         if let direction = config.direction { body["direction"] = direction }
         if let flow = config.flow { body["flow"] = flow }
+        if let goal = config.goal { body["goal"] = goal }
         if let status = config.status { body["status"] = status.rawValue }
         if let agent = config.agent { body["agent"] = agent }
         if let stepAgents = config.stepAgents { body["step_agents"] = stepAgents }
@@ -1110,6 +1119,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             if let area = overrides.area { body["area"] = area }
             if let direction = overrides.direction { body["direction"] = direction }
             if let flow = overrides.flow { body["flow"] = flow }
+            if let goal = overrides.goal { body["goal"] = goal }
             if let roadmapItem = overrides.roadmapItem { body["roadmap_item"] = roadmapItem }
         }
 
@@ -1936,6 +1946,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: id,
             waveId: waveId,
             flow: flow,
+            task: json["task"] as? String,
             area: area,
             repo: repoPath,
             direction: direction,

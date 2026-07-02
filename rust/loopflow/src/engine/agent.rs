@@ -20,7 +20,6 @@ use crate::engine::structured_reply::{render_structured_reply_guidance, Structur
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
 /// to this process before exiting so the agent doesn't survive as an orphan.
 static CHILD_PID: AtomicU32 = AtomicU32::new(0);
-const RLM_PASSTHROUGH_VARS: &[&str] = &["RLM_MAX_DEPTH", "RLM_MAX_PARALLEL", "RLM_MODEL"];
 
 /// Tracks the active agent PID and clears it even on early returns.
 struct ChildPidGuard;
@@ -450,18 +449,6 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
         _ => {}
     }
 
-    let next_depth = std::env::var("RLM_DEPTH")
-        .ok()
-        .and_then(|depth| depth.parse::<usize>().ok())
-        .unwrap_or(0)
-        + 1;
-    env.insert("RLM_DEPTH".to_string(), next_depth.to_string());
-    for var in RLM_PASSTHROUGH_VARS {
-        if let Ok(value) = std::env::var(var) {
-            env.insert((*var).to_string(), value);
-        }
-    }
-
     env
 }
 
@@ -571,8 +558,6 @@ pub fn launch_agent(
     let (harness, _) = parse_agent(agent);
     apply_harness_env(&harness, &mut cmd, process);
 
-    propagate_rlm_env(&mut cmd);
-
     if process.auto && process.stream {
         // Stream mode: capture stdout line by line
         launch_streaming(&mut cmd, process.stream_format, process.timeout)
@@ -582,41 +567,6 @@ pub fn launch_agent(
     } else {
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
-    }
-}
-
-/// Seed RLM environment variables from config.
-///
-/// Sets process-level env vars so `propagate_rlm_env` can forward them
-/// to child agents. Only sets vars that aren't already present (a parent
-/// `lf` process may have already set them).
-pub fn seed_rlm_env(config: &crate::engine::config::Config) {
-    if std::env::var("RLM_MAX_DEPTH").is_err() {
-        std::env::set_var("RLM_MAX_DEPTH", config.rlm_max_depth.to_string());
-    }
-    if std::env::var("RLM_MAX_PARALLEL").is_err() {
-        std::env::set_var("RLM_MAX_PARALLEL", config.rlm_max_parallel.to_string());
-    }
-    if std::env::var("RLM_MODEL").is_err() {
-        if let Some(ref rlm_agent) = config.rlm_agent {
-            std::env::set_var("RLM_MODEL", rlm_agent);
-        }
-    }
-}
-
-fn propagate_rlm_env(cmd: &mut Command) {
-    // RLM_DEPTH auto-increments so sub-agents don't need to manage it.
-    let next_depth = std::env::var("RLM_DEPTH")
-        .ok()
-        .and_then(|depth| depth.parse::<usize>().ok())
-        .unwrap_or(0)
-        + 1;
-    cmd.env("RLM_DEPTH", next_depth.to_string());
-
-    for var in RLM_PASSTHROUGH_VARS {
-        if let Ok(val) = std::env::var(var) {
-            cmd.env(var, val);
-        }
     }
 }
 

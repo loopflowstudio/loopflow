@@ -88,7 +88,7 @@ _CLEANUP_PATTERNS = (
         re.compile(
             r"\n3\. Append metrics:\n```bash\n"
             r"mkdir -p ~/.gstack/analytics\n"
-            r'.*?spec-review\.jsonl.*?\n```\n'
+            r".*?spec-review\.jsonl.*?\n```\n"
             r"Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values "
             r"from the review\.\n",
             re.DOTALL,

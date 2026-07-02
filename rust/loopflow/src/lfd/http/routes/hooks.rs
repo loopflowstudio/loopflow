@@ -792,6 +792,8 @@ mod tests {
             repo: repo_dir.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -847,6 +849,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
                 flow: flow.to_string(),
+                task: None,
                 direction: Vec::new(),
                 area: Vec::new(),
             },

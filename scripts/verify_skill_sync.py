@@ -74,7 +74,8 @@ def maybe_run_live(repo: Path, live: bool) -> None:
         output = result.stdout + result.stderr
         if result.returncode != 0 or SENTINEL not in output:
             raise RuntimeError(
-                f"{name} probe failed with {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                f"{name} probe failed with {result.returncode}\n"
+                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             )
         print(f"{name}: {SENTINEL}")
 

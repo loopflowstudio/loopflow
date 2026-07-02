@@ -357,21 +357,3 @@ lf rams/rams                          # legacy compatibility alias, if installed
 ```
 
 The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/steps/<namespace>/<step>.md` (repo-local) or `~/.lf/steps/<namespace>/<step>.md` (user-global) and invoke them as `lf <namespace>/<step>`. Namespaced steps use `/`, not `:`.
-
-### RLM (Recursive Language Model)
-
-Configure recursive sub-agent behavior for processing large inputs.
-
-```yaml
-rlm_agent: claude:sonnet    # model for sub-agents (default: same as agent)
-rlm_max_parallel: 10        # max concurrent sub-agents
-rlm_max_depth: 3            # max recursion depth
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `rlm_agent` | (agent) | Model for RLM sub-agents |
-| `rlm_max_parallel` | 10 | Suggested max concurrent sub-agents |
-| `rlm_max_depth` | 3 | Maximum recursion depth |
-
-These values are propagated as environment variables (`RLM_MODEL`, `RLM_MAX_PARALLEL`, `RLM_MAX_DEPTH`) to sub-agents. See the bundled RLM instructions for usage patterns.

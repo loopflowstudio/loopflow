@@ -56,7 +56,7 @@ async fn pause_wave_after_activation_conflict(
     event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
-async fn create_wave_run(
+pub(crate) async fn create_wave_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
@@ -612,6 +612,8 @@ mod tests {
             repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),

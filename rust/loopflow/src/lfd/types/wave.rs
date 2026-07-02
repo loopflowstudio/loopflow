@@ -233,6 +233,8 @@ pub struct Wave {
     pub repo: String,
     pub mode: WaveMode,
     pub primary_flow: String,
+    pub goal: String,
+    pub metrics: Vec<String>,
     #[serde(default)]
     pub crons: Vec<WaveCron>,
     pub direction: Vec<String>,
@@ -259,6 +261,8 @@ impl Wave {
             repo,
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
@@ -288,6 +292,14 @@ impl Wave {
 
     pub fn primary_flow(&self) -> &String {
         &self.primary_flow
+    }
+
+    pub fn goal(&self) -> &str {
+        &self.goal
+    }
+
+    pub fn metrics(&self) -> &Vec<String> {
+        &self.metrics
     }
 
     pub fn direction(&self) -> &Vec<String> {
@@ -332,6 +344,7 @@ pub struct PullRequest {
 pub struct WaveRunSnapshot {
     pub repo: String,
     pub flow: String,
+    pub task: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
 }

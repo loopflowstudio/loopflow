@@ -218,6 +218,8 @@ mod tests {
             repo: ".".to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: Vec::new(),
             area: Vec::new(),
@@ -236,6 +238,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
                 flow: "build".to_string(),
+                task: None,
                 direction: Vec::new(),
                 area: Vec::new(),
             },

@@ -16,10 +16,11 @@ use time::OffsetDateTime;
 
 #[cfg(test)]
 use crate::engine::flow::ConcreteStep;
+use crate::engine::flow::InFlightDispatch;
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
-use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
+use crate::lfd::http::routes::{infer_wave_git_state_for_worktree, is_open_pr_state};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
@@ -40,8 +41,8 @@ use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_lf_step_command, cleanup_run_worktree,
-    is_active_wave_run_status, is_ephemeral_worktree_path,
+    advance_branch, auto_create_pr, build_lf_inline_command, build_lf_step_command,
+    cleanup_run_worktree, is_active_wave_run_status, is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -123,6 +124,85 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty())
+}
+
+fn build_wave_run_command(
+    wave: &Wave,
+    run: &WaveRun,
+    in_flight: Vec<InFlightDispatch>,
+) -> Result<(Vec<String>, String)> {
+    if let Some(task) = run.snapshot.task.as_ref() {
+        let mut cmd = build_lf_step_command(
+            &run.snapshot.flow,
+            true,
+            &run.snapshot.direction,
+            &run.snapshot.area,
+            wave.name(),
+        );
+        let flow_arg = cmd
+            .get_mut(1)
+            .ok_or_else(|| anyhow!("lf dispatch command missing flow argument"))?;
+        flow_arg.push(':');
+        cmd.push(task.clone());
+        return Ok((cmd, format!("dispatch:{}", run.snapshot.flow)));
+    }
+
+    let repo = Path::new(&run.worktree);
+    let goal = crate::engine::load_goal(wave.goal(), repo)?;
+    let memory = read_wave_memory(repo, wave.name())?;
+    let prompt = crate::engine::render_goal(
+        &goal,
+        &crate::engine::GoalRenderContext {
+            flows: crate::engine::available_flow_names(repo),
+            roadmap: format!("wave/{}", wave.name()),
+            memory,
+            metrics: wave.metrics().clone(),
+            in_flight,
+        },
+    );
+    let cmd = build_lf_inline_command(
+        &prompt,
+        true,
+        &run.snapshot.direction,
+        &run.snapshot.area,
+        wave.name(),
+    );
+    Ok((cmd, format!("goal:{}", wave.goal())))
+}
+
+/// Wave runs that are still dispatched — active status or an open PR — excluding
+/// `exclude_run_id` (the run about to launch, which isn't in flight yet).
+async fn list_in_flight_dispatches(
+    store: &SharedStore,
+    wave_id: &LfdId,
+    exclude_run_id: &LfdId,
+) -> Result<Vec<InFlightDispatch>> {
+    let runs = store.list_wave_runs(Some(wave_id), None).await?;
+    let in_flight = runs
+        .into_iter()
+        .filter(|run| &run.id != exclude_run_id)
+        .filter(|run| {
+            is_active_wave_run_status(run.status)
+                || is_open_pr_state(run.pr.as_ref().and_then(|pr| pr.state.as_deref()))
+        })
+        .map(|run| InFlightDispatch {
+            task: run.snapshot.task.clone(),
+            flow: run.snapshot.flow.clone(),
+            status: format!("{:?}", run.status).to_lowercase(),
+            pr_url: run.pr.as_ref().map(|pr| pr.url.clone()),
+            pr_state: run.pr.as_ref().and_then(|pr| pr.state.clone()),
+        })
+        .collect();
+    Ok(in_flight)
+}
+
+fn read_wave_memory(repo: &Path, wave_name: &str) -> Result<String> {
+    let path = repo.join("wave").join(wave_name).join("MEMORY.md");
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(anyhow!("failed to read wave memory: {err}")),
+    }
 }
 
 #[derive(Clone)]
@@ -436,19 +516,14 @@ impl WaveExecutor {
 
         let session_id = LfdId::new();
         let env = flow_step_env(wave.id(), &run.id, Some(&session_id));
-        let cmd = build_lf_step_command(
-            &run.snapshot.flow,
-            true,
-            &run.snapshot.direction,
-            &run.snapshot.area,
-            wave.name(),
-        );
+        let in_flight = list_in_flight_dispatches(&self.store, &run.wave_id, &run.id).await?;
+        let (cmd, terminal_step) = build_wave_run_command(&wave, &run, in_flight)?;
         let tmux_managed = !self.disable_tmux && tmux_available();
         let terminal_session = TerminalSession {
             id: session_id.clone(),
             wave_id: wave.id().clone(),
             wave_run_id: Some(run.id.clone()),
-            step: run.snapshot.flow.clone(),
+            step: terminal_step.clone(),
             agent: "lf".to_string(),
             cwd: run.worktree.clone(),
             argv: cmd.clone(),
@@ -485,7 +560,7 @@ impl WaveExecutor {
                     repo: run.snapshot.repo.clone(),
                     worktree: run.worktree.clone(),
                     step: crate::engine::flow::ConcreteStep {
-                        step: crate::engine::flow::Step::named(&run.snapshot.flow),
+                        step: crate::engine::flow::Step::named(&terminal_step),
                         flow_parents: Vec::new(),
                     },
                     agent: "lf".to_string(),
@@ -765,6 +840,7 @@ impl WaveExecutor {
             snapshot: WaveRunSnapshot {
                 repo: failed_run.snapshot.repo.clone(),
                 flow: repair_flow.to_string(),
+                task: None,
                 direction: failed_run.snapshot.direction.clone(),
                 area: failed_run.snapshot.area.clone(),
             },
@@ -1185,9 +1261,10 @@ mod tests {
     use super::*;
     use crate::engine::flow::Step;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
+    use crate::lfd::types::{PullRequest, Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     struct MockRunner;
@@ -1200,6 +1277,28 @@ mod tests {
             _cwd: &Path,
             _context: super::super::AgentRunContext,
         ) -> Result<i32> {
+            Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturingRunner {
+        cmd: Mutex<Option<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl AgentExecutor for CapturingRunner {
+        async fn run(
+            &self,
+            cmd: Vec<String>,
+            _cwd: &Path,
+            _context: super::super::AgentRunContext,
+        ) -> Result<i32> {
+            *self.cmd.lock().expect("capture mutex poisoned") = Some(cmd);
             Ok(0)
         }
 
@@ -1222,6 +1321,8 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1242,6 +1343,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: repo.to_string_lossy().to_string(),
                 flow: flow_name.to_string(),
+                task: None,
                 direction: vec![],
                 area: vec![],
             },
@@ -1280,6 +1382,8 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1298,6 +1402,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
                 flow: wave.primary_flow().clone(),
+                task: None,
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
             },
@@ -1384,6 +1489,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_wave_run_with_goal_runs_rendered_goal_prompt() {
+        let repo = TestRepo::new();
+        let goals_dir = repo.path().join(".lf/goals");
+        std::fs::create_dir_all(&goals_dir).expect("create goal dir");
+        std::fs::write(goals_dir.join("drive.md"), "Execute the custom goal body.")
+            .expect("write goal");
+        std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("create flows dir");
+        std::fs::write(repo.path().join(".lf/flows/custom.yaml"), "- implement\n")
+            .expect("write flow");
+
+        let db_path = repo.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store"),
+        );
+        let scheduler = Arc::new(crate::lfd::scheduler::Scheduler::new(1));
+        let event_hub = EventHub::new(16);
+        let runner = Arc::new(CapturingRunner {
+            cmd: Mutex::new(None),
+        });
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            OutputHub::new(1024, repo.path().join("output")),
+            event_hub,
+            runner.clone(),
+        );
+
+        let mut wave = make_wave(
+            "goal-wave",
+            repo.path(),
+            "ship-roadmap",
+            WaveStatus::Running,
+        );
+        wave.mode = WaveMode::Manual;
+        wave.goal = "drive".to_string();
+        store.create_wave(&wave).await.expect("create wave");
+
+        let mut run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
+        run.target_branch = "goal-branch".to_string();
+        run.snapshot.flow = "qa".to_string();
+        store.update_wave_run(&run).await.expect("update run");
+
+        executor.execute(&run.id).await.expect("execute run");
+
+        let cmd = runner
+            .cmd
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone()
+            .expect("runner command");
+        assert!(cmd.iter().any(|arg| arg == ":"));
+        let prompt = cmd.last().expect("inline prompt should be last arg");
+        assert!(prompt.contains("Execute the custom goal body."));
+        assert!(prompt.contains("- custom"));
+        assert!(prompt.contains("wave/goal-wave"));
+    }
+
+    #[tokio::test]
     async fn execute_starts_listen_wave_on_completion() {
         let repo = TestRepo::new();
         repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
@@ -1406,6 +1571,8 @@ mod tests {
             repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -1723,6 +1890,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: worktree.to_string_lossy().to_string(),
                 flow: "build".to_string(),
+                task: None,
                 direction: vec![],
                 area: vec![],
             },
@@ -1929,6 +2097,100 @@ mod tests {
         assert_eq!(classify_repair_flow(&run), "debug");
     }
 
+    #[test]
+    fn build_wave_run_command_includes_wave_memory_in_prompt() {
+        let repo = tempdir().expect("tempdir");
+        let wave_dir = repo.path().join("wave").join("memory-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
+        std::fs::write(
+            wave_dir.join("MEMORY.md"),
+            "Last loop found the roadmap gap.\n",
+        )
+        .expect("write memory");
+
+        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
+        wave.goal = "memory-wave".to_string();
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+
+        let (cmd, terminal_step) =
+            build_wave_run_command(&wave, &run, Vec::new()).expect("build wave command");
+        let rendered = cmd.join("\n");
+
+        assert_eq!(terminal_step, "goal:memory-wave");
+        assert!(rendered.contains("Drive the memory wave."));
+        assert!(rendered.contains("<lf:wave-memory>"));
+        assert!(rendered.contains("Last loop found the roadmap gap."));
+        assert!(rendered.contains("<lf:in-flight>\nNo work is in flight."));
+    }
+
+    #[test]
+    fn build_wave_run_command_includes_in_flight_dispatches() {
+        let repo = tempdir().expect("tempdir");
+        let wave_dir = repo.path().join("wave").join("memory-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
+
+        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
+        wave.goal = "memory-wave".to_string();
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+
+        let in_flight = vec![InFlightDispatch {
+            task: Some("Add the dispatch endpoint.".to_string()),
+            flow: "implement".to_string(),
+            status: "running".to_string(),
+            pr_url: Some("https://github.com/example/repo/pull/7".to_string()),
+            pr_state: Some("open".to_string()),
+        }];
+
+        let (cmd, _terminal_step) =
+            build_wave_run_command(&wave, &run, in_flight).expect("build wave command");
+        let rendered = cmd.join("\n");
+
+        assert!(rendered.contains("<lf:in-flight>"));
+        assert!(rendered.contains(
+            "- [running] implement: Add the dispatch endpoint. (open https://github.com/example/repo/pull/7)"
+        ));
+    }
+
+    #[test]
+    fn build_wave_run_command_dispatches_task() {
+        let repo = tempdir().expect("tempdir");
+        let wave = make_wave("dispatch-wave", repo.path(), "build", WaveStatus::Running);
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+        run.snapshot.flow = "implement".to_string();
+        run.snapshot.task = Some("Add the dispatch endpoint.".to_string());
+
+        let (cmd, terminal_step) =
+            build_wave_run_command(&wave, &run, Vec::new()).expect("build dispatch command");
+
+        assert_eq!(terminal_step, "dispatch:implement");
+        assert!(cmd.contains(&"implement:".to_string()));
+        assert!(cmd.contains(&"-b".to_string()));
+        assert!(cmd.contains(&"Add the dispatch endpoint.".to_string()));
+    }
+
+    #[test]
+    fn build_wave_run_command_errors_when_wave_memory_is_unreadable() {
+        let repo = tempdir().expect("tempdir");
+        let wave_dir = repo.path().join("wave").join("memory-wave");
+        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
+        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
+        std::fs::create_dir(wave_dir.join("MEMORY.md")).expect("create unreadable memory path");
+
+        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
+        wave.goal = "memory-wave".to_string();
+        let mut run = WaveRun::new(LfdId::new(), wave.id().clone());
+        run.worktree = repo.path().to_string_lossy().to_string();
+
+        let err =
+            build_wave_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
+        assert!(err.to_string().contains("failed to read wave memory"));
+    }
+
     #[tokio::test]
     async fn create_repair_run_links_to_failed_run() {
         let tmp = tempdir().expect("tempdir");
@@ -1969,5 +2231,66 @@ mod tests {
         // Verify persisted
         let loaded = store.get_wave_run(&repair.id).await.unwrap().unwrap();
         assert_eq!(loaded.repair_of.unwrap(), failed_run.id);
+    }
+
+    #[tokio::test]
+    async fn list_in_flight_dispatches_includes_active_and_open_pr_runs_only() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+        let repo = TestRepo::new();
+        let wave = make_wave("in-flight-wave", repo.path(), "build", WaveStatus::Running);
+        store.create_wave(&wave).await.unwrap();
+
+        // The run about to launch — excluded from its own in-flight list.
+        let launching_run = create_main_run(&store, &wave, WaveRunStatus::Pending).await;
+
+        // Still running — included regardless of PR state.
+        let mut running_run = create_main_run(&store, &wave, WaveRunStatus::Running).await;
+        running_run.snapshot.task = Some("Fix the flaky test.".to_string());
+        store.update_wave_run(&running_run).await.unwrap();
+
+        // Completed, but the PR is still open — included.
+        let mut completed_open_pr = create_main_run(&store, &wave, WaveRunStatus::Completed).await;
+        completed_open_pr.pr = Some(PullRequest {
+            url: "https://github.com/example/repo/pull/1".to_string(),
+            number: Some(1),
+            state: Some("open".to_string()),
+            title: None,
+            branch: Some("feature".to_string()),
+        });
+        store.update_wave_run(&completed_open_pr).await.unwrap();
+
+        // Completed with a merged PR — excluded.
+        let mut completed_merged_pr =
+            create_main_run(&store, &wave, WaveRunStatus::Completed).await;
+        completed_merged_pr.pr = Some(PullRequest {
+            url: "https://github.com/example/repo/pull/2".to_string(),
+            number: Some(2),
+            state: Some("merged".to_string()),
+            title: None,
+            branch: Some("feature-2".to_string()),
+        });
+        store.update_wave_run(&completed_merged_pr).await.unwrap();
+
+        // Completed with no PR at all — excluded.
+        let _completed_no_pr = create_main_run(&store, &wave, WaveRunStatus::Completed).await;
+
+        let in_flight = list_in_flight_dispatches(&store, wave.id(), &launching_run.id)
+            .await
+            .expect("list in-flight dispatches");
+
+        assert_eq!(in_flight.len(), 2);
+        assert!(in_flight
+            .iter()
+            .any(|dispatch| dispatch.task.as_deref() == Some("Fix the flaky test.")));
+        assert!(in_flight
+            .iter()
+            .any(|dispatch| dispatch.pr_url.as_deref()
+                == Some("https://github.com/example/repo/pull/1")));
     }
 }

@@ -108,11 +108,13 @@ def create_wave(
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     status: Optional[str] = None,
+    goal: Optional[str] = None,
 ) -> Wave:
     return _client().create_wave(
         name,
         repo,
         flow=flow,
+        goal=goal,
         crons=crons,
         direction=direction,
         area=area,
@@ -127,10 +129,12 @@ def update_wave(
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     status: Optional[str] = None,
+    goal: Optional[str] = None,
 ) -> Wave:
     return _client().update_wave(
         name_or_id,
         flow=flow,
+        goal=goal,
         crons=crons,
         direction=direction,
         area=area,
@@ -175,10 +179,12 @@ def run_wave(
     flow: Optional[str] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
+    goal: Optional[str] = None,
 ) -> dict[str, Any]:
     return _client().run_wave(
         name_or_id,
         flow=flow,
+        goal=goal,
         direction=direction,
         area=area,
     )
@@ -238,6 +244,21 @@ def wave_runs(
 
 def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)
+
+
+def list_terminal_sessions(
+    wave_id: Optional[str] = None,
+    statuses: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    return _client().list_terminal_sessions(wave_id=wave_id, statuses=statuses)
+
+
+def attach_terminal_session(session_id: str) -> dict[str, Any]:
+    return _client().attach_terminal_session(session_id)
+
+
+def list_attention(status: Optional[str] = None) -> list[dict[str, Any]]:
+    return _client().list_attention(status=status)
 
 
 def create_session(

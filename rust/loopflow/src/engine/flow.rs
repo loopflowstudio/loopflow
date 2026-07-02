@@ -133,6 +133,63 @@ pub struct Flow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Goal {
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalRenderContext {
+    pub flows: Vec<String>,
+    pub roadmap: String,
+    pub memory: String,
+    pub metrics: Vec<String>,
+    pub in_flight: Vec<InFlightDispatch>,
+}
+
+/// A wave run that is still dispatched — not yet completed, failed, or landed.
+/// Fed into `render_goal` so the loop's read step sees what's already in flight
+/// before picking the next move.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InFlightDispatch {
+    pub task: Option<String>,
+    pub flow: String,
+    pub status: String,
+    pub pr_url: Option<String>,
+    pub pr_state: Option<String>,
+}
+
+const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave — an orchestrator, not an implementer.
+
+A Wave runs one Goal in a loop against a Roadmap (its Asana backlog), driving a
+set of Metrics. Each iteration:
+
+1. Read the roadmap and the current metrics. Pick the next move that most
+   advances the goal.
+2. Capture, then dispatch — never solve substantial work yourself. If the move is
+   a real subproject, first write it to the roadmap as an Asana task, then launch
+   a flow against that task (`lf <flow>: <task>`). Small, atomic fixes can
+   dispatch directly. Either way the work runs as a steerable subagent session
+   you and the human can monitor and redirect; read the result back when it lands.
+3. Re-measure against the goal's metrics. Decide what changed about the next move.
+4. Repeat until the metrics say done, or record a blocker if no safe move remains.
+
+Three powers:
+- Dispatch flows/steps — your default hand; the inner work pipeline you run each
+  iteration.
+- Fan out — when the budget allows and the roadmap holds well-scoped, independent
+  tasks, launch parallel subagents instead of advancing one move at a time: one
+  subagent per task, each running the flow against its specific roadmap task.
+  Spawn a child wave when a task is itself a looping unit of work.
+- Run any `lf` flow on demand — beyond your standing flow.
+
+Operate autonomously. Make the executive call and keep the loop moving; don't
+stall waiting for direction. Keep this transcript about decisions and
+coordination — what you chose, why, what came back.
+
+Don't invent work. If the roadmap is empty or every move is unsafe, record the
+blocker and stop."#;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteStep {
     pub step: Step,
     pub flow_parents: Vec<String>,
@@ -227,6 +284,92 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     load_flow_inner(name, repo, true)
+}
+
+pub fn available_flow_names(repo: &Path) -> Vec<String> {
+    let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect();
+    collect_flow_names(&repo.join(".lf/flows"), None, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
+    if let Ok(goal_path) = find_goal_path(name, repo) {
+        let content = fs::read_to_string(goal_path)?;
+        let prompt = split_frontmatter(&content)
+            .map(|(_, body)| body)
+            .unwrap_or(content);
+        return Ok(Goal { prompt });
+    }
+
+    if let Some(key) = crate::engine::builtins::resolve_builtin_goal(name) {
+        let prompt = crate::engine::builtins::get_builtin_goal(key)
+            .expect("resolve_builtin_goal returned a known key");
+        return Ok(Goal {
+            prompt: prompt.to_string(),
+        });
+    }
+
+    Err(LoadError::GoalNotFound(name.to_string()))
+}
+
+pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
+    let flows = if ctx.flows.is_empty() {
+        "No flows are available.".to_string()
+    } else {
+        ctx.flows
+            .iter()
+            .map(|flow| format!("- {flow}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let metrics = if ctx.metrics.is_empty() {
+        "No metrics are configured.".to_string()
+    } else {
+        ctx.metrics
+            .iter()
+            .map(|metric| format!("- {metric}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let memory = if ctx.memory.trim().is_empty() {
+        "No wave memory is recorded.".to_string()
+    } else {
+        ctx.memory.trim().to_string()
+    };
+    let in_flight = if ctx.in_flight.is_empty() {
+        "No work is in flight.".to_string()
+    } else {
+        ctx.in_flight
+            .iter()
+            .map(|dispatch| {
+                let task = dispatch.task.as_deref().unwrap_or("(no task)");
+                let pr = match (&dispatch.pr_state, &dispatch.pr_url) {
+                    (Some(state), Some(url)) => format!(" ({state} {url})"),
+                    (Some(state), None) => format!(" ({state})"),
+                    (None, Some(url)) => format!(" ({url})"),
+                    (None, None) => String::new(),
+                };
+                format!("- [{}] {}: {}{}", dispatch.status, dispatch.flow, task, pr)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
+        LOOPFLOW_OPERATING_PROMPT,
+        goal.prompt.trim(),
+        memory,
+        in_flight,
+        flows,
+        ctx.roadmap,
+        metrics
+    )
 }
 
 /// Like `load_flow`, but resolves only exact-name matches in the builtin
@@ -488,6 +631,37 @@ fn markdown_path(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}.md"))
 }
 
+fn collect_flow_names(dir: &Path, prefix: Option<&str>, names: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && prefix.is_none() {
+            let Some(child_prefix) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            collect_flow_names(&path, Some(child_prefix), names);
+            continue;
+        }
+
+        if !path
+            .extension()
+            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+        {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        match prefix {
+            Some(prefix) => names.push(format!("{prefix}/{stem}")),
+            None => names.push(stem.to_string()),
+        }
+    }
+}
+
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     // 1. Repo-local flows
     if let Some(path) = first_existing_path(paths_with_extensions(
@@ -553,6 +727,52 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError::StepNotFound(name.to_string()))
+}
+
+fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    let wave_goal = repo.join("wave").join(name).join("GOAL.md");
+    if exact_path_exists(&wave_goal) {
+        return Ok(wave_goal);
+    }
+
+    if let Some((prefix, goal_name)) = name.split_once('/') {
+        let repo_ns = markdown_path(&repo.join(".lf/goals").join(prefix), goal_name);
+        if repo_ns.exists() {
+            return Ok(repo_ns);
+        }
+        if let Some(home) = home_dir() {
+            let home_ns = markdown_path(&home.join(".lf/goals").join(prefix), goal_name);
+            if home_ns.exists() {
+                return Ok(home_ns);
+            }
+        }
+    }
+
+    if let Some(path) = first_existing_path([markdown_path(&repo.join(".lf/goals"), name)]) {
+        return Ok(path);
+    }
+
+    if let Some(home) = home_dir() {
+        if let Some(path) = first_existing_path([markdown_path(&home.join(".lf/goals"), name)]) {
+            return Ok(path);
+        }
+    }
+
+    Err(LoadError::GoalNotFound(name.to_string()))
+}
+
+fn exact_path_exists(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Some(file_name) = path.file_name() else {
+        return false;
+    };
+    std::fs::read_dir(parent).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name() == file_name)
+    })
 }
 
 fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
@@ -1417,6 +1637,131 @@ mod tests {
         let step = load_step("mystep", tmp.path()).unwrap();
         assert_eq!(step.name, "mystep");
         assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_goal_finds_repo_goal_override() {
+        let tmp = TempDir::new().unwrap();
+        let goals_dir = tmp.path().join(".lf/goals");
+        fs::create_dir_all(&goals_dir).unwrap();
+        fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
+
+        let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
+        assert_eq!(goal.prompt, "Repo goal prompt.");
+    }
+
+    #[test]
+    fn load_goal_prefers_wave_goal_md() {
+        let tmp = TempDir::new().unwrap();
+        let goals_dir = tmp.path().join(".lf/goals");
+        let wave_dir = tmp.path().join("wave/goals");
+        fs::create_dir_all(&goals_dir).unwrap();
+        fs::create_dir_all(&wave_dir).unwrap();
+        fs::write(goals_dir.join("goals.md"), "Repo goal prompt.").unwrap();
+        fs::write(
+            wave_dir.join("GOAL.md"),
+            "---\nmetrics:\n  - tests pass\n---\nWave goal prompt.",
+        )
+        .unwrap();
+
+        let goal = load_goal("goals", tmp.path()).unwrap();
+        assert_eq!(goal.prompt, "Wave goal prompt.");
+    }
+
+    #[test]
+    fn load_goal_ignores_legacy_goal_paths() {
+        let tmp = TempDir::new().unwrap();
+        let singular_dir = tmp.path().join(".lf/goal");
+        let root_dir = tmp.path().join("goal");
+        let wave_dir = tmp.path().join("wave/custom");
+        fs::create_dir_all(&singular_dir).unwrap();
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(&wave_dir).unwrap();
+        fs::write(singular_dir.join("custom.md"), "Singular goal.").unwrap();
+        fs::write(root_dir.join("custom.md"), "Root goal.").unwrap();
+        fs::write(wave_dir.join("goal.md"), "Lowercase wave goal.").unwrap();
+
+        let err = load_goal("custom", tmp.path()).unwrap_err();
+        assert!(matches!(err, LoadError::GoalNotFound(name) if name == "custom"));
+    }
+
+    #[test]
+    fn render_goal_includes_flow_and_roadmap_context() {
+        let goal = Goal {
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: vec!["build".to_string(), "qa".to_string()],
+                roadmap: "wave/goals".to_string(),
+                memory: "Last loop found the docs drift.".to_string(),
+                metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
+                in_flight: Vec::new(),
+            },
+        );
+
+        assert!(rendered.contains("Drive the work."));
+        assert!(rendered.contains("<lf:loopflow-operating-prompt>"));
+        assert!(rendered.contains("<lf:wave-memory>"));
+        assert!(rendered.contains("Last loop found the docs drift."));
+        assert!(rendered.contains("an orchestrator, not an implementer."));
+        assert!(rendered.contains("never solve substantial work yourself"));
+        assert!(rendered.contains("- build"));
+        assert!(rendered.contains("- qa"));
+        assert!(rendered.contains("wave/goals"));
+        assert!(rendered.contains("- tests pass"));
+        assert!(rendered.contains("- docs updated"));
+    }
+
+    #[test]
+    fn render_goal_handles_empty_memory() {
+        let goal = Goal {
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: Vec::new(),
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: Vec::new(),
+                in_flight: Vec::new(),
+            },
+        );
+
+        assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
+        assert!(rendered.contains("No flows are available."));
+        assert!(rendered.contains("No metrics are configured."));
+        assert!(rendered.contains("<lf:in-flight>\nNo work is in flight."));
+    }
+
+    #[test]
+    fn render_goal_includes_in_flight_dispatches() {
+        let goal = Goal {
+            prompt: "Drive the work.".to_string(),
+        };
+        let rendered = render_goal(
+            &goal,
+            &GoalRenderContext {
+                flows: Vec::new(),
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: Vec::new(),
+                in_flight: vec![InFlightDispatch {
+                    task: Some("Add the dispatch endpoint.".to_string()),
+                    flow: "implement".to_string(),
+                    status: "running".to_string(),
+                    pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
+                    pr_state: Some("open".to_string()),
+                }],
+            },
+        );
+
+        assert!(rendered.contains("<lf:in-flight>"));
+        assert!(rendered.contains(
+            "- [running] implement: Add the dispatch endpoint. (open https://github.com/example/repo/pull/42)"
+        ));
     }
 
     #[test]

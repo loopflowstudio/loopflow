@@ -208,6 +208,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let direction_json = serde_json::to_string(wave.direction())?;
         let area_json = serde_json::to_string(wave.area())?;
+        let metrics_json = serde_json::to_string(wave.metrics())?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
@@ -233,6 +234,8 @@ impl SqliteStore {
                 wave.workers as i64,
                 wave.mode().as_str(),
                 wave.primary_flow(),
+                wave.goal(),
+                metrics_json,
             ],
         )?;
         Ok(())
@@ -1208,6 +1211,7 @@ impl SqliteStore {
                 run.error,
                 run.snapshot.repo,
                 run.snapshot.flow,
+                run.snapshot.task,
                 serde_json::to_string(&run.snapshot.direction)?,
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.pr)?,
@@ -1244,6 +1248,7 @@ impl SqliteStore {
                 run.error,
                 run.snapshot.repo,
                 run.snapshot.flow,
+                run.snapshot.task,
                 serde_json::to_string(&run.snapshot.direction)?,
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.pr)?,

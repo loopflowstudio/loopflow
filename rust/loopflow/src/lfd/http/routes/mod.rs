@@ -139,6 +139,8 @@ pub async fn build_wave_dto(
         repo: wave.repo().clone(),
         mode: wave.mode().as_str().to_string(),
         primary_flow: wave.primary_flow().to_string(),
+        goal: wave.goal().to_string(),
+        metrics: wave.metrics().clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
@@ -244,7 +246,7 @@ pub(crate) fn infer_wave_git_state_for_worktree(
     })
 }
 
-fn is_open_pr_state(state: Option<&str>) -> bool {
+pub(crate) fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
         None => false,
@@ -424,6 +426,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
                 flow: "build".to_string(),
+                task: None,
                 direction: Vec::new(),
                 area: Vec::new(),
             },
@@ -473,6 +476,8 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec![],
             area: vec![],
@@ -491,6 +496,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
                 flow: wave.primary_flow().clone(),
+                task: None,
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
             },

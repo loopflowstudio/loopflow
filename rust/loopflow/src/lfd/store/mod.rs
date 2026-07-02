@@ -2322,6 +2322,8 @@ mod tests {
             repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
             crons: Vec::new(),
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
@@ -2340,6 +2342,7 @@ mod tests {
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
                 flow: wave.primary_flow().clone(),
+                task: None,
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
             },
@@ -3140,6 +3143,7 @@ mod tests {
                     snapshot: WaveRunSnapshot {
                         repo: wave.repo().clone(),
                         flow: wave.primary_flow().clone(),
+                        task: None,
                         direction: wave.direction().clone(),
                         area: wave.area().clone(),
                     },

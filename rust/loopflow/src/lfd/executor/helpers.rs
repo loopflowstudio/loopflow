@@ -59,6 +59,7 @@ pub async fn create_parallel_wave_run(
         snapshot: WaveRunSnapshot {
             repo: wave.repo().clone(),
             flow: wave.primary_flow().clone(),
+            task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),
         },
@@ -145,6 +146,7 @@ pub async fn create_wave_run_with_id(
         snapshot: WaveRunSnapshot {
             repo: wave.repo().clone(),
             flow: wave.primary_flow().clone(),
+            task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),
         },
@@ -366,6 +368,31 @@ pub(crate) fn build_lf_step_command(
         resolve_lf_binary().to_string_lossy().to_string(),
         step_name.to_string(),
     ];
+    append_lf_run_options(&mut cmd, batch, directions, area, wave_name);
+    cmd
+}
+
+pub(crate) fn build_lf_inline_command(
+    prompt: &str,
+    batch: bool,
+    directions: &[String],
+    area: &[String],
+    wave_name: &str,
+) -> Vec<String> {
+    let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
+    append_lf_run_options(&mut cmd, batch, directions, area, wave_name);
+    cmd.push(":".to_string());
+    cmd.push(prompt.to_string());
+    cmd
+}
+
+fn append_lf_run_options(
+    cmd: &mut Vec<String>,
+    batch: bool,
+    directions: &[String],
+    area: &[String],
+    wave_name: &str,
+) {
     if batch {
         cmd.push("-b".to_string());
     }
@@ -380,7 +407,6 @@ pub(crate) fn build_lf_step_command(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-    cmd
 }
 
 /// Commit any remaining changes, push, and create a draft PR.

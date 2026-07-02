@@ -1,7 +1,7 @@
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
-    prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
     ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
     PromptComponents, SkillSyncOptions, StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
@@ -110,7 +110,9 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let surface = if is_interactive {
+    let surface = if cli.ide {
+        Surface::Ide
+    } else if is_interactive {
         Surface::Cli
     } else {
         Surface::Headless
@@ -399,8 +401,6 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
 
-    seed_rlm_env(&built.config);
-
     info!(harness = built.harness, "launching agent");
     let launch_start = Instant::now();
     let result = launch_agent(&agent_config, &process, &built.capabilities);
@@ -533,6 +533,24 @@ mod tests {
         // skills fire with `$name`.
         let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
         assert!(seed.starts_with("$gate\n\n"));
+    }
+
+    #[test]
+    fn skill_launch_seed_ide_omits_voice_and_surface() {
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Ide,
+            "gate",
+            Some("build auth"),
+            false,
+            Some("Be terse."),
+        );
+
+        assert!(seed.starts_with("/gate\n\n"));
+        assert!(!seed.contains("Run mode is interactive"));
+        assert!(!seed.contains("Run mode is headless"));
+        assert!(!seed.contains("<lf:voice>"));
+        assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+ALTER TABLE waves ADD COLUMN metrics TEXT NOT NULL DEFAULT '[]';

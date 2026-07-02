@@ -341,6 +341,8 @@ async fn create_running_wave_and_run(
         repo: repo.to_string_lossy().to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
+        goal: "ship-roadmap".to_string(),
+        metrics: Vec::new(),
         crons: Vec::new(),
         direction: vec![],
         area: vec![],
@@ -361,6 +363,7 @@ async fn create_running_wave_and_run(
         snapshot: WaveRunSnapshot {
             repo: repo.to_string_lossy().to_string(),
             flow: "test-flow".to_string(),
+            task: None,
             direction: vec![],
             area: vec![],
         },
@@ -586,6 +589,8 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         repo: tmp.path().to_string_lossy().to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
+        goal: "ship-roadmap".to_string(),
+        metrics: Vec::new(),
         crons: Vec::new(),
         direction: vec![],
         area: vec![],
@@ -606,6 +611,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         snapshot: WaveRunSnapshot {
             repo: tmp.path().to_string_lossy().to_string(),
             flow: "test-flow".to_string(),
+            task: None,
             direction: vec![],
             area: vec![],
         },

@@ -31,10 +31,13 @@ from loopflow.cli import (
     _repo_table,
     _split_repo_slug,
     _status_details,
+    _terminal_sessions_table,
     _usage_table,
     _wave_detail_table,
     _wave_table,
+    app,
 )
+from loopflow.errors import LoopflowError
 from loopflow.models import (
     AuthProviderStatus,
     CostRates,
@@ -45,6 +48,7 @@ from loopflow.models import (
     Wave,
 )
 from rich.console import Console
+from typer.testing import CliRunner
 
 
 def _render_table(wave: Wave) -> str:
@@ -97,6 +101,107 @@ def test_wave_detail_table_includes_flow_and_area() -> None:
     assert "tend" in rendered
     assert "area" in rendered
     assert "wave/chord-model/, wave/signals/" in rendered
+
+
+def test_terminal_sessions_table_flags_interactive_attention() -> None:
+    sessions = [
+        {
+            "id": "terminal-session-agent",
+            "wave_id": "abc-123",
+            "wave_run_id": None,
+            "source": "wave_agent",
+            "step": "goal",
+            "status": "running",
+        },
+        {
+            "id": "terminal-session-child",
+            "wave_id": "abc-123",
+            "wave_run_id": "run-1",
+            "source": "wave_dispatch",
+            "step": "implement",
+            "status": "attached",
+        },
+    ]
+    attention_items = [
+        {
+            "kind": "interactive",
+            "status": "surfaced",
+            "context": {"terminal_session_id": "terminal-session-child"},
+        }
+    ]
+    console = Console(record=True, width=220)
+    console.print(_terminal_sessions_table(sessions, attention_items, {"abc-123": "reduce"}))
+    rendered = console.export_text()
+
+    assert "reduce" in rendered
+    assert "agent" in rendered
+    assert "dispatch" in rendered
+    assert "implement" in rendered
+    assert "yes" in rendered
+
+
+def test_sessions_command_renders_live_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    wave = Wave.model_validate(WAVE_MINIMAL)
+    sessions = [
+        {
+            "id": "terminal-session-child",
+            "wave_id": wave.id,
+            "wave_run_id": "run-1",
+            "source": "wave_dispatch",
+            "step": "implement",
+            "status": "running",
+        }
+    ]
+    attention_items = [
+        {
+            "kind": "interactive",
+            "status": "surfaced",
+            "context": {"terminal_session_id": "terminal-session-child"},
+        }
+    ]
+    monkeypatch.setattr("loopflow.cli.api.wave", lambda _name: wave)
+    monkeypatch.setattr("loopflow.cli.api.list_terminal_sessions", lambda **_kwargs: sessions)
+    monkeypatch.setattr("loopflow.cli.api.list_attention", lambda **_kwargs: attention_items)
+
+    result = CliRunner().invoke(app, ["sessions", "reduce"])
+
+    assert result.exit_code == 0
+    assert "reduce" in result.stdout
+    assert "implement" in result.stdout
+    assert "yes" in result.stdout
+
+
+def test_attach_command_execs_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
+    executed: dict[str, object] = {}
+
+    def fake_execvp(file: str, args: list[str]) -> None:
+        executed["file"] = file
+        executed["args"] = args
+
+    monkeypatch.setattr(
+        "loopflow.cli.api.attach_terminal_session",
+        lambda _session_id: {"session_name": "lfq-terminal-session-child"},
+    )
+    monkeypatch.setattr("loopflow.cli.shutil.which", lambda _name: "/usr/bin/tmux")
+    monkeypatch.setattr("loopflow.cli.os.execvp", fake_execvp)
+
+    result = CliRunner().invoke(app, ["attach", "terminal-session-child"])
+
+    assert result.exit_code == 0
+    assert executed["file"] == "tmux"
+    assert executed["args"] == ["tmux", "attach", "-t", "lfq-terminal-session-child"]
+
+
+def test_attach_command_errors_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_attach(_session_id: str) -> dict[str, object]:
+        raise LoopflowError("terminal session is not tmux-backed")
+
+    monkeypatch.setattr("loopflow.cli.api.attach_terminal_session", fail_attach)
+
+    result = CliRunner().invoke(app, ["attach", "terminal-session-child"])
+
+    assert result.exit_code == 1
+    assert "terminal session is not tmux-backed" in result.stderr
 
 
 def test_auth_status_table_shows_active_and_none_states() -> None:

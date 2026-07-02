@@ -198,6 +198,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var name: String
     public var repo: String
     public var flow: String
+    public var goal: String
+    public var metrics: [String]
     public var direction: [String]
     public var area: [String]
     public var agent: String?
@@ -220,6 +222,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         name: String = "",
         repo: String,
         flow: String = "",
+        goal: String = "ship-roadmap",
+        metrics: [String] = [],
         direction: [String] = [],
         area: [String] = [],
         agent: String? = nil,
@@ -241,6 +245,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.name = name
         self.repo = repo
         self.flow = flow
+        self.goal = goal
+        self.metrics = metrics
         self.direction = direction
         self.area = area
         self.agent = agent

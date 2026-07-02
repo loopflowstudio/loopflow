@@ -22,7 +22,6 @@ local-bin/
 .lf/logs/
 .lf/prompts/
 .lf/journal/
-.lf/rlm/
 .lf/summaries/
 .lf/tmp/
 .claude/skills/

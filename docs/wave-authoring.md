@@ -11,7 +11,7 @@ A wave is a program of work that agents process autonomously. You define what to
 
 ## Creating a Wave
 
-In Concerto, create a wave from the dashboard — set its name, flow, area, and direction.
+In Concerto, create a wave from the dashboard — set its name and flow.
 
 CLI equivalent:
 
@@ -24,7 +24,7 @@ Python API:
 ```python
 import loopflow.api as loopflow
 
-loopflow.create_wave("mywave", repo=".", flow="build", direction=["clarity"], area=["src/"])
+loopflow.create_wave("mywave", repo=".", flow="build", goal="mywave")
 ```
 
 This creates the wave in lfd. To give it work, you write wave content on disk.
@@ -37,14 +37,34 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 
 ```
 wave/infra/
-├── README.md               # Vision, strategy, goals, risks
+├── goal.md                # Loop prompt and authored wave intent
+├── README.md              # Vision, strategy, goals, risks
 ├── 1-fix-crash-loop.md    # Urgent — broken / unblock-now
 ├── 2-daemon-integrity.md  # High — clear next step
 ├── 3-golden-tests.md      # Medium — big "when not if" work
 └── 4-security-research.md # Low — speculative
 ```
 
-The `wave/` directory is the source of truth for what to build. `lfd` reads it; `update-wave` writes it.
+The `wave/` directory is the source of truth for what to build. `lfd` reads the goal; `update-wave` writes the roadmap content.
+
+### The Goal
+
+`goal.md` is the authored loop surface for a wave. Frontmatter carries durable intent; the body is the prompt the looping agent runs.
+
+```markdown
+---
+primary_flow: build
+mode: loop
+workers: 2
+metrics:
+  - daemon migrations are transactional
+  - webhook security is enabled by default
+---
+
+Run one loop iteration for the infra wave.
+Read the roadmap, choose the next useful move, dispatch the right flow, and fold
+the result back into the wave.
+```
 
 ### The README
 
@@ -119,41 +139,20 @@ The lfd daemon has three data integrity issues:
 
 Keep items focused. One PR's worth of work — roughly 1000 LOC. If an item feels like it needs splitting, it probably does.
 
-### The Config YAML
+### Goal Frontmatter
 
-Optional. Mirrors the wave's fields in lfd:
-
-```yaml
-# wave/infra/infra.yaml
-flow: build
-workers: 2
-mode: loop
-crons:
-  - flow: sync
-    schedule: "0 0 * * 1"
-area:
-  - rust/loopflow/src/lfd/
-  - rust/loopflow/src/lfd/store/
-direction:
-  - security
-  - reliability
-triggers:
-  - signal: wave
-    source_wave_id: backend
-    flow: build
-```
+Optional. Seeds the wave's durable intent in lfd when the wave is created.
 
 | Field | What it does |
 |-------|-------------|
-| `flow` | Which flow to run (`build`, `garden`, `sync`, etc.) |
+| `goal` | Which loop prompt to run for autonomous iterations |
+| `primary_flow` | Default flow the goal dispatches (`build`, `garden`, `sync`, etc.) |
 | `workers` | Parallelism for the primary flow. `0` means "don't auto-dispatch the primary flow" |
 | `mode` | Primary execution pattern: `manual` or `loop` |
-| `crons` | Scheduled supplementary flows. Each entry has a `flow` and cron `schedule` |
-| `area` | Paths in scope for this wave |
-| `direction` | Quality lenses applied to every step |
-| `triggers` | Signal + flow pairs (repo, wave, ci_failure). Defaults don't need declaring |
+| `metrics` | Criteria the loop re-judges each iteration |
+| `agent` | Preferred agent harness/model |
 
-If omitted, the wave uses whatever was set via `lfq create` or the Python API.
+Crons and triggers are live lfd state. Configure them through the HTTP or Python API; they are not read from `goal.md`.
 
 ---
 
@@ -234,25 +233,42 @@ Mode controls the primary execution pattern. Crons schedule supplementary flows.
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped or backlog empty |
 
-```yaml
-# wave/mywave/mywave.yaml
-flow: build
+```markdown
+<!-- wave/mywave/goal.md -->
+---
+primary_flow: build
 workers: 2
 mode: loop
-crons:
-  - flow: sync
-    schedule: "0 0 * * 1"
+metrics:
+  - backlog is empty
+---
+
+Run one loop iteration for the mywave wave.
 ```
 
-`workers: 0` is valid for waves that only run scheduled flows:
+`workers: 0` is valid in `goal.md` for waves that only run scheduled flows:
 
-```yaml
-flow: garden
+```markdown
+---
+primary_flow: garden
 workers: 0
 mode: manual
-crons:
-  - flow: govern-coordination
-    schedule: "0 0 * * *"
+---
+
+Run one loop iteration for the governance wave.
+```
+
+Then configure the cron schedule in lfd:
+
+```python
+import loopflow.api as loopflow
+
+loopflow.create_wave(
+    "governance",
+    repo=".",
+    flow="garden",
+    crons=[{"flow": "govern-coordination", "schedule": "0 0 * * *"}],
+)
 ```
 
 | Signal | What changed | Default flow |
@@ -264,13 +280,12 @@ crons:
 ```python
 import loopflow.api as loopflow
 
-# Create the wave, then manage primary flow, crons, and scope
-loopflow.create_wave("mywave", repo=".", flow="build", area=["src/"])
+# Create the wave, then manage primary flow and crons
+loopflow.create_wave("mywave", repo=".", flow="build", goal="mywave")
 loopflow.update_wave(
     "mywave",
     flow="build",
     crons=[{"flow": "sync", "schedule": "0 0 * * 1"}],
-    area=["src/"],
 )
 
 # Add a trigger — react to another wave

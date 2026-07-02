@@ -28,8 +28,8 @@ def test_pm_enabled_ingest_returns_structured_response(
 
     wave_dir = lfd_runtime.repo_dir / "wave" / "designer"
     wave_dir.mkdir(parents=True, exist_ok=True)
-    (wave_dir / "designer.yaml").write_text(
-        "pm:\n  provider: asana\n  asana_project: '123'\n"
+    (wave_dir / "goal.md").write_text(
+        "---\npm:\n  provider: asana\n  asana_project: '123'\n---\nDrive the work.\n"
     )
     (wave_dir / "1-something.md").write_text("# Something\n")
 

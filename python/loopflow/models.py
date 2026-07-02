@@ -33,6 +33,7 @@ class PullRequest(BaseModel):
 class WaveRun(BaseModel):
     id: str
     wave_id: str
+    task: Optional[str] = None
     iteration: int
     step_index: int
     status: str
@@ -81,6 +82,8 @@ class Wave(BaseModel):
     repo: str
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
+    goal: str
+    metrics: list[str]
     workers: int = 1
     direction: list[str]
     area: list[str]

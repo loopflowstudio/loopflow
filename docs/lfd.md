@@ -250,17 +250,28 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
-Chord-waves are regular waves whose `area` points at other wave directories:
+Wave intent lives in `wave/<name>/goal.md`:
+
+```markdown
+---
+primary_flow: build
+mode: loop
+metrics:
+  - backlog is empty
+---
+
+Run one loop iteration for this wave.
+```
+
+Create the wave in lfd:
 
 ```bash
 curl -s -X POST "$LFD_ADDR/v0/waves" \
   -H "Content-Type: application/json" \
-  -d '{"repo":"'"$(pwd)"'","name":"conductor"}'
+  -d '{"repo":"'"$(pwd)"'","name":"shipper","goal":"ship-roadmap","flow":"build"}'
 
-curl -s "$LFD_ADDR/v0/waves/conductor"
+curl -s "$LFD_ADDR/v0/waves/shipper"
 ```
-
-The `wave/conductor/conductor.yaml` file is the source of truth for member waves.
 
 ## Browse the flow catalog
 
@@ -318,24 +329,17 @@ Stop the session:
 curl -s -X DELETE "$LFD_ADDR/v0/sessions/<session_id>"
 ```
 
-## Wave schemas
+## Terminal sessions API
 
 ```bash
-curl -s "$LFD_ADDR/v0/wave/schemas?repo=$(pwd)" | jq '.data[].name'
+curl -s "$LFD_ADDR/v0/terminal-sessions?active_only=true" | jq '.data[] | {id, wave_id, step, source, status, tmux_name}'
 ```
 
 ```bash
-curl -s -X POST "$LFD_ADDR/v0/waves" \
-  -H "Content-Type: application/json" \
-  -d "{\"repo\":\"$(pwd)\",\"schema\":\"scan\"}"
+curl -s -X POST "$LFD_ADDR/v0/terminal-sessions/<session_id>/attach"
 ```
 
-Use explicit refs when names collide:
-
-```json
-{"schema":"builtin://scan"}
-{"schema":"file:///abs/path/to/repo/wave/scan/scan.yaml"}
-```
+The attach endpoint marks the session attached and returns tmux connection info. `lfq sessions` and `lfq attach <session-id>` wrap these endpoints for day-to-day use.
 
 ## GitHub CI auto-fix
 

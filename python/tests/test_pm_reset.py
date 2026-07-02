@@ -29,12 +29,12 @@ pm_reset = _load_script()
 def _write_wave(path: Path, name: str, **pm_fields: str) -> Path:
     wave_dir = path / "wave" / name
     wave_dir.mkdir(parents=True)
-    yaml_path = wave_dir / f"{name}.yaml"
-    body: dict[str, object] = {"flow": "build"}
+    goal_path = wave_dir / "goal.md"
+    body: dict[str, object] = {"primary_flow": "build"}
     if pm_fields:
         body["pm"] = dict(pm_fields)
-    yaml_path.write_text(yaml.safe_dump(body, sort_keys=False))
-    return yaml_path
+    goal_path.write_text(f"---\n{yaml.safe_dump(body, sort_keys=False)}---\nDrive the work.\n")
+    return goal_path
 
 
 def test_find_wave_projects_returns_configured_waves(tmp_path):
@@ -51,32 +51,33 @@ def test_find_wave_projects_ignores_malformed_yaml(tmp_path):
     _write_wave(tmp_path, "alpha", provider="asana", asana_project="111")
     bad = tmp_path / "wave" / "bad"
     bad.mkdir(parents=True)
-    (bad / "bad.yaml").write_text(":: not valid yaml ::\n  - : -")
+    (bad / "goal.md").write_text("---\n:: not valid yaml ::\n  - : -\n---\n")
 
     found = pm_reset.find_wave_projects(tmp_path, "asana")
     assert [wave for _, wave, _ in found] == ["alpha"]
 
 
 def test_clear_project_id_removes_field_preserves_other_pm(tmp_path):
-    yaml_path = _write_wave(
+    goal_path = _write_wave(
         tmp_path, "alpha", provider="asana", asana_project="111", workspace="ws1"
     )
 
-    pm_reset.clear_project_id(yaml_path, "asana")
+    pm_reset.clear_project_id(goal_path, "asana")
 
-    data = yaml.safe_load(yaml_path.read_text())
+    data, body = pm_reset._split_frontmatter(goal_path.read_text())
     assert "asana_project" not in data["pm"]
     assert data["pm"]["workspace"] == "ws1"
+    assert body == "Drive the work.\n"
 
 
 def test_clear_project_id_drops_pm_block_when_empty(tmp_path):
-    yaml_path = _write_wave(tmp_path, "alpha", asana_project="111")
+    goal_path = _write_wave(tmp_path, "alpha", asana_project="111")
 
-    pm_reset.clear_project_id(yaml_path, "asana")
+    pm_reset.clear_project_id(goal_path, "asana")
 
-    data = yaml.safe_load(yaml_path.read_text())
+    data, _ = pm_reset._split_frontmatter(goal_path.read_text())
     assert "pm" not in data
-    assert data["flow"] == "build"
+    assert data["primary_flow"] == "build"
 
 
 def test_delete_asana_project_uses_bearer_auth(tmp_path, monkeypatch):
@@ -141,5 +142,5 @@ def test_dry_run_does_not_delete_or_mutate_yaml(tmp_path, monkeypatch):
     )
     assert result.returncode == 0, result.stderr
 
-    data = yaml.safe_load((tmp_path / "wave/alpha/alpha.yaml").read_text())
+    data, _ = pm_reset._split_frontmatter((tmp_path / "wave/alpha/goal.md").read_text())
     assert data["pm"]["asana_project"] == "111"

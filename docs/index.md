@@ -86,13 +86,14 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 |------|--------------|------|
 | **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
 | **Flow** | Chains steps together | `.lf/flows/*.yaml` |
+| **Goal** | Runs a wave loop prompt | `wave/<name>/goal.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
-| **Mode** | Primary execution pattern: manual or loop | wave config |
-| **Cron** | Scheduled supplementary flow | wave config |
-| **Trigger** | Signal + flow: repo, wave, ci_failure | wave config |
+| **Mode** | Primary execution pattern: manual or loop | goal frontmatter / lfd |
+| **Cron** | Scheduled supplementary flow | lfd |
+| **Trigger** | Signal + flow: repo, wave, ci_failure | lfd |
 
-A wave is **area × direction × flow**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
+A wave is **goal × flow × runtime state**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
 
 Area is the path you pass—not a file. It scopes what the wave sees and changes.
 
@@ -101,13 +102,16 @@ Area is the path you pass—not a file. It scopes what the wave sees and changes
 | **manual** | Single run |
 | **loop** | Continuously until stopped |
 
-```yaml
-flow: build
+```markdown
+---
+primary_flow: build
 workers: 2
 mode: loop
-crons:
-  - flow: sync
-    schedule: "0 0 * * 1"
+metrics:
+  - backlog is empty
+---
+
+Run one loop iteration for this wave.
 ```
 
 | Signal | What changed | Default flow |
@@ -223,7 +227,7 @@ loopflow.run_wave("shipper")
 PY
 ```
 
-Combined with flow and direction, area defines the wave:
+Combined with flow and direction, area scopes a manual run or live wave update:
 
 ```bash
 python - <<'PY'

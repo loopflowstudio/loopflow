@@ -218,6 +218,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let direction_json = serde_json::to_string(wave.direction())?;
             let area_json = serde_json::to_string(wave.area())?;
+            let metrics_json = serde_json::to_string(wave.metrics())?;
             let paused: i32 = if wave.status() == WaveStatus::Paused {
                 1
             } else {
@@ -228,6 +229,8 @@ impl PostgresStore {
             let workers = wave.workers as i32;
             let mode = wave.mode().as_str();
             let primary_flow = wave.primary_flow();
+            let goal = wave.goal();
+            let metrics = metrics_json.as_str();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -245,6 +248,8 @@ impl PostgresStore {
                         &workers,
                         &mode,
                         &primary_flow.as_str(),
+                        &goal,
+                        &metrics,
                     ],
                 )
                 .await?;
@@ -1293,6 +1298,7 @@ impl PostgresStore {
                         &run.error,
                         &run.snapshot.repo,
                         &run.snapshot.flow,
+                        &run.snapshot.task,
                         &serde_json::to_string(&run.snapshot.direction)?,
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.pr)?,
@@ -1333,6 +1339,7 @@ impl PostgresStore {
                         &run.error,
                         &run.snapshot.repo,
                         &run.snapshot.flow,
+                        &run.snapshot.task,
                         &serde_json::to_string(&run.snapshot.direction)?,
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.pr)?,

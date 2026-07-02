@@ -59,7 +59,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 |------|-------------|
 | `--docs PATH[,PATH...]` | Include docs files, globs, or directories |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
-| `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
+| `--diff-files / --no-diff-files` | Include files touched by branch |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
 ### Clipboard
@@ -121,7 +121,7 @@ Every step automatically includes:
 | **Loopflow operating guidance** | ✓ included | `--no-loopflow` |
 | **scratch/** | ✓ included | — |
 | **wave/** (when scoped) | ✓ included | — |
-| **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
+| **Branch files** (files you've changed) | — | `--diff-files` |
 
 ## What's Opt-In
 
@@ -131,6 +131,7 @@ These require explicit flags or config:
 |---------|---------------|
 | **Docs** (files, globs, directories) | `--docs README.md,docs/` or `docs:` config |
 | **Raw diff** (line-by-line changes) | `--diff` |
+| **Branch files** (full changed file bodies) | `--diff-files` |
 | **Clipboard** | `-c` / `--clipboard` |
 | **Chrome automation** | `--chrome` |
 

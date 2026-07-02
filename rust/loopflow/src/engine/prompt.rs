@@ -796,7 +796,7 @@ fn gather_local_doc_target(
     };
 
     if path.is_dir() {
-        for doc in gather_directory_docs(repo_root, target) {
+        for doc in gather_directory_docs(repo_root, target, &gitignore) {
             let abs_path = repo_root.join(&doc.path);
             let canonical = abs_path.canonicalize().unwrap_or(abs_path);
             if seen.insert(canonical) {
@@ -941,7 +941,11 @@ fn resolve_doc_target<'a>(
 ///
 /// Does NOT include repo root docs unless the target is "." and does NOT include
 /// sibling directories.
-fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
+fn gather_directory_docs(
+    repo_root: &Path,
+    target: &str,
+    gitignore: &ignore::gitignore::Gitignore,
+) -> Vec<Document> {
     let target_path = Path::new(target);
     let mut ancestors = Vec::new();
 
@@ -975,7 +979,9 @@ fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     let path = e.path();
-                    path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                    path.is_file()
+                        && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                        && !should_exclude(repo_root, &path, gitignore)
                 })
                 .collect(),
             Err(_) => continue,
@@ -994,7 +1000,7 @@ fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
                 continue;
             }
 
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Some(content) = read_text_file(&path) {
                 seen.insert(rel_path.clone());
                 docs.push(Document {
                     path: rel_path,
@@ -1005,13 +1011,19 @@ fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
         }
     }
 
-    // Gather descendants recursively. The `seen` set already contains the area
+    // Gather descendants recursively. The `seen` set already contains the docs
     // directory's own .md files from the ancestor walk, so they won't be
     // double-counted.
     let target_abs = repo_root.join(target_path);
     if target_abs.is_dir() {
         let mut descendant_docs = Vec::new();
-        gather_directory_descendants(&target_abs, repo_root, &mut descendant_docs, &mut seen);
+        gather_directory_descendants(
+            &target_abs,
+            repo_root,
+            gitignore,
+            &mut descendant_docs,
+            &mut seen,
+        );
 
         // Prefer shallower descendant docs, then stable path ordering.
         descendant_docs.sort_by(|a, b| {
@@ -1029,9 +1041,14 @@ fn gather_directory_docs(repo_root: &Path, target: &str) -> Vec<Document> {
 fn gather_directory_descendants(
     dir: &Path,
     repo_root: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
     docs: &mut Vec<Document>,
     seen: &mut HashSet<String>,
 ) {
+    if should_exclude(repo_root, dir, gitignore) {
+        return;
+    }
+
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
@@ -1043,11 +1060,14 @@ fn gather_directory_descendants(
     for entry in sorted {
         let path = entry.path();
         if path.is_dir() {
-            gather_directory_descendants(&path, repo_root, docs, seen);
+            gather_directory_descendants(&path, repo_root, gitignore, docs, seen);
             continue;
         }
 
         if !path.extension().map(|ext| ext == "md").unwrap_or(false) {
+            continue;
+        }
+        if should_exclude(repo_root, &path, gitignore) {
             continue;
         }
 
@@ -1060,7 +1080,7 @@ fn gather_directory_descendants(
             continue;
         }
 
-        if let Ok(content) = fs::read_to_string(&path) {
+        if let Some(content) = read_text_file(&path) {
             seen.insert(rel_path.clone());
             docs.push(Document {
                 path: rel_path,
@@ -2580,7 +2600,8 @@ mod tests {
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/api/handlers/v1/README.md", "# v1");
 
-        let docs = gather_directory_docs(repo.path(), "src/api");
+        let gitignore = build_gitignore(repo.path());
+        let docs = gather_directory_docs(repo.path(), "src/api", &gitignore);
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/README.md"));
@@ -2603,7 +2624,8 @@ mod tests {
         write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
         write_file(repo.path(), "src/web/README.md", "# web");
 
-        let docs = gather_directory_docs(repo.path(), "src/api");
+        let gitignore = build_gitignore(repo.path());
+        let docs = gather_directory_docs(repo.path(), "src/api", &gitignore);
         let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
 
         assert!(paths.contains(&"src/api/handlers/README.md"));
@@ -2630,6 +2652,30 @@ mod tests {
 
         let error = gather_documents(&opts).expect_err("too many explicit docs");
         assert!(error.to_string().contains("--docs resolved to 121 files"));
+    }
+
+    #[test]
+    fn gather_documents_directory_docs_respects_excludes() {
+        let repo = init_repo();
+        write_file(repo.path(), ".gitignore", "docs/private/\n");
+        write_file(repo.path(), "docs/README.md", "# public");
+        write_file(repo.path(), "docs/private/README.md", "# private");
+        write_file(repo.path(), "docs/Cargo.lock", "# lock");
+        write_file(repo.path(), ".lf/README.md", "# internal");
+
+        let spec = GatherSpec {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec![".".to_string()],
+            ..Default::default()
+        };
+
+        let docs = gather_documents(&spec).expect("gather docs");
+        let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
+
+        assert!(paths.contains(&"docs/README.md"));
+        assert!(!paths.contains(&"docs/private/README.md"));
+        assert!(!paths.contains(&"docs/Cargo.lock"));
+        assert!(!paths.contains(&".lf/README.md"));
     }
 
     // ==========================================================================

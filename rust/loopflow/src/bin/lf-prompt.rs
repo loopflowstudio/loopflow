@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use loopflow::engine::{
-    format_prompt, gather_context, GatherContextOpts, PromptFormatMode, Surface,
+    drop_native_instruction_docs, format_prompt, gather_context, GatherContextOpts,
+    PromptFormatMode, Surface,
 };
 
 #[derive(Parser, Debug)]
@@ -55,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     let opts = GatherContextOpts {
-        repo_root: args.repo,
+        repo_root: args.repo.clone(),
         step: args.step,
         message: None,
         operate: !args.no_loopflow,
@@ -70,7 +71,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         related_repos: Vec::new(),
     };
 
-    let gathered = gather_context(&opts)?;
+    let mut gathered = gather_context(&opts)?;
+    drop_native_instruction_docs(gathered.components_mut(), &args.repo);
     let prompt = format_prompt(PromptFormatMode::Full, gathered.components());
     println!("{prompt}");
 

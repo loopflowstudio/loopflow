@@ -1,0 +1,34 @@
+## Try it!
+
+```bash
+lf op release status
+cargo test -p loopflow release_status
+```
+
+`lf op release status` still shows the target, latest tag, tagged release workflow, and GitHub Release state. It now also prints the most recent package verification and weekly release workflow status, including titles and URLs when GitHub returns them.
+
+Validation run:
+
+```bash
+cargo fmt --check
+cargo test -p loopflow release_status
+cargo clippy -- -D warnings
+uv run pytest python/tests/
+cargo test --all
+```
+
+## Intent
+
+Close the first local feedback-loop gap for release automation by making failed nightly package verification or weekly release runs discoverable from Loopflow itself, not only from GitHub Actions history.
+
+## Assumptions
+
+The recurring release workflows are named `nightly-packages.yml` and `weekly-release.yml`, matching the repo's documented release automation. The GitHub CLI remains the release ops integration point and must be installed/authenticated for release status checks.
+
+## Key decisions
+
+The release status command keeps tagged release publication and recurring automation health as separate lines. Missing nightly/weekly workflow files are reported as `(not found)` for compatibility with repos that have not adopted the release automation skeleton, while unrelated GitHub errors still fail loudly.
+
+## Not included
+
+This does not create wave items, issues, or repair PRs from failed workflow runs. It also does not add a daemon/API status surface or deploy-host freshness checks.

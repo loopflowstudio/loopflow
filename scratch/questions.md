@@ -41,3 +41,16 @@ progress command to `lf wave` (with `lf loop` as an alias) and retain each
 bounded pass's stdout/stderr under `wave/<name>/streams/` for the future monitor
 arm. Cron scheduling, monitor summarization, and in-process chat API remain
 separate follow-on work.
+
+## Reduction pass (compress)
+
+Reshaped `run_pass` in `loop.rs`: dropped the `PassOutcome::SpawnError` variant
+and let setup failures (spawn, pipes, log I/O, wait) propagate as `Err` via `?`.
+Cut ~17 lines of manual match-and-rewrap; the outcome enum now models only what
+a pass that actually *ran* can produce. Also deduped the `wave/<name>` path join.
+
+**Observed, left out of scope:** `goal.rs::launch_goal_batch` duplicates the
+headless-launch sequence in `run.rs` (check_cli → write prompt/context logs →
+`StreamFormat::Human` → `launch_agent` → exit-code hint). Collapsing it means a
+shared `engine::agent` helper and rewiring `run.rs`, which this branch didn't
+touch. Worth a dedicated pass once a third caller appears.

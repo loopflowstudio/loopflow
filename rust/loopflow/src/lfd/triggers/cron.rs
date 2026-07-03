@@ -125,7 +125,7 @@ mod tests {
 
     use crate::lfd::http::routes::test_helpers::test_http_state;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Wave, WaveCron, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoWork, Wave, WaveCron, WaveMode, WaveStatus};
 
     #[test]
     fn never_triggered_within_grace_period() {
@@ -178,19 +178,26 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "cron-wave".to_string(),
-            repo: repo_tmp.path().to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo_tmp.path().to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 0,
+            parent_wave_id: None,
         };
         state.store.create_wave(&wave).await.expect("create wave");
 

@@ -76,32 +76,45 @@ class FlowStep(BaseModel):
         raise TypeError(f"Unsupported flow step value: {value!r}")
 
 
-class Wave(BaseModel):
-    id: str
-    name: str
+class RepoWork(BaseModel):
+    """Per-repo execution surface for a wave. Wire type — no defaults on the
+    fields the server always emits; optional fields mirror Rust's
+    skip_serializing_if (absent → None)."""
+
     repo: str
-    mode: str = "loop"
-    primary_flow: str = "ship-roadmap"
-    goal: str
-    metrics: list[str]
-    workers: int = 1
-    direction: list[str]
-    area: list[str]
-    triggers: list[Trigger] = Field(default_factory=list)
-    crons: list[WaveCron] = Field(default_factory=list)
     status: str
     iteration: int
+    commits: list[CommitEntry]
+    open_pr_count: int
+    stack_count: int
     local_worktree: Optional[str] = None
     remote_branch: Optional[str] = None
-    commits: list[CommitEntry] = Field(default_factory=list)
     diff_stat: Optional[str] = None
-    flow_steps: list[FlowStep] = Field(default_factory=list)
     active_run: Optional[Run] = None
-    created_at: Optional[datetime] = None
+    pr: Optional[PullRequest] = None
 
-    branch: Optional[str] = None
-    pr_url: Optional[str] = None
-    pr_state: Optional[str] = None
+
+class Wave(BaseModel):
+    """Wave wire type. No field defaults — every field the server always emits
+    is required, mirroring Rust's `WaveDto` (absent → parse error). Optional
+    fields carry `None` for absent, never a value default."""
+
+    id: str
+    name: str
+    mode: str
+    primary_flow: str
+    goal: str
+    metrics: list[str]
+    workers: int
+    direction: list[str]
+    area: list[str]
+    triggers: list[Trigger]
+    crons: list[WaveCron]
+    status: str
+    repos: list[RepoWork]
+    flow_steps: list[FlowStep]
+    parent_wave_id: Optional[str]
+    created_at: Optional[datetime] = None
 
     @field_validator("flow_steps", mode="before")
     @classmethod

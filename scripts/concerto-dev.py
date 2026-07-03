@@ -55,6 +55,12 @@ DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
 # (UserDefaults/keychain) with the installed Concerto. Worktree dev stays on the
 # local bundled lfd; the installed app keeps its own (e.g. Mac Mini) connection.
 DEV_BUNDLE_ID = "com.loopflow.concerto.dev"
+# Stable self-signed identity used to sign dev builds. Ad-hoc signing (`--sign -`)
+# yields a fresh cdhash every build, so the keychain ACL that "Always Allow"
+# creates for the connection token never matches the next build and macOS
+# re-prompts. A persistent identity keeps the cdhash constant so the ACL sticks.
+DEV_SIGNING_IDENTITY = "Concerto Dev"
+LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
@@ -113,8 +119,17 @@ def stream_with_log(
         return process.wait()
 
 
-def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | None = None) -> int:
-    """Launch app bundle through LaunchServices and stream redirected stdout/stderr."""
+def run_app_bundle_with_log(
+    app_path: Path,
+    log_path: Path,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    """Launch app bundle through LaunchServices and stream redirected stdout/stderr.
+
+    `env` entries are passed to the launched app via `open --env` (LaunchServices
+    does not inherit this process's environment).
+    """
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     open_cmd = [
@@ -125,8 +140,10 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | No
         str(log_path),
         "--stderr",
         str(log_path),
-        str(app_path),
     ]
+    for key, value in (env or {}).items():
+        open_cmd.extend(["--env", f"{key}={value}"])
+    open_cmd.append(str(app_path))
     if args:
         open_cmd.extend(["--args", *args])
     with log_path.open("a", encoding="utf-8") as log_file:
@@ -320,7 +337,20 @@ def cmd_run() -> int:
         return result.returncode
 
     _install_dev_app()
-    run(["open", str(DEV_APP)])
+    # Dev launches read this checkout's wave/ dir + lfd AS-IS (CONCERTO_DEV_WAVE_REPO);
+    # a plain production launch leaves it unset and reads the main worktree.
+    run(
+        [
+            "open",
+            "-n",
+            "--env",
+            f"CONCERTO_DEV_WAVE_REPO={REPO_ROOT}",
+            str(DEV_APP),
+            "--args",
+            "--repo",
+            str(REPO_ROOT),
+        ]
+    )
     return 0
 
 
@@ -483,6 +513,9 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path =
         DEV_APP,
         CONCERTO_STREAM_LOG,
         args=["--repo", str(repo)],
+        # Dev launches read the launched checkout's wave/ dir + lfd AS-IS; a plain
+        # production launch leaves this unset and reads the main worktree.
+        env={"CONCERTO_DEV_WAVE_REPO": str(repo)},
     )
 
     if lfd_process is not None:
@@ -949,6 +982,91 @@ def _wave_name_from_branch(branch: str) -> str | None:
     return None
 
 
+def _find_stable_signing_identity() -> str | None:
+    """Pick a stable codesigning identity already in the keychain.
+
+    Prefers our dedicated dev cert, then a real Apple identity (what Xcode uses
+    for local debug builds). Any of these keeps the cdhash constant across
+    builds so the connection-token ACL persists. Returns None if none exist.
+    """
+    result = run_capture(["security", "find-identity", "-v", "-p", "codesigning"])
+    names = []
+    for line in result.stdout.splitlines():
+        start = line.find('"')
+        end = line.rfind('"')
+        if start != -1 and end > start:
+            names.append(line[start + 1 : end])
+
+    for preferred in (DEV_SIGNING_IDENTITY, "Apple Development", "Developer ID Application"):
+        for name in names:
+            if name.startswith(preferred):
+                return name
+    return names[0] if names else None
+
+
+def _create_dev_signing_identity() -> None:
+    """Create a stable, trusted self-signed code-signing identity.
+
+    Fallback for machines with no Apple developer identity. The cert must be
+    trusted for code signing or `codesign` and `find-identity` won't accept it;
+    the trust step may raise a one-time authorization dialog.
+    """
+    print(f'Creating stable dev signing identity "{DEV_SIGNING_IDENTITY}"...')
+    p12_password = "concerto-dev"  # transient; only unlocks the export archive
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        config = tmp_dir / "cert.conf"
+        key = tmp_dir / "key.pem"
+        cert = tmp_dir / "cert.pem"
+        p12 = tmp_dir / "identity.p12"
+        config.write_text(
+            "[req]\n"
+            "distinguished_name = dn\n"
+            "x509_extensions = v3\n"
+            "prompt = no\n"
+            "[dn]\n"
+            f"CN = {DEV_SIGNING_IDENTITY}\n"
+            "[v3]\n"
+            "basicConstraints = critical,CA:false\n"
+            "keyUsage = critical,digitalSignature\n"
+            "extendedKeyUsage = critical,codeSigning\n"
+        )
+        run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(key), "-out", str(cert),
+            "-days", "3650", "-config", str(config), "-extensions", "v3",
+        ])
+        # An empty p12 password trips a MAC-verification failure in macOS'
+        # `security import`, so use a transient one.
+        run([
+            "openssl", "pkcs12", "-export", "-inkey", str(key), "-in", str(cert),
+            "-out", str(p12), "-name", DEV_SIGNING_IDENTITY,
+            "-passout", f"pass:{p12_password}",
+        ])
+        # -A lets any app (incl. codesign) use the private key without an access
+        # prompt. Importing into the already-unlocked login keychain is
+        # non-interactive.
+        run([
+            "security", "import", str(p12),
+            "-k", str(LOGIN_KEYCHAIN),
+            "-P", p12_password,
+            "-A",
+        ])
+        # Trust the cert for code signing so codesign/find-identity accept it.
+        run(["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign",
+             "-k", str(LOGIN_KEYCHAIN), str(cert)])
+
+
+def _ensure_dev_signing_identity() -> str:
+    identity = _find_stable_signing_identity()
+    if identity is None:
+        _create_dev_signing_identity()
+        identity = _find_stable_signing_identity()
+    if identity is None:
+        raise RuntimeError("Failed to create a dev signing identity")
+    return identity
+
+
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
@@ -962,8 +1080,9 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS", profile="debug")
 
+    identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
-    codesign_cmd = ["codesign", "--force", "--deep", "--sign", "-"]
+    codesign_cmd = ["codesign", "--force", "--deep", "--sign", identity]
     if entitlements.exists():
         codesign_cmd += ["--entitlements", str(entitlements)]
     codesign_cmd.append(str(DEV_APP))

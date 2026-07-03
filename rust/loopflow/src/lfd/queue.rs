@@ -654,7 +654,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Run, RunStatus, Wave, WaveMode, WaveStatus,
+        PullRequest, QueueBlockReason, RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -717,19 +717,26 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 
@@ -737,7 +744,7 @@ mod tests {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: wave.repo().to_string(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),

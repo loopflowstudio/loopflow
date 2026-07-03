@@ -173,7 +173,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
 
-        if let contentType {
+        // Only advertise a Content-Type when we actually send a body. axum's
+        // `Option<Json<T>>` extractor rejects an empty body that carries a JSON
+        // content-type (EOF while parsing), which surfaced as a 400 "Terminal
+        // unavailable" when starting a wave's /goal agent with no overrides.
+        if let contentType, body != nil {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
@@ -975,17 +979,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         default: normalizedStatus = statusValue
         }
         let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
-        let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseRunFromJSON)
 
-        let commits: [CommitEntry]
-        if let commitsData = json["commits"] as? [[String: Any]] {
-            commits = commitsData.compactMap { entry in
-                guard let sha = entry["sha"] as? String,
-                      let message = entry["message"] as? String else { return nil }
-                return CommitEntry(sha: sha, message: message)
-            }
+        let repos: [RepoWork]
+        if let reposData = json["repos"] as? [[String: Any]] {
+            repos = reposData.map { Self.parseRepoWorkFromJSON($0) }
         } else {
-            commits = []
+            repos = []
         }
 
         let flowSteps = json["flow_steps"] as? [String] ?? []
@@ -998,7 +997,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
-            repo: json["repo"] as? String ?? "",
+            repos: repos,
             flow: json["primary_flow"] as? String ?? "",
             goal: json["goal"] as! String,
             metrics: json["metrics"] as! [String],
@@ -1009,15 +1008,66 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             triggers: triggers,
             crons: crons,
             status: status,
-            iteration: json["iteration"] as? Int ?? 0,
+            flowSteps: flowSteps,
+            createdAt: createdAt,
+            parentWaveId: json["parent_wave_id"] as? String
+        )
+    }
+
+    /// Parse one entry of a wave's nested `repos` array into a `RepoWork`,
+    /// mirroring `RepoWorkDto`.
+    static func parseRepoWorkFromJSON(_ json: [String: Any]) -> RepoWork {
+        let statusValue = json["status"] as? String ?? "idle"
+        let normalizedStatus: String
+        switch statusValue {
+        case "error": normalizedStatus = "failed"
+        case "completed": normalizedStatus = "idle"
+        default: normalizedStatus = statusValue
+        }
+        let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
+
+        let commits: [CommitEntry]
+        if let commitsData = json["commits"] as? [[String: Any]] {
+            commits = commitsData.compactMap { entry in
+                guard let sha = entry["sha"] as? String,
+                      let message = entry["message"] as? String else { return nil }
+                return CommitEntry(sha: sha, message: message)
+            }
+        } else {
+            commits = []
+        }
+
+        let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseRunFromJSON)
+
+        let pr: PullRequest?
+        if let prData = json["pr"] as? [String: Any],
+           let urlString = prData["url"] as? String,
+           let url = URL(string: urlString) {
+            let number = prData["number"] as? Int
+            let state = (prData["state"] as? String).map { $0.lowercased() }.flatMap { PRState(rawValue: $0) }
+            pr = PullRequest(
+                url: url,
+                number: number,
+                state: state,
+                title: prData["title"] as? String,
+                branch: prData["branch"] as? String
+            )
+        } else {
+            pr = nil
+        }
+
+        return RepoWork(
+            repo: json["repo"] as? String ?? "",
+            status: status,
+            iteration: normalizeInt(json["iteration"]),
             localWorktree: json["local_worktree"] as? String,
             remoteBranch: json["remote_branch"] as? String,
             commits: commits,
             diffStat: json["diff_stat"] as? String,
-            flowSteps: flowSteps,
             openPRCount: normalizeInt(json["open_pr_count"]),
+            stackCount: normalizeInt(json["stack_count"]),
             activeRun: activeRun,
-            createdAt: createdAt
+            pr: pr
         )
     }
 

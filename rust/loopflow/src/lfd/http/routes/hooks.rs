@@ -658,7 +658,9 @@ mod tests {
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{PullRequest, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{
+        PullRequest, RepoWork, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus,
+    };
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -784,19 +786,26 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "watch-wave".to_string(),
-            repo: repo_dir.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo_dir.path().to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         };
         state.store.create_wave(&wave).await.expect("create wave");
         let trigger = Trigger {

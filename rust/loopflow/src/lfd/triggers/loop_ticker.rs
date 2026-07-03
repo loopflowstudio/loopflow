@@ -98,7 +98,7 @@ async fn tick_loop_waves(
                         "max iterations exceeded, pausing wave"
                     );
                     let mut paused_wave = wave.clone();
-                    paused_wave.status = WaveStatus::Paused;
+                    paused_wave.set_status(WaveStatus::Paused);
                     if let Err(err) = store.update_wave(&paused_wave).await {
                         tracing::error!(
                             wave_id = %paused_wave.id,
@@ -156,7 +156,7 @@ fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
 mod tests {
     use super::should_pause_for_max_iterations;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode, WaveStatus};
     use time::OffsetDateTime;
 
     fn make_trigger(max_iterations: Option<u32>) -> Trigger {
@@ -169,19 +169,26 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "loop-wave".to_string(),
-            repo: "/tmp/repo".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: "/tmp/repo".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration,
+                cycle_start_iteration,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration,
-            cycle_start_iteration,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 

@@ -48,14 +48,18 @@ pub async fn create_parallel_run(
         .map(|run| run.stack_group_id.clone())
         .unwrap_or_else(|| wave.id().to_string());
 
-    let main_repo = Path::new(wave.repo());
+    let repo_work = wave
+        .repos
+        .first()
+        .expect("wave always has at least one RepoWork");
+    let main_repo = Path::new(&repo_work.repo);
     let (wt_path, branch) =
         create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?;
 
     let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        repo: wave.repo().clone(),
+        repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
         direction: wave.direction().clone(),
@@ -83,12 +87,14 @@ pub async fn create_parallel_run(
     };
     store.create_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
-        // New cycle: record the starting iteration for max_iterations safety valve.
-        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
-            wave.cycle_start_iteration = iteration;
+        if let Some(rw) = wave.repo_work_mut(&run.repo) {
+            // New cycle: record the starting iteration for max_iterations safety valve.
+            if rw.status == WaveStatus::Idle || rw.status == WaveStatus::Paused {
+                rw.cycle_start_iteration = iteration;
+            }
+            rw.status = WaveStatus::Running;
+            rw.iteration = iteration;
         }
-        wave.status = WaveStatus::Running;
-        wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
             warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
         }
@@ -123,7 +129,11 @@ pub async fn create_run_with_id(
         .map(|run| run.stack_group_id.clone())
         .unwrap_or_else(|| wave.id().to_string());
 
-    let main_repo = Path::new(wave.repo());
+    let repo_work = wave
+        .repos
+        .first()
+        .expect("wave always has at least one RepoWork");
+    let main_repo = Path::new(&repo_work.repo);
 
     // Targeted activations (non-main branch) get their own worktree
     // even for serialized waves, since the wave's shared worktree is
@@ -140,7 +150,7 @@ pub async fn create_run_with_id(
     let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        repo: wave.repo().clone(),
+        repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
         direction: wave.direction().clone(),
@@ -168,11 +178,13 @@ pub async fn create_run_with_id(
     };
     store.create_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
-        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
-            wave.cycle_start_iteration = iteration;
+        if let Some(rw) = wave.repo_work_mut(&run.repo) {
+            if rw.status == WaveStatus::Idle || rw.status == WaveStatus::Paused {
+                rw.cycle_start_iteration = iteration;
+            }
+            rw.status = WaveStatus::Running;
+            rw.iteration = iteration;
         }
-        wave.status = WaveStatus::Running;
-        wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
             warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
         }

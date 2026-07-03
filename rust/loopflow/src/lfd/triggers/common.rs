@@ -85,7 +85,7 @@ async fn execute_run_inner(
                 tracing::error!(run_id = %run.id, error = %err, "failed to update wave run status");
             }
             if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
-                wave.status = WaveStatus::Failed;
+                wave.set_status(WaveStatus::Failed);
                 if let Err(err) = store.update_wave(&wave).await {
                     tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
                 }
@@ -231,7 +231,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{Run, RunStackStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoWork, Run, RunStackStatus, Wave, WaveMode, WaveStatus};
 
     async fn test_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
@@ -247,19 +247,26 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            repo: ".".to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: ".".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Failed,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Failed,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 

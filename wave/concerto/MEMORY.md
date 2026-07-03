@@ -1,4 +1,57 @@
-# Desktop wave memory
+# Concerto wave memory
+
+## Model (design invariants)
+
+- Frame, don't render: no native chat UI, and the CLI stays the source of truth — Concerto composes around it.
+- Concerto owns wave *navigation* (which wave to open); workflows owns wave *governance* (grading, rollups, rhythm).
+- The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; Concerto consumes it.
+- lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
+
+## Progress — terminal-first rebuild (2026-07-02)
+
+- **The surface is being reshaped, not rebuilt.** First attempt shipped a fresh
+  `RepoSidebarWindow` (repo sidebar + wave list + `CreateWaveSheet` launcher;
+  commits `b411c714`/`5237df25`/`9bb44534`) — but rebuilding fresh reintroduced
+  regressions the proven components already solved (gray `NavigationSplitView`
+  sidebar vs. burgundy; black `.roundedBorder` fields). **Decision: reshape the
+  battle-tested `PortfolioWindow` into that shape (rename → `WavesView`), reusing
+  `WaveSidebar`/`WaveRow`/`TerminalWorkspaceView`, and DROP the fresh
+  `RepoSidebarWindow`.** Reuse over rebuild.
+- **Then trim.** Actively delete every `Platform/macOS/Views/*.swift` not reachable
+  from `WavesView` — delete-until-`xcodebuild`-green is the arbiter. The old
+  wave-workspace / multiplexer / native-chat stack goes.
+- **A2 (Wave.repo → repos:[RepoWork]) — shipped, all 7 steps.** `RepoWork` type +
+  `wave_repos` table + store methods (mirror `wave_crons`), repos stitched on
+  read/write, executor resolves worktrees/dispatch from `RepoWork`, status/
+  iteration rolled up over repos, nested in the DTO + mirrored to Python/Swift/
+  fixtures, and the flat `Wave.repo`/`status`/`iteration` columns dropped. The
+  single-repo bridge is now `Wave::repo()` (`repos.first()…`); repo-filters use
+  `repos.iter().any(...)`. Ontology: `WaveRun`→`Run` (snapshot flattened),
+  `WaveRunStatus`→`RunStatus`.
+- **UX research loop** — `lf ux-research` (`propose→generate→evaluate→learn`),
+  `scratch/ux-research/`. Loop-01: candidates that beat the plain repo-list ranked
+  by *attention* (`failed→waiting→running→idle`) and carried each wave's *reason*;
+  tension = glanceable dashboard vs. `⌘K` keyboard-first. Loop-02 queued.
+
+### Learnings (this rebuild)
+
+- **Reshape proven code; don't rebuild beside it.** The fresh view re-derived the
+  burgundy sidebar, the create sheet, and the terminal panes — and got each subtly
+  wrong. The old components (`WaveSidebar`, `CatchWaveView`, `TerminalWorkspaceView`)
+  already encode the right style + behavior; adapt them.
+- **Burgundy sidebar = a custom `VStack{…}.background(Color.loopflowBurgundy)` with
+  white text** (`WaveSidebar.swift`), NOT a `NavigationSplitView` column (its gray
+  vibrant material can't be overridden). Fields = `.textFieldStyle(.plain)` +
+  `palette.surfaceMuted` (`CatchWaveView`), NOT `.roundedBorder` (renders black).
+- **`concerto-dev` builds from the worktree it's run in** (`REPO_ROOT =
+  __file__.parent.parent`); run it from the branch's worktree. Window title shows
+  the target repo.
+- **Repo list is worktree-aware** — collapse to main via `git rev-parse
+  --git-common-dir`; never present a worktree. Default source `~/src`.
+- **Wave-agent (`/goal`) launch + attach already exists:** backend
+  `launch_wave_agent_session` starts the goal-loop agent in tmux; Concerto attaches
+  via `attachSession` → `GhosttyTerminalView` → `tmux attach-session` (see
+  `TerminalWorkspaceView`). The wave screen reuses this, not new plumbing.
 
 ## Patterns (verified 2026-05-19, embedded-terminal implementation)
 

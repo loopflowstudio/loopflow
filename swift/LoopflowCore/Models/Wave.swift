@@ -193,10 +193,52 @@ public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
     }
 }
 
+/// Per-repo execution surface for a wave, mirroring `RepoWorkDto`. One entry
+/// per repo the wave runs in. `localWorktree`/`remoteBranch` are git-inferred at
+/// build time; `worktree`/`branch` persisted duplicates were dropped from the wire.
+public struct RepoWork: Sendable, Hashable {
+    public var repo: String
+    public var status: WaveStatus
+    public var iteration: Int
+    public var localWorktree: String?
+    public var remoteBranch: String?
+    public var commits: [CommitEntry]
+    public var diffStat: String?
+    public var openPRCount: Int
+    public var stackCount: Int
+    public var activeRun: Run?
+    public var pr: PullRequest?
+
+    public init(
+        repo: String,
+        status: WaveStatus = .idle,
+        iteration: Int = 0,
+        localWorktree: String? = nil,
+        remoteBranch: String? = nil,
+        commits: [CommitEntry] = [],
+        diffStat: String? = nil,
+        openPRCount: Int = 0,
+        stackCount: Int = 0,
+        activeRun: Run? = nil,
+        pr: PullRequest? = nil
+    ) {
+        self.repo = repo
+        self.status = status
+        self.iteration = iteration
+        self.localWorktree = localWorktree
+        self.remoteBranch = remoteBranch
+        self.commits = commits
+        self.diffStat = diffStat
+        self.openPRCount = openPRCount
+        self.stackCount = stackCount
+        self.activeRun = activeRun
+        self.pr = pr
+    }
+}
+
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
-    public var repo: String
     public var flow: String
     public var goal: String
     public var metrics: [String]
@@ -206,17 +248,53 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var stepAgents: [String: String]?
     public var triggers: [Trigger]
     public var crons: [WaveCron]
+    /// Wave-level status rolled up over `repos`.
     public var status: WaveStatus
-    public var iteration: Int
-    public var localWorktree: String?
-    public var remoteBranch: String?
-    public var commits: [CommitEntry]
-    public var diffStat: String?
+    public var repos: [RepoWork]
     public var flowSteps: [String]
-    public var openPRCount: Int
-    public var activeRun: Run?
     public var createdAt: Date?
+    /// Parent wave in the chord tree. `nil` for a root wave.
+    public var parentWaveId: String?
 
+    public init(
+        id: String,
+        name: String = "",
+        repos: [RepoWork],
+        flow: String = "",
+        goal: String = "ship-roadmap",
+        metrics: [String] = [],
+        direction: [String] = [],
+        area: [String] = [],
+        agent: String? = nil,
+        stepAgents: [String: String]? = nil,
+        triggers: [Trigger] = [],
+        crons: [WaveCron] = [],
+        status: WaveStatus = .idle,
+        flowSteps: [String] = [],
+        createdAt: Date? = nil,
+        parentWaveId: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.repos = repos
+        self.flow = flow
+        self.goal = goal
+        self.metrics = metrics
+        self.direction = direction
+        self.area = area
+        self.agent = agent
+        self.stepAgents = stepAgents
+        self.triggers = triggers
+        self.crons = crons
+        self.status = status
+        self.flowSteps = flowSteps
+        self.createdAt = createdAt
+        self.parentWaveId = parentWaveId
+    }
+
+    /// Single-repo convenience mirroring the old flat shape: packs the per-repo
+    /// execution fields into one `RepoWork`. Keeps existing call sites (views,
+    /// tests, placeholders) compiling unchanged.
     public init(
         id: String,
         name: String = "",
@@ -241,27 +319,35 @@ public struct Wave: Sendable, Identifiable, Hashable {
         activeRun: Run? = nil,
         createdAt: Date? = nil
     ) {
-        self.id = id
-        self.name = name
-        self.repo = repo
-        self.flow = flow
-        self.goal = goal
-        self.metrics = metrics
-        self.direction = direction
-        self.area = area
-        self.agent = agent
-        self.stepAgents = stepAgents
-        self.triggers = triggers
-        self.crons = crons
-        self.status = status
-        self.iteration = iteration
-        self.localWorktree = localWorktree
-        self.remoteBranch = remoteBranch
-        self.commits = commits
-        self.diffStat = diffStat
-        self.flowSteps = flowSteps
-        self.openPRCount = openPRCount
-        self.activeRun = activeRun
-        self.createdAt = createdAt
+        self.init(
+            id: id,
+            name: name,
+            repos: [
+                RepoWork(
+                    repo: repo,
+                    status: status,
+                    iteration: iteration,
+                    localWorktree: localWorktree,
+                    remoteBranch: remoteBranch,
+                    commits: commits,
+                    diffStat: diffStat,
+                    openPRCount: openPRCount,
+                    activeRun: activeRun
+                )
+            ],
+            flow: flow,
+            goal: goal,
+            metrics: metrics,
+            direction: direction,
+            area: area,
+            agent: agent,
+            stepAgents: stepAgents,
+            triggers: triggers,
+            crons: crons,
+            status: status,
+            flowSteps: flowSteps,
+            createdAt: createdAt,
+            parentWaveId: nil
+        )
     }
 }

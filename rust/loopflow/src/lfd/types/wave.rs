@@ -230,27 +230,32 @@ impl std::str::FromStr for QueueBlockReason {
 pub struct Wave {
     pub id: LfdId,
     pub name: String,
-    pub repo: String,
     pub mode: WaveMode,
     pub primary_flow: String,
     pub goal: String,
     pub metrics: Vec<String>,
     #[serde(default)]
     pub crons: Vec<WaveCron>,
+    /// Per-repo execution state (worktree/branch/status/iteration), stitched from
+    /// `wave_repos` on read. Execution state lives here; the wave carries only
+    /// identity plus the wave-level `paused` flag.
+    #[serde(default)]
+    pub repos: Vec<RepoWork>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
-    pub status: WaveStatus,
-    pub iteration: u32,
-    /// First iteration of the current cycle. Used with `max_iterations` to
-    /// bound re-triggers within a single cycle rather than across the wave's
-    /// lifetime.
-    #[serde(default)]
-    pub cycle_start_iteration: u32,
+    /// Wave-level pause flag. Rolled into `status()` (a paused wave reports
+    /// `Paused` regardless of per-repo state).
+    pub paused: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
     /// Maximum number of active runs this wave can have at once.
     #[serde(default = "default_workers")]
     pub workers: u32,
+    /// Parent wave in the chord tree. `None` for a root wave. A chord is simply
+    /// a wave that has children (`children_of(id)` non-empty) — there is no
+    /// `wave_type` discriminator.
+    #[serde(default)]
+    pub parent_wave_id: Option<LfdId>,
 }
 
 impl Wave {
@@ -258,32 +263,52 @@ impl Wave {
         Self {
             id,
             name,
-            repo,
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo,
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: default_workers(),
+            parent_wave_id: None,
         }
+    }
+
+    /// Attach this wave to a parent, making it a child in the chord tree.
+    pub fn with_parent(mut self, parent: LfdId) -> Self {
+        self.parent_wave_id = Some(parent);
+        self
     }
 
     pub fn id(&self) -> &LfdId {
         &self.id
     }
 
+    /// Parent wave in the chord tree, `None` for a root wave.
+    pub fn parent_wave_id(&self) -> Option<&LfdId> {
+        self.parent_wave_id.as_ref()
+    }
+
     pub fn name(&self) -> &String {
         &self.name
     }
 
-    pub fn repo(&self) -> &String {
-        &self.repo
+    /// Primary repo path — the first `RepoWork`'s repo, `""` when a wave carries
+    /// no repos (shouldn't happen outside construction).
+    pub fn repo(&self) -> &str {
+        self.repos.first().map(|r| r.repo.as_str()).unwrap_or("")
     }
 
     pub fn mode(&self) -> WaveMode {
@@ -310,16 +335,55 @@ impl Wave {
         &self.area
     }
 
+    /// Wave-level status, rolled up over `repos`. `Paused` is a wave-level flag;
+    /// otherwise the status is derived from the per-repo execution state: any
+    /// running wins, then failed, then waiting, else idle.
     pub fn status(&self) -> WaveStatus {
-        self.status
+        if self.paused {
+            return WaveStatus::Paused;
+        }
+        if self.repos.iter().any(|r| r.status == WaveStatus::Running) {
+            WaveStatus::Running
+        } else if self.repos.iter().any(|r| r.status == WaveStatus::Failed) {
+            WaveStatus::Failed
+        } else if self.repos.iter().any(|r| r.status == WaveStatus::Waiting) {
+            WaveStatus::Waiting
+        } else {
+            WaveStatus::Idle
+        }
     }
 
+    /// Max iteration across `repos`.
     pub fn iteration(&self) -> u32 {
-        self.iteration
+        self.repos.iter().map(|r| r.iteration).max().unwrap_or(0)
     }
 
     pub fn cycle_start_iteration(&self) -> u32 {
-        self.cycle_start_iteration
+        self.repos
+            .iter()
+            .map(|r| r.cycle_start_iteration)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Set the wave's execution status. Toggles the wave-level `paused` flag and
+    /// writes the status onto every `RepoWork`, so reads through `status()` and
+    /// per-repo readers agree.
+    pub fn set_status(&mut self, status: WaveStatus) {
+        self.paused = status == WaveStatus::Paused;
+        for repo in &mut self.repos {
+            repo.status = status;
+        }
+    }
+
+    /// Mutable access to the `RepoWork` for `repo`, falling back to the primary
+    /// repo when there's no exact match. Used by the executor to record per-repo
+    /// status/iteration after dispatching a run.
+    pub fn repo_work_mut(&mut self, repo: &str) -> Option<&mut RepoWork> {
+        if let Some(pos) = self.repos.iter().position(|r| r.repo == repo) {
+            return self.repos.get_mut(pos);
+        }
+        self.repos.first_mut()
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {
@@ -329,6 +393,21 @@ impl Wave {
     pub fn workers(&self) -> u32 {
         self.workers
     }
+}
+
+/// Per-repo execution state for a wave. Waves own identity; each `RepoWork`
+/// carries the worktree/branch/status/iteration for one repo the wave runs in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoWork {
+    pub repo: String,
+    /// Worktree path, `""` when none.
+    pub worktree: String,
+    /// Branch name, `""` when none.
+    pub branch: String,
+    pub status: WaveStatus,
+    pub iteration: u32,
+    pub cycle_start_iteration: u32,
+    pub position: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

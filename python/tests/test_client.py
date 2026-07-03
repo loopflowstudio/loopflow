@@ -588,6 +588,7 @@ class TestClientResponses:
         ]
         client.close()
 
+
 def _mock_token_client(token=None, base_url="http://test"):
     """Create a Client with a mock transport that captures request headers."""
     received_headers = {}

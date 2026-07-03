@@ -173,42 +173,8 @@ private struct SessionTerminalSurface: View {
     }
 }
 
-struct TerminalAttachCommand: Equatable {
-    let workingDirectory: String
-    let argv: [String]
-    let env: [String: String]
-
-    init(workingDirectory: String, argv: [String], env: [String: String] = [:]) {
-        self.workingDirectory = workingDirectory
-        self.argv = argv
-        self.env = env
-    }
-
-    init(_ connection: SessionConnectionInfo) {
-        if connection.usesLocalTmux {
-            self.init(
-                workingDirectory: connection.cwd,
-                argv: ["tmux", "attach-session", "-t", connection.sessionName]
-            )
-            return
-        }
-
-        self.init(
-            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
-            argv: [
-                "ssh",
-                "-t",
-                connection.host,
-                "tmux attach-session -t \(shellEscape(connection.sessionName))",
-            ]
-        )
-    }
-}
-
-private func shellEscape(_ value: String) -> String {
-    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
-}
+// `TerminalAttachCommand` and `shellEscape` are defined once in WavesView.swift
+// (same target) and shared here.
 
 private struct WorkspaceShell {
     let waveId: String

@@ -1,11 +1,15 @@
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
-use crate::engine::config::load_config_or_default;
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::config::{load_config_or_default, BranchNameConfig};
+use crate::engine::git::{get_default_branch, worktree_add, WorktreeBranch};
+use crate::engine::naming::format_branch_name;
+use crate::engine::worktrees::branch_exists;
+use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::{
     available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal,
     GoalRenderContext, InFlightDispatch,
@@ -15,17 +19,22 @@ use crate::lf::Cli;
 use crate::lfd::client::{authorize, blocking_client, resolve_base_url};
 use crate::lfd::http::dto::RunDto;
 use crate::lfd::http::routes::wave_config::read_wave_config;
+use crate::lfd::types::tmux_session_name;
 use crate::ops::util::resolve_wave_name;
 
 const IN_FLIGHT_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Launch a wave's goal as a looping top-level agent (`operate` on, interactive
 /// surface). The agent dispatches real work via `lfq worker run`.
-pub fn run(name: &str, once: bool, cli: &Cli) -> Result<()> {
+pub fn run(name: &str, once: bool, tmux: bool, cli: &Cli) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or(repo_root);
     let wave_name = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+
+    if tmux {
+        return launch_in_tmux(&main_repo, &wave_name, once, cli);
+    }
 
     let in_flight = fetch_in_flight_dispatches(&wave_name);
     let message = build_goal_message(&main_repo, &wave_name, once, in_flight)?;
@@ -53,6 +62,148 @@ pub fn run(name: &str, once: bool, cli: &Cli) -> Result<()> {
         &main_repo,
         &prepared.prompt,
     )
+}
+
+/// Spawn `lf goal <wave>` in a detached tmux session and print its handle.
+///
+/// This is the launch primitive Concerto uses without lfd: it runs the goal
+/// loop in a background tmux session and prints the session name, which the
+/// client attaches to with `tmux attach`. Idempotent — re-running against a
+/// live session just reprints the handle so a re-click re-attaches.
+fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> Result<()> {
+    let worktree = worktree_path(main_repo, wave_name);
+    if !worktree.exists() {
+        let branch = stable_wave_branch_name(main_repo, wave_name)?;
+        create_goal_worktree(main_repo, &worktree, &branch).with_context(|| {
+            format!(
+                "failed to create worktree '{}' on branch '{}'",
+                worktree.display(),
+                branch
+            )
+        })?;
+    }
+
+    let handle = wave_worktree_session_handle(&worktree);
+
+    if tmux_has_session(&handle) {
+        println!("{handle}");
+        return Ok(());
+    }
+
+    let lf_bin = std::env::current_exe()
+        .map_err(|err| anyhow!("cannot resolve the lf binary path: {err}"))?;
+    let mut inner = vec![
+        lf_bin.to_string_lossy().into_owned(),
+        "goal".to_string(),
+        wave_name.to_string(),
+    ];
+    if once {
+        inner.push("--once".to_string());
+    }
+    if let Some(model) = &cli.model {
+        inner.push("-m".to_string());
+        inner.push(model.clone());
+    }
+    if cli.yolo {
+        inner.push("--yolo".to_string());
+    }
+    // Run under a login shell so the agent inherits the user's PATH/env, matching
+    // how lfd launches its tmux sessions.
+    let inner_cmd = inner
+        .iter()
+        .map(|arg| sh_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Detach tmux's stdio from ours. A cold `new-session` forks the tmux server,
+    // which would otherwise inherit our stdout pipe and hold it open for the life
+    // of the detached session — a parent reading our stdout to EOF (e.g. Concerto's
+    // `readDataToEndOfFile`) would then block forever waiting for the handle. With
+    // the server's stdio pointed at /dev/null, our `println!` below is the only
+    // writer, so EOF arrives the moment we exit.
+    let status = Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &handle,
+            "-c",
+            &worktree.to_string_lossy(),
+            "/bin/zsh",
+            "-lc",
+            &inner_cmd,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|err| anyhow!("failed to run tmux: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!("tmux failed to launch goal session '{wave_name}'"));
+    }
+
+    // Match lfd: let scroll reach tmux rather than the inner shell.
+    let _ = Command::new("tmux")
+        .args(["set-option", "-t", &handle, "mouse", "on"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    println!("{handle}");
+    Ok(())
+}
+
+fn create_goal_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
+    if branch_exists(main_repo, branch)
+        .map_err(|err| anyhow!("failed to check branch '{branch}': {err}"))?
+    {
+        return worktree_add(main_repo, worktree, branch, WorktreeBranch::Existing)
+            .map_err(|err| anyhow!("failed to add existing branch '{branch}' as worktree: {err}"));
+    }
+
+    let default_branch = get_default_branch(main_repo)
+        .map_err(|err| anyhow!("failed to resolve default branch: {err}"))?;
+    worktree_add(
+        main_repo,
+        worktree,
+        branch,
+        WorktreeBranch::New {
+            start_point: default_branch.as_str(),
+        },
+    )
+    .map_err(|err| anyhow!("failed to add new branch '{branch}' as worktree: {err}"))
+}
+
+fn stable_wave_branch_name(main_repo: &Path, wave_name: &str) -> Result<String> {
+    let stable_schema = BranchNameConfig {
+        schema_: "{user}.{name}".to_string(),
+    };
+    format_branch_name(wave_name, Some(&stable_schema), main_repo)
+        .map_err(|err| anyhow!("failed to format branch name for wave '{wave_name}': {err}"))
+}
+
+fn wave_worktree_session_handle(worktree: &Path) -> String {
+    let worktree_name = worktree
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    tmux_session_name(worktree_name)
+}
+
+fn tmux_has_session(name: &str) -> bool {
+    Command::new("tmux")
+        .args(["has-session", "-t", name])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// Single-quote a string for safe interpolation into a shell command.
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Render the goal prompt: the wave's `GOAL.md` body plus flows, roadmap
@@ -138,6 +289,7 @@ fn is_open_pr_state(state: Option<&str>) -> bool {
 mod tests {
     use super::*;
     use crate::engine::config::Config;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn wave_fixture() -> TempDir {
@@ -152,6 +304,34 @@ mod tests {
         std::fs::write(wave_dir.join("MEMORY.md"), "Last loop shipped auth.")
             .expect("write memory");
         tmp
+    }
+
+    fn git_repo_fixture() -> (TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        run_git(&repo, &["init"]);
+        run_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_git(&repo, &["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("README.md"), "# test\n").expect("seed file");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+        (tmp, repo)
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git command");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -230,5 +410,34 @@ mod tests {
         assert!(is_open_pr_state(Some("DRAFT")));
         assert!(!is_open_pr_state(Some("merged")));
         assert!(!is_open_pr_state(None));
+    }
+
+    #[test]
+    fn wave_worktree_session_handle_uses_worktree_basename() {
+        let handle = wave_worktree_session_handle(Path::new("/tmp/loopflow.concerto"));
+
+        assert_eq!(handle, "lf-loopflow-concerto");
+    }
+
+    #[test]
+    fn create_goal_worktree_reuses_existing_branch() {
+        let (_tmp, repo) = git_repo_fixture();
+        let branch = "jack.concerto";
+        run_git(&repo, &["branch", branch]);
+
+        let worktree = repo
+            .parent()
+            .expect("repo has parent")
+            .join("repo.concerto");
+        create_goal_worktree(&repo, &worktree, branch).expect("create worktree");
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .expect("git rev-parse");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), branch);
     }
 }

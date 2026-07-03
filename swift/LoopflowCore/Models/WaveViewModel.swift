@@ -49,11 +49,12 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         waitingReason: WaitingReason? = nil,
         runStartedAt: Date? = nil
     ) {
-        let activeRun = api.activeRun
+        let primary = api.repos.first
+        let activeRun = primary?.activeRun
         self.api = api
         self.content = content
-        self.worktreePath = worktreePath ?? activeRun?.worktree ?? api.localWorktree
-        self.branch = branch ?? activeRun?.branch ?? api.remoteBranch
+        self.worktreePath = worktreePath ?? activeRun?.worktree ?? primary?.localWorktree
+        self.branch = branch ?? activeRun?.branch ?? primary?.remoteBranch
         self.isDirty = isDirty
         self.isRebasing = isRebasing
         self.isMerging = isMerging
@@ -76,14 +77,28 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var id: String { api.id }
 
+    /// The wave's first/primary repo — backs the flat per-repo accessors below.
+    private var primaryRepo: RepoWork? { api.repos.first }
+
+    /// Mutate the primary repo in place, creating one if the wave has none.
+    private mutating func withPrimaryRepo(_ mutate: (inout RepoWork) -> Void) {
+        if api.repos.isEmpty {
+            var work = RepoWork(repo: "")
+            mutate(&work)
+            api.repos = [work]
+        } else {
+            mutate(&api.repos[0])
+        }
+    }
+
     public var name: String {
         get { api.name }
         set { api.name = newValue }
     }
 
     public var repo: String {
-        get { api.repo }
-        set { api.repo = newValue }
+        get { primaryRepo?.repo ?? "" }
+        set { withPrimaryRepo { $0.repo = newValue } }
     }
 
     public var flow: String {
@@ -125,13 +140,13 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     }
 
     public var iteration: Int {
-        get { api.iteration }
-        set { api.iteration = newValue }
+        get { primaryRepo?.iteration ?? 0 }
+        set { withPrimaryRepo { $0.iteration = newValue } }
     }
 
     public var activeRun: Run? {
-        get { api.activeRun }
-        set { api.activeRun = newValue }
+        get { primaryRepo?.activeRun }
+        set { withPrimaryRepo { $0.activeRun = newValue } }
     }
 
     public var createdAt: Date? {
@@ -187,8 +202,8 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         direction.isEmpty ? "" : direction.joined(separator: ", ")
     }
 
-    public var commits: [CommitEntry] { api.commits }
-    public var diffStat: String? { api.diffStat }
+    public var commits: [CommitEntry] { primaryRepo?.commits ?? [] }
+    public var diffStat: String? { primaryRepo?.diffStat }
     public var flowSteps: [String] { api.flowSteps }
     private var diffCounts: (additions: Int, deletions: Int)? {
         guard let diffStat else { return nil }
@@ -237,7 +252,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         return displayFlow.isEmpty ? [] : [displayFlow]
     }
 
-    public var openPRCount: Int { api.openPRCount }
+    public var openPRCount: Int { primaryRepo?.openPRCount ?? 0 }
     public var effectiveOpenPRCount: Int { max(openPRCount, pendingPR == nil ? 0 : 1) }
     public var hasOpenPRs: Bool { effectiveOpenPRCount > 0 }
 

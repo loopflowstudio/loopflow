@@ -141,13 +141,17 @@ impl AgentExecutor for LocalProcessExecutor {
     }
 
     async fn ensure_wave_workspace(&self, wave: &Wave) -> Result<()> {
-        let repo = wave.repo().clone();
         let wave_name = wave.name().clone();
-        tokio::task::spawn_blocking(move || {
-            super::ensure_wave_worktree(Path::new(&repo), &wave_name).map(|_| ())
-        })
-        .await
-        .map_err(|err| anyhow!("failed preparing wave workspace: {err}"))?
+        for repo_work in &wave.repos {
+            let repo = repo_work.repo.clone();
+            let wave_name = wave_name.clone();
+            tokio::task::spawn_blocking(move || {
+                super::ensure_wave_worktree(Path::new(&repo), &wave_name).map(|_| ())
+            })
+            .await
+            .map_err(|err| anyhow!("failed preparing wave workspace: {err}"))??;
+        }
+        Ok(())
     }
 }
 

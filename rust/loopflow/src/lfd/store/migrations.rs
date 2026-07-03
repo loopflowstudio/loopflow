@@ -213,7 +213,16 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         }
         conn.execute_batch("BEGIN EXCLUSIVE")?;
         let result = (|| -> StoreResult<()> {
-            conn.execute_batch(migration.sql)?;
+            // An additive `ADD COLUMN` migration that fails only because the
+            // column already exists is effectively already applied — this
+            // happens when a migration's version id was renamed, so a db that
+            // recorded the old id re-runs it. Record it and converge rather
+            // than crashing every store that predates the rename.
+            match conn.execute_batch(migration.sql) {
+                Ok(()) => {}
+                Err(e) if e.to_string().contains("duplicate column name") => {}
+                Err(e) => return Err(e.into()),
+            }
             conn.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
                 rusqlite::params![migration.version, now_unix()],

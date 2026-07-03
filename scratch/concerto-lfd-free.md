@@ -1,8 +1,9 @@
 # Concerto lfd-free basic UX (ship slice)
 
 **Goal:** Concerto lists waves, launches a wave's `/goal` loop in a tmux session,
-and attaches to it — with **no lfd in the launch/attach path**. Proof: kill lfd,
-click a wave, the loop still launches and attaches.
+and attaches to it — through `lf`, with lfd out of the launch/attach path (today
+lfd is only a name-resolver there). The bar is the normal flow working well: open
+Concerto, click a wave on loopflow/Cadenza, get a working goal terminal.
 
 Background + rationale: `scratch/lf-unification.md`. This brief is the buildable
 slice; everything else in that doc is deferred to the reduce roadmap.
@@ -14,8 +15,8 @@ slice; everything else in that doc is deferred to the reduce roadmap.
    - starts the goal loop in a detached tmux session **whose cwd is that worktree**,
    - prints the tmux session name (the handle) and exits 0,
    - is idempotent: a second call with the session live just reprints the handle.
-2. In Concerto, with the bundled lfd **killed**: the wave list still renders (from
-   disk), and clicking a wave launches + attaches its goal terminal.
+2. In Concerto, clicking a wave launches + attaches its goal terminal (the normal
+   flow), and the wave list renders from disk — no lfd query in that path.
 3. `tmux ls` shows the session named `lf-<repo>-<wave>` running in `../<repo>.<wave>`.
 
 ## Task 1 — `lf goal --tmux` runs in the wave's worktree (Rust)
@@ -69,14 +70,29 @@ name*. Replace the lfd calls with:
 Concerto can also *derive* the handle for a wave (same rule as Task 1:
 `lf-<repo>-<wave>`) to show running state and re-attach without launching.
 
+## Tests (the wider notion of "works")
+
+The demo bar is the normal flow above. Breadth and failure modes live in tests,
+not the demo:
+
+- **lfd absent:** with no lfd reachable, `lf goal <wave> --tmux` still launches and
+  prints a handle, and Concerto's list + click-launch still work. (This is the
+  "kill lfd, still succeeds" scenario — a test, not a demo stunt.)
+- **Idempotent relaunch:** a second `lf goal --tmux` with the session live reprints
+  the handle; no duplicate session.
+- **Create-if-missing:** fresh repo with no `../<repo>.<wave>` → the worktree is
+  created and the loop runs there.
+- **Stale handle:** `lf-<repo>-<wave>` recorded but the tmux session died → relaunch
+  recreates cleanly.
+
 ## Out of scope (defer to reduce roadmap)
 
 `lfdb` extraction · `lf`-self-registration into sqlite + "show active agents by
 worktree" · `lf d`/`lf q` namespaces · deleting lfd's HTTP executor (the hard cut)
 · subscription-based live status · Concerto proactive worktree pre-allocation.
 
-This slice runs as **lfd-present-but-unused** (provable by killing it). No
-irreversible cut required.
+This slice leaves lfd running (it still serves subscriptions/live status); it's
+just out of the launch/attach path. No irreversible cut required.
 
 ## Reuse map (don't reinvent)
 

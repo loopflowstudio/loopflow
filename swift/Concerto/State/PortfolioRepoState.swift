@@ -161,8 +161,7 @@ final class PortfolioRepoState {
         return repo
             .deletingLastPathComponent()
             .appendingPathComponent(
-                "\(repo.lastPathComponent).\(sanitizeWavePathComponent(waveName))",
-                isDirectory: true
+                "\(repo.lastPathComponent).\(sanitizeWavePathComponent(waveName))"
             )
             .normalizedFilePath
     }

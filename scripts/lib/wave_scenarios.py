@@ -126,7 +126,8 @@ def _expect_wave(wave: Wave) -> None:
     assert isinstance(wave, Wave)
     assert wave.id, "wave.id should be present"
     assert wave.name, "wave.name should be present"
-    assert wave.repo, "wave.repo should be present"
+    assert wave.repos, "wave.repos should be present"
+    assert wave.repos[0].repo, "wave.repos[0].repo should be present"
 
 
 def _create_wave_raw(raw: ApiClient, runtime: LfdRuntime, name: str) -> dict[str, Any]:
@@ -137,11 +138,13 @@ def _create_wave_raw(raw: ApiClient, runtime: LfdRuntime, name: str) -> dict[str
     )
     ApiAssertions.expect_status(response, 200)
     payload = ApiAssertions.expect_json_object(response)
-    required = {"id", "object", "name", "repo", "primary_flow", "direction", "area", "status"}
+    required = {"id", "object", "name", "repos", "primary_flow", "direction", "area", "status"}
     missing = required - payload.keys()
     if missing:
         raise AssertionError(f"missing fields: {sorted(missing)}; payload={payload}")
     assert payload["object"] == "wave", f"unexpected object: {payload['object']}"
     assert payload["name"] == name
-    assert payload["repo"] == str(runtime.repo_dir)
+    repos = payload["repos"]
+    assert isinstance(repos, list) and repos, f"unexpected repos: {repos}"
+    assert repos[0]["repo"] == str(runtime.repo_dir)
     return payload

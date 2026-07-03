@@ -6,8 +6,9 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
 use crate::engine::config::{load_config_or_default, BranchNameConfig};
+use crate::engine::git::{get_default_branch, worktree_add, WorktreeBranch};
 use crate::engine::naming::format_branch_name;
-use crate::engine::worktree::create_worktree;
+use crate::engine::worktrees::branch_exists;
 use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::{
     available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal,
@@ -73,7 +74,7 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
     let worktree = worktree_path(main_repo, wave_name);
     if !worktree.exists() {
         let branch = stable_wave_branch_name(main_repo, wave_name)?;
-        create_worktree(main_repo, &worktree, &branch).with_context(|| {
+        create_goal_worktree(main_repo, &worktree, &branch).with_context(|| {
             format!(
                 "failed to create worktree '{}' on branch '{}'",
                 worktree.display(),
@@ -139,6 +140,27 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
 
     println!("{handle}");
     Ok(())
+}
+
+fn create_goal_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
+    if branch_exists(main_repo, branch)
+        .map_err(|err| anyhow!("failed to check branch '{branch}': {err}"))?
+    {
+        return worktree_add(main_repo, worktree, branch, WorktreeBranch::Existing)
+            .map_err(|err| anyhow!("failed to add existing branch '{branch}' as worktree: {err}"));
+    }
+
+    let default_branch = get_default_branch(main_repo)
+        .map_err(|err| anyhow!("failed to resolve default branch: {err}"))?;
+    worktree_add(
+        main_repo,
+        worktree,
+        branch,
+        WorktreeBranch::New {
+            start_point: default_branch.as_str(),
+        },
+    )
+    .map_err(|err| anyhow!("failed to add new branch '{branch}' as worktree: {err}"))
 }
 
 fn stable_wave_branch_name(main_repo: &Path, wave_name: &str) -> Result<String> {
@@ -255,6 +277,7 @@ fn is_open_pr_state(state: Option<&str>) -> bool {
 mod tests {
     use super::*;
     use crate::engine::config::Config;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn wave_fixture() -> TempDir {
@@ -269,6 +292,34 @@ mod tests {
         std::fs::write(wave_dir.join("MEMORY.md"), "Last loop shipped auth.")
             .expect("write memory");
         tmp
+    }
+
+    fn git_repo_fixture() -> (TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        run_git(&repo, &["init"]);
+        run_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_git(&repo, &["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("README.md"), "# test\n").expect("seed file");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+        (tmp, repo)
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git command");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -354,5 +405,27 @@ mod tests {
         let handle = wave_worktree_session_handle(Path::new("/tmp/loopflow.concerto"));
 
         assert_eq!(handle, "lf-loopflow-concerto");
+    }
+
+    #[test]
+    fn create_goal_worktree_reuses_existing_branch() {
+        let (_tmp, repo) = git_repo_fixture();
+        let branch = "jack.concerto";
+        run_git(&repo, &["branch", branch]);
+
+        let worktree = repo
+            .parent()
+            .expect("repo has parent")
+            .join("repo.concerto");
+        create_goal_worktree(&repo, &worktree, branch).expect("create worktree");
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .expect("git rev-parse");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), branch);
     }
 }

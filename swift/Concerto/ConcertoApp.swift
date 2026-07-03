@@ -199,7 +199,7 @@ struct ConcertoApp: App {
                 } else if let launchRepoURL {
                     RepoWindow(repoURL: launchRepoURL, portfolioService: portfolioService)
                 } else {
-                    PortfolioWindow(portfolioService: portfolioService)
+                    RepoSidebarWindow(portfolioService: portfolioService)
                 }
             }
             .tint(.loopflowBurgundy)

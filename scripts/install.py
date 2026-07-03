@@ -308,11 +308,18 @@ def _sync_skills(lf_bin: Path) -> None:
     are already in place—so we warn and move on.
     """
     typer.echo("Syncing skills into ~/.claude and ~/.agents...")
-    code = _stream_process(
-        [str(lf_bin), "op", "sync-skills", "--global", "--yes"], "skills", cwd=ROOT
-    )
+    try:
+        code = _stream_process(
+            [str(lf_bin), "op", "sync-skills", "--global", "--yes"], "skills", cwd=ROOT
+        )
+    except OSError as exc:
+        typer.echo(f"skill sync failed ({exc}); binaries installed, skills unchanged", err=True)
+        return
     if code != 0:
-        typer.echo(f"skill sync failed (exit {code}); binaries installed, skills unchanged", err=True)
+        typer.echo(
+            f"skill sync failed (exit {code}); binaries installed, skills unchanged",
+            err=True,
+        )
 
 
 def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:

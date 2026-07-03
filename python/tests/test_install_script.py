@@ -184,6 +184,31 @@ def test_stage_binaries_errors_on_missing_cargo_output(
         install._stage_binaries(tmp_path / "local-bin")
 
 
+def test_sync_skills_runs_fresh_lf_with_global_yes(tmp_path: Path) -> None:
+    log = tmp_path / "sync.log"
+    lf = tmp_path / "lf"
+    lf.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$*\" > {log}\n"
+        "printf 'synced\\n'\n"
+    )
+    lf.chmod(0o755)
+
+    install._sync_skills(lf)
+
+    assert log.read_text() == "op sync-skills --global --yes\n"
+
+
+def test_sync_skills_warns_without_failing_when_lf_cannot_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install._sync_skills(Path("/not/a/real/lf"))
+
+    captured = capsys.readouterr()
+    assert "skill sync failed" in captured.err
+    assert "binaries installed, skills unchanged" in captured.err
+
+
 def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) -> None:
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()

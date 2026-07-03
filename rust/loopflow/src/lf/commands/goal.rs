@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -11,8 +12,9 @@ use crate::engine::naming::format_branch_name;
 use crate::engine::worktrees::branch_exists;
 use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::{
-    available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal,
-    GoalRenderContext, InFlightDispatch,
+    available_flow_names, check_cli_available, durable_log_dir, launch_agent, load_goal,
+    parse_agent, prepare_goal_launch, render_goal, write_prompt_log, AgentCapabilities,
+    GoalRenderContext, InFlightDispatch, ProcessConfig, StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::Cli;
@@ -40,13 +42,23 @@ pub fn run(name: &str, once: bool, tmux: bool, cli: &Cli) -> Result<()> {
     let message = build_goal_message(&main_repo, &wave_name, once, in_flight)?;
 
     let config = load_config_or_default(Some(&main_repo));
+    let surface = if cli.batch {
+        Surface::Headless
+    } else {
+        Surface::Cli
+    };
     let prepared = prepare_goal_launch(
         &config,
         main_repo.clone(),
         message,
         cli.model.clone(),
+        surface,
         cli.yolo || config.yolo,
     )?;
+
+    if cli.batch {
+        return launch_goal_batch(&main_repo, &wave_name, prepared, cli, config.chrome);
+    }
 
     let agent = prepared
         .config
@@ -62,6 +74,66 @@ pub fn run(name: &str, once: bool, tmux: bool, cli: &Cli) -> Result<()> {
         &main_repo,
         &prepared.prompt,
     )
+}
+
+fn launch_goal_batch(
+    repo: &Path,
+    wave_name: &str,
+    prepared: crate::engine::PreparedLaunchPrompt,
+    cli: &Cli,
+    default_chrome: bool,
+) -> Result<()> {
+    let agent = prepared
+        .config
+        .agent
+        .clone()
+        .expect("prepare_goal_launch always sets agent");
+    let (harness, _) = parse_agent(&agent);
+    if !check_cli_available(&harness) {
+        return Err(anyhow!(
+            "'{}' CLI not found. Run `lf op doctor` to check dependencies.",
+            harness
+        ));
+    }
+
+    write_prompt_log(repo, &prepared.prompt, &format!("goal-{wave_name}"), None)?;
+    let context_file = if prepared.config.system_prompt.trim().is_empty() {
+        None
+    } else {
+        Some(write_prompt_log(
+            repo,
+            &prepared.config.system_prompt,
+            &format!("goal-{wave_name}.context"),
+            None,
+        )?)
+    };
+
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        context_file,
+        stream_format: StreamFormat::Human(
+            std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal(),
+        ),
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: cli.chrome_setting().unwrap_or(default_chrome),
+    };
+
+    let result = launch_agent(&prepared.config, &process, &capabilities)?;
+    if result.exit_code == 0 {
+        return Ok(());
+    }
+
+    let log_hint = durable_log_dir(repo)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.lf/logs/".to_string());
+    Err(anyhow!(
+        "agent exited with code {}. Check {} for details.",
+        result.exit_code,
+        log_hint
+    ))
 }
 
 /// Spawn `lf goal <wave>` in a detached tmux session and print its handle.
@@ -387,8 +459,15 @@ mod tests {
             agent: Some("claude:opus".to_string()),
             ..Config::default()
         };
-        let prepared = prepare_goal_launch(&config, tmp.path().to_path_buf(), message, None, false)
-            .expect("prepare goal launch");
+        let prepared = prepare_goal_launch(
+            &config,
+            tmp.path().to_path_buf(),
+            message,
+            None,
+            Surface::Cli,
+            false,
+        )
+        .expect("prepare goal launch");
 
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.prompt.contains("<lf:goal-context>"));

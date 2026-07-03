@@ -170,7 +170,12 @@ jobs:
           failure_pattern = re.compile(
               r"^✗ |Test Suite '.*' failed at |\*\* TEST FAILED \*\*|failed with \d+ failures"
           )
-          idle_success_seconds = 60
+          # The Concerto GUI test host reliably fails to exit after the suite
+          # finishes on headless macos-15, so xcodebuild hangs post-test. We
+          # force-kill once success is proven (XCTest + >=30 Swift suites passed,
+          # no failures). That verdict lands before this wait, so shrinking the
+          # grace only trims dead idle time — it can't truncate a live run.
+          idle_success_seconds = 15
           idle_min_swift_suites = 30
 
           def xcresult_indicates_success(path):

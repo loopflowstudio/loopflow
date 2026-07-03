@@ -2087,8 +2087,8 @@ pub async fn refresh_pm_oauth_token(
     provider: Provider,
     refresh_token: &str,
 ) -> Result<ProviderToken, AuthError> {
-    let endpoint =
-        pm_oauth_endpoint(provider).ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
+    let endpoint = pm_oauth_endpoint(provider)
+        .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
     let (client_id, client_secret) =
         oauth_client_credentials(provider, endpoint.client_id_env, endpoint.client_secret_env)?;
 
@@ -2116,10 +2116,13 @@ pub async fn refresh_pm_oauth_token(
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.bytes().await.map_err(|err| AuthError::OAuthRequest {
-            provider,
-            message: err.to_string(),
-        })?;
+        let body = response
+            .bytes()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider,
+                message: err.to_string(),
+            })?;
         let message = oauth_error_message(body.as_ref())
             .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
         return Err(AuthError::OAuthRequest {

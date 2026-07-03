@@ -1,0 +1,146 @@
+---
+status: draft
+source_analysis: wave/reduce/analysis/session-model-comparison.md
+---
+
+# Session Record Spine
+
+## Design decision
+
+Make one user-facing **Session Record** the spine for agent interaction across
+CLI, lfd, lfq, and Concerto.
+
+The Session Record is the object a user starts, watches, resumes, attaches to,
+exports, audits, and reviews. Run lineage, backend process, tmux attachment,
+usage, and context snapshots become facets of that object rather than competing
+public nouns.
+
+Scope: this is an **lf session** spine. lfd should own loopflow-managed agent,
+wave, worker, and palette sessions. Concerto can also show ordinary terminal
+sessions that are not loopflow work; those are workspace/terminal state unless
+the product deliberately decides to open all terminals inside the main agent's
+tmux session.
+
+## Why
+
+After the conversation subsystem is removed, the remaining split is smaller and
+healthier:
+
+- `Run`
+- `Session`
+- `ExecutionProcess`
+- agent/output/session events
+
+Those are real layers. The proposal is not to collapse them into one table. The
+proposal is to make the **public read model** match the product question:
+"what is my agent doing, and how do I get back to it?"
+
+Codex and OpenCode both make resumable sessions central across terminal, server,
+and app surfaces. Loopflow should not make users choose between run id, session
+id, process id, and UI terminal pane id when they are trying to answer one
+session-shaped question.
+
+`Conversation` was the false pressure. Remove it first. Then the Session Record
+can be a small aggregate over live concepts instead of a compatibility wrapper
+around a dormant subsystem.
+
+## Shape
+
+Public API shape:
+
+```text
+session
+  id
+  wave_id
+  run_id
+  role
+  status
+  agent
+  command/cwd/worktree
+  attach/connect info
+  context snapshot
+  usage
+  backend/process details
+```
+
+Internal storage can remain normalized. The design change is the public spine:
+clients ask for a session and receive enough facets to render, resume, attach,
+audit, or continue.
+
+Concerto may still need a separate `TerminalWorkspace` or `TerminalPane`
+concept. A shell tab running `git status` is not automatically a Session Record.
+It becomes one only when loopflow launches or adopts it as managed work.
+
+## Post-conversation shape
+
+Once conversations are gone, the proposal becomes:
+
+- Keep `Run` as flow execution lineage: wave, flow, task, queue, PR, stack,
+  iteration, and current step.
+- Keep `ExecutionProcess` as backend supervision: pid/container, worktree,
+  run mode, started/ended timestamps, and stuck-process recovery.
+- Keep `Session` as the loopflow-managed interaction record: wave/worker/palette
+  role, agent, command, cwd, tmux/connect info, lifecycle, and optional run.
+- Expose `SessionRecord` as a read model, not necessarily a stored DTO:
+  `Session + optional Run + optional ExecutionProcess + recent output/attention
+  + usage if available`.
+- Keep Concerto unmanaged terminals out of lfd. They live in
+  `TerminalWorkspace`/`TerminalPane` unless explicitly adopted as lf work.
+
+This makes the first implementation slice small: build the read model and update
+clients/UI to consume it where they currently stitch sessions and runs by hand.
+
+## Prototype plan
+
+Build a read-model aggregator before changing storage:
+
+1. Add an internal `SessionRecord` view assembled from existing store tables.
+2. Populate it for one active run with control session + process + latest
+   events.
+3. Render it in a narrow CLI/debug endpoint or script.
+4. Compare against current `lfq sessions` and Concerto session view.
+
+Prototype success means the aggregate makes existing behavior clearer without
+forcing a risky database migration.
+
+## Removal invariant
+
+The Conversation removal must pull every root:
+
+- Rust conversation manager, harnesses, runtime, types, usage helpers, routes,
+  lfd startup wiring, HTTP state, and module exports.
+- SQLite/postgres store traits and implementations for `conversations` and
+  `conversation_events`.
+- Migration references or replacement migration policy for unused conversation
+  tables.
+- Python API/client/models/tests for conversation input/events.
+- Swift service protocol, local service, session state, agent-session event
+  envelopes, and tests tied to conversation streams.
+- Docs and e2e tests for `/v0/conversations`.
+- Generated or checked-in summaries that still describe conversations as a live
+  subsystem.
+
+No compatibility shim. No empty endpoints. No "old/new" split. Git is the
+history.
+
+After that removal lands, this section should move out of the proposal and into
+the shipped queue item history. The active design can then focus entirely on the
+Session/Run/ExecutionProcess/TerminalWorkspace boundary.
+
+## Open questions
+
+- Should `run_id` remain required for worker/wave sessions and optional only for
+  palette sessions?
+- Should Concerto support unmanaged terminal panes beside lf sessions, or should
+  every terminal live inside a wave/agent tmux topology?
+- If unmanaged terminal panes exist, what is the adoption path that turns one
+  into a loopflow-managed session?
+- Do `AgentStarted`, `AgentEnded`, and `OutputLine` survive as compatibility
+  events or become session event variants?
+- Is resume/fork a Session Record operation in loopflow, or delegated entirely
+  to the underlying harness until all harnesses support it?
+
+## Gate
+
+This proposal changes public vocabulary and DTO/API shape. It needs human design
+agreement before implementation.

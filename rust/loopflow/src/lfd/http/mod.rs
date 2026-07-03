@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    attention, auth as auth_routes, catalog, conversations, flows, hooks, providers, repos, runs,
-    session_controls, system, usage, waves, worktrees, ws,
+    attention, auth as auth_routes, catalog, flows, hooks, providers, repos, runs,
+    session_controls, system, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -104,18 +104,6 @@ pub fn router(state: HttpState) -> Router {
             post(session_controls::cancel_session_handler),
         )
         .route(
-            "/conversations/{id}/input",
-            post(conversations::send_conversation_input_handler),
-        )
-        .route(
-            "/conversations/{id}/events",
-            get(conversations::stream_conversation_events_handler),
-        )
-        .route(
-            "/conversations/{id}/usage",
-            get(usage::get_conversation_usage_handler),
-        )
-        .route(
             "/attention",
             get(attention::list_attention_handler).post(attention::create_attention_handler),
         )
@@ -190,13 +178,7 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/runs",
             get(runs::list_runs_for_wave_handler),
         )
-        .route("/waves/{wave_id}/usage", get(usage::get_wave_usage_handler))
         .route("/waves/{wave_id}/logs", get(runs::wave_logs_handler))
-        .route("/usage/summary", get(usage::get_usage_summary_handler))
-        .route(
-            "/usage/timeseries",
-            get(usage::get_usage_timeseries_handler),
-        )
         .route("/runs", get(runs::list_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
         .layer(DefaultBodyLimit::max(max_json_body_bytes))

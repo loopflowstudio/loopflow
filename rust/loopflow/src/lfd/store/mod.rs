@@ -1,10 +1,6 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::lfd::conversations::types::{
-    Conversation, ConversationEvent, ConversationStatus, PersistedConversationEvent,
-};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
@@ -75,15 +71,6 @@ pub enum StorageConfig {
     Postgres { database_url: String },
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ConversationFilters {
-    pub wave: Option<String>,
-    pub flow: Option<String>,
-    pub step: Option<String>,
-    pub from: Option<i64>,
-    pub to: Option<i64>,
-}
-
 impl StorageConfig {
     pub fn sqlite(path: PathBuf) -> Self {
         Self::Sqlite { path }
@@ -124,10 +111,6 @@ impl Store {
     }
 
     pub fn execution(&self) -> &dyn ExecutionStore {
-        self
-    }
-
-    pub fn conversations(&self) -> &dyn ConversationStore {
         self
     }
 
@@ -538,75 +521,6 @@ impl Store {
         ExecutionStore::fail_orphaned_runs(self).await
     }
 
-    pub async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
-        ConversationStore::create_conversation(self, conversation).await
-    }
-
-    pub async fn get_conversation(
-        &self,
-        conversation_id: &LfdId,
-    ) -> StoreResult<Option<Conversation>> {
-        ConversationStore::get_conversation(self, conversation_id).await
-    }
-
-    pub async fn get_active_conversation_for_run(
-        &self,
-        run_id: &str,
-    ) -> StoreResult<Option<Conversation>> {
-        ConversationStore::get_active_conversation_for_run(self, run_id).await
-    }
-
-    pub async fn update_provider_session_id(
-        &self,
-        conversation_id: &LfdId,
-        provider_session_id: &str,
-    ) -> StoreResult<()> {
-        ConversationStore::update_provider_session_id(self, conversation_id, provider_session_id)
-            .await
-    }
-
-    pub async fn update_conversation_status(
-        &self,
-        conversation_id: &LfdId,
-        status: ConversationStatus,
-        ended_at: Option<i64>,
-    ) -> StoreResult<()> {
-        ConversationStore::update_conversation_status(self, conversation_id, status, ended_at).await
-    }
-
-    pub async fn append_conversation_event(
-        &self,
-        conversation_id: &LfdId,
-        seq: i64,
-        event: &ConversationEvent,
-        created_at: i64,
-    ) -> StoreResult<()> {
-        ConversationStore::append_conversation_event(self, conversation_id, seq, event, created_at)
-            .await
-    }
-
-    pub async fn list_conversations_by_statuses(
-        &self,
-        statuses: &[ConversationStatus],
-    ) -> StoreResult<Vec<Conversation>> {
-        ConversationStore::list_conversations_by_statuses(self, statuses).await
-    }
-
-    pub async fn list_conversation_events(
-        &self,
-        conversation_id: &LfdId,
-        after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedConversationEvent>> {
-        ConversationStore::list_conversation_events(self, conversation_id, after_seq).await
-    }
-
-    pub async fn list_events_for_conversations(
-        &self,
-        conversation_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
-        ConversationStore::list_events_for_conversations(self, conversation_ids).await
-    }
-
     pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
         ControlSessionStore::create_session(self, session).await
     }
@@ -663,20 +577,6 @@ impl Store {
 
     pub async fn list_secrets_provider_configs(&self) -> StoreResult<Vec<SecretsProviderConfig>> {
         SecretsProviderStore::list_secrets_provider_configs(self).await
-    }
-
-    pub async fn list_conversations_for_wave(
-        &self,
-        wave_id: &str,
-    ) -> StoreResult<Vec<Conversation>> {
-        ConversationStore::list_conversations_for_wave(self, wave_id).await
-    }
-
-    pub async fn list_conversations_filtered(
-        &self,
-        filters: &ConversationFilters,
-    ) -> StoreResult<Vec<Conversation>> {
-        ConversationStore::list_conversations_filtered(self, filters).await
     }
 
     pub async fn health_check(&self) -> StoreResult<()> {
@@ -837,52 +737,6 @@ pub trait ExecutionStore: Send + Sync {
     async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<ExecutionProcess>>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
-}
-
-#[async_trait::async_trait]
-pub trait ConversationStore: Send + Sync {
-    async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()>;
-    async fn get_conversation(&self, conversation_id: &LfdId) -> StoreResult<Option<Conversation>>;
-    async fn get_active_conversation_for_run(
-        &self,
-        run_id: &str,
-    ) -> StoreResult<Option<Conversation>>;
-    async fn update_provider_session_id(
-        &self,
-        conversation_id: &LfdId,
-        provider_session_id: &str,
-    ) -> StoreResult<()>;
-    async fn update_conversation_status(
-        &self,
-        conversation_id: &LfdId,
-        status: ConversationStatus,
-        ended_at: Option<i64>,
-    ) -> StoreResult<()>;
-    async fn append_conversation_event(
-        &self,
-        conversation_id: &LfdId,
-        seq: i64,
-        event: &ConversationEvent,
-        created_at: i64,
-    ) -> StoreResult<()>;
-    async fn list_conversations_by_statuses(
-        &self,
-        statuses: &[ConversationStatus],
-    ) -> StoreResult<Vec<Conversation>>;
-    async fn list_conversation_events(
-        &self,
-        conversation_id: &LfdId,
-        after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedConversationEvent>>;
-    async fn list_events_for_conversations(
-        &self,
-        conversation_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>>;
-    async fn list_conversations_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Conversation>>;
-    async fn list_conversations_filtered(
-        &self,
-        filters: &ConversationFilters,
-    ) -> StoreResult<Vec<Conversation>>;
 }
 
 #[async_trait::async_trait]
@@ -1914,197 +1768,6 @@ impl ExecutionStore for Store {
 }
 
 #[async_trait::async_trait]
-impl ConversationStore for Store {
-    async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation = conversation.clone();
-                run_sqlite(store, move |store| store.create_conversation(&conversation)).await
-            }
-            StoreBackend::Postgres(store) => store.create_conversation(conversation).await,
-        }
-    }
-
-    async fn get_conversation(&self, conversation_id: &LfdId) -> StoreResult<Option<Conversation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_id = conversation_id.clone();
-                run_sqlite(store, move |store| store.get_conversation(&conversation_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_conversation(conversation_id).await,
-        }
-    }
-
-    async fn get_active_conversation_for_run(
-        &self,
-        run_id: &str,
-    ) -> StoreResult<Option<Conversation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.get_active_conversation_for_run(&run_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_active_conversation_for_run(run_id).await,
-        }
-    }
-
-    async fn update_provider_session_id(
-        &self,
-        conversation_id: &LfdId,
-        provider_session_id: &str,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_id = conversation_id.clone();
-                let provider_session_id = provider_session_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.update_provider_session_id(&conversation_id, &provider_session_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_provider_session_id(conversation_id, provider_session_id)
-                    .await
-            }
-        }
-    }
-
-    async fn update_conversation_status(
-        &self,
-        conversation_id: &LfdId,
-        status: ConversationStatus,
-        ended_at: Option<i64>,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_id = conversation_id.clone();
-                run_sqlite(store, move |store| {
-                    store.update_conversation_status(&conversation_id, status, ended_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_conversation_status(conversation_id, status, ended_at)
-                    .await
-            }
-        }
-    }
-
-    async fn append_conversation_event(
-        &self,
-        conversation_id: &LfdId,
-        seq: i64,
-        event: &ConversationEvent,
-        created_at: i64,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_id = conversation_id.clone();
-                let event = event.clone();
-                run_sqlite(store, move |store| {
-                    store.append_conversation_event(&conversation_id, seq, &event, created_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .append_conversation_event(conversation_id, seq, event, created_at)
-                    .await
-            }
-        }
-    }
-
-    async fn list_conversations_by_statuses(
-        &self,
-        statuses: &[ConversationStatus],
-    ) -> StoreResult<Vec<Conversation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let statuses = statuses.to_vec();
-                run_sqlite(store, move |store| {
-                    store.list_conversations_by_statuses(&statuses)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_conversations_by_statuses(statuses).await,
-        }
-    }
-
-    async fn list_conversation_events(
-        &self,
-        conversation_id: &LfdId,
-        after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedConversationEvent>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_id = conversation_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_conversation_events(&conversation_id, after_seq)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .list_conversation_events(conversation_id, after_seq)
-                    .await
-            }
-        }
-    }
-
-    async fn list_events_for_conversations(
-        &self,
-        conversation_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let conversation_ids = conversation_ids.to_vec();
-                run_sqlite(store, move |store| {
-                    store.list_events_for_conversations(&conversation_ids)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.list_events_for_conversations(conversation_ids).await
-            }
-        }
-    }
-
-    async fn list_conversations_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Conversation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.list_conversations_for_wave(&wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_conversations_for_wave(wave_id).await,
-        }
-    }
-
-    async fn list_conversations_filtered(
-        &self,
-        filters: &ConversationFilters,
-    ) -> StoreResult<Vec<Conversation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let filters = filters.clone();
-                run_sqlite(store, move |store| {
-                    store.list_conversations_filtered(&filters)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_conversations_filtered(filters).await,
-        }
-    }
-}
-
-#[async_trait::async_trait]
 impl ControlSessionStore for Store {
     async fn create_session(&self, session: &Session) -> StoreResult<()> {
         match &self.backend {
@@ -2309,7 +1972,6 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
-    use crate::lfd::conversations::types::{Conversation, ConversationConfig, ConversationStatus};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, ExecutionProcess, ExecutionProcessStatus, LivePrState,
@@ -2716,59 +2378,6 @@ mod tests {
             .expect("get deleted wave")
             .is_none());
 
-        // Conversation CRUD
-        let conversation = Conversation {
-            id: LfdId::new(),
-            harness: "claude".to_string(),
-            status: ConversationStatus::Active,
-            run_id: None,
-            provider_session_id: None,
-            config: ConversationConfig {
-                step: "design".to_string(),
-                repo_root: "/tmp/repo".to_string(),
-                ..Default::default()
-            },
-            created_at: OffsetDateTime::now_utc(),
-            ended_at: None,
-        };
-        store
-            .create_conversation(&conversation)
-            .await
-            .expect("create conversation");
-        let loaded = store
-            .get_conversation(&conversation.id)
-            .await
-            .expect("get conversation")
-            .expect("conversation exists");
-        assert_eq!(loaded.harness, "claude");
-        assert_eq!(loaded.status, ConversationStatus::Active);
-
-        store
-            .update_conversation_status(
-                &conversation.id,
-                ConversationStatus::Ended,
-                Some(OffsetDateTime::now_utc().unix_timestamp()),
-            )
-            .await
-            .expect("update conversation status");
-        let ended = store
-            .get_conversation(&conversation.id)
-            .await
-            .expect("get ended conversation")
-            .expect("conversation exists");
-        assert_eq!(ended.status, ConversationStatus::Ended);
-        assert!(ended.ended_at.is_some());
-
-        let active = store
-            .list_conversations_by_statuses(&[ConversationStatus::Active])
-            .await
-            .expect("list active conversations");
-        assert!(active.is_empty());
-        let ended = store
-            .list_conversations_by_statuses(&[ConversationStatus::Ended])
-            .await
-            .expect("list ended conversations");
-        assert_eq!(ended.len(), 1);
     }
 
     #[tokio::test]

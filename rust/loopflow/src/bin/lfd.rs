@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::config::{LfdConfig, StorageType};
-use loopflow::lfd::conversations::ConversationManager;
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -148,8 +147,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
     let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);
-    let conversation_manager =
-        ConversationManager::new_with_scheduler(store.clone(), scheduler.clone());
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(
         store.clone(),
@@ -188,30 +185,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
-    }
-
-    match conversation_manager.recover_orphaned_conversations().await {
-        Ok(recovery) => {
-            if recovery.conversations_failed > 0 {
-                tracing::info!(
-                    count = recovery.conversations_failed,
-                    "recovered orphaned conversations from previous lfd"
-                );
-            }
-            if recovery.opencode_servers_reaped > 0 {
-                tracing::info!(
-                    count = recovery.opencode_servers_reaped,
-                    "reaped orphaned OpenCode servers from previous lfd"
-                );
-            }
-            if recovery.reap_errors > 0 {
-                tracing::warn!(
-                    count = recovery.reap_errors,
-                    "encountered errors while reaping orphaned OpenCode servers"
-                );
-            }
-        }
-        Err(err) => tracing::warn!(error = %err, "session orphan recovery failed"),
     }
 
     match executor.reconcile_sessions().await {
@@ -306,7 +279,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
-        conversations: conversation_manager,
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

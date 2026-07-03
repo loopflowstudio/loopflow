@@ -1,7 +1,6 @@
 pub mod attention;
 pub mod auth;
 pub mod catalog;
-pub mod conversations;
 pub mod flows;
 pub mod hooks;
 pub mod providers;
@@ -10,7 +9,6 @@ pub mod runs;
 pub mod secrets;
 pub mod session_controls;
 pub mod system;
-pub mod usage;
 pub mod wave_config;
 pub mod waves;
 pub mod worktrees;

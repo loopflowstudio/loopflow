@@ -50,6 +50,7 @@ loopflow.run_wave("engbot")
 | Just installed, want to try it | [Try It](#try-it) above, then [Get Started](getting-started.md) |
 | Building features with steps and flows | [Get Started → Build Features](getting-started.md#build-features) |
 | Ready to automate with waves | [Wave Authoring](wave-authoring.md) |
+| Understanding how the pieces fit | [Architecture](architecture.md) |
 | Running agents on a server | [Get Started → Go Remote](getting-started.md#go-remote) |
 
 ---

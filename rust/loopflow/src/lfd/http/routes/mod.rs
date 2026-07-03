@@ -76,7 +76,6 @@ pub async fn build_wave_dto(
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
-    let latest = store.get_latest_run(wave.id()).await?;
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let blocks = store.list_queue_blocks(wave.id()).await?;
     let blocks_by_run = blocks
@@ -125,7 +124,7 @@ pub async fn build_wave_dto(
             None => (None, None, Vec::new(), None),
         };
 
-        let latest_for_repo = latest.as_ref().filter(|run| run.repo == repo_work.repo);
+        let latest_for_repo = repo_runs.iter().max_by_key(|run| run.started_at);
         let pr = latest_for_repo.and_then(|run| {
             run.pr.as_ref().map(|pr| PullRequestDto {
                 url: pr.url.clone(),
@@ -136,11 +135,11 @@ pub async fn build_wave_dto(
             })
         });
         let active_run = if include_active_run {
-            latest_for_repo.cloned().map(|run| {
-                let live_pr_state = snapshot.state_for_run(&run);
-                let pr_state_stale = snapshot.stale_for_run(&run);
+            latest_for_repo.map(|run| {
+                let live_pr_state = snapshot.state_for_run(run);
+                let pr_state_stale = snapshot.stale_for_run(run);
                 let queue_view = queue_views.get(&run.id);
-                run_dto(run, live_pr_state, pr_state_stale, queue_view)
+                run_dto(run.clone(), live_pr_state, pr_state_stale, queue_view)
             })
         } else {
             None
@@ -674,6 +673,73 @@ mod tests {
         );
         assert_eq!(dto.repos[0].stack_count, 1);
         assert!(dto.has_stale_pr_state);
+    }
+
+    #[tokio::test]
+    async fn build_wave_dto_selects_latest_run_per_repo() {
+        let store = sqlite_store().await;
+        let repo_a = tempfile::tempdir().expect("repo a");
+        let repo_b = tempfile::tempdir().expect("repo b");
+        let repo_a_path = repo_a.path().to_str().expect("repo a path").to_string();
+        let repo_b_path = repo_b.path().to_str().expect("repo b path").to_string();
+        let started = OffsetDateTime::now_utc();
+
+        let mut wave = make_wave(&repo_a_path);
+        wave.repos.push(RepoWork {
+            repo: repo_b_path.clone(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            position: 1,
+        });
+        store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created in store");
+
+        let mut run_a = make_run(&wave, 11);
+        run_a.repo = repo_a_path.clone();
+        run_a.started_at = Some(started);
+        let mut run_b = make_run(&wave, 22);
+        run_b.repo = repo_b_path;
+        run_b.started_at = Some(started + time::Duration::seconds(1));
+        store
+            .create_run(&run_a)
+            .await
+            .expect("repo a run should be created");
+        store
+            .create_run(&run_b)
+            .await
+            .expect("repo b run should be created");
+
+        let dto = build_wave_dto(
+            &store,
+            &crate::lfd::config::GitHubConfig::default(),
+            wave,
+            true,
+        )
+        .await
+        .expect("wave dto should be built");
+
+        assert_eq!(dto.repos.len(), 2);
+        assert_eq!(
+            dto.repos[0]
+                .active_run
+                .as_ref()
+                .and_then(|run| run.pr.as_ref())
+                .and_then(|pr| pr.number),
+            Some(11)
+        );
+        assert_eq!(
+            dto.repos[1]
+                .active_run
+                .as_ref()
+                .and_then(|run| run.pr.as_ref())
+                .and_then(|pr| pr.number),
+            Some(22)
+        );
     }
 
     #[tokio::test]

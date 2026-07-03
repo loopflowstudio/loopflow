@@ -621,15 +621,12 @@ struct WavesView: View {
     private func handleEvent(_ event: LFDEvent) {
         switch event {
         case .connected(let connected):
-            let grouped = Dictionary(grouping: connected.waves) {
-                $0.repos.first?.repo.normalizedFilePath ?? ""
-            }
             for repo in repos {
-                repoStates[repo.path]?.applyConnectedWaves(grouped[repo.path] ?? [])
+                repoStates[repo.path]?.applyConnectedWaves(connected.waves)
             }
 
         case .wave(let waveEvent):
-            guard let wave = waveEvent.wave else {
+            guard waveEvent.wave != nil else {
                 Task {
                     for repoState in repoStates.values {
                         await repoState.refresh()
@@ -637,7 +634,9 @@ struct WavesView: View {
                 }
                 return
             }
-            repoStates[wave.repos.first?.repo.normalizedFilePath ?? ""]?.applyWaveEvent(waveEvent)
+            for repoState in repoStates.values {
+                repoState.applyWaveEvent(waveEvent)
+            }
 
         case .auth(let authEvent):
             authProviderStore.handleEvent(authEvent)

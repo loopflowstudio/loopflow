@@ -154,6 +154,8 @@ pub enum Commands {
         /// Wave name (matches wave/<name>/)
         name: String,
     },
+    /// Show token usage by repo and provider (from a running lfd)
+    Usage,
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

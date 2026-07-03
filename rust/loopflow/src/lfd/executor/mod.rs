@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::engine::stream::{render_event, ParseResult, StreamParser};
+use crate::engine::stream::{render_event, ParseResult, StreamEvent, StreamParser};
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
@@ -140,6 +140,20 @@ pub(crate) fn handle_output_line(line: &str, parser: &mut StreamParser, context:
     match parser.feed_line(line) {
         ParseResult::Events(events) => {
             for event in &events {
+                if let StreamEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                } = event
+                {
+                    context.output.add_usage(
+                        &context.run_id,
+                        *input_tokens,
+                        *output_tokens,
+                        *cache_read_tokens,
+                    );
+                    continue;
+                }
                 let (stdout, stderr) = render_event(event, false);
                 let text = if !stdout.is_empty() { stdout } else { stderr };
                 let text = text.trim_end_matches('\n').to_string();

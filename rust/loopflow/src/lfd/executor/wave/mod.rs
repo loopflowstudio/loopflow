@@ -24,6 +24,7 @@ use crate::lfd::http::routes::{infer_wave_git_state_for_worktree, is_open_pr_sta
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
+use crate::lfd::store::RunTokenUsage;
 use crate::lfd::store::SharedStore;
 #[cfg(test)]
 use crate::lfd::triggers::spawn_run_task_with_slot;
@@ -652,6 +653,7 @@ impl WaveExecutor {
 
         info!(run_id = %run.id, flow = %run.flow, repo = %run.repo, "launching flow in tmux session");
 
+        let provider = session.agent.clone();
         let exit_code = if session.is_tmux_backed() {
             let session = self.launch_tmux_session(session).await?;
             self.wait_for_tmux_session_exit(&session).await?
@@ -683,6 +685,8 @@ impl WaveExecutor {
             outcome.exit_code
         };
 
+        self.persist_run_usage(&run, &provider).await;
+
         if exit_code == 0 {
             self.finish_completed_run(&wave, &mut run).await
         } else {
@@ -694,6 +698,31 @@ impl WaveExecutor {
             )
             .await?;
             Ok(())
+        }
+    }
+
+    /// Persist token usage accumulated for a run during streaming, tagged with
+    /// the wave and the provider (agent) that produced it. Runs that never
+    /// stream in-process (tmux-backed) accumulate nothing and are skipped.
+    async fn persist_run_usage(&self, run: &Run, provider: &str) {
+        let Some(totals) = self.output.take_usage(&run.id.to_string()) else {
+            return;
+        };
+        if totals.is_empty() {
+            return;
+        }
+        let usage = RunTokenUsage {
+            run_id: run.id.clone(),
+            wave: run.wave_id.clone(),
+            provider: provider.to_string(),
+            model: None,
+            input_tokens: totals.input_tokens,
+            output_tokens: totals.output_tokens,
+            cache_read_tokens: totals.cache_read_tokens,
+            recorded_at: OffsetDateTime::now_utc().unix_timestamp(),
+        };
+        if let Err(err) = self.store.record_run_usage(&usage).await {
+            warn!(run_id = %run.id, error = %err, "failed to persist run token usage");
         }
     }
 

@@ -418,7 +418,7 @@ mod tests {
     use std::sync::Arc;
     use time::OffsetDateTime;
 
-    fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> Run {
+    fn run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> Run {
         Run {
             id: LfdId::new(),
             wave_id: LfdId::new(),
@@ -486,7 +486,7 @@ mod tests {
         }
     }
 
-    fn make_wave_run(wave: &Wave, pr_number: u32) -> Run {
+    fn make_run(wave: &Wave, pr_number: u32) -> Run {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -537,7 +537,7 @@ mod tests {
             .create_wave(&wave)
             .await
             .expect("wave should be created in store");
-        let run = make_wave_run(&wave, pr_number);
+        let run = make_run(&wave, pr_number);
         store
             .create_run(&run)
             .await
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn snapshot_returns_state_and_stale_for_run() {
-        let run = wave_run_with_pr(Some(101), Some("open"));
+        let run = run_with_pr(Some(101), Some("open"));
         let key = crate::lfd::live_pr::run_live_pr_key(&run).expect("key");
         let snapshot = LivePrSnapshot {
             live_states: HashMap::from([(

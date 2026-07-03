@@ -24,8 +24,8 @@ use crate::lfd::types::{
 };
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
-/// Create a wave run using a per-run worktree for parallel execution.
-pub async fn create_parallel_wave_run(
+/// Create a run using a per-run worktree for parallel execution.
+pub async fn create_parallel_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
@@ -96,7 +96,7 @@ pub async fn create_parallel_wave_run(
     Ok(run)
 }
 
-/// Create a wave run with a worktree and branch for the wave.
+/// Create a run with a worktree and branch for the wave.
 ///
 /// For serialized waves targeting a specific branch (non-"main"),
 /// uses a per-run worktree instead of the shared wave worktree.
@@ -265,7 +265,7 @@ pub fn create_run_worktree(
     Ok((run_wt.to_string_lossy().to_string(), branch))
 }
 
-pub(crate) fn is_active_wave_run_status(status: RunStatus) -> bool {
+pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
     matches!(
         status,
         RunStatus::Pending | RunStatus::Running | RunStatus::Waiting

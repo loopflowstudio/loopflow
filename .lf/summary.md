@@ -865,7 +865,7 @@ pub struct QueueRunView {
 Primary orchestration APIs:
 
 ```rust
-pub async fn create_parallel_wave_run(...);
+pub async fn create_parallel_run(...);
 pub async fn create_wave_run_with_id(...);
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)>;
 

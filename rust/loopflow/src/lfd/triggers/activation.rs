@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_parallel_wave_run, create_run_with_id, spawn_run_task_with_slot};
+use super::common::{create_parallel_run, create_run_with_id, spawn_run_task_with_slot};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::cleanup_workspace_worktree;
 use crate::lfd::executor::WaveExecutor;
@@ -64,7 +64,7 @@ pub(crate) async fn create_run(
     target_branch: Option<&str>,
 ) -> anyhow::Result<Run> {
     if force_parallel || wave.workers() != 1 {
-        create_parallel_wave_run(store, wave, run_id, target_branch).await
+        create_parallel_run(store, wave, run_id, target_branch).await
     } else {
         create_run_with_id(store, wave, run_id, target_branch).await
     }

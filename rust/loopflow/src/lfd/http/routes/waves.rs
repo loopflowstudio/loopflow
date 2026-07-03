@@ -332,7 +332,7 @@ pub async fn create_wave_handler(
         .send(Event::wave_created(wave.id().clone(), wave.name().clone()));
 
     if run {
-        start_wave_run(&state, &mut wave, None).await?;
+        start_run(&state, &mut wave, None).await?;
     }
 
     let response_wave = if run {
@@ -1032,7 +1032,7 @@ async fn active_wave_agent_session(
         .find(|session| session.session_use == SessionUse::WaveAgent))
 }
 
-async fn start_wave_run(
+async fn start_run(
     state: &HttpState,
     wave: &mut Wave,
     overrides: Option<RunWaveRequest>,
@@ -2237,7 +2237,7 @@ mod tests {
             .expect("load wave")
             .expect("wave exists");
 
-        let run = start_wave_run(
+        let run = start_run(
             &state,
             &mut wave,
             Some(RunWaveRequest {

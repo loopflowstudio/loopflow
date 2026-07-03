@@ -67,7 +67,7 @@ impl DockerExecutor {
         }
     }
 
-    pub(super) fn resolve_wave_run_branch(run: &Run, wave: &Wave) -> String {
+    pub(super) fn resolve_run_branch(run: &Run, wave: &Wave) -> String {
         if !run.branch.trim().is_empty() {
             return run.branch.clone();
         }
@@ -163,7 +163,7 @@ impl DockerExecutor {
             .await?
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
         let repo_source = Self::resolve_host_repo(&run.repo);
-        let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
+        let fallback_branch = Self::resolve_run_branch(&run, &wave);
         Ok((repo_source, fallback_branch))
     }
 

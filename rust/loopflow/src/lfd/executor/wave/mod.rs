@@ -42,7 +42,7 @@ use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_create_pr, build_lf_inline_command, build_lf_step_command,
-    cleanup_run_worktree, is_active_wave_run_status, is_ephemeral_worktree_path,
+    cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -126,7 +126,7 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .filter(|branch| !branch.is_empty())
 }
 
-fn build_wave_run_command(
+fn build_run_command(
     wave: &Wave,
     run: &Run,
     in_flight: Vec<InFlightDispatch>,
@@ -169,7 +169,7 @@ fn build_wave_agent_command(
     Ok((cmd, format!("goal:{}", wave.goal())))
 }
 
-/// Wave runs that are still dispatched — active status or an open PR — excluding
+/// Runs that are still dispatched — active status or an open PR — excluding
 /// `exclude_run_id` (the run about to launch, which isn't in flight yet).
 async fn list_in_flight_dispatches(
     store: &SharedStore,
@@ -181,7 +181,7 @@ async fn list_in_flight_dispatches(
         .into_iter()
         .filter(|run| exclude_run_id != Some(&run.id))
         .filter(|run| {
-            is_active_wave_run_status(run.status)
+            is_active_run_status(run.status)
                 || is_open_pr_state(run.pr.as_ref().and_then(|pr| pr.state.as_deref()))
         })
         .map(|run| InFlightDispatch {
@@ -491,7 +491,7 @@ impl WaveExecutor {
         let mut active_paths = HashSet::new();
         let runs = self.store.list_runs(None, None).await?;
         for run in runs {
-            if is_active_wave_run_status(run.status) {
+            if is_active_run_status(run.status) {
                 active_paths.insert(run.worktree);
             }
         }
@@ -565,7 +565,7 @@ impl WaveExecutor {
         let session_id = LfdId::new();
         let mut env = flow_step_env(wave.id(), &run.id, Some(&session_id));
         let in_flight = list_in_flight_dispatches(&self.store, &run.wave_id, Some(&run.id)).await?;
-        let (cmd, terminal_step) = build_wave_run_command(&wave, &run, in_flight)?;
+        let (cmd, terminal_step) = build_run_command(&wave, &run, in_flight)?;
         let session_use = if run.task.is_some() {
             SessionUse::Worker
         } else {
@@ -590,7 +590,7 @@ impl WaveExecutor {
             source: if tmux_managed {
                 TMUX_TERMINAL_SOURCE.to_string()
             } else {
-                "wave_run".to_string()
+                "run".to_string()
             },
             tmux_name: tmux_session_name(&run.branch),
             status: SessionStatus::Pending,
@@ -2224,7 +2224,7 @@ mod tests {
     }
 
     #[test]
-    fn build_wave_run_command_includes_wave_memory_in_prompt() {
+    fn build_run_command_includes_wave_memory_in_prompt() {
         let repo = tempdir().expect("tempdir");
         let wave_dir = repo.path().join("wave").join("memory-wave");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
@@ -2241,7 +2241,7 @@ mod tests {
         run.worktree = repo.path().to_string_lossy().to_string();
 
         let (cmd, terminal_step) =
-            build_wave_run_command(&wave, &run, Vec::new()).expect("build wave command");
+            build_run_command(&wave, &run, Vec::new()).expect("build wave command");
         let rendered = cmd.join("\n");
 
         assert_eq!(terminal_step, "goal:memory-wave");
@@ -2252,7 +2252,7 @@ mod tests {
     }
 
     #[test]
-    fn build_wave_run_command_includes_in_flight_dispatches() {
+    fn build_run_command_includes_in_flight_dispatches() {
         let repo = tempdir().expect("tempdir");
         let wave_dir = repo.path().join("wave").join("memory-wave");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
@@ -2272,7 +2272,7 @@ mod tests {
         }];
 
         let (cmd, _terminal_step) =
-            build_wave_run_command(&wave, &run, in_flight).expect("build wave command");
+            build_run_command(&wave, &run, in_flight).expect("build wave command");
         let rendered = cmd.join("\n");
 
         assert!(rendered.contains("<lf:in-flight>"));
@@ -2282,7 +2282,7 @@ mod tests {
     }
 
     #[test]
-    fn build_wave_run_command_dispatches_task() {
+    fn build_run_command_dispatches_task() {
         let repo = tempdir().expect("tempdir");
         let wave = make_wave("dispatch-wave", repo.path(), "build", WaveStatus::Running);
         let mut run = Run::new(LfdId::new(), wave.id().clone());
@@ -2291,7 +2291,7 @@ mod tests {
         run.task = Some("Add the dispatch endpoint.".to_string());
 
         let (cmd, terminal_step) =
-            build_wave_run_command(&wave, &run, Vec::new()).expect("build dispatch command");
+            build_run_command(&wave, &run, Vec::new()).expect("build dispatch command");
 
         assert_eq!(terminal_step, "dispatch:implement");
         assert!(cmd.contains(&"implement:".to_string()));
@@ -2300,7 +2300,7 @@ mod tests {
     }
 
     #[test]
-    fn build_wave_run_command_errors_when_wave_memory_is_unreadable() {
+    fn build_run_command_errors_when_wave_memory_is_unreadable() {
         let repo = tempdir().expect("tempdir");
         let wave_dir = repo.path().join("wave").join("memory-wave");
         std::fs::create_dir_all(&wave_dir).expect("create wave dir");
@@ -2313,7 +2313,7 @@ mod tests {
         run.worktree = repo.path().to_string_lossy().to_string();
 
         let err =
-            build_wave_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
+            build_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
         assert!(err.to_string().contains("failed to read wave memory"));
     }
 

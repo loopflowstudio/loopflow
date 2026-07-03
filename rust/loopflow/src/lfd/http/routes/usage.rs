@@ -238,7 +238,7 @@ async fn load_usage_session_data(
         .await
         .map_err(map_store_error)?;
 
-    let wave_run_meta = load_wave_run_metadata(state, &conversations).await?;
+    let run_meta = load_run_metadata(state, &conversations).await?;
 
     let mut usage_sessions = Vec::with_capacity(conversations.len());
     for conversation in conversations {
@@ -247,7 +247,7 @@ async fn load_usage_session_data(
             .run_id
             .as_deref()
             .and_then(|id| id.parse::<LfdId>().ok())
-            .and_then(|id| wave_run_meta.get(&id))
+            .and_then(|id| run_meta.get(&id))
             .cloned()
             .unwrap_or((None, None));
         usage_sessions.push(UsageConversationData {
@@ -263,7 +263,7 @@ async fn load_usage_session_data(
 
 /// Batch-fetch run metadata for all conversations that have a run_id.
 /// Deduplicates IDs so each run is fetched at most once.
-async fn load_wave_run_metadata(
+async fn load_run_metadata(
     state: &HttpState,
     conversations: &[Conversation],
 ) -> Result<HashMap<LfdId, (Option<String>, Option<String>)>, ApiError> {
@@ -456,7 +456,7 @@ mod tests {
     async fn get_wave_usage_rolls_up_sessions_and_steps() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let run = seed_wave_run(&state, &wave, "build").await;
+        let run = seed_run(&state, &wave, "build").await;
         let session = seed_session(
             &state,
             ConversationConfig {
@@ -526,8 +526,8 @@ mod tests {
     async fn usage_summary_applies_wave_flow_and_model_filters() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let build_run = seed_wave_run(&state, &wave, "build").await;
-        let gate_run = seed_wave_run(&state, &wave, "gate").await;
+        let build_run = seed_run(&state, &wave, "build").await;
+        let gate_run = seed_run(&state, &wave, "gate").await;
 
         let build_session = seed_session(
             &state,
@@ -616,7 +616,7 @@ mod tests {
     async fn usage_timeseries_groups_by_day_and_wave() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let run = seed_wave_run(&state, &wave, "build").await;
+        let run = seed_run(&state, &wave, "build").await;
 
         let first_day = parse_datetime(Some("2026-02-01T08:00:00Z"), "from")
             .expect("parse")
@@ -749,7 +749,7 @@ mod tests {
         wave
     }
 
-    async fn seed_wave_run(state: &HttpState, wave: &Wave, flow: &str) -> Run {
+    async fn seed_run(state: &HttpState, wave: &Wave, flow: &str) -> Run {
         let run = Run {
             id: LfdId::new(),
             wave_id: wave.id.clone(),

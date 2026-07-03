@@ -919,11 +919,11 @@ impl ConversationManager {
     ) -> Option<(Arc<Scheduler>, String)> {
         let scheduler = self.inner.scheduler.clone()?;
         let run_id = run_id?;
-        let wave_id = self.wave_id_for_wave_run(run_id).await?;
+        let wave_id = self.wave_id_for_run(run_id).await?;
         Some((scheduler, wave_id))
     }
 
-    async fn wave_id_for_wave_run(&self, run_id: &str) -> Option<String> {
+    async fn wave_id_for_run(&self, run_id: &str) -> Option<String> {
         let run_id = match run_id.parse::<LfdId>() {
             Ok(run_id) => run_id,
             Err(err) => {
@@ -1771,7 +1771,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_session_enforces_single_active_session_per_wave_run() {
+    async fn create_session_enforces_single_active_session_per_run() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(

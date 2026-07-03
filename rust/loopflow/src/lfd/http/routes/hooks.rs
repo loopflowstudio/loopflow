@@ -840,7 +840,7 @@ mod tests {
         assert_eq!(pending[0].to_sha, "def");
     }
 
-    fn wave_run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> Run {
+    fn run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> Run {
         Run {
             id: LfdId::new(),
             wave_id: LfdId::new(),
@@ -880,20 +880,20 @@ mod tests {
 
     #[test]
     fn run_matches_ci_target_only_matches_open_main_prs() {
-        let run = wave_run_with_pr("build", Some("open"), Some("feature"));
+        let run = run_with_pr("build", Some("open"), Some("feature"));
         assert!(run_matches_ci_target(&run, Some("feature"), Some(1)));
 
-        let closed = wave_run_with_pr("build", Some("closed"), Some("feature"));
+        let closed = run_with_pr("build", Some("closed"), Some("feature"));
         assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
 
-        let unknown_state = wave_run_with_pr("build", None, Some("feature"));
+        let unknown_state = run_with_pr("build", None, Some("feature"));
         assert!(!run_matches_ci_target(
             &unknown_state,
             Some("feature"),
             Some(1)
         ));
 
-        let ci_fix = wave_run_with_pr("ci-fix", Some("open"), Some("feature"));
+        let ci_fix = run_with_pr("ci-fix", Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
     }
 

@@ -225,7 +225,7 @@ pub async fn list_parents_handler(
 fn build_repo_dtos(registered: Vec<Repo>, waves: Vec<Wave>) -> Vec<RepoDto> {
     let mut wave_counts: BTreeMap<String, u32> = BTreeMap::new();
     for wave in waves {
-        *wave_counts.entry(wave.repo().clone()).or_insert(0) += 1;
+        *wave_counts.entry(wave.repo().to_string()).or_insert(0) += 1;
     }
 
     let mut repos: BTreeMap<String, RepoDto> = BTreeMap::new();

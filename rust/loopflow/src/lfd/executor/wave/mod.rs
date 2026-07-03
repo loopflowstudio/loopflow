@@ -396,7 +396,7 @@ impl WaveExecutor {
         self.ensure_wave_workspace(&wave).await?;
 
         let worktree =
-            crate::engine::worktrees::worktree_path(Path::new(wave.primary_repo()), wave.name());
+            crate::engine::worktrees::worktree_path(Path::new(wave.repo()), wave.name());
         let worktree = worktree.display().to_string();
         let session_id = LfdId::new();
         let in_flight = list_in_flight_dispatches(&self.store, wave.id(), None).await?;

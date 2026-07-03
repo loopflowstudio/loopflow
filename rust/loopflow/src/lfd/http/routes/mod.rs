@@ -85,7 +85,7 @@ pub async fn build_wave_dto(
         .collect::<HashMap<_, _>>();
 
     let flow_name = wave.primary_flow().clone();
-    let flow_repo = wave.repo().clone();
+    let flow_repo = wave.repo().to_string();
     let flow_steps = tokio::task::spawn_blocking(move || {
         flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
     })
@@ -530,7 +530,7 @@ mod tests {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: wave.repo().to_string(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),

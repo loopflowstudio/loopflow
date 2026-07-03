@@ -363,7 +363,7 @@ async fn wait_for_wave_start_settle(state: &HttpState, mut wave: Wave) -> Wave {
         let Ok(Some(updated)) = state.store.get_wave(&wave_id).await else {
             continue;
         };
-        if updated.status != WaveStatus::Running {
+        if updated.status() != WaveStatus::Running {
             return updated;
         }
         wave = updated;
@@ -564,10 +564,9 @@ async fn resolve_wave_id_in_repo(
 
 async fn wave_name_exists(
     state: &HttpState,
-    repo: &str,
     name: &str,
 ) -> Result<bool, crate::lfd::store::StoreError> {
-    let waves = state.store.list_waves(Some(repo)).await?;
+    let waves = state.store.list_waves(None).await?;
     Ok(waves.into_iter().any(|wave| wave.name() == name))
 }
 
@@ -608,8 +607,8 @@ pub async fn update_wave_handler(
         if !name.is_empty() && *name != *wave.name() {
             let new_name = name.clone();
 
-            // Check for duplicate name in same repo.
-            let existing = wave_name_exists(&state, wave.repo(), &new_name)
+            // Check for duplicate wave name (globally unique).
+            let existing = wave_name_exists(&state, &new_name)
                 .await
                 .map_err(map_store_error)?;
             if existing {
@@ -633,7 +632,7 @@ pub async fn update_wave_handler(
 
             // Move worktree + rename branch on disk.
             let old_name = wave.name().clone();
-            let repo = wave.repo().clone();
+            let repo = wave.repo().to_string();
             let new_name_for_wt = new_name.clone();
             run_blocking_result(
                 move || {
@@ -667,7 +666,7 @@ pub async fn update_wave_handler(
     }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {
-        let repo = wave.repo().clone();
+        let repo = wave.repo().to_string();
         let wave_name = wave.name().clone();
         let agent = payload.agent.clone();
         let step_agents = payload.step_agents.clone();
@@ -735,7 +734,7 @@ pub async fn delete_wave_handler(
     }
 
     // Clean up the worktree on disk.
-    let repo = wave.repo().clone();
+    let repo = wave.repo().to_string();
     let wave_name = wave.name().clone();
     tokio::task::spawn_blocking(move || {
         let wt = worktree_path(std::path::Path::new(&repo), &wave_name);
@@ -1530,14 +1529,14 @@ pub async fn land_wave_handler(
         .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
     let worktree =
-        resolve_wave_work_dir_for_api(wave.repo().clone(), wave.name().clone(), latest_worktree)
+        resolve_wave_work_dir_for_api(wave.repo().to_string(), wave.name().clone(), latest_worktree)
             .await?;
 
     let strict = payload.strict.unwrap_or(false);
     let local = payload.local.unwrap_or(false);
     let create_pr = payload.create_pr.unwrap_or(true);
 
-    let repo_path = wave.repo().clone();
+    let repo_path = wave.repo().to_string();
     let land_result = run_blocking_result(
         move || {
             let progress = crate::ops::NullProgress;
@@ -1667,7 +1666,7 @@ pub async fn get_wave_file_diff_handler(
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid file path"));
     }
 
-    let repo = wave.repo().clone();
+    let repo = wave.repo().to_string();
     let wave_name = wave.name().clone();
     let diff = tokio::task::spawn_blocking(move || {
         let repo_path = std::path::Path::new(&repo);
@@ -1714,7 +1713,7 @@ async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, 
         .map(|run| run.worktree)
         .filter(|value| !value.is_empty());
     let work_dir =
-        resolve_wave_work_dir_for_api(wave.repo().clone(), wave.name().clone(), latest_worktree)
+        resolve_wave_work_dir_for_api(wave.repo().to_string(), wave.name().clone(), latest_worktree)
             .await?;
 
     Ok((wave, work_dir))

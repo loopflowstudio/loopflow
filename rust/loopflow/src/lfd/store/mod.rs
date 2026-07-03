@@ -2092,7 +2092,7 @@ mod tests {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: wave.repo().to_string(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),
@@ -2831,7 +2831,7 @@ mod tests {
                 Run {
                     id: LfdId::new(),
                     wave_id: wave.id().clone(),
-                    repo: wave.repo().clone(),
+                    repo: wave.repo().to_string(),
                     flow: wave.primary_flow().clone(),
                     task: None,
                     direction: wave.direction().clone(),
@@ -2867,7 +2867,7 @@ mod tests {
 
         let make_pr_state =
             |pr_number: u32, state: LivePrState, head_sha: &str| LivePullRequestState {
-                repo_id: wave.repo().clone(),
+                repo_id: wave.repo().to_string(),
                 pr_number,
                 state,
                 is_draft: false,

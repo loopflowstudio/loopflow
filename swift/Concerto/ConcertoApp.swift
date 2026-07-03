@@ -79,18 +79,6 @@ private enum AppFontRegistration {
     }
 }
 
-@MainActor
-private enum VoiceInputWarmup {
-    static let service = VoiceInputService()
-    private static var hasStarted = false
-
-    static func start() {
-        guard !hasStarted else { return }
-        hasStarted = true
-        service.prewarmModelInBackground()
-    }
-}
-
 private enum AppRuntime {
     static var isAutomatedTest: Bool {
         let processInfo = ProcessInfo.processInfo
@@ -126,9 +114,6 @@ private func bootstrapConcertoApp() {
     guard !AppRuntime.isAutomatedTest else { return }
     Task {
         try? await NotificationService.shared.requestAuthorization()
-    }
-    Task { @MainActor in
-        VoiceInputWarmup.start()
     }
     #if os(macOS)
     Task { @MainActor in
@@ -183,25 +168,13 @@ struct ConcertoApp: App {
 
     var body: some Scene {
         let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
-        let uiTestMode = RepoState.uiTestMode()
-        let screenshotMode = RepoState.ScreenshotMode.fromArgs()
-        let launchRepoURL = screenshotMode == nil ? LaunchArguments.repoURL() : nil
+        let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
-            Group {
-                if let screenshot = screenshotMode {
-                    ScreenshotWindow(mode: screenshot)
-                } else if uiTestMode != nil {
-                    RepoWindow(
-                        repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
-                        portfolioService: portfolioService
-                    )
-                } else if let launchRepoURL {
-                    RepoWindow(repoURL: launchRepoURL, portfolioService: portfolioService)
-                } else {
-                    WavesView(portfolioService: portfolioService)
-                }
-            }
+            WavesView(
+                portfolioService: portfolioService,
+                initialRepoPath: launchRepoURL?.path
+            )
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
@@ -212,14 +185,17 @@ struct ConcertoApp: App {
         .defaultSize(width: 1080, height: 760)
 
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
-            RepoWindow(repoURL: repoURL, portfolioService: portfolioService)
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-                .environment(keyboardRouter)
+            WavesView(
+                portfolioService: portfolioService,
+                initialRepoPath: repoURL?.path
+            )
+            .tint(.loopflowBurgundy)
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.palette, theme.palette)
+            .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
-        .defaultSize(width: 900, height: 700)
+        .defaultSize(width: 1080, height: 760)
 
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService)
@@ -236,13 +212,6 @@ struct ConcertoApp: App {
                 .environment(\.palette, theme.palette)
         }
         .defaultSize(width: 800, height: 600)
-
-        Window("Reply Demo", id: "reply-demo") {
-            ReplyDemoView()
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-        }
-        .defaultSize(width: 1200, height: 760)
 
         .commands {
             CommandGroup(after: .appSettings) {
@@ -304,11 +273,6 @@ struct ConcertoApp: App {
                     openWindow(id: "terminal-test")
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-
-                Button("Reply Demo") {
-                    openWindow(id: "reply-demo")
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
     }

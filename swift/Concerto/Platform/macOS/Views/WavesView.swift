@@ -18,6 +18,10 @@ enum RepoFilter: Hashable {
 struct WavesView: View {
     let portfolioService: PortfolioService
 
+    /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
+    /// window). Collapsed to its main worktree before matching the rail.
+    var initialRepoPath: String? = nil
+
     @Environment(\.palette) private var palette
 
     @State private var connectionStore = ConnectionStore()
@@ -33,6 +37,7 @@ struct WavesView: View {
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
+    @State private var didApplyInitialRepo = false
 
     /// All waves across every repo, in the registry's repo order.
     private var allWaves: [WaveViewModel] {
@@ -87,7 +92,12 @@ struct WavesView: View {
         }
         .task {
             await prepareConnectionIfNeeded()
+            let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
+            if let initialMain, !didApplyInitialRepo {
+                didApplyInitialRepo = true
+                selection = .repo(initialMain)
+            }
             ensureRepoStates()
             await syncRepoStates()
             await startEventSubscription()
@@ -340,6 +350,21 @@ struct WavesView: View {
             throw WaveServiceError.commandFailed("Unknown repo: \(repoPath)")
         }
         try await state.createWave(name: name)
+    }
+
+    /// Register a launch-provided repo (collapsed to its main worktree) so it
+    /// shows in the rail, and return its main-worktree path for pre-selection.
+    private func registerInitialRepoIfNeeded() async -> String? {
+        guard let initialRepoPath, !didApplyInitialRepo else { return nil }
+        if RepoState.uiTestMode() != nil { return nil }
+        let url = URL(fileURLWithPath: initialRepoPath)
+        let mainPath = await Task.detached {
+            RepoScanner().resolveMainWorktree(url).normalizedFilePath
+        }.value
+        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == mainPath }) {
+            portfolioService.addRepo(URL(fileURLWithPath: mainPath))
+        }
+        return mainPath
     }
 
     /// Seed the registry from a `~/src` scan on first empty launch, then collapse
@@ -677,6 +702,45 @@ private struct CreateWaveSheet: View {
             }
         }
     }
+}
+
+/// Resolves a session connection into the working directory + argv needed to
+/// attach a terminal, choosing local tmux vs. SSH based on the connection.
+struct TerminalAttachCommand: Equatable {
+    let workingDirectory: String
+    let argv: [String]
+    let env: [String: String]
+
+    init(workingDirectory: String, argv: [String], env: [String: String] = [:]) {
+        self.workingDirectory = workingDirectory
+        self.argv = argv
+        self.env = env
+    }
+
+    init(_ connection: SessionConnectionInfo) {
+        if connection.usesLocalTmux {
+            self.init(
+                workingDirectory: connection.cwd,
+                argv: ["tmux", "attach-session", "-t", connection.sessionName]
+            )
+            return
+        }
+
+        self.init(
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            argv: [
+                "ssh",
+                "-t",
+                connection.host,
+                "tmux attach-session -t \(shellEscape(connection.sessionName))",
+            ]
+        )
+    }
+}
+
+private func shellEscape(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
 }
 
 #Preview {

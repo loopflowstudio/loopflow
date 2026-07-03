@@ -78,7 +78,6 @@ pub struct WaveDto {
     pub id: String,
     pub object: String,
     pub name: String,
-    pub repo: String,
     pub mode: String,
     pub primary_flow: String,
     pub goal: String,
@@ -90,24 +89,45 @@ pub struct WaveDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
+    /// Wave-level status rolled up over `repos` (see `Wave::status`).
+    pub status: String,
+    pub flow_steps: Vec<String>,
+    pub has_stale_pr_state: bool,
+    pub workers: u32,
+    pub triggers: Vec<TriggerDto>,
+    pub crons: Vec<WaveCronDto>,
+    /// Per-repo execution state, one entry per repo the wave runs in.
+    pub repos: Vec<RepoWorkDto>,
+}
+
+/// Per-repo execution surface for a wave: the worktree/branch/status/iteration
+/// plus the live git and PR snapshot derived at DTO-build time for one repo.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepoWorkDto {
+    pub repo: String,
     pub status: String,
     pub iteration: u32,
+    /// Persisted worktree path for this repo, omitted when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+    /// Persisted branch for this repo, omitted when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Live worktree path inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,
+    /// Live branch inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_branch: Option<String>,
     pub commits: Vec<CommitEntryDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff_stat: Option<String>,
-    pub flow_steps: Vec<String>,
     pub open_pr_count: u32,
     pub stack_count: u32,
-    pub has_stale_pr_state: bool,
-    pub workers: u32,
-    pub triggers: Vec<TriggerDto>,
-    pub crons: Vec<WaveCronDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<RunDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PullRequestDto>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -564,10 +584,50 @@ mod contract_tests {
             .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
     }
 
+    /// Nested-shape wave payload used by the contract tests. The golden
+    /// `tests/fixtures/wave.json` is still flat and gets rewritten to this
+    /// shape in step 6; until then the in-tree tests exercise the nested
+    /// contract inline.
+    fn nested_wave_json() -> serde_json::Value {
+        serde_json::json!({
+            "id": "wave_abc123",
+            "object": "wave",
+            "name": "engbot",
+            "mode": "loop",
+            "primary_flow": "build",
+            "goal": "ship-roadmap",
+            "metrics": ["all roadmap items shipped", "cargo test green"],
+            "direction": ["ux", "clarity"],
+            "area": ["src/"],
+            "created_at": null,
+            "status": "running",
+            "flow_steps": ["plan", "build", "review"],
+            "has_stale_pr_state": false,
+            "workers": 1,
+            "triggers": [
+                {"id": "trig_1", "signal": "repo", "enabled": true, "flow": "integrate", "created_at": null},
+                {"id": "trig_2", "signal": "ci_failure", "enabled": true, "created_at": null}
+            ],
+            "crons": [
+                {"id": "cron_1", "flow": "wave-polish", "schedule": "0 9 * * *", "created_at": null}
+            ],
+            "repos": [
+                {
+                    "repo": "/tmp/repo",
+                    "status": "running",
+                    "iteration": 3,
+                    "local_worktree": "/tmp/repo/.worktrees/engbot",
+                    "commits": [{"sha": "abc1234", "message": "wire it up"}],
+                    "open_pr_count": 1,
+                    "stack_count": 1
+                }
+            ]
+        })
+    }
+
     #[test]
     fn wave_fixture_deserializes() {
-        let json = fixture("wave.json");
-        let wave: WaveDto = serde_json::from_str(&json).unwrap();
+        let wave: WaveDto = serde_json::from_value(nested_wave_json()).unwrap();
 
         assert_eq!(wave.id, "wave_abc123");
         assert_eq!(wave.object, "wave");
@@ -580,11 +640,9 @@ mod contract_tests {
         );
         assert_eq!(wave.mode, "loop");
         assert_eq!(wave.status, "running");
-        assert_eq!(wave.iteration, 3);
         assert_eq!(wave.workers, 1);
         assert_eq!(wave.direction, vec!["ux", "clarity"]);
         assert_eq!(wave.area, vec!["src/"]);
-        assert_eq!(wave.open_pr_count, 1);
 
         assert_eq!(wave.triggers.len(), 2);
         assert_eq!(wave.triggers[0].signal, "repo");
@@ -593,8 +651,14 @@ mod contract_tests {
         assert_eq!(wave.crons.len(), 1);
         assert_eq!(wave.crons[0].flow, "wave-polish");
 
-        assert_eq!(wave.commits.len(), 1);
-        assert_eq!(wave.commits[0].sha, "abc1234");
+        assert_eq!(wave.repos.len(), 1);
+        let repo = &wave.repos[0];
+        assert_eq!(repo.repo, "/tmp/repo");
+        assert_eq!(repo.status, "running");
+        assert_eq!(repo.iteration, 3);
+        assert_eq!(repo.open_pr_count, 1);
+        assert_eq!(repo.commits.len(), 1);
+        assert_eq!(repo.commits[0].sha, "abc1234");
     }
 
     #[test]

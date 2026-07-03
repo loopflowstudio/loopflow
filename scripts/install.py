@@ -345,8 +345,15 @@ def _install_concerto(spec: BundleSpec, version: str) -> None:
 
     _verify_bundle_layout(spec)
 
+    identity = _codesign_identity()
+    if identity != "-":
+        typer.echo(f"  [codesign] signing with stable identity: {identity}")
     sign = subprocess.run(
-        ["codesign", "--force", "--deep", "--sign", "-", str(spec.app_path)],
+        [
+            "codesign", "--force", "--deep",
+            "--preserve-metadata=entitlements",
+            "--sign", identity, str(spec.app_path),
+        ],
         capture_output=True,
         text=True,
     )
@@ -355,6 +362,32 @@ def _install_concerto(spec: BundleSpec, version: str) -> None:
         raise StageError(f"codesign failed: {detail}")
 
     _verify_bundle_signature(spec)
+
+
+def _codesign_identity() -> str:
+    """Pick a stable signing identity so keychain grants survive rebuilds.
+
+    Ad-hoc signatures (`-`) change every build, which invalidates the macOS
+    keychain ACL on items like `loopflow.connection.token` and re-prompts the
+    user on every launch. A stable identity keeps "Always Allow" sticky. Falls
+    back to ad-hoc when no identity exists (CI, fresh machines) so builds never
+    break. Override with LOOPFLOW_CODESIGN_IDENTITY.
+    """
+    override = os.environ.get("LOOPFLOW_CODESIGN_IDENTITY")
+    if override:
+        return override
+    found = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    for preferred in ("Developer ID Application", "Apple Development"):
+        for line in found.splitlines():
+            if preferred in line:
+                start, end = line.find('"'), line.rfind('"')
+                if start != -1 and end > start:
+                    return line[start + 1 : end]
+    return "-"
 
 
 def _verify_bundle_layout(spec: BundleSpec) -> None:

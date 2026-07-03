@@ -33,6 +33,12 @@ lfq sessions                 # every live session — the wave agent and its wor
 lfq attach <session-id>      # jump into one over tmux
 ```
 
+Run the same wave context through a builtin VSM system charter:
+
+```bash
+lf goal root --system s3 --once    # govern-control charter, root context, one loop
+```
+
 The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
 
 ```bash

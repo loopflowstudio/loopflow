@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
+use crate::engine::builtins::get_builtin_goal;
 use crate::engine::config::load_config_or_default;
 use crate::engine::worktrees::main_repo_root;
 use crate::engine::{
@@ -78,9 +79,16 @@ fn build_goal_message(
     once: bool,
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<String> {
-    let goal_name = goal_name.unwrap_or(wave_name);
-    let goal = load_goal(goal_name, repo)
-        .map_err(|err| anyhow!("failed to load goal '{goal_name}': {err}"))?;
+    let goal = match goal_name {
+        Some(goal_name) => {
+            let prompt = get_builtin_goal(goal_name)
+                .ok_or_else(|| anyhow!("builtin goal not found: '{goal_name}'"))?
+                .to_string();
+            crate::engine::Goal { prompt }
+        }
+        None => load_goal(wave_name, repo)
+            .map_err(|err| anyhow!("failed to load goal '{wave_name}': {err}"))?,
+    };
     let wave_config = read_wave_config(repo, wave_name).unwrap_or_default();
     let memory = std::fs::read_to_string(repo.join("wave").join(wave_name).join("MEMORY.md"))
         .unwrap_or_default();
@@ -215,6 +223,27 @@ mod tests {
         assert!(message.contains("wave/ship"));
         assert!(message.contains("Last loop shipped auth."));
         assert!(message.contains("<lf:goal-once>"));
+    }
+
+    #[test]
+    fn build_goal_message_system_goal_ignores_repo_goal_override() {
+        let tmp = wave_fixture();
+        let goals_dir = tmp.path().join(".lf/goals");
+        std::fs::create_dir_all(&goals_dir).expect("create goals dir");
+        std::fs::write(goals_dir.join("govern-control.md"), "Repo override.")
+            .expect("write goal override");
+
+        let message = build_goal_message(
+            tmp.path(),
+            "ship",
+            Some("govern-control"),
+            false,
+            Vec::new(),
+        )
+        .expect("build message");
+
+        assert!(message.contains("True north: the whole is worth more than the sum of its parts."));
+        assert!(!message.contains("Repo override."));
     }
 
     #[test]

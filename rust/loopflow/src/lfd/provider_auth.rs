@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -14,7 +13,6 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
@@ -47,17 +45,6 @@ const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
 const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
 const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
 const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
-const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
-const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
-const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
-const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
-const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
-const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
-const NOTION_OAUTH_AUTHORIZE_URL: &str = "https://api.notion.com/v1/oauth/authorize";
-const NOTION_OAUTH_TOKEN_URL: &str = "https://api.notion.com/v1/oauth/token";
-const NOTION_OAUTH_REDIRECT_URI: &str = "http://localhost:19223/oauth/callback";
-const NOTION_CLIENT_ID_ENV: &str = "NOTION_CLIENT_ID";
-const NOTION_CLIENT_SECRET_ENV: &str = "NOTION_CLIENT_SECRET";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -79,8 +66,6 @@ pub enum Provider {
     Codex,
     OpenCodeZen,
     Asana,
-    Linear,
-    Notion,
     Doppler,
 }
 

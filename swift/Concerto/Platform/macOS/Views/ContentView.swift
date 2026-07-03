@@ -66,7 +66,15 @@ struct ContentView: View {
 
             Spacer()
 
-            StatusPill(status: repoState.lfdConnected ? "Connected" : "Disconnected")
+            Text(repoState.lfdConnected ? "Connected" : "Disconnected")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: CornerRadius.sm)
+                        .fill(palette.text.opacity(0.06))
+                )
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)
@@ -141,14 +149,10 @@ private struct RepoWaveRow: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("wave-name")
 
-                HStack(spacing: Spacing.sm) {
-                    RepoChip(repoPath: wave.repo)
-
-                    Text(wave.statusText)
-                        .font(Typography.caption())
-                        .foregroundStyle(wave.status.color)
-                        .accessibilityIdentifier("wave-status")
-                }
+                Text(wave.statusText)
+                    .font(Typography.caption())
+                    .foregroundStyle(wave.status.color)
+                    .accessibilityIdentifier("wave-status")
             }
 
             Spacer()
@@ -156,49 +160,7 @@ private struct RepoWaveRow: View {
         .padding(.vertical, Spacing.md)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(wave.displayName), \(wave.repo), \(wave.statusText)")
-    }
-}
-
-private struct RepoChip: View {
-    let repoPath: String
-
-    @Environment(\.palette) private var palette
-
-    private var repoName: String {
-        URL(fileURLWithPath: repoPath).lastPathComponent
-    }
-
-    var body: some View {
-        Text(repoName)
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.sm)
-                    .fill(palette.text.opacity(0.08))
-            )
-            .accessibilityIdentifier("wave-repo-chip")
-    }
-}
-
-private struct StatusPill: View {
-    let status: String
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        Text(status)
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.sm)
-                    .fill(palette.text.opacity(0.06))
-            )
+        .accessibilityLabel("\(wave.displayName), \(wave.statusText)")
     }
 }
 

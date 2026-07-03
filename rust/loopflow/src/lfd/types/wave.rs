@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::types::money::{Money, SpendCap};
 
 fn default_workers() -> u32 {
     1
@@ -251,6 +252,14 @@ pub struct Wave {
     /// Maximum number of active runs this wave can have at once.
     #[serde(default = "default_workers")]
     pub workers: u32,
+    /// Hard spend ceiling for this wave. `None` means uncapped (safety floor
+    /// opt-in). Crossing the cap pauses the wave and blocks to a human.
+    #[serde(default)]
+    pub spend_cap: Option<SpendCap>,
+    /// Cumulative agent cost accrued by this wave's runs, in cents. Grows as
+    /// runs finish and report cost; compared against `spend_cap.rate`.
+    #[serde(default)]
+    pub spent: Money,
 }
 
 impl Wave {
@@ -277,6 +286,8 @@ impl Wave {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: default_workers(),
+            spend_cap: None,
+            spent: Money::ZERO,
         }
     }
 
@@ -375,6 +386,66 @@ impl Wave {
 
     pub fn workers(&self) -> u32 {
         self.workers
+    }
+
+    pub fn spend_cap(&self) -> Option<SpendCap> {
+        self.spend_cap
+    }
+
+    pub fn spent(&self) -> Money {
+        self.spent
+    }
+
+    /// Accrue one run's cost onto the wave's running total. Returns the new
+    /// total so callers can log it.
+    pub fn accrue_spend(&mut self, cost: Money) -> Money {
+        self.spent = self.spent.saturating_add(cost);
+        self.spent
+    }
+
+    /// Why the wave should pause, given a just-finished run's `run_cost`.
+    /// `None` means keep going. Checks the per-iteration ceiling against the
+    /// single run and the cumulative ceiling against total spend-to-date.
+    pub fn spend_pause_reason(&self, run_cost: Money) -> Option<SpendPause> {
+        let cap = self.spend_cap?;
+        if cap.iteration_exceeded(run_cost) {
+            return Some(SpendPause::PerIteration {
+                cost: run_cost,
+                cap: cap.per_iteration,
+            });
+        }
+        if cap.rate_exceeded(self.spent) {
+            return Some(SpendPause::Rate {
+                spent: self.spent,
+                cap: cap.rate,
+            });
+        }
+        None
+    }
+}
+
+/// Which spend ceiling a wave crossed. Carries the numbers for the block's
+/// human-facing summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpendPause {
+    /// A single iteration cost more than `per_iteration` allows.
+    PerIteration { cost: Money, cap: Money },
+    /// Cumulative spend reached the `rate` ceiling.
+    Rate { spent: Money, cap: Money },
+}
+
+impl SpendPause {
+    pub fn summary(&self) -> String {
+        match self {
+            SpendPause::PerIteration { cost, cap } => format!(
+                "One iteration spent {cost}, over the per-iteration cap of {cap}. \
+                 Wave paused; review before resuming."
+            ),
+            SpendPause::Rate { spent, cap } => format!(
+                "Wave has spent {spent}, at or over its spend cap of {cap}. \
+                 Wave paused; raise the cap or resume to continue."
+            ),
+        }
     }
 }
 
@@ -520,5 +591,62 @@ impl Run {
             repair_of: None,
             pr: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod spend_tests {
+    use super::*;
+
+    fn capped_wave(rate_cents: i64, per_iteration_cents: i64) -> Wave {
+        let mut wave = Wave::new(LfdId::new(), "budget".to_string(), "/tmp/repo".to_string());
+        wave.spend_cap = Some(SpendCap {
+            rate: Money::from_cents(rate_cents),
+            per_iteration: Money::from_cents(per_iteration_cents),
+        });
+        wave
+    }
+
+    #[test]
+    fn uncapped_wave_never_pauses() {
+        let mut wave = Wave::new(LfdId::new(), "w".to_string(), "/tmp/repo".to_string());
+        wave.accrue_spend(Money::from_cents(999_999));
+        assert_eq!(wave.spend_pause_reason(Money::from_cents(999_999)), None);
+    }
+
+    #[test]
+    fn accrue_accumulates() {
+        let mut wave = capped_wave(1000, 0);
+        wave.accrue_spend(Money::from_cents(300));
+        wave.accrue_spend(Money::from_cents(250));
+        assert_eq!(wave.spent(), Money::from_cents(550));
+    }
+
+    #[test]
+    fn pauses_when_cumulative_cap_crossed() {
+        let mut wave = capped_wave(500, 0);
+        wave.accrue_spend(Money::from_cents(500));
+        assert!(matches!(
+            wave.spend_pause_reason(Money::from_cents(100)),
+            Some(SpendPause::Rate { .. })
+        ));
+    }
+
+    #[test]
+    fn per_iteration_catches_pathological_run() {
+        // Cumulative is fine, but one run blew past the per-iteration cap.
+        let mut wave = capped_wave(10_000, 200);
+        wave.accrue_spend(Money::from_cents(300));
+        assert!(matches!(
+            wave.spend_pause_reason(Money::from_cents(300)),
+            Some(SpendPause::PerIteration { .. })
+        ));
+    }
+
+    #[test]
+    fn stays_running_below_both_caps() {
+        let mut wave = capped_wave(1000, 500);
+        wave.accrue_spend(Money::from_cents(200));
+        assert_eq!(wave.spend_pause_reason(Money::from_cents(200)), None);
     }
 }

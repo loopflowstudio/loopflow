@@ -87,6 +87,35 @@ async fn tick_loop_waves(
             continue;
         }
 
+        // Safety valve: never dispatch another iteration once the wave has
+        // reached its cumulative spend cap. Pause + block to a human, mirroring
+        // the max-iterations valve below.
+        if let Some(pause) = wave.spend_pause_reason(crate::lfd::types::Money::ZERO) {
+            tracing::warn!(
+                wave = %wave.name(),
+                spent = %wave.spent(),
+                "spend cap reached, pausing wave"
+            );
+            let mut paused_wave = wave.clone();
+            paused_wave.set_status(WaveStatus::Paused);
+            if let Err(err) = store.update_wave(&paused_wave).await {
+                tracing::error!(
+                    wave_id = %paused_wave.id,
+                    error = %err,
+                    "failed to pause wave after spend cap"
+                );
+            }
+            match crate::lfd::attention::create_spend_cap_attention(store, &paused_wave, pause)
+                .await
+            {
+                Ok(item) => event_hub.send(crate::lfd::types::Event::attention_created(item)),
+                Err(err) => {
+                    tracing::error!(wave = %wave.name(), error = %err, "failed to raise spend cap block")
+                }
+            }
+            continue;
+        }
+
         // Safety valve: check max_iterations on any trigger for this wave.
         if let Ok(triggers) = store.list_triggers(Some(wave.id())).await {
             if let Some(trigger) = triggers.iter().find(|t| t.max_iterations.is_some()) {
@@ -188,6 +217,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         }
     }
 

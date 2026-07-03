@@ -226,6 +226,9 @@ fn build_goal_message(
         memory,
         metrics: wave_config.metrics.unwrap_or_default(),
         in_flight,
+        // The CLI preview has no live wave to read spend from; the running
+        // wave loop populates this from the store.
+        spend: None,
     };
 
     let mut message = render_goal(&goal, &ctx);

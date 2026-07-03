@@ -14,7 +14,7 @@ use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
     map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
-    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_wave_repo_row, map_wave_row, now_unix, serialize_pr, serialize_spend_cap,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
@@ -215,6 +215,7 @@ impl PostgresStore {
             let direction_json = serde_json::to_string(wave.direction())?;
             let area_json = serde_json::to_string(wave.area())?;
             let metrics_json = serde_json::to_string(wave.metrics())?;
+            let spend_cap_json = serialize_spend_cap(&wave.spend_cap())?;
             let paused: i32 = if wave.status() == WaveStatus::Paused {
                 1
             } else {
@@ -227,6 +228,7 @@ impl PostgresStore {
             let primary_flow = wave.primary_flow();
             let goal = wave.goal();
             let metrics = metrics_json.as_str();
+            let spent = wave.spent().cents();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -242,6 +244,8 @@ impl PostgresStore {
                         &primary_flow.as_str(),
                         &goal,
                         &metrics,
+                        &spend_cap_json,
+                        &spent,
                     ],
                 )
                 .await?;

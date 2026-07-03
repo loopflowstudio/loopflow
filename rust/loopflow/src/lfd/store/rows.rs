@@ -2,9 +2,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
-    ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger,
-    Wave, WaveCron, WaveMode, WaveStatus,
+    ExecutionProcessStatus, LivePrState, LivePullRequestState, Money, PendingActivation,
+    PullRequest, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal,
+    SpendCap, Summary, Trigger, Wave, WaveCron, WaveMode, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -99,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers, mode,
-///        primary_flow, goal, metrics
+///        primary_flow, goal, metrics, spend_cap, spent
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(2)?)?;
     let area = parse_json_vec(&row.text(3)?)?;
@@ -111,6 +111,8 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let primary_flow = row.text(8)?;
     let goal = row.text(9)?;
     let metrics = parse_json_vec(&row.text(10)?)?;
+    let spend_cap = parse_spend_cap(row.opt_text(11)?)?;
+    let spent = Money::from_cents(row.bigint(12)?);
 
     Ok(Wave {
         id: LfdId::from_raw(row.text(0)?),
@@ -126,7 +128,25 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         paused,
         created_at: Some(created_at),
         workers,
+        spend_cap,
+        spent,
     })
+}
+
+pub fn parse_spend_cap(value: Option<String>) -> StoreResult<Option<SpendCap>> {
+    match value {
+        Some(raw) if !raw.trim().is_empty() => serde_json::from_str::<SpendCap>(&raw)
+            .map(Some)
+            .map_err(StoreError::Serde),
+        _ => Ok(None),
+    }
+}
+
+pub fn serialize_spend_cap(value: &Option<SpendCap>) -> StoreResult<Option<String>> {
+    match value {
+        Some(cap) => Ok(Some(serde_json::to_string(cap)?)),
+        None => Ok(None),
+    }
 }
 
 /// SELECT id, wave_id, flow, schedule, last_triggered_at, created_at

@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::types::{
     ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run,
-    RunStatus, Session, Trigger, WaveCron,
+    RunStatus, Session, SpendCap, Trigger, WaveCron,
 };
 
 #[derive(Debug, Serialize)]
@@ -94,6 +94,10 @@ pub struct WaveDto {
     pub flow_steps: Vec<String>,
     pub has_stale_pr_state: bool,
     pub workers: u32,
+    /// Hard spend ceiling, or `null` when uncapped. Cents-based `SpendCap`.
+    pub spend_cap: Option<SpendCap>,
+    /// Cumulative agent spend to date, in cents.
+    pub spent: i64,
     pub triggers: Vec<TriggerDto>,
     pub crons: Vec<WaveCronDto>,
     /// Per-repo execution state, one entry per repo the wave runs in.
@@ -607,6 +611,8 @@ mod contract_tests {
             flow_steps: Vec::new(),
             has_stale_pr_state: false,
             repos: Vec::new(),
+            spend_cap: None,
+            spent: 0,
         };
 
         let json = serde_json::to_value(&wave).unwrap();

@@ -38,8 +38,8 @@ use crate::lfd::triggers::{
     ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
-    Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionUse, Signal, Trigger,
-    Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
+    Event, ExecutionProcessStatus, Money, RepoWork, Run, RunStatus, Session, SessionUse, Signal,
+    Trigger, Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
 };
 
 #[derive(Debug, Deserialize)]
@@ -267,6 +267,10 @@ pub async fn create_wave_handler(
         .unwrap_or_default();
     let cron_defs = requested_crons.unwrap_or_default();
     let crons = build_wave_crons(&id, &cron_defs)?;
+    let spend_cap = wave_config
+        .as_ref()
+        .and_then(|config| config.spend_cap.as_ref())
+        .and_then(|cap| cap.to_spend_cap());
 
     let mut wave = Wave {
         id: id.clone(),
@@ -290,6 +294,8 @@ pub async fn create_wave_handler(
         paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers,
+        spend_cap,
+        spent: Money::ZERO,
     };
     if let Some(status) = status {
         let parsed = WaveStatus::from_str(&status)
@@ -1950,6 +1956,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         }
     }
 

@@ -144,6 +144,19 @@ pub struct GoalRenderContext {
     pub memory: String,
     pub metrics: Vec<String>,
     pub in_flight: Vec<InFlightDispatch>,
+    /// Wave spend-to-date and headroom, when the wave carries a spend cap. Lets
+    /// the Goal economize below the ceiling. `None` when uncapped.
+    pub spend: Option<SpendSummary>,
+}
+
+/// Spend signal handed to the Goal: what the wave has spent and how much room
+/// remains under its cap. Amounts in cents (kept integer so the context stays
+/// `Eq`); rendered as dollars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendSummary {
+    pub spent_cents: i64,
+    pub rate_cap_cents: i64,
+    pub per_iteration_cap_cents: i64,
 }
 
 /// A wave run that is still dispatched — not yet completed, failed, or landed.
@@ -361,16 +374,44 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .join("\n")
     };
 
+    let spend = render_spend(ctx.spend.as_ref());
+
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n{}\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
         LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
         memory,
         in_flight,
+        spend,
         flows,
         ctx.roadmap,
         metrics
     )
+}
+
+/// Render the spend signal block. Empty string when the wave is uncapped, so
+/// uncapped goals see no budget noise.
+fn render_spend(spend: Option<&SpendSummary>) -> String {
+    let Some(spend) = spend else {
+        return String::new();
+    };
+    let usd = |cents: i64| format!("${:.2}", cents as f64 / 100.0);
+    let mut lines = vec![format!("Spent so far: {}", usd(spend.spent_cents))];
+    if spend.rate_cap_cents > 0 {
+        let headroom = (spend.rate_cap_cents - spend.spent_cents).max(0);
+        lines.push(format!("Spend cap: {}", usd(spend.rate_cap_cents)));
+        lines.push(format!("Headroom remaining: {}", usd(headroom)));
+    }
+    if spend.per_iteration_cap_cents > 0 {
+        lines.push(format!(
+            "Per-iteration cap: {}",
+            usd(spend.per_iteration_cap_cents)
+        ));
+    }
+    lines.push(
+        "Economize below the cap; crossing it pauses the wave and blocks to a human.".to_string(),
+    );
+    format!("\n<lf:spend>\n{}\n</lf:spend>\n", lines.join("\n"))
 }
 
 /// Like `load_flow`, but resolves only exact-name matches in the builtin
@@ -1699,6 +1740,7 @@ mod tests {
                 memory: "Last loop found the docs drift.".to_string(),
                 metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
                 in_flight: Vec::new(),
+                spend: None,
             },
         );
 
@@ -1731,6 +1773,7 @@ mod tests {
                 memory: String::new(),
                 metrics: Vec::new(),
                 in_flight: Vec::new(),
+                spend: None,
             },
         );
 
@@ -1759,6 +1802,7 @@ mod tests {
                     pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
                     pr_state: Some("open".to_string()),
                 }],
+                spend: None,
             },
         );
 

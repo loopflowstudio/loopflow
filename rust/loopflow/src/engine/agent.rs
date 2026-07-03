@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crate::engine::config::parse_agent;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
-use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
+use crate::engine::stream::{format_event, ParseResult, StreamEvent, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -51,6 +51,10 @@ pub struct LaunchResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    /// Total agent cost in USD, summed across the run's `Result` events. `None`
+    /// when the harness reported no cost (e.g. batch/interactive mode, or a
+    /// harness that never emits cost). Only the streaming path populates this.
+    pub cost_usd: Option<f64>,
 }
 
 /// Configuration for launching an agent.
@@ -626,6 +630,7 @@ fn launch_batch(cmd: &mut Command, timeout: Option<Duration>) -> Result<LaunchRe
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+        cost_usd: None,
     })
 }
 
@@ -655,6 +660,7 @@ fn launch_interactive(
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
+        cost_usd: None,
     })
 }
 
@@ -710,6 +716,7 @@ fn launch_streaming(
     let mut stderr_content = String::new();
     let mut logged_first_output = false;
     let mut parser = StreamParser::new();
+    let mut total_cost_usd: Option<f64> = None;
 
     let use_color = match stream_format {
         StreamFormat::Human(c) => Some(c),
@@ -730,18 +737,18 @@ fn launch_streaming(
                 }
                 match stream {
                     StreamKind::Stdout => {
-                        if let Some(color) = use_color {
-                            match parser.feed_line(&line) {
-                                ParseResult::Events(events) => {
-                                    for event in &events {
-                                        format_event(event, color);
-                                    }
+                        // Always parse to accrue cost; display depends on format.
+                        let parsed = parser.feed_line(&line);
+                        accrue_cost(&parsed, &mut total_cost_usd);
+                        match (use_color, parsed) {
+                            (Some(color), ParseResult::Events(events)) => {
+                                for event in &events {
+                                    format_event(event, color);
                                 }
-                                ParseResult::Skipped => {}
-                                ParseResult::Passthrough => println!("{line}"),
                             }
-                        } else {
-                            println!("{line}");
+                            (Some(_), ParseResult::Skipped) => {}
+                            (Some(_), ParseResult::Passthrough) => println!("{line}"),
+                            (None, _) => println!("{line}"),
                         }
                         stdout_content.push_str(&line);
                         stdout_content.push('\n');
@@ -789,11 +796,53 @@ fn launch_streaming(
         )));
     }
 
+    write_cost_sidecar(total_cost_usd);
+
     Ok(LaunchResult {
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
+        cost_usd: total_cost_usd,
     })
+}
+
+/// Sum cost from any `Result` events into the running total.
+fn accrue_cost(parsed: &ParseResult, total: &mut Option<f64>) {
+    let ParseResult::Events(events) = parsed else {
+        return;
+    };
+    for event in events {
+        if let StreamEvent::Result {
+            cost_usd: Some(cost),
+            ..
+        } = event
+        {
+            *total = Some(total.unwrap_or(0.0) + cost);
+        }
+    }
+}
+
+/// Append the run's accrued cost (USD) to `LOOPFLOW_COST_FILE` when set, so a
+/// parent lfd process running this agent in a tmux pane can read spend back.
+/// Mirrors the tmux exit-file handshake — the only channel lfd has into a pane.
+fn write_cost_sidecar(total_cost_usd: Option<f64>) {
+    let Some(cost) = total_cost_usd else {
+        return;
+    };
+    let Ok(path) = std::env::var("LOOPFLOW_COST_FILE") else {
+        return;
+    };
+    if path.is_empty() {
+        return;
+    }
+    // Accumulate across multiple agent launches within one session.
+    let prior: f64 = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0.0);
+    if let Err(err) = std::fs::write(&path, format!("{}", prior + cost)) {
+        tracing::warn!(path, error = %err, "failed to write agent cost sidecar");
+    }
 }
 
 fn wait_for_exit(

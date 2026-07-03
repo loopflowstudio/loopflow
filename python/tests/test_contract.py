@@ -27,6 +27,10 @@ def test_wave_fixture_parses():
     assert wave.status == "running"
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]
+    assert wave.spend_cap is not None
+    assert wave.spend_cap.rate == 5000
+    assert wave.spend_cap.per_iteration == 1000
+    assert wave.spent == 1234
     assert len(wave.crons) == 1
     assert wave.crons[0].flow == "wave-polish"
 

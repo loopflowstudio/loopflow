@@ -38,6 +38,11 @@ fn wave_fixture_nests_repo_work() {
     assert_eq!(wave.primary_flow, "build");
     assert_eq!(wave.status, "running");
 
+    let cap = wave.spend_cap.expect("spend_cap present");
+    assert_eq!(cap.rate.cents(), 5000);
+    assert_eq!(cap.per_iteration.cents(), 1000);
+    assert_eq!(wave.spent, 1234);
+
     assert_eq!(wave.repos.len(), 1);
     let repo = &wave.repos[0];
     assert_eq!(repo.repo, "/home/user/project");

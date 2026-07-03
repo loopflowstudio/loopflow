@@ -2,7 +2,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Run, RunStatus,
-    Wave,
+    SpendPause, Wave,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -10,6 +10,42 @@ use time::OffsetDateTime;
 /// Stable ID for queue-block attention items: reuse the run_id so upserts converge.
 pub fn attention_id_for_queue_block(run_id: &LfdId) -> LfdId {
     run_id.clone()
+}
+
+/// Stable ID for a wave's spend-cap block: reuse the wave_id so repeated
+/// crossings converge onto one item rather than piling up.
+pub fn attention_id_for_spend_cap(wave_id: &LfdId) -> LfdId {
+    wave_id.clone()
+}
+
+/// Algedonic block raised when a wave crosses its spend cap. Pauses belong to
+/// the wave (not a run), so the item keys on `wave_id`.
+pub async fn create_spend_cap_attention(
+    store: &SharedStore,
+    wave: &Wave,
+    pause: SpendPause,
+) -> Result<AttentionItem, String> {
+    let item = AttentionItem {
+        id: attention_id_for_spend_cap(wave.id()),
+        wave_id: wave.id().clone(),
+        run_id: None,
+        kind: AttentionKind::Algedonic,
+        status: AttentionStatus::Surfaced,
+        title: "Spend cap reached".to_string(),
+        summary: pause.summary(),
+        context: json!({
+            "spend_cap": true,
+            "spent_cents": wave.spent().cents(),
+        }),
+        surfaced_at: OffsetDateTime::now_utc(),
+        viewed_at: None,
+        resolved_at: None,
+    };
+    store
+        .upsert_attention_item(&item)
+        .await
+        .map_err(|err| format!("upsert spend cap attention failed: {err}"))?;
+    Ok(item)
 }
 
 /// Daemon-created algedonic attention: repair chain exhausted.

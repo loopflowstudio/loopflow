@@ -994,6 +994,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             }
         }
 
+        let spendCap: SpendCap?
+        if let capDict = json["spend_cap"] as? [String: Any],
+           let rate = capDict["rate"] as? Int,
+           let perIteration = capDict["per_iteration"] as? Int {
+            spendCap = SpendCap(rate: rate, perIteration: perIteration)
+        } else {
+            spendCap = nil
+        }
+        let spent = json["spent"] as? Int ?? 0
+
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
@@ -1009,6 +1019,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             crons: crons,
             status: status,
             flowSteps: flowSteps,
+            spendCap: spendCap,
+            spent: spent,
             createdAt: createdAt
         )
     }

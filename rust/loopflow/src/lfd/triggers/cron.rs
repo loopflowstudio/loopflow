@@ -197,6 +197,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 0,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         };
         state.store.create_wave(&wave).await.expect("create wave");
 

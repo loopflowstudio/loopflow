@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
+use crate::lfd::types::Money;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TriggerDef {
     pub signal: String,
@@ -43,6 +45,32 @@ pub(crate) struct WaveConfig {
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
+    pub spend_cap: Option<SpendCapConfig>,
+}
+
+/// Spend cap declared in GOAL.md frontmatter, in dollars for human legibility.
+/// Converted to the cents-based `SpendCap` at wave creation.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub(crate) struct SpendCapConfig {
+    pub rate_usd: Option<f64>,
+    pub per_iteration_usd: Option<f64>,
+}
+
+impl SpendCapConfig {
+    pub fn to_spend_cap(&self) -> Option<crate::lfd::types::SpendCap> {
+        let rate = self.rate_usd.map(Money::from_usd).unwrap_or(Money::ZERO);
+        let per_iteration = self
+            .per_iteration_usd
+            .map(Money::from_usd)
+            .unwrap_or(Money::ZERO);
+        if rate.is_zero() && per_iteration.is_zero() {
+            return None;
+        }
+        Some(crate::lfd::types::SpendCap {
+            rate,
+            per_iteration,
+        })
+    }
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

@@ -95,6 +95,22 @@ public enum MergeMode: String, Sendable, Codable {
     case land
 }
 
+/// A wave's hard spend ceiling, in cents. Mirrors Rust's `SpendCap`.
+public struct SpendCap: Sendable, Hashable, Codable {
+    public var rate: Int
+    public var perIteration: Int
+
+    public init(rate: Int, perIteration: Int) {
+        self.rate = rate
+        self.perIteration = perIteration
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case rate
+        case perIteration = "per_iteration"
+    }
+}
+
 public enum WaitingReason: Sendable, Hashable {
     case prLimitReached(open: Int, limit: Int)
 
@@ -252,6 +268,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var status: WaveStatus
     public var repos: [RepoWork]
     public var flowSteps: [String]
+    /// Hard spend ceiling, or `nil` when uncapped. Mirrors `WaveDto.spend_cap`.
+    public var spendCap: SpendCap?
+    /// Cumulative agent spend to date, in cents. Mirrors `WaveDto.spent`.
+    public var spent: Int
     public var createdAt: Date?
 
     public init(
@@ -269,6 +289,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         crons: [WaveCron] = [],
         status: WaveStatus = .idle,
         flowSteps: [String] = [],
+        spendCap: SpendCap? = nil,
+        spent: Int = 0,
         createdAt: Date? = nil
     ) {
         self.id = id
@@ -285,6 +307,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.crons = crons
         self.status = status
         self.flowSteps = flowSteps
+        self.spendCap = spendCap
+        self.spent = spent
         self.createdAt = createdAt
     }
 

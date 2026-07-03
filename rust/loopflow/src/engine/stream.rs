@@ -274,19 +274,37 @@ fn parse_codex_item(v: &serde_json::Value) -> Vec<StreamEvent> {
 }
 
 fn parse_codex_turn_completed(v: &serde_json::Value) -> Vec<StreamEvent> {
-    // Codex doesn't report cost or duration in the JSON output
-    let usage = v.get("usage");
-    let _ = usage; // available for future use
+    // Codex reports token usage but no dollars. Estimate cost from usage via
+    // the Codex rate table so a Codex wave still accrues a spend proxy.
+    let cost_usd = v.get("usage").and_then(estimate_codex_cost);
     let mut events = Vec::new();
     if let Some(text) = extract_codex_turn_text(v) {
         events.push(StreamEvent::Text(text));
     }
     events.push(StreamEvent::Result {
         subtype: ResultSubtype::Success,
-        cost_usd: None,
+        cost_usd,
         duration_secs: None,
     });
     events
+}
+
+/// Estimate Codex run cost (USD) from a `usage` object using the estimated
+/// Codex rate table. Returns `None` when usage carries no token counts.
+fn estimate_codex_cost(usage: &serde_json::Value) -> Option<f64> {
+    let rates = crate::lfd::providers::lookup_cost_rates("codex", "codex")?;
+    let field = |name: &str| usage.get(name).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let input = field("input_tokens");
+    let output = field("output_tokens");
+    let cached = field("cached_input_tokens");
+    if input == 0.0 && output == 0.0 && cached == 0.0 {
+        return None;
+    }
+    let cost = (input * rates.input_per_mtok
+        + output * rates.output_per_mtok
+        + cached * rates.cache_read_per_mtok)
+        / 1_000_000.0;
+    Some(cost)
 }
 
 // ── Gemini parsing ──────────────────────────────────────────────────────────
@@ -765,9 +783,24 @@ mod tests {
     }
 
     #[test]
-    fn codex_turn_completed() {
+    fn codex_turn_completed_estimates_cost_from_usage() {
         let mut parser = StreamParser::new();
         let line = r#"{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}"#;
+        let expected = (100.0 * 1.25 + 50.0 * 10.0) / 1_000_000.0;
+        assert_eq!(
+            parser.feed_line(line),
+            ParseResult::Events(vec![StreamEvent::Result {
+                subtype: ResultSubtype::Success,
+                cost_usd: Some(expected),
+                duration_secs: None,
+            }])
+        );
+    }
+
+    #[test]
+    fn codex_turn_completed_without_usage_has_no_cost() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"turn.completed"}"#;
         assert_eq!(
             parser.feed_line(line),
             ParseResult::Events(vec![StreamEvent::Result {

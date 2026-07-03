@@ -47,6 +47,8 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         paused: false,
         created_at: None,
         workers: 1,
+        spend_cap: None,
+        spent: loopflow::lfd::types::Money::ZERO,
     }
 }
 

@@ -174,27 +174,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, spend_cap, spent\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, spend_cap, spent\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, mode, primary_flow, goal, metrics\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics",
+        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, mode, primary_flow, goal, metrics, spend_cap, spent\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics,\n                spend_cap = excluded.spend_cap,\n                spent = excluded.spent",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, spend_cap, spent\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, spend_cap, spent\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -477,7 +477,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListLoopableWaves
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE mode = 'loop' AND paused = 0\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, spend_cap, spent\n             FROM waves\n             WHERE mode = 'loop' AND paused = 0\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },

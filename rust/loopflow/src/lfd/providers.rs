@@ -80,7 +80,7 @@ pub static PROVIDER_CATALOG: &[ProviderInfo] = &[
         models: CODEX_MODELS,
         is_default: false,
         auth_provider: Some(Provider::Codex),
-        model_rates: &[],
+        model_rates: CODEX_MODEL_RATES,
     },
     ProviderInfo {
         id: "opencode",
@@ -102,6 +102,20 @@ pub struct ModelRate {
     pub model_prefix: &'static str,
     pub rates: CostRates,
 }
+
+// Codex runs on a ChatGPT subscription with no per-token billing to the user.
+// These rates are an ESTIMATE (GPT-5-class pricing) so a Codex wave accrues a
+// spend proxy instead of dropping usage entirely — the weak spot called out in
+// the wave-budget design. Treat resulting cost as approximate, not billed.
+const CODEX_MODEL_RATES: &[ModelRate] = &[ModelRate {
+    model_prefix: "codex",
+    rates: CostRates {
+        input_per_mtok: 1.25,
+        output_per_mtok: 10.0,
+        cache_read_per_mtok: 0.125,
+        cache_write_per_mtok: 1.25,
+    },
+}];
 
 const OPENCODE_MODEL_RATES: &[ModelRate] = &[
     // Moonshot — Kimi K2
@@ -267,9 +281,16 @@ mod tests {
     }
 
     #[test]
-    fn subscription_harnesses_have_no_rates() {
+    fn claude_subscription_has_no_rates() {
+        // Claude reports total_cost_usd directly, so needs no rate table.
         assert!(lookup_cost_rates("claude", "anything").is_none());
-        assert!(lookup_cost_rates("codex", "anything").is_none());
+    }
+
+    #[test]
+    fn codex_has_estimated_rate() {
+        // Codex reports usage but no dollars; an estimated rate lets a Codex
+        // wave still accrue a spend proxy.
+        assert!(lookup_cost_rates("codex", "codex").is_some());
     }
 
     #[test]

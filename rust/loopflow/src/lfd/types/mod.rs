@@ -8,6 +8,7 @@ mod chat_memory;
 mod chat_message;
 mod event;
 mod execution;
+mod money;
 mod repo;
 mod session;
 mod summary;
@@ -19,6 +20,7 @@ pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use event::Event;
 pub use execution::{ExecutionProcess, ExecutionProcessStatus};
+pub use money::{Money, SpendCap};
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use session::{
     tmux_session_name, Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES,
@@ -30,5 +32,5 @@ pub use trigger::{
 };
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    RepoWork, Run, RunStackStatus, RunStatus, Wave, WaveCron, WaveMode, WaveStatus,
+    RepoWork, Run, RunStackStatus, RunStatus, SpendPause, Wave, WaveCron, WaveMode, WaveStatus,
 };

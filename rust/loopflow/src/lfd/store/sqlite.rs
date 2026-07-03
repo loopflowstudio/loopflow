@@ -13,7 +13,7 @@ use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
     map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
-    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_wave_repo_row, map_wave_row, now_unix, serialize_pr, serialize_spend_cap,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
@@ -219,6 +219,7 @@ impl SqliteStore {
         let direction_json = serde_json::to_string(wave.direction())?;
         let area_json = serde_json::to_string(wave.area())?;
         let metrics_json = serde_json::to_string(wave.metrics())?;
+        let spend_cap_json = serialize_spend_cap(&wave.spend_cap())?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
@@ -242,6 +243,8 @@ impl SqliteStore {
                 wave.primary_flow(),
                 wave.goal(),
                 metrics_json,
+                spend_cap_json,
+                wave.spent().cents(),
             ],
         )?;
         Ok(())

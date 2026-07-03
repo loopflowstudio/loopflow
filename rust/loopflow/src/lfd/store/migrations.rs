@@ -186,6 +186,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "043_drop_legacy_wave_columns",
         sql: include_str!("migrations/043_drop_legacy_wave_columns.sql"),
     },
+    Migration {
+        version: "044_wave_spend_cap",
+        sql: include_str!("migrations/044_wave_spend_cap.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

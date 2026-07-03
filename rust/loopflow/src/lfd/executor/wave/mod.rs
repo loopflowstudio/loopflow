@@ -32,7 +32,7 @@ use crate::lfd::triggers::{
     ActivationEnvelope, EnqueueOutcome, ImmediateActivation,
 };
 use crate::lfd::types::{
-    tmux_session_name, Event, LivePrState, LivePullRequestState, Run, RunStatus, Session,
+    tmux_session_name, Event, LivePrState, LivePullRequestState, Money, Run, RunStatus, Session,
     SessionStatus, SessionUse, Signal, Wave, WaveMode, WaveStatus, CI_FIX_FLOW,
     LIVE_SESSION_STATUSES, PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
 };
@@ -84,6 +84,31 @@ fn shell_escape(value: &str) -> String {
 fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
     cwd.join(".lf/tmp/sessions")
         .join(format!("{session_id}.exit"))
+}
+
+/// Sidecar file a run's agent writes its accrued cost (USD) into. The child
+/// `lf`/agent process is handed this path via `LOOPFLOW_COST_FILE`; lfd reads
+/// it back when the run finishes. Keyed on run id so it survives across the
+/// tmux/direct launch split.
+fn run_cost_file(cwd: &Path, run_id: &LfdId) -> PathBuf {
+    cwd.join(".lf/tmp/sessions").join(format!("{run_id}.cost"))
+}
+
+/// Read and consume a run's cost sidecar, returning accrued spend (zero when
+/// absent or unparseable). Removes the file so a reused worktree doesn't
+/// double-count.
+async fn read_run_cost(cwd: String, run_id: LfdId) -> crate::lfd::types::Money {
+    let path = run_cost_file(Path::new(&cwd), &run_id);
+    tokio::task::spawn_blocking(move || {
+        let usd = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| text.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let _ = std::fs::remove_file(&path);
+        crate::lfd::types::Money::from_usd(usd)
+    })
+    .await
+    .unwrap_or(crate::lfd::types::Money::ZERO)
 }
 
 fn tmux_available() -> bool {
@@ -155,6 +180,11 @@ fn build_wave_agent_command(
     let repo = Path::new(worktree);
     let goal = crate::engine::load_goal(wave.goal(), repo)?;
     let memory = read_wave_memory(repo, wave.name())?;
+    let spend = wave.spend_cap().map(|cap| crate::engine::SpendSummary {
+        spent_cents: wave.spent().cents(),
+        rate_cap_cents: cap.rate.cents(),
+        per_iteration_cap_cents: cap.per_iteration.cents(),
+    });
     let prompt = crate::engine::render_goal(
         &goal,
         &crate::engine::GoalRenderContext {
@@ -163,6 +193,7 @@ fn build_wave_agent_command(
             memory,
             metrics: wave.metrics().clone(),
             in_flight,
+            spend,
         },
     );
     let cmd = build_lf_inline_command(&prompt, true, direction, area, wave.name());
@@ -575,6 +606,14 @@ impl WaveExecutor {
             "LFD_AGENT_ROLE".to_string(),
             session_use.as_str().to_string(),
         ));
+        // Hand the agent a sidecar path to write its accrued cost into, so the
+        // wave can account spend even when the run executes in a tmux pane.
+        env.push((
+            "LOOPFLOW_COST_FILE".to_string(),
+            run_cost_file(Path::new(&run.worktree), &run.id)
+                .display()
+                .to_string(),
+        ));
         let tmux_managed = !self.disable_tmux && tmux_available();
         let session = Session {
             id: session_id.clone(),
@@ -697,6 +736,36 @@ impl WaveExecutor {
         }
     }
 
+    /// Roll a finished run's cost onto the wave and enforce the spend cap.
+    /// Loads the wave fresh so concurrent runs don't clobber each other's
+    /// accrual, pauses + raises an algedonic block when the cap is crossed.
+    async fn accrue_run_spend(&self, wave_id: &LfdId, run_cost: Money) -> Result<()> {
+        let Some(mut wave) = self.store.get_wave(wave_id).await? else {
+            return Ok(());
+        };
+        wave.accrue_spend(run_cost);
+        let pause = wave.spend_pause_reason(run_cost);
+        if pause.is_some() {
+            wave.set_status(WaveStatus::Paused);
+        }
+        self.store.update_wave(&wave).await?;
+        if let Some(pause) = pause {
+            warn!(
+                wave_id = %wave_id,
+                spent = %wave.spent(),
+                "wave crossed spend cap, pausing and blocking to human"
+            );
+            match crate::lfd::attention::create_spend_cap_attention(&self.store, &wave, pause).await
+            {
+                Ok(item) => self.event_hub.send(Event::attention_created(item)),
+                Err(err) => {
+                    warn!(wave_id = %wave_id, error = %err, "failed to raise spend cap block")
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn finish_completed_run(&self, wave: &Wave, run: &mut Run) -> Result<()> {
         run.status = RunStatus::Completed;
         run.ended_at = Some(OffsetDateTime::now_utc());
@@ -770,6 +839,8 @@ impl WaveExecutor {
         }
 
         self.store.update_run(run).await?;
+        // Read the run's cost sidecar before the worktree is cleaned up below.
+        let run_cost = read_run_cost(run.worktree.clone(), run.id.clone()).await;
         self.output.close_writer(&run.id.to_string());
         self.trigger_listeners_on_completion(wave.id(), &run.branch)
             .await;
@@ -802,6 +873,8 @@ impl WaveExecutor {
         if !other_active {
             self.set_wave_status(wave.id(), WaveStatus::Idle).await;
         }
+        // Accrue after the idle reset so a cap crossing's Paused status wins.
+        self.accrue_run_spend(wave.id(), run_cost).await?;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
     }
@@ -930,9 +1003,13 @@ impl WaveExecutor {
         // execute_run_inner (triggers/common.rs), which checks the full
         // repair chain depth and applies backoff.
 
+        let run_cost = read_run_cost(run.worktree.clone(), run.id.clone()).await;
         self.output.close_writer(&run.id.to_string());
 
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
+        // A failed run still burned tokens; accrue and enforce the cap (a
+        // crossing's Paused status supersedes Failed).
+        self.accrue_run_spend(wave.id(), run_cost).await?;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
     }
@@ -1471,6 +1548,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         };
         store
             .create_wave(&wave)
@@ -1536,6 +1615,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         }
     }
 
@@ -1733,6 +1814,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         };
         store
             .create_wave(&target_wave)

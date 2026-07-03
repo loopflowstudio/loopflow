@@ -94,6 +94,13 @@ class RepoWork(BaseModel):
     pr: Optional[PullRequest] = None
 
 
+class SpendCap(BaseModel):
+    """Wave spend ceiling, in cents. Mirrors Rust's `SpendCap`."""
+
+    rate: int
+    per_iteration: int
+
+
 class Wave(BaseModel):
     """Wave wire type. No field defaults — every field the server always emits
     is required, mirroring Rust's `WaveDto` (absent → parse error). Optional
@@ -106,6 +113,8 @@ class Wave(BaseModel):
     goal: str
     metrics: list[str]
     workers: int
+    spend_cap: Optional[SpendCap]
+    spent: int
     direction: list[str]
     area: list[str]
     triggers: list[Trigger]

@@ -186,6 +186,8 @@ pub async fn build_wave_dto(
         flow_steps,
         has_stale_pr_state,
         workers: wave.workers(),
+        spend_cap: wave.spend_cap(),
+        spent: wave.spent().cents(),
         triggers,
         crons,
         repos,
@@ -519,6 +521,8 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            spend_cap: None,
+            spent: crate::lfd::types::Money::ZERO,
         }
     }
 

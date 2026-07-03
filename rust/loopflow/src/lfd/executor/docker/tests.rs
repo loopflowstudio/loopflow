@@ -353,6 +353,8 @@ async fn create_running_wave_and_run(store: &SharedStore, repo: &Path, name: &st
         paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers: 1,
+        spend_cap: None,
+        spent: crate::lfd::types::Money::ZERO,
     };
     store
         .create_wave(&wave)
@@ -605,6 +607,8 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers: 1,
+        spend_cap: None,
+        spent: crate::lfd::types::Money::ZERO,
     };
     store
         .create_wave(&wave)

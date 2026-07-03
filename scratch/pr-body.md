@@ -43,4 +43,4 @@ No replacement transcript subsystem, no Session Record aggregate, and no rebuilt
 
 ## Validation notes
 
-`cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. `xcodebuild build ...` passed. `xcodebuild test ... -skip-testing:ConcertoUITests` passed with 310 tests.
+Gate reran at `789f6e71b72b17c6443de334b86b26c18fe3bbb9`; all commands above passed. `cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. `xcodebuild build ...` passed. `xcodebuild test ... -skip-testing:ConcertoUITests` passed with 310 tests.

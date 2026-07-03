@@ -24,6 +24,7 @@ lfd owns waves, runs, sessions, attention, auth, providers, and store state. Pyt
 - Any external caller still using `/v0/conversations/*` will now fail; this is intentional.
 - Usage analytics UI is removed rather than replaced. Future metering should come from the live session/run model, not from resurrected conversation events.
 - Docker smoke tests passed, but the two runtime Docker cases skipped internally because `/var/run/docker.sock` was unavailable in this local OrbStack setup.
+- Reduce analyses are pinned to `5d3f965a`; the current tip `789f6e71` only adds wave metadata and the assumption note, so the implementation analysis remains current without another SHA churn pass.
 
 ## What's not included
 
@@ -33,6 +34,7 @@ lfd owns waves, runs, sessions, attention, auth, providers, and store state. Pyt
 
 ## Validation
 
+- Gate rerun at `789f6e71b72b17c6443de334b86b26c18fe3bbb9`.
 - `rg -n "Conversation(EventEnvelope|Store|Filters)|UsageAnalytics|AnalyticsDashboard|CostEstimator|sendConversationInput|streamConversationEvents|usage_summary|/v0/conversations|lfq usage|scripts/test_session.py" README.md TESTING.md docs python rust swift scripts tests -S`: no matches.
 - `git diff main --check`: passed.
 - `cargo fmt --all -- --check`: passed.

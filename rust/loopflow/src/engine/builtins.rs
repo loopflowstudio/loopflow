@@ -235,4 +235,13 @@ mod tests {
         // The ingest step is gone; workers are handed their task at dispatch.
         assert!(get_builtin_step("ingest").is_none());
     }
+
+    #[test]
+    fn vsm_system_goals_are_registered() {
+        let key = resolve_builtin_goal("govern-control").expect("govern-control goal");
+        let goal = get_builtin_goal(key).expect("registered goal");
+
+        assert_eq!(key, "govern-control");
+        assert!(goal.contains("True north: the whole is worth more than the sum of its parts."));
+    }
 }

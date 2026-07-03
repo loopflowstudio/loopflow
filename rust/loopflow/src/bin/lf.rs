@@ -297,8 +297,8 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
             loopflow::lf::commands::ops::run(op, cli.model.as_deref())
         }),
-        Some(Commands::Goal { name, once }) => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::goal::run(name, *once, &cli)
+        Some(Commands::Goal { name, system, once }) => in_repo_runtime(&args, |_| {
+            loopflow::lf::commands::goal::run(name, system.as_deref(), *once, &cli)
         }),
         Some(Commands::External(external_args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;

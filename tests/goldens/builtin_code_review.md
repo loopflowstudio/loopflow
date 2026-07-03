@@ -35,7 +35,7 @@ bloat the transcript with work that belongs in a child.
 Inside a Wave loop, dispatch with:
 
 ```bash
-lf op dispatch --wave <wave> --flow <flow> --task "<task>"
+lfq worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline

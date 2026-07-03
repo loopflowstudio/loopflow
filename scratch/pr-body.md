@@ -1,8 +1,7 @@
 ## Try it!
 
 ```bash
-rg -n "conversation|Conversation|conversations|UsageAnalytics|AnalyticsDashboard|CostEstimator" -S
-rg -n "lfq usage|scripts/test_session.py|/v0/conversations|conversations/" README.md TESTING.md docs python rust swift scripts tests wave -S
+rg -n "Conversation(EventEnvelope|Store|Filters)|UsageAnalytics|AnalyticsDashboard|CostEstimator|sendConversationInput|streamConversationEvents|usage_summary|/v0/conversations|lfq usage|scripts/test_session.py" README.md TESTING.md docs python rust swift scripts tests -S
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
@@ -13,9 +12,14 @@ cd website && uv run python dev.py test
 tests/e2e/test_smoke.sh
 uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
 uv run pytest tests/regression/ -v
+docker version
+cargo test -p loopflow docker_ -- --nocapture
+cd swift && xcodegen generate
+xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-Expected: no live conversation API/client roots or stale removed-command docs remain; Rust, Python, Swift package, website, regression, and e2e smoke checks pass.
+Expected: no live conversation API/client roots or stale removed-command docs remain; Rust, Python, Swift package, website, regression, e2e, Docker-marked, and Concerto Xcode checks pass.
 
 ## Intent
 
@@ -29,6 +33,7 @@ External compatibility for `/v0/conversations/*` is not required. Usage analytic
 
 - Deleted conversation routes, DTOs, store methods, Python/Swift clients, docs, and tests instead of leaving shims.
 - Kept session create/get/stop/attach as the live control surface.
+- Removed stale Swift event reducers and parsing helpers that only fed the deleted conversation event stream.
 - Added `docs/architecture.md` to make the post-removal system shape easy to review.
 - Marked the reduce queue item done with the gate validation record.
 
@@ -38,4 +43,4 @@ No replacement transcript subsystem, no Session Record aggregate, and no rebuilt
 
 ## Validation notes
 
-`cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. `xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` passed. The bounded local `xcodebuild test ... -skip-testing:ConcertoUITests` run timed out after 300 seconds while building test targets, before any test result; `swift test --package-path swift` and the Swift boundary guard passed.
+`cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. `xcodebuild build ...` passed. `xcodebuild test ... -skip-testing:ConcertoUITests` passed with 310 tests.

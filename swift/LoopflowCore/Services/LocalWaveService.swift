@@ -1605,29 +1605,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return json
     }
 
-    private static func parseJSONValue(_ value: Any) -> JSONValue {
-        if let dict = value as? [String: Any] {
-            let mapped = dict.mapValues { parseJSONValue($0) }
-            return .object(mapped)
-        }
-        if let array = value as? [Any] {
-            return .array(array.map(parseJSONValue))
-        }
-        if let string = value as? String {
-            return .string(string)
-        }
-        if let bool = value as? Bool {
-            return .bool(bool)
-        }
-        if let number = value as? NSNumber {
-            return .number(number.doubleValue)
-        }
-        if value is NSNull {
-            return .null
-        }
-        return .string(String(describing: value))
-    }
-
     private static func parseRunFromJSON(_ json: [String: Any]) -> Run? {
         guard let id = json["id"] as? String,
               let flow = json["flow"] as? String,
@@ -1719,29 +1696,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return Date(timeIntervalSince1970: TimeInterval(seconds))
     }
 
-    private static func normalizeOptionalUInt64(_ value: Any?) -> UInt64? {
-        if let uintValue = value as? UInt64 {
-            return uintValue
-        }
-        if let intValue = value as? Int, intValue >= 0 {
-            return UInt64(intValue)
-        }
-        if let doubleValue = value as? Double, doubleValue >= 0 {
-            return UInt64(doubleValue)
-        }
-        if let number = value as? NSNumber {
-            let intValue = number.int64Value
-            if intValue >= 0 {
-                return UInt64(intValue)
-            }
-        }
-        return nil
-    }
-
-    private static func normalizeUInt64(_ value: Any?) -> UInt64 {
-        normalizeOptionalUInt64(value) ?? 0
-    }
-
     private static func parseRemoteRepo(_ json: [String: Any]) -> RemoteRepo? {
         guard let path = json["path"] as? String else {
             return nil
@@ -1767,12 +1721,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             return date
         }
         return ISO8601DateFormatter().date(from: dateStr)
-    }
-
-    private static func formatUsageDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
     }
 
     private static func decodeStringArray(_ str: String?) -> [String] {

@@ -496,4 +496,3 @@ def test_providers_table_renders_providers() -> None:
     assert "Kimi K2.5" in rendered
     assert "\u2713 active" in rendered
     assert "\u2717 none" in rendered
-

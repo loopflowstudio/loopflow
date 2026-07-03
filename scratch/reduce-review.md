@@ -6,7 +6,7 @@ This branch removes the dormant conversations subsystem across lfd, Python, Swif
 
 It also adds the reduce wave scaffold: `wave/reduce/GOAL.md`, `MEMORY.md`, living analyses, the Session Record proposal, and a completed queue item for conversation removal. `docs/architecture.md` gives reviewers a current system map now that the runtime vocabulary is smaller.
 
-Local gate cleanup removes remaining Swift analytics/cost UI support, drops stale conversation stream cancellation in `SessionState`, tightens one Python client test assertion, marks the reduce queue item done, and deletes stale usage/session-script docs that no longer match the reduced surface.
+Local gate cleanup removes remaining Swift analytics/cost UI support, drops stale conversation stream cancellation and private transcript reducers in `SessionState`, removes unused Swift parsing helpers from `LocalWaveService`, tightens one Python client test assertion, marks the reduce queue item done, and deletes stale usage/session-script docs that no longer match the reduced surface.
 
 ## Key choices
 
@@ -23,7 +23,6 @@ lfd owns waves, runs, sessions, attention, auth, providers, and store state. Pyt
 
 - Any external caller still using `/v0/conversations/*` will now fail; this is intentional.
 - Usage analytics UI is removed rather than replaced. Future metering should come from the live session/run model, not from resurrected conversation events.
-- `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto ...` timed out locally after 300 seconds while building test targets. The Concerto app build, Swift package tests, and multiplatform boundary guard passed.
 - Docker smoke tests passed, but the two runtime Docker cases skipped internally because `/var/run/docker.sock` was unavailable in this local OrbStack setup.
 
 ## What's not included
@@ -34,8 +33,8 @@ lfd owns waves, runs, sessions, attention, auth, providers, and store state. Pyt
 
 ## Validation
 
-- `rg -n "lfq usage|scripts/test_session.py|UsageAnalytics|AnalyticsDashboard|CostEstimator|/v0/conversations|conversations/" README.md TESTING.md docs python rust swift scripts tests wave -S`: no matches.
-- `git diff --check`: passed.
+- `rg -n "Conversation(EventEnvelope|Store|Filters)|UsageAnalytics|AnalyticsDashboard|CostEstimator|sendConversationInput|streamConversationEvents|usage_summary|/v0/conversations|lfq usage|scripts/test_session.py" README.md TESTING.md docs python rust swift scripts tests -S`: no matches.
+- `git diff main --check`: passed.
 - `cargo fmt --all -- --check`: passed.
 - `cargo clippy --all-targets -- -D warnings`: passed.
 - `cargo test --all`: passed.
@@ -50,4 +49,4 @@ lfd owns waves, runs, sessions, attention, auth, providers, and store state. Pyt
 - `uv run pytest tests/regression/ -v`: 4 passed.
 - `cd swift && xcodegen generate`: passed.
 - `xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`: passed.
-- `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`: timed out after 300 seconds while building test targets; no test failure was reported before the timeout.
+- `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`: passed, 310 tests.

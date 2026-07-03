@@ -21,6 +21,15 @@ final class PortfolioRepoState {
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
     }
 
+    /// Create a wave against this repo's lfd via the shared create-wave path
+    /// (`POST /v0/waves`), then refresh so the new wave lands in the list.
+    @discardableResult
+    func createWave(name: String) async throws -> Wave {
+        let wave = try await waveService.createWave(name: name, repo: .local(repo.url))
+        await refresh()
+        return wave
+    }
+
     func refresh() async {
         isLoading = true
         defer { isLoading = false }

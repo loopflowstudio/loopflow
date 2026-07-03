@@ -173,7 +173,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
 
-        if let contentType {
+        // Only advertise a Content-Type when we actually send a body. axum's
+        // `Option<Json<T>>` extractor rejects an empty body that carries a JSON
+        // content-type (EOF while parsing), which surfaced as a 400 "Terminal
+        // unavailable" when starting a wave's /goal agent with no overrides.
+        if let contentType, body != nil {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 

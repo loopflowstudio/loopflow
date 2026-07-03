@@ -9,13 +9,14 @@ from .models import (
     AuthProviderStatus,
     CommitEntry,
     Conversation,
+    ConversationEventEnvelope,
     CostRates,
     ModelInfo,
     ProviderInfo,
     PullRequest,
     Repo,
+    Run,
     Session,
-    ConversationEventEnvelope,
     SessionConnectionInfo,
     TokenTotals,
     Trigger,
@@ -24,7 +25,6 @@ from .models import (
     Wave,
     WaveAgentTree,
     WaveCron,
-    Run,
 )
 
 _default_client: Optional[Client] = None

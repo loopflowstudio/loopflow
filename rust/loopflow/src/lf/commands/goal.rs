@@ -187,6 +187,17 @@ mod tests {
     }
 
     #[test]
+    fn build_goal_message_can_render_builtin_vsm_goal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let message =
+            build_goal_message(tmp.path(), "s3", true, Vec::new()).expect("build message");
+
+        assert!(message.contains("True north: the whole is worth more than the sum of its parts."));
+        assert!(message.contains("<lf:goal-context>"));
+        assert!(message.contains("<lf:goal-once>"));
+    }
+
+    #[test]
     fn goal_launch_prompt_includes_operate_and_goal_context() {
         let tmp = wave_fixture();
         let message =

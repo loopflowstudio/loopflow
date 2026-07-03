@@ -59,6 +59,12 @@ move, dispatch a worker to build it, watch the PR, and fold what shipped into
 memory.
 ```
 
+Run `lf goal <wave>` to launch that wave's goal directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
+
+```bash
+lf goal s3 --once    # the s3 (control) charter, one loop
+```
+
 ### Memory
 
 `MEMORY.md` is durable working context the wave agent writes as it goes — decisions, dead ends, what a downstream task should know. Workers inherit it as read-only context so they build with the wave's history in view; only the wave agent writes it.

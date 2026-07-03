@@ -33,6 +33,12 @@ lfq sessions                 # every live session — the wave agent and its wor
 lfq attach <session-id>      # jump into one over tmux
 ```
 
+The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
+
+```bash
+lf goal s3 --once    # the s3 (control) charter, one loop
+```
+
 The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
 
 ```bash

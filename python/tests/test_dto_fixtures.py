@@ -8,9 +8,8 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from loopflow.models import Session
+from pydantic import ValidationError
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "dto"
 

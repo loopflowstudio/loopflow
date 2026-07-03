@@ -578,81 +578,11 @@ mod contract_tests {
             .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
     }
 
-    /// Nested-shape wave payload used by the contract tests. The golden
-    /// `tests/fixtures/wave.json` is still flat and gets rewritten to this
-    /// shape in step 6; until then the in-tree tests exercise the nested
-    /// contract inline.
-    fn nested_wave_json() -> serde_json::Value {
-        serde_json::json!({
-            "id": "wave_abc123",
-            "object": "wave",
-            "name": "engbot",
-            "mode": "loop",
-            "primary_flow": "build",
-            "goal": "ship-roadmap",
-            "metrics": ["all roadmap items shipped", "cargo test green"],
-            "direction": ["ux", "clarity"],
-            "area": ["src/"],
-            "created_at": null,
-            "status": "running",
-            "flow_steps": ["plan", "build", "review"],
-            "has_stale_pr_state": false,
-            "workers": 1,
-            "triggers": [
-                {"id": "trig_1", "signal": "repo", "enabled": true, "flow": "integrate", "created_at": null},
-                {"id": "trig_2", "signal": "ci_failure", "enabled": true, "created_at": null}
-            ],
-            "crons": [
-                {"id": "cron_1", "flow": "wave-polish", "schedule": "0 9 * * *", "created_at": null}
-            ],
-            "repos": [
-                {
-                    "repo": "/tmp/repo",
-                    "status": "running",
-                    "iteration": 3,
-                    "local_worktree": "/tmp/repo/.worktrees/engbot",
-                    "commits": [{"sha": "abc1234", "message": "wire it up"}],
-                    "open_pr_count": 1,
-                    "stack_count": 1
-                }
-            ]
-        })
-    }
-
-    #[test]
-    fn wave_fixture_deserializes() {
-        let wave: WaveDto = serde_json::from_value(nested_wave_json()).unwrap();
-
-        assert_eq!(wave.id, "wave_abc123");
-        assert_eq!(wave.object, "wave");
-        assert_eq!(wave.name, "engbot");
-        assert_eq!(wave.primary_flow, "build");
-        assert_eq!(wave.goal, "ship-roadmap");
-        assert_eq!(
-            wave.metrics,
-            vec!["all roadmap items shipped", "cargo test green"]
-        );
-        assert_eq!(wave.mode, "loop");
-        assert_eq!(wave.status, "running");
-        assert_eq!(wave.workers, 1);
-        assert_eq!(wave.direction, vec!["ux", "clarity"]);
-        assert_eq!(wave.area, vec!["src/"]);
-
-        assert_eq!(wave.triggers.len(), 2);
-        assert_eq!(wave.triggers[0].signal, "repo");
-        assert_eq!(wave.triggers[0].flow.as_deref(), Some("integrate"));
-        assert_eq!(wave.triggers[1].signal, "ci_failure");
-        assert_eq!(wave.crons.len(), 1);
-        assert_eq!(wave.crons[0].flow, "wave-polish");
-
-        assert_eq!(wave.repos.len(), 1);
-        let repo = &wave.repos[0];
-        assert_eq!(repo.repo, "/tmp/repo");
-        assert_eq!(repo.status, "running");
-        assert_eq!(repo.iteration, 3);
-        assert_eq!(repo.open_pr_count, 1);
-        assert_eq!(repo.commits.len(), 1);
-        assert_eq!(repo.commits[0].sha, "abc1234");
+    /// The golden nested-wave payload, shared with the Python and Swift
+    /// contract suites. Parsing and shape are covered by
+    /// `tests/dto_fixtures.rs`; these tests only pin required-field behavior.
+    fn wave_fixture() -> serde_json::Value {
+        serde_json::from_str(&fixture("wave.json")).expect("wave.json parses")
     }
 
     #[test]
@@ -687,7 +617,7 @@ mod contract_tests {
 
     #[test]
     fn wave_goal_is_required() {
-        let mut json = nested_wave_json();
+        let mut json = wave_fixture();
         json.as_object_mut()
             .expect("wave payload should be an object")
             .remove("goal");
@@ -698,7 +628,7 @@ mod contract_tests {
 
     #[test]
     fn wave_metrics_is_required() {
-        let mut json = nested_wave_json();
+        let mut json = wave_fixture();
         json.as_object_mut()
             .expect("wave payload should be an object")
             .remove("metrics");
@@ -709,7 +639,7 @@ mod contract_tests {
 
     #[test]
     fn wave_repos_is_required() {
-        let mut json = nested_wave_json();
+        let mut json = wave_fixture();
         json.as_object_mut()
             .expect("wave payload should be an object")
             .remove("repos");

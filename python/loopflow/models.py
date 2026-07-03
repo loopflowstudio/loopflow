@@ -95,20 +95,24 @@ class RepoWork(BaseModel):
 
 
 class Wave(BaseModel):
+    """Wave wire type. No field defaults — every field the server always emits
+    is required, mirroring Rust's `WaveDto` (absent → parse error). Optional
+    fields carry `None` for absent, never a value default."""
+
     id: str
     name: str
-    mode: str = "loop"
-    primary_flow: str = "ship-roadmap"
+    mode: str
+    primary_flow: str
     goal: str
     metrics: list[str]
-    workers: int = 1
+    workers: int
     direction: list[str]
     area: list[str]
-    triggers: list[Trigger] = Field(default_factory=list)
-    crons: list[WaveCron] = Field(default_factory=list)
+    triggers: list[Trigger]
+    crons: list[WaveCron]
     status: str
     repos: list[RepoWork]
-    flow_steps: list[FlowStep] = Field(default_factory=list)
+    flow_steps: list[FlowStep]
     created_at: Optional[datetime] = None
 
     @field_validator("flow_steps", mode="before")

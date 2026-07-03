@@ -13,7 +13,8 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md` and
+  `MEMORY.md`, and its live roadmap (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -80,25 +81,31 @@ This is the natural session exit point. The user's answer determines what to run
 
 **If wave:**
 
-1. Break the idea into bucketed wave items
-2. Choose a wave name and create `wave/<name>/`
-3. Write `wave/<name>/README.md` using the wave content model:
-   - `## Vision` — from the Dream phase conversation
-   - `## Goals` — concrete objectives from the Detail phase
-   - `## Risks` — unknowns and failure modes surfaced during detailing
-   - `## Metrics` — numeric measurements (counts, percentages, durations), not qualitative indicators
-   - Include `### Not here` under Vision when scope boundaries are important
-4. Write `wave/<name>/GOAL.md`:
-   - frontmatter: `primary_flow` (default `ship-wave` unless user asks for something else), optional `direction`, and `metrics`
-   - body: the loop prompt this wave should run
-5. Write roadmap files as `wave/<name>/1-*.md`, `2-*.md`, `3-*.md`, `4-*.md` — use the smallest honest priority for each item. **Create every file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
-6. The first item you expect to build now — usually `1-*` or `2-*` — becomes the design doc for this branch (`scratch/<branch>.md`)
-7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
-8. End session and tell the user what to run next:
-   - `lf implement` (for the immediate urgent/high item)
+1. Choose a wave name and create `wave/<name>/`.
+2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
+   - frontmatter: `primary_flow` (default `ship-wave` unless the user asks for
+     something else) and, once connected, `pm.asana_project`
+   - body (the loop prompt): what this wave is and why it exists (scope
+     boundaries as natural qualifiers), how it judges progress (numeric metrics
+     where possible), and the shape of the work ahead
+   - **No roadmap table, no status indicators, no item lists** — the roadmap
+     lives in Asana.
+3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
+   Detail phase (key decisions, constraints, what's known). Short is fine.
+4. Connect and seed the roadmap in Asana:
+   - `lf op pm init --wave <name>` creates/links the Asana project and writes
+     `asana_project` into `GOAL.md`.
+   - File the opening items with `lf op pm update --title "…" --notes "…"` — the
+     urgent and next-step work, one task each. The roadmap starts in Asana, not
+     on disk.
+5. The first item you expect to build now becomes the design doc for this branch
+   (`scratch/<branch>.md`).
+6. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
+7. End session and tell the user what to run next:
+   - `lf implement` (for the immediate item)
    - `lf ship-wave`
 
-Once breaking things up, be aggressive about commit boundaries—each item should be independently shippable.
+Once breaking things up, be aggressive about commit boundaries—each roadmap item should be independently shippable.
 
 ## What makes a good design doc
 

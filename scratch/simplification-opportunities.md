@@ -4,6 +4,12 @@ Reshape the proven `PortfolioWindow` into the shape sketched by `RepoSidebarWind
 then delete the sketch. Reuse proven components; the sketch kept reintroducing
 style regressions the old components already solved.
 
+**Decided:** repo rail stays the leftmost primary axis for this slice. The
+attention-first surface from the UX research loop (`ux-research/design-guidelines.md`
+G1–G3, the A-vs-C default-surface question) is a **later loop, not a blocker
+here** — we don't need attention views yet. Don't build row-reason lines,
+attention sort, or the calm state in this slice.
+
 ## Component → role mapping
 
 | New role (target shape)        | Proven component reused                          | Keep / adapt / drop |

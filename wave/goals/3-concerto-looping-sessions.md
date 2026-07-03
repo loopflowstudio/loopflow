@@ -13,11 +13,11 @@ Concerto is the macOS surface raised a layer (2026-06-19): wave monitoring plus
 the frame around vendor sessions, not a chat client. Goals add a per-repo view
 of what's looping. The two backends have intentionally different depths.
 
-Concerto's data source is now the unified Swift `Session` model — the
-`AgentSession` (transcript/input) and `TerminalSession` (tmux/Ghostty pane)
-split was collapsed into one `Session` during the Wave/Run/Session reduction.
-The dashboard reads `Session` + `Run` + the `WaveAgentTree`; tmux/Ghostty stay
-UI transport details, not product nouns. Build on that model, not the old split.
+Concerto's data source is now the unified Swift `Session` model. The old
+transcript/input and tmux/Ghostty pane split was collapsed during the
+Wave/Run/Session reduction. The dashboard reads `Session` + `Run` + the
+`WaveAgentTree`; tmux/Ghostty stay UI transport details, not product nouns.
+Build on that model, not the old split.
 
 ## What to shape
 

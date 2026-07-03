@@ -1,1 +1,0 @@
-lfd: reduce runtime model to Wave, Run, Session

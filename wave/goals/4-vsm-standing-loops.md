@@ -7,19 +7,26 @@ priority: low
 **Finish line:** The chord decides — and enforces — which of the five VSM
 systems run as standing Looping Agents versus collapse to reflexes or member
 waves. Whatever survives runs on its own loop against the chord's context, not
-just on-demand via `lf goal --system`.
+just on-demand via `lf goal s1..s5`.
 
 ## Context
 
 Shipped: the five VSM systems are builtin goal charters
-(`engine/builtins/govern/goal/govern-{operations,coordination,control,
-intelligence,identity}.md`) resolvable through `lf goal <wave> --system s1..s5`.
+(`engine/builtins/govern/goal/{s1,s2,s3,s4,s5}.md`), body-only markdown that
+`build.rs` auto-registers as core-category builtin goals. You run one with
+`lf goal s3 --once` — the *generic* goal loader resolves `s3` through the
+standard precedence (`.lf/goals/s3.md` → `wave/s3/GOAL.md` → builtin), so a
+repo or wave override shadows the builtin by name with no special casing. There
+is **no `--system` flag and no VSM mapping table** — an earlier iteration added
+`lf goal <wave> --system s1..s5` plus a `resolve_system_goal` map, and both were
+removed as redundant with the loader. Adding a `wave/s3/` dir later layers its
+`GOAL.md`/`MEMORY.md`/roadmap/metrics onto the same `s3` name.
+
 Each charter is a generic five-move compass (true north, drive, progress test,
 reorientation, deferral) whose deferrals form a closed ring
 (S1→S2/S3, S2→S1/S3, S3→S4/S5, S4→S3/S5, S5→S3/S4) — that closure *is* the
 viable-system property. The `govern-*` flows are still the hands; the charter is
-the head. `lf goal <wave> --system` swaps the goal body while keeping the wave's
-roadmap, memory, metrics, flows, and in-flight work.
+the head.
 
 What's unresolved is the **standing** question. Right now you invoke a system
 charter by hand against a chord. The open design question, deliberately left for

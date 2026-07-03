@@ -237,8 +237,8 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.area.clone()))
         .unwrap_or_default();
 
-    // Check for duplicate wave name in the same repo.
-    let existing = wave_name_exists(&state, &repo, &name)
+    // Wave names are globally unique.
+    let existing = wave_name_exists(&state, &name)
         .await
         .map_err(map_store_error)?;
     if existing {
@@ -271,7 +271,6 @@ pub async fn create_wave_handler(
     let mut wave = Wave {
         id: id.clone(),
         name,
-        repo: repo.clone(),
         mode,
         primary_flow,
         goal,
@@ -288,9 +287,7 @@ pub async fn create_wave_handler(
         }],
         direction,
         area,
-        status: WaveStatus::Idle,
-        iteration: 0,
-        cycle_start_iteration: 0,
+        paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers,
     };

@@ -300,6 +300,28 @@ def _install_cli_binaries(install_dir: Path) -> None:
         _atomic_install(built / name, install_dir / name)
 
 
+def _sync_skills(lf_bin: Path) -> None:
+    """Mirror loopflow steps into ~/.claude/skills and ~/.agents/skills (codex).
+
+    Runs after the binary install so the freshly built `lf` regenerates the
+    global skill catalog. A failure here doesn't fail the install—the binaries
+    are already in place—so we warn and move on.
+    """
+    typer.echo("Syncing skills into ~/.claude and ~/.agents...")
+    try:
+        code = _stream_process(
+            [str(lf_bin), "op", "sync-skills", "--global", "--yes"], "skills", cwd=ROOT
+        )
+    except OSError as exc:
+        typer.echo(f"skill sync failed ({exc}); binaries installed, skills unchanged", err=True)
+        return
+    if code != 0:
+        typer.echo(
+            f"skill sync failed (exit {code}); binaries installed, skills unchanged",
+            err=True,
+        )
+
+
 def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
     """Make this worktree's build the active one.
 
@@ -489,6 +511,7 @@ def refresh(
             _refresh_default_branch(ROOT)
         _build_cli_binaries()
         _install_cli_binaries(resolved_install_dir)
+        _sync_skills(resolved_install_dir / "lf")
     except (subprocess.CalledProcessError, StageError) as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -538,6 +561,7 @@ def local(
             typer.echo(f"Would promote: symlink lf/lfd into {install_dir}")
             typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             typer.echo("Would install wheel with uv pip install + uv tool install")
+            typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
             typer.echo(
                 "Would install/restart lfd service"
                 if service
@@ -565,6 +589,7 @@ def local(
             _promote(LOCAL_BIN, install_dir)
             typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             _report_path_collisions(install_dir)
+            _sync_skills(install_dir / "lf")
 
             if service:
                 _restart_lfd()

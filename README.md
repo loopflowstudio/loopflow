@@ -318,10 +318,10 @@ From a dev checkout, build everything locally with one entry:
 
 ```bash
 uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd
+uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, and install them into the local bin dir.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow steps into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf op sync-skills --global --yes` after installing, so Claude and Codex always see the latest steps.
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 

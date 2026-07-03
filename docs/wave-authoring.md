@@ -59,10 +59,10 @@ move, dispatch a worker to build it, watch the PR, and fold what shipped into
 memory.
 ```
 
-Run `lf goal <wave>` to launch that wave goal directly. Add `--system s1..s5` to run a builtin VSM charter against the same wave context:
+Run `lf goal <wave>` to launch that wave's goal directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
 
 ```bash
-lf goal infra --system s3 --once    # govern-control charter, infra context
+lf goal s3 --once    # the s3 (control) charter, one loop
 ```
 
 ### Memory

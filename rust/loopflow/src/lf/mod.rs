@@ -138,9 +138,6 @@ pub enum Commands {
     Goal {
         /// Wave name (matches wave/<name>/)
         name: String,
-        /// Run a builtin VSM system charter against this wave
-        #[arg(short = 's', long)]
-        system: Option<String>,
         /// Cap the loop to a single iteration
         #[arg(long)]
         once: bool,

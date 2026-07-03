@@ -3,8 +3,7 @@
 ## What to build
 
 Ship the five Viable System Model systems as **builtin goals** — short generic
-charters a looping agent runs against any chord — and add `lf goal <chord>
---system <s1..s5>` to launch a system's charter against that chord's context.
+charters a looping agent can run as `lf goal s1` through `lf goal s5`.
 
 This promotes VSM from *flows* (today's `govern-*` `scan→assess→mutate`
 pipelines) to *goal-driven wave agents*. The flows survive as each system's
@@ -43,19 +42,12 @@ goal `.md` files (body only, no frontmatter — matches `build/goal/ship-roadmap
 
 ## Key functions
 
-- **Add** `rust/loopflow/src/engine/builtins/govern/goal/{govern-operations,
-  govern-coordination,govern-control,govern-intelligence,govern-identity}.md` —
-  the five charters below. Goal name == existing flow name, so `--system s3`
-  resolves to one identifier (`govern-control`) that is both the charter and the
-  hand-flow.
-- **`lf goal` flag** (`rust/loopflow/src/lf/commands/goal.rs`): add
-  `--system/-s <s1..s5>`. Map `s1→govern-operations … s5→govern-identity`.
-  When set, load the builtin charter instead of `wave/<chord>/GOAL.md`, but keep
-  the chord's render context (roadmap, `wave/<chord>/MEMORY.md`, metrics,
-  in-flight).
-- **`build_goal_message`**: add `goal_name: Option<&str>` — `Some(charter)`
-  loads that goal; `None` keeps today's load-by-wave-name behavior. Context
-  (memory, wave_config) still keys off the chord name.
+- **Add** `rust/loopflow/src/engine/builtins/govern/goal/{s1,s2,s3,s4,s5}.md`
+  — the five charters below. They register as builtin goals through `build.rs`.
+- **Reuse `lf goal` as-is** (`rust/loopflow/src/lf/commands/goal.rs`):
+  `resolve_wave_name` accepts explicit names, and `load_goal` already falls back
+  to builtins. `lf goal s3 --once` therefore renders the builtin S3 charter
+  without a VSM-specific flag or mapping table.
 
 ## Constraints
 
@@ -69,7 +61,7 @@ goal `.md` files (body only, no frontmatter — matches `build/goal/ship-roadmap
 
 ## The five charters (ship verbatim)
 
-### s1 → govern/goal/govern-operations.md
+### s1 → govern/goal/s1.md
 ```
 True north: the work of the system actually gets done, in real contact with the world.
 
@@ -85,7 +77,7 @@ to it.
 Friction between units belongs to s2; making them add up belongs to s3.
 ```
 
-### s2 → govern/goal/govern-coordination.md
+### s2 → govern/goal/s2.md
 ```
 True north: the units act in parallel without colliding.
 
@@ -101,7 +93,7 @@ you've taken s3's chair — drop back to damping the oscillation.
 What each unit should pursue is its own (s1); whether the whole gains is s3's.
 ```
 
-### s3 → govern/goal/govern-control.md
+### s3 → govern/goal/s3.md
 ```
 True north: the whole is worth more than the sum of its parts.
 
@@ -117,7 +109,7 @@ drifted into local optimization — return to the whole.
 The future belongs to s4; identity belongs to s5. Yours is the living whole.
 ```
 
-### s4 → govern/goal/govern-intelligence.md
+### s4 → govern/goal/s4.md
 ```
 True north: the system stays fit for a world that keeps changing.
 
@@ -134,7 +126,7 @@ The living now belongs to s3; whether to actually change what the system is
 belongs to s5.
 ```
 
-### s5 → govern/goal/govern-identity.md
+### s5 → govern/goal/s5.md
 ```
 True north: the system stays unmistakably itself as it grows.
 
@@ -155,15 +147,15 @@ must not change.
 
 ```
 cargo build && cargo test -p loopflow
-lf goal root --system s3 --once
+lf goal s3 --once
 ```
 
 - The five charter files exist under `builtins/govern/goal/` and are registered
-  (a `resolve_builtin_goal("govern-control")` unit test passes).
-- `lf goal root --system s3 --once` renders the **S3 charter** (not root's own
-  GOAL.md) inside `<lf:loopflow-operating-prompt>` + `<lf:goal-context>`, with
-  root's roadmap/memory as context, and stops after one iteration.
-- `lf goal root` (no `--system`) still loads root's own goal — unchanged.
+  (a `resolve_builtin_goal("s3")` unit test passes).
+- `lf goal s3 --once` renders the **S3 charter** inside
+  `<lf:loopflow-operating-prompt>` + `<lf:goal-context>` and stops after one
+  iteration.
+- `lf goal root` still loads root's own goal — unchanged.
 
 ## Deferred (not this commit)
 

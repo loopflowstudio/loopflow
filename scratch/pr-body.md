@@ -2,33 +2,27 @@
 
 ```bash
 cargo build
-cargo test -p loopflow
-lf goal root --system s3 --once
+lf goal s3 --once
 ```
 
-`--system s3` runs the builtin `govern-control` charter against `root`'s wave context. In this repo today, `root` has no roadmap handle or metrics, so the one-shot loop launches, sees there is no safe move to make, and halts cleanly.
-
-For direct verification:
-
-```bash
-cargo test -p loopflow build_goal_message_can_render_system_goal_against_wave_context
-cargo test -p loopflow build_goal_message_system_goal_ignores_repo_goal_override
-```
+`lf goal s3` resolves the builtin goal named `s3` — the VSM control charter — through the existing goal-loader precedence (`.lf/goals/` → `wave/<name>/GOAL.md` → builtin). In this repo `s3` has no wave dir, so it renders the charter with empty roadmap/memory, launches, sees no safe move, and halts cleanly.
 
 ## Intent
 
-Promote the five VSM systems from only govern flows into builtin goal charters that can run against any chord. `lf goal <wave> --system s1..s5` gives a looping agent a generic system-level compass while preserving the selected wave's roadmap, memory, metrics, available flows, and in-flight work.
+Ship the five Viable System Model system charters as **builtin goals** `s1`…`s5`. Each is a short, generic, self-correcting compass a looping agent can run directly with `lf goal s1`…`lf goal s5`.
 
 ## Assumptions
 
-System names are the lowercase shorthand values `s1` through `s5`. The shipped charter wording is authoritative, so `--system` loads embedded builtin goal text directly instead of allowing repo-local goal overrides.
+Goal-loader precedence remains the right abstraction: repo overrides and wave-local `GOAL.md` files can shadow builtin goals by name. A standing system loop gets memory or roadmap context by adding a matching `wave/s1`…`wave/s5` directory later.
 
 ## Key decisions
 
-The feature reuses the existing goal renderer and launch path instead of adding a new runtime type. `--system` changes only the goal body; wave context still comes from the named wave.
+**No VSM-specific code, anywhere.** `load_goal` already falls back to builtin goals by name, and `resolve_wave_name` doesn't require a `wave/<name>/` dir — so `lf goal s3` reaches the builtin `s3` charter through the generic path with zero new plumbing. The five charters are plain markdown under `builtins/govern/goal/`, auto-registered by `build.rs`.
 
-The five builtin goal filenames match the existing govern flow names: `govern-operations`, `govern-coordination`, `govern-control`, `govern-intelligence`, and `govern-identity`.
+**A wave overrides a builtin by name.** Drop a `wave/s3/GOAL.md` to override the `s3` charter; add a `wave/s3/MEMORY.md` and it layers in as context. Precedence is unchanged: repo override → wave `GOAL.md` → builtin.
+
+**No `lf goal` changes.** The command is byte-identical to `main`. An earlier iteration added a `--system s1..s5` flag and a `resolve_system_goal` map; that special-casing was redundant with the loader and has been removed.
 
 ## Not included
 
-No changes to the existing `govern-*` flows. No standing scheduler or UI for always-on VSM agents. No aliases beyond `s1` through `s5`.
+No wave directories for `s1`…`s5` (they resolve as builtins today; add a dir when a system needs standing memory). No changes to the `govern-*` flows — they remain each system's hand. No scheduler or UI for always-on VSM loops.

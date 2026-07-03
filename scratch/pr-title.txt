@@ -1,1 +1,1 @@
-lf goal: run builtin VSM system charters
+govern: ship s1..s5 VSM system charters as builtin goals

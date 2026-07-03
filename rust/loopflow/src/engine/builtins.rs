@@ -238,10 +238,10 @@ mod tests {
 
     #[test]
     fn vsm_system_goals_are_registered() {
-        let key = resolve_builtin_goal("govern-control").expect("govern-control goal");
+        let key = resolve_builtin_goal("s3").expect("s3 goal");
         let goal = get_builtin_goal(key).expect("registered goal");
 
-        assert_eq!(key, "govern-control");
+        assert_eq!(key, "s3");
         assert!(goal.contains("True north: the whole is worth more than the sum of its parts."));
     }
 }

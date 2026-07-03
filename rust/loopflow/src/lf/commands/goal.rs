@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
-use crate::engine::builtins::get_builtin_goal;
 use crate::engine::config::load_config_or_default;
 use crate::engine::worktrees::main_repo_root;
 use crate::engine::{
@@ -22,15 +21,14 @@ const IN_FLIGHT_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Launch a wave's goal as a looping top-level agent (`operate` on, interactive
 /// surface). The agent dispatches real work via `lfq worker run`.
-pub fn run(name: &str, system: Option<&str>, once: bool, cli: &Cli) -> Result<()> {
+pub fn run(name: &str, once: bool, cli: &Cli) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or(repo_root);
     let wave_name = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let goal_name = system.map(resolve_system_goal).transpose()?;
 
     let in_flight = fetch_in_flight_dispatches(&wave_name);
-    let message = build_goal_message(&main_repo, &wave_name, goal_name, once, in_flight)?;
+    let message = build_goal_message(&main_repo, &wave_name, once, in_flight)?;
 
     let config = load_config_or_default(Some(&main_repo));
     let prepared = prepare_goal_launch(
@@ -57,38 +55,16 @@ pub fn run(name: &str, system: Option<&str>, once: bool, cli: &Cli) -> Result<()
     )
 }
 
-fn resolve_system_goal(system: &str) -> Result<&'static str> {
-    match system {
-        "s1" => Ok("govern-operations"),
-        "s2" => Ok("govern-coordination"),
-        "s3" => Ok("govern-control"),
-        "s4" => Ok("govern-intelligence"),
-        "s5" => Ok("govern-identity"),
-        _ => Err(anyhow!(
-            "invalid system: '{system}' (expected s1, s2, s3, s4, or s5)"
-        )),
-    }
-}
-
-/// Render the goal prompt: a goal body plus the wave's flows, roadmap
+/// Render the goal prompt: the wave's `GOAL.md` body plus flows, roadmap
 /// handle, metrics, memory, and in-flight dispatches.
 fn build_goal_message(
     repo: &Path,
     wave_name: &str,
-    goal_name: Option<&str>,
     once: bool,
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<String> {
-    let goal = match goal_name {
-        Some(goal_name) => {
-            let prompt = get_builtin_goal(goal_name)
-                .ok_or_else(|| anyhow!("builtin goal not found: '{goal_name}'"))?
-                .to_string();
-            crate::engine::Goal { prompt }
-        }
-        None => load_goal(wave_name, repo)
-            .map_err(|err| anyhow!("failed to load goal '{wave_name}': {err}"))?,
-    };
+    let goal = load_goal(wave_name, repo)
+        .map_err(|err| anyhow!("failed to load goal for wave '{wave_name}': {err}"))?;
     let wave_config = read_wave_config(repo, wave_name).unwrap_or_default();
     let memory = std::fs::read_to_string(repo.join("wave").join(wave_name).join("MEMORY.md"))
         .unwrap_or_default();
@@ -182,7 +158,7 @@ mod tests {
     fn build_goal_message_renders_goal_context_and_memory() {
         let tmp = wave_fixture();
         let message =
-            build_goal_message(tmp.path(), "ship", None, false, Vec::new()).expect("build message");
+            build_goal_message(tmp.path(), "ship", false, Vec::new()).expect("build message");
 
         assert!(message.contains("Drive the ship wave."));
         assert!(message.contains("<lf:goal-context>"));
@@ -196,7 +172,7 @@ mod tests {
     fn build_goal_message_appends_once_marker() {
         let tmp = wave_fixture();
         let message =
-            build_goal_message(tmp.path(), "ship", None, true, Vec::new()).expect("build message");
+            build_goal_message(tmp.path(), "ship", true, Vec::new()).expect("build message");
 
         assert!(message.contains("<lf:goal-once>"));
         assert!(message.contains("Run a single loop iteration"));
@@ -205,62 +181,27 @@ mod tests {
     #[test]
     fn build_goal_message_fails_for_missing_goal() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let err = build_goal_message(tmp.path(), "missing", None, false, Vec::new())
+        let err = build_goal_message(tmp.path(), "missing", false, Vec::new())
             .expect_err("missing goal should fail");
         assert!(err.to_string().contains("missing"));
     }
 
     #[test]
-    fn build_goal_message_can_render_system_goal_against_wave_context() {
-        let tmp = wave_fixture();
+    fn build_goal_message_can_render_builtin_vsm_goal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
         let message =
-            build_goal_message(tmp.path(), "ship", Some("govern-control"), true, Vec::new())
-                .expect("build message");
+            build_goal_message(tmp.path(), "s3", true, Vec::new()).expect("build message");
 
         assert!(message.contains("True north: the whole is worth more than the sum of its parts."));
-        assert!(!message.contains("Drive the ship wave."));
         assert!(message.contains("<lf:goal-context>"));
-        assert!(message.contains("wave/ship"));
-        assert!(message.contains("Last loop shipped auth."));
         assert!(message.contains("<lf:goal-once>"));
-    }
-
-    #[test]
-    fn build_goal_message_system_goal_ignores_repo_goal_override() {
-        let tmp = wave_fixture();
-        let goals_dir = tmp.path().join(".lf/goals");
-        std::fs::create_dir_all(&goals_dir).expect("create goals dir");
-        std::fs::write(goals_dir.join("govern-control.md"), "Repo override.")
-            .expect("write goal override");
-
-        let message = build_goal_message(
-            tmp.path(),
-            "ship",
-            Some("govern-control"),
-            false,
-            Vec::new(),
-        )
-        .expect("build message");
-
-        assert!(message.contains("True north: the whole is worth more than the sum of its parts."));
-        assert!(!message.contains("Repo override."));
-    }
-
-    #[test]
-    fn resolve_system_goal_maps_vsm_systems_to_govern_goals() {
-        assert_eq!(resolve_system_goal("s1").unwrap(), "govern-operations");
-        assert_eq!(resolve_system_goal("s2").unwrap(), "govern-coordination");
-        assert_eq!(resolve_system_goal("s3").unwrap(), "govern-control");
-        assert_eq!(resolve_system_goal("s4").unwrap(), "govern-intelligence");
-        assert_eq!(resolve_system_goal("s5").unwrap(), "govern-identity");
-        assert!(resolve_system_goal("s6").is_err());
     }
 
     #[test]
     fn goal_launch_prompt_includes_operate_and_goal_context() {
         let tmp = wave_fixture();
         let message =
-            build_goal_message(tmp.path(), "ship", None, false, Vec::new()).expect("build message");
+            build_goal_message(tmp.path(), "ship", false, Vec::new()).expect("build message");
 
         let config = Config {
             agent: Some("claude:opus".to_string()),

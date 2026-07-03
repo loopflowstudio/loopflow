@@ -2,36 +2,33 @@
 
 ## What was implemented
 
-Added five builtin VSM system goal charters under `govern/goal/` and exposed them through `lf goal <wave> --system s1..s5`. The command keeps the target wave's context, memory, metrics, flows, and in-flight work, but swaps the goal body to the selected builtin system charter.
+Added five builtin Viable System Model system charters as goals named `s1` through `s5`. Each charter is a body-only markdown builtin under `rust/loopflow/src/engine/builtins/govern/goal/`, so `lf goal s3 --once` reaches the S3 control charter through the existing goal loader.
 
-Gate polish added two pieces:
-
-- `--system` loads embedded builtin goal text directly, so repo-local `.lf/goals/govern-control.md` cannot shadow the shipped VSM charter.
-- `README.md` and `docs/wave-authoring.md` now show the `lf goal <wave> --system s3 --once` path.
+Gate polish kept the simpler implementation from the second pass: no `--system` flag, no VSM-specific goal mapping, and no special launch path. The docs and tests now describe and pin the builtin-goal behavior directly.
 
 ## Key choices
 
-The system flag maps only the VSM shorthand names: `s1` through `s5`. That keeps the public CLI small and leaves the longer `govern-*` names as implementation identifiers.
+The public names are `s1` through `s5`, not `govern-control` style aliases. That makes the VSM systems short builtin goals while leaving the existing `govern-*` flows as separate hands for operational work.
 
-Builtin system goals deliberately bypass repo goal overrides. Normal `lf goal <wave>` still uses the existing `load_goal` precedence; system charters are different because their exact wording is the artifact being shipped.
+`lf goal` was left generic. `resolve_wave_name` accepts an explicit name, and `load_goal` already searches repo overrides, `wave/<name>/GOAL.md`, then builtins. That means a future `wave/s3/GOAL.md` intentionally overrides the builtin, using the same precedence as every other goal.
 
-No new DTOs or runtime types were added. The feature stays in the existing `Goal { prompt }` path and the existing goal renderer.
+The shipped charters remain body-only markdown. No DTOs, runtime types, scheduler behavior, or launch semantics changed.
 
 ## How it fits together
 
-`lf goal` resolves the wave name first, then optionally resolves `--system` to a builtin govern goal key. `build_goal_message` renders either the wave's own `GOAL.md` or the selected builtin charter, while `read_wave_config` and `MEMORY.md` continue to use the target wave name.
+`build.rs` scans `builtins/*/goal/*.md` and registers core-category goals in the flat builtin goal namespace. The five `s1`...`s5` files therefore become builtin goal keys.
 
-The builtin registration remains automatic through `build.rs`; dropping the five markdown files under `rust/loopflow/src/engine/builtins/govern/goal/` makes them resolvable by the generated builtin goal map.
+`lf goal s3 --once` normalizes `s3` as the wave/goal name, finds no local wave goal in this repo, loads the builtin `s3` goal, renders it with empty `s3` wave context, and launches the standard goal prompt with the one-iteration marker.
 
 ## Risks and bottlenecks
 
-The `--system` accepted values are lowercase only. That matches the design, but users typing `S3` will get the explicit invalid-system error.
+Repo-local goal overrides can shadow these builtins by name. That is consistent with the loader, but reviewers should notice that the exact shipped wording is only guaranteed when no `.lf/goals/s3.md` or `wave/s3/GOAL.md` override exists.
 
-The smoke command currently halts for `root` because `root` has no roadmap handle or metrics configured. That verifies the command launches the S3 charter and one-iteration stop path, but not a dispatching loop with real roadmap work.
+The smoke command halts because this repo has no `wave/s3` roadmap, metrics, memory, or in-flight work. That verifies launch and stop behavior, not a productive standing VSM loop with real roadmap input.
 
 ## What's not included
 
-The existing `govern-*` flows were not changed. No scheduler, lfd wave execution, PM sync, or UI behavior was added for standing VSM system loops. No aliases beyond `s1` through `s5` were added.
+No `--system` flag. No wave directories for `s1` through `s5`. No scheduler, lfd activation, UI, PM sync, or changes to the existing `govern-*` flows.
 
 ## Validation
 
@@ -39,12 +36,13 @@ The existing `govern-*` flows were not changed. No scheduler, lfd wave execution
 cargo fmt --all -- --check
 cargo build
 cargo clippy --all-targets -- -D warnings
+cargo test -p loopflow
 cargo test --all
 uv run ruff check python/loopflow python/tests
 uv run pytest python/tests/
 tests/e2e/test_smoke.sh
-perl -e 'alarm shift; exec @ARGV' 30 cargo run -q -p loopflow --bin lf -- goal root --system s3 --once
-git diff --check main...HEAD
+perl -e 'alarm shift; exec @ARGV' 30 cargo run -q -p loopflow --bin lf -- goal s3 --once
+git diff --check main...HEAD && git diff --check
 ```
 
-The smoke command completed one iteration and halted because `root` has no roadmap handle or metrics to act on.
+The one-shot smoke command completed and halted cleanly on empty `s3` context.

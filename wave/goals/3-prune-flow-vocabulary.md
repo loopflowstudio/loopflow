@@ -1,6 +1,5 @@
 ---
 priority: medium
-asana_id: '1216273057538130'
 ---
 
 # Prune the flow/step vocabulary for the wave-agent world

@@ -1,6 +1,5 @@
 ---
 priority: low
-asana_id: '1216272792246052'
 ---
 
 # VSM system charters as standing chord loops

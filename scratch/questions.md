@@ -54,3 +54,15 @@ headless-launch sequence in `run.rs` (check_cli → write prompt/context logs �
 `StreamFormat::Human` → `launch_agent` → exit-code hint). Collapsing it means a
 shared `engine::agent` helper and rewiring `run.rs`, which this branch didn't
 touch. Worth a dedicated pass once a third caller appears.
+
+## Gate pass: roadmap lives in Asana
+
+Removed the branch-added `wave/goals/*lf-loop*.md` roadmap files and the two
+duplicate-project `asana_id` additions from existing wave goal files. Current
+loopflow guidance says Asana is the roadmap source of truth; local numbered
+roadmap mirrors should not be extended from this branch.
+
+Assumption: the `lf wave` follow-on roadmap should be filed or adjusted with
+`lf op pm update` against the canonical `wave/goals/GOAL.md` Asana project when
+the roadmap owner is ready to mutate external project state. Gate did not call
+Asana write APIs.

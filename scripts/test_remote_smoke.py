@@ -100,15 +100,6 @@ def main() -> int:
             ("health", lambda: _scenario_health(api)),
             ("wave_crud", lambda: _scenario_wave_crud(api, repo_path)),
             ("auth_rejection", lambda: _scenario_auth_rejection(api)),
-            (
-                "sse_streaming",
-                lambda: _scenario_sse_streaming(
-                    api,
-                    repo_path,
-                    args.session_harness,
-                    args.events_timeout,
-                ),
-            ),
             ("websocket_connected", lambda: _scenario_websocket(ws)),
             (
                 "wave_session_and_logs",
@@ -182,72 +173,6 @@ def _scenario_wave_crud(api: ApiClient, repo_path: str) -> None:
 def _scenario_auth_rejection(api: ApiClient) -> None:
     response = api.request("GET", "/v0/waves", auth=False)
     ApiAssertions.expect_error(response, 401, message_contains="missing")
-
-
-def _scenario_sse_streaming(
-    api: ApiClient,
-    repo_path: str,
-    session_harness: str,
-    events_timeout: float,
-) -> None:
-    session_id: str | None = None
-    try:
-        create_response = api.request(
-            "POST",
-            "/v0/sessions",
-            json={
-                "harness": session_harness,
-                "step": "design",
-                "repo_root": repo_path,
-            },
-        )
-        ApiAssertions.expect_status(create_response, 200)
-        session_payload = ApiAssertions.expect_json_object(create_response)
-        session_id = _require_field(session_payload, "id")
-
-        input_response = api.request(
-            "POST",
-            f"/v0/conversations/{session_id}/input",
-            json={"text": "Reply with one short sentence."},
-        )
-        ApiAssertions.expect_status(input_response, 200)
-
-        deadline = time.monotonic() + events_timeout
-        seen_session_event = False
-        current_event_name = ""
-
-        with api.stream("GET", f"/v0/conversations/{session_id}/events") as response:
-            ApiAssertions.expect_status(response, 200)
-            for line in response.iter_lines():
-                if time.monotonic() > deadline:
-                    break
-                if not line:
-                    continue
-                if line.startswith("event:"):
-                    current_event_name = line[6:].strip()
-                    continue
-                if not line.startswith("data:") or current_event_name != "session.event":
-                    continue
-
-                payload = line[5:].strip()
-                if not payload:
-                    continue
-
-                event = json.loads(payload)
-                if isinstance(event, dict):
-                    seen_session_event = True
-                    break
-
-        if not seen_session_event:
-            raise AssertionError(
-                f"no session.event received from SSE stream within {events_timeout}s"
-            )
-    finally:
-        if session_id:
-            try:
-                api.request("DELETE", f"/v0/sessions/{session_id}")
-            except Exception:
-                pass
 
 
 def _scenario_websocket(ws: WebSocketClient) -> None:
@@ -429,21 +354,10 @@ def _parse_args() -> argparse.Namespace:
         help="HTTP and websocket timeout in seconds",
     )
     parser.add_argument(
-        "--events-timeout",
-        type=float,
-        default=30.0,
-        help="Seconds to wait for a session SSE event",
-    )
-    parser.add_argument(
         "--logs-timeout",
         type=float,
         default=30.0,
         help="Seconds to wait for wave log output",
-    )
-    parser.add_argument(
-        "--session-harness",
-        default="claude",
-        help="Harness for SSE session scenario",
     )
     parser.add_argument(
         "--insecure",

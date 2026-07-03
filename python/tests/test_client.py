@@ -11,7 +11,6 @@ from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     AUTH_PROVIDER_NONE,
-    CONVERSATION_MINIMAL,
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
@@ -588,64 +587,6 @@ class TestClientResponses:
             ("DELETE", "/v0/repos/loopflowstudio/studio/children/loopflowstudio/loopflow"),
         ]
         client.close()
-
-    def test_send_conversation_input_sends_correct_body(self):
-        received = {}
-
-        def handler(request):
-            received.update(json.loads(request.content))
-            return httpx.Response(200, json=CONVERSATION_MINIMAL)
-
-        client = _mock_client(handler)
-        client.send_conversation_input("session-1", "hello")
-        assert received["text"] == "hello"
-        client.close()
-
-    def test_stream_conversation_events_parses_sse(self):
-        def handler(request):
-            return httpx.Response(
-                200,
-                text="\n".join(
-                    [
-                        "id: 0",
-                        'data: {"type":"status_changed","status":"starting"}',
-                        "",
-                        "id: 1",
-                        'data: {"type":"turn_completed","status":"completed"}',
-                        "",
-                    ]
-                ),
-            )
-
-        client = _mock_client(handler)
-        events = list(client.stream_conversation_events("session-1", timeout=1))
-
-        assert len(events) == 2
-        assert events[0].seq == 0
-        assert events[0].event["type"] == "status_changed"
-        assert events[1].seq == 1
-        assert events[1].event["type"] == "turn_completed"
-        client.close()
-
-    def test_stream_conversation_events_sends_after_seq(self):
-        def handler(request):
-            assert request.url.params.get("after_seq") == "10"
-            return httpx.Response(200, text='data: {"type":"turn_completed"}\n')
-
-        client = _mock_client(handler)
-        events = list(client.stream_conversation_events("session-1", after_seq=10, timeout=1))
-        assert len(events) == 1
-        client.close()
-
-    def test_stream_conversation_events_errors(self):
-        def handler(request):
-            return httpx.Response(500, json={"error": "boom"})
-
-        client = _mock_client(handler)
-        with pytest.raises(LoopflowError, match="boom"):
-            list(client.stream_conversation_events("session-1", timeout=1))
-        client.close()
-
 
 def _mock_token_client(token=None, base_url="http://test"):
     """Create a Client with a mock transport that captures request headers."""

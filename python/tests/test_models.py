@@ -7,8 +7,6 @@ from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     AUTH_PROVIDER_APIKEY,
-    CONVERSATION_FULL,
-    CONVERSATION_MINIMAL,
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
@@ -20,12 +18,11 @@ from loopflow.models import (
     AuthFlow,
     AuthProviderStatus,
     CommitEntry,
-    Conversation,
-    ConversationEventEnvelope,
     CostRates,
     ModelInfo,
     ProviderInfo,
     Repo,
+    Session,
     Run,
     Wave,
 )
@@ -105,32 +102,6 @@ class TestRunModel:
         data = {**WAVE_RUN_MINIMAL, "error": "rebase conflict"}
         run = Run.model_validate(data)
         assert run.error == "rebase conflict"
-
-
-class TestConversationModel:
-    def test_minimal_payload(self):
-        session = Conversation.model_validate(CONVERSATION_MINIMAL)
-        assert session.harness == "claude"
-        assert session.config.yolo_mode is False
-        assert session.created_at is None
-
-    def test_full_payload(self):
-        session = Conversation.model_validate(CONVERSATION_FULL)
-        assert session.run_id == "run-1"
-        assert session.provider_session_id == "provider-1"
-        assert session.input_supported is False
-        assert session.config.agent == "claude-sonnet-4-5-20250929"
-        assert session.created_at is not None
-        assert session.ended_at is not None
-
-
-class TestConversationEventEnvelopeModel:
-    def test_parse(self):
-        event = ConversationEventEnvelope.model_validate(
-            {"seq": 12, "event": {"type": "turn_completed", "status": "completed"}}
-        )
-        assert event.seq == 12
-        assert event.event["type"] == "turn_completed"
 
 
 class TestAuthModels:

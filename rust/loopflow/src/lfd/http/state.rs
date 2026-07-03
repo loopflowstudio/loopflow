@@ -5,7 +5,6 @@ use tokio::sync::Mutex;
 
 use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
 use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-use crate::lfd::conversations::ConversationManager;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
@@ -28,5 +27,4 @@ pub struct HttpState {
     pub http_security: HttpSecurityConfig,
     pub auth_failure_throttle: AuthFailureThrottle,
     pub ci_failure_cache: Arc<Mutex<std::collections::HashSet<String>>>,
-    pub conversations: ConversationManager,
 }

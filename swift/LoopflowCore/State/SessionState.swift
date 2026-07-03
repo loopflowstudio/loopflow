@@ -110,11 +110,6 @@ public protocol SessionService: Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession
-    func streamConversationEvents(
-        conversationId: String,
-        afterSeq: Int?
-    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error>
     func stopSession(_ id: String) async throws -> AgentSession
 }
 
@@ -148,29 +143,17 @@ public final class SessionState {
     public var awaitingSessionJoin: Bool = false
     public var suggestedActions: [SuggestedAction] = []
     public var contextSnapshot: ContextSnapshot?
-    public private(set) var inputSupported: Bool
-
-    public private(set) var itemsById: [String: SessionItem] = [:]
 
     private let sessionHarness: String
     private let sessionRunId: String?
     private var sessionConfig: AgentSessionConfig
     private let waveService: any SessionService
     private let userDefaults: UserDefaults
-    private let detailLimit = 16_000
-    private let truncationSuffix = "…truncated"
 
     private var sessionId: String?
-    private var lastAppliedSeq: Int?
-    private var currentTurnId: String?
 
-    private var itemEntryIdByItemId: [String: UUID] = [:]
-    private var assistantEntryIdByTurnId: [String: UUID] = [:]
     private var messageEntryIdByItemId: [String: UUID] = [:]
     private var transcriptIndexById: [UUID: Int] = [:]
-
-    private var streamTask: Task<Void, Never>?
-    private var streamGeneration = 0
 
     public init(
         waveId: String,
@@ -184,7 +167,6 @@ public final class SessionState {
         self.sessionHarness = sessionHarness
         self.sessionRunId = sessionRunId
         self.sessionConfig = sessionConfig
-        self.inputSupported = false
         self.waveService = waveService
         self.userDefaults = userDefaults
     }
@@ -194,8 +176,7 @@ public final class SessionState {
     }
 
     public var canSend: Bool {
-        let inputAllowed = sessionId == nil || inputSupported
-        return inputAllowed && turnState != .running && streamPhase != .replaying && streamPhase != .ending
+        sessionId == nil && turnState != .running && streamPhase != .ending
     }
 
     public var canEndSession: Bool {
@@ -205,10 +186,7 @@ public final class SessionState {
     public func onAppear() async {
         if let sessionId {
             awaitingSessionJoin = false
-            if streamTask == nil {
-                let phase: StreamPhase = lastAppliedSeq == nil ? .replaying : .live
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: phase)
-            }
+            _ = sessionId
             return
         }
 
@@ -220,7 +198,6 @@ public final class SessionState {
         guard !trimmed.isEmpty else { return }
         guard sessionId != trimmed else { return }
 
-        cancelStreamTask()
         resetForReplay()
         sessionId = trimmed
         persistSessionId(trimmed)
@@ -247,7 +224,6 @@ public final class SessionState {
     }
 
     public func onDisappear() {
-        cancelStreamTask()
         if streamPhase != .ending {
             streamPhase = .idle
         }
@@ -257,13 +233,8 @@ public final class SessionState {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        guard streamPhase != .replaying else {
-            appendMessage(role: .system, content: "Replaying… Please wait.")
-            return
-        }
-
-        if sessionId != nil && !inputSupported {
-            appendMessage(role: .system, content: "Input is not supported for this session harness.")
+        guard sessionId == nil else {
+            appendMessage(role: .system, content: "Input is no longer supported for joined sessions.")
             return
         }
 
@@ -275,16 +246,8 @@ public final class SessionState {
         awaitingSessionJoin = false
 
         do {
-            let sessionId = try await ensureSession()
-            if !inputSupported {
-                appendMessage(role: .system, content: "Input is not supported for this session harness.")
-                turnState = .idle
-                return
-            }
-            if streamTask == nil {
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
-            }
-            _ = try await waveService.sendConversationInput(conversationId: sessionId, content: text)
+            _ = try await ensureSession()
+            turnState = .completed
         } catch {
             appendMessage(role: .error, content: error.localizedDescription)
             turnState = .failed
@@ -295,7 +258,6 @@ public final class SessionState {
         guard let sessionId else { return }
 
         streamPhase = .ending
-        cancelStreamTask()
 
         do {
             _ = try await waveService.stopSession(sessionId)
@@ -305,7 +267,6 @@ public final class SessionState {
 
         self.sessionId = nil
         persistSessionId(nil)
-        currentTurnId = nil
         turnState = .idle
         streamPhase = .idle
         clearSuggestedActions()
@@ -331,7 +292,6 @@ public final class SessionState {
 
         do {
             let session = try await waveService.getSession(storedSessionId)
-            inputSupported = session.inputSupported
             if isSessionTerminalStatus(session.status) {
                 persistSessionId(nil)
                 streamPhase = .idle
@@ -341,8 +301,8 @@ public final class SessionState {
 
             sessionId = session.id
             resetForReplay()
-            appendMessage(role: .system, content: "Replaying…")
-            startStream(sessionId: storedSessionId, afterSeq: nil, phase: .replaying)
+            appendMessage(role: .system, content: "Session restored")
+            streamPhase = .idle
         } catch {
             persistSessionId(nil)
             streamPhase = .idle
@@ -374,7 +334,6 @@ public final class SessionState {
             config: sessionConfig
         )
         sessionId = session.id
-        inputSupported = session.inputSupported
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
         awaitingSessionJoin = false
@@ -424,74 +383,6 @@ public final class SessionState {
         return normalized == "ended" || normalized == "failed"
     }
 
-    private func startStream(sessionId: String, afterSeq: Int?, phase: StreamPhase) {
-        cancelStreamTask()
-        streamGeneration += 1
-        let generation = streamGeneration
-        streamPhase = phase
-        awaitingSessionJoin = false
-
-        streamTask = Task { [weak self] in
-            guard let self else { return }
-            await self.consumeStream(
-                sessionId: sessionId,
-                afterSeq: afterSeq,
-                generation: generation,
-                reconnecting: phase == .replaying
-            )
-        }
-    }
-
-    private func consumeStream(
-        sessionId: String,
-        afterSeq: Int?,
-        generation: Int,
-        reconnecting: Bool
-    ) async {
-        do {
-            for try await envelope in waveService.streamConversationEvents(conversationId: sessionId, afterSeq: afterSeq) {
-                if envelope.replayCompletedLastSeq != nil {
-                    promoteToLiveIfCurrent(generation: generation)
-                    continue
-                }
-                applyEnvelope(envelope)
-            }
-
-            if reconnecting {
-                promoteToLiveIfCurrent(generation: generation)
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            guard generation == streamGeneration else { return }
-            appendMessage(role: .error, content: error.localizedDescription)
-            turnState = .failed
-            if streamPhase != .ending {
-                streamPhase = .idle
-            }
-            streamTask = nil
-            return
-        }
-
-        guard generation == streamGeneration else { return }
-        streamTask = nil
-        if streamPhase != .ending {
-            streamPhase = .idle
-        }
-    }
-
-    private func promoteToLiveIfCurrent(generation: Int) {
-        guard generation == streamGeneration else { return }
-        if streamPhase == .replaying {
-            streamPhase = .live
-        }
-    }
-
-    private func cancelStreamTask() {
-        streamTask?.cancel()
-        streamTask = nil
-    }
-
     private func resetForReplay() {
         setTranscript([])
         turnState = .idle
@@ -499,11 +390,6 @@ public final class SessionState {
     }
 
     private func resetSessionCaches() {
-        currentTurnId = nil
-        lastAppliedSeq = nil
-        itemsById.removeAll()
-        itemEntryIdByItemId.removeAll()
-        assistantEntryIdByTurnId.removeAll()
         messageEntryIdByItemId.removeAll()
         transcriptIndexById.removeAll()
         clearSuggestedActions()
@@ -563,360 +449,8 @@ public final class SessionState {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func applyEnvelope(_ envelope: ConversationEventEnvelope) {
-        guard let event = envelope.event else { return }
-
-        if let seq = envelope.seq {
-            if let lastAppliedSeq, seq <= lastAppliedSeq {
-                return
-            }
-            lastAppliedSeq = seq
-        }
-
-        reduce(event)
-    }
-
-    private func reduce(_ event: AgentSessionEvent) {
-        switch event {
-        case .turnStarted(let turnId):
-            currentTurnId = turnId
-            turnState = .running
-            clearSuggestedActions()
-
-        case .turnCompleted(let turnId, let status):
-            guard currentTurnId == nil || currentTurnId == turnId else { return }
-            currentTurnId = nil
-            if status == "completed" {
-                turnState = .completed
-            } else {
-                turnState = .failed
-            }
-
-        case .contextSnapshot(let snapshot):
-            contextSnapshot = snapshot
-
-        case .textDelta(let turnId, let content):
-            guard !content.isEmpty else { return }
-            appendAssistantDelta(turnId: turnId, delta: content)
-
-        case .itemStarted(let turnId, let item):
-            if upsertMessageBubble(item: item, isCompletion: false) {
-                return
-            }
-            upsertItem(turnId: turnId, item: item)
-
-        case .itemUpdated(let turnId, let itemId, let delta):
-            applyItemUpdate(turnId: turnId, itemId: itemId, delta: delta)
-
-        case .itemCompleted(let turnId, let item):
-            if upsertMessageBubble(item: item, isCompletion: true) {
-                return
-            }
-            upsertItem(turnId: turnId, item: item)
-
-        case .diffUpdated(_, _):
-            return
-
-        case .suggestedActions(_, let actions):
-            applySuggestedActions(actions)
-
-        case .statusChanged(let status):
-            if status == "ended" || status == "failed" {
-                streamPhase = .idle
-                clearSuggestedActions()
-            }
-
-        case .error(_, let message):
-            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                appendMessage(role: .error, content: trimmed)
-            }
-            turnState = .failed
-
-        case .reasoningDelta, .other:
-            return
-        }
-    }
-
-    private func appendAssistantDelta(turnId: String, delta: String) {
-        if let entryId = assistantEntryIdByTurnId[turnId],
-           let index = transcriptIndexById[entryId],
-           case .message(let message) = transcript[index],
-           message.role == .assistant {
-            updateTranscriptEntry(id: entryId) { _ in
-                .message(
-                    SessionMessage(
-                        id: message.id,
-                        role: .assistant,
-                        content: message.content + delta,
-                        timestamp: message.timestamp
-                    )
-                )
-            }
-            return
-        }
-
-        let message = SessionMessage(role: .assistant, content: delta)
-        appendTranscriptEntry(.message(message))
-        assistantEntryIdByTurnId[turnId] = message.id
-    }
-
-    private func applySuggestedActions(_ payloads: [SuggestedActionPayload]) {
-        let sanitized = payloads
-            .compactMap { payload -> SuggestedAction? in
-                let label = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !label.isEmpty else { return nil }
-                let description = payload.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return SuggestedAction(
-                    label: label,
-                    description: (description?.isEmpty == false) ? description : nil
-                )
-            }
-            .prefix(4)
-
-        suggestedActions = Array(sanitized)
-    }
-
     private func clearSuggestedActions() {
         suggestedActions.removeAll()
-    }
-
-    private func upsertItem(turnId: String, item: SessionItem) {
-        guard let itemId = itemIdentifier(item) else { return }
-        let boundedItem = boundedSessionItem(item)
-        itemsById[itemId] = boundedItem
-
-        if itemEntryIdByItemId[itemId] == nil {
-            let entry = TranscriptItem(
-                turnId: turnId,
-                itemId: itemId,
-                card: projectCard(from: boundedItem)
-            )
-            itemEntryIdByItemId[itemId] = entry.id
-            appendTranscriptEntry(.item(entry))
-            return
-        }
-
-        updateTranscriptItem(itemId: itemId, turnId: turnId, item: boundedItem)
-    }
-
-    private func applyItemUpdate(turnId: String, itemId: String, delta: ItemDelta) {
-        guard let existing = itemsById[itemId] else { return }
-
-        let updated = boundedSessionItem(apply(delta: delta, to: existing))
-        itemsById[itemId] = updated
-        updateTranscriptItem(itemId: itemId, turnId: turnId, item: updated)
-    }
-
-    private func updateTranscriptItem(itemId: String, turnId: String, item: SessionItem) {
-        guard let entryId = itemEntryIdByItemId[itemId],
-              let index = transcriptIndexById[entryId],
-              case .item(let existing) = transcript[index] else {
-            return
-        }
-
-        updateTranscriptEntry(id: entryId) { _ in
-            .item(
-                TranscriptItem(
-                    id: existing.id,
-                    turnId: turnId,
-                    itemId: itemId,
-                    card: projectCard(from: item),
-                    timestamp: existing.timestamp
-                )
-            )
-        }
-    }
-
-    private func apply(delta: ItemDelta, to item: SessionItem) -> SessionItem {
-        switch (item, delta) {
-        case let (.command(command), .output(content)):
-            return .command(
-                CommandItem(
-                    id: command.id,
-                    command: command.command,
-                    cwd: command.cwd,
-                    status: command.status,
-                    output: appendDetail(command.output, delta: content),
-                    exitCode: command.exitCode,
-                    durationMs: command.durationMs
-                )
-            )
-
-        case let (.tool(tool), .output(content)):
-            return .tool(
-                ToolItem(
-                    id: tool.id,
-                    name: tool.name,
-                    status: tool.status,
-                    input: tool.input,
-                    output: appendDetail(tool.output, delta: content)
-                )
-            )
-
-        case let (.message(message), .planText(content)):
-            return .message(
-                MessageItem(
-                    id: message.id,
-                    text: appendDetail(message.text, delta: content),
-                    phase: message.phase
-                )
-            )
-
-        case let (.thought(thought), .planText(content)):
-            return .thought(
-                ThoughtItem(
-                    id: thought.id,
-                    text: appendDetail(thought.text, delta: content)
-                )
-            )
-
-        default:
-            return item
-        }
-    }
-
-    private func boundedSessionItem(_ item: SessionItem) -> SessionItem {
-        switch item {
-        case .command(let command):
-            return .command(
-                CommandItem(
-                    id: command.id,
-                    command: command.command,
-                    cwd: command.cwd,
-                    status: command.status,
-                    output: trimDetail(command.output),
-                    exitCode: command.exitCode,
-                    durationMs: command.durationMs
-                )
-            )
-        case .tool(let tool):
-            return .tool(
-                ToolItem(
-                    id: tool.id,
-                    name: tool.name,
-                    status: tool.status,
-                    input: tool.input,
-                    output: trimDetail(tool.output)
-                )
-            )
-        case .message(let message):
-            return .message(
-                MessageItem(
-                    id: message.id,
-                    text: trimDetail(message.text) ?? "",
-                    phase: message.phase
-                )
-            )
-        case .thought(let thought):
-            return .thought(
-                ThoughtItem(
-                    id: thought.id,
-                    text: trimDetail(thought.text) ?? ""
-                )
-            )
-        case .file, .unknown:
-            return item
-        }
-    }
-
-    private func projectCard(from item: SessionItem) -> TranscriptItemCard {
-        switch item {
-        case .command(let command):
-            let label = command.command.isEmpty ? "Command" : command.command.joined(separator: " ")
-            return TranscriptItemCard(
-                type: .command,
-                label: label,
-                status: command.status,
-                detail: trimDetail(command.output)
-            )
-
-        case .file(let file):
-            let paths = file.changes.map(\.path).filter { !$0.isEmpty }
-            let diffs = file.changes.compactMap(\.diff).filter { !$0.isEmpty }
-            let combinedDiff = diffs.joined(separator: "\n")
-            return TranscriptItemCard(
-                type: .file,
-                label: paths.isEmpty ? "File change" : paths.joined(separator: ", "),
-                status: file.status,
-                detail: combinedDiff.isEmpty ? nil : combinedDiff
-            )
-
-        case .message(let message):
-            return TranscriptItemCard(
-                type: .message,
-                label: summarize(message.text),
-                status: nil,
-                detail: nil
-            )
-
-        case .thought(let thought):
-            return TranscriptItemCard(
-                type: .thought,
-                label: summarize(thought.text),
-                status: nil,
-                detail: nil
-            )
-
-        case .tool(let tool):
-            return TranscriptItemCard(
-                type: .tool,
-                label: tool.name,
-                status: tool.status,
-                detail: trimDetail(tool.output)
-            )
-
-        case .unknown(let type, _):
-            return TranscriptItemCard(
-                type: .unknown,
-                label: type,
-                status: nil,
-                detail: nil
-            )
-        }
-    }
-
-    private func summarize(_ text: String, maxLength: Int = 140) -> String {
-        let compact = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard compact.count > maxLength else {
-            return compact.isEmpty ? "(empty)" : compact
-        }
-        return String(compact.prefix(maxLength - 1)) + "…"
-    }
-
-    private func trimDetail(_ text: String?) -> String? {
-        guard let text else { return nil }
-        guard text.count > detailLimit else { return text }
-
-        let keepCount = max(0, detailLimit - truncationSuffix.count)
-        let tail = String(text.suffix(keepCount))
-        return tail + truncationSuffix
-    }
-
-    private func appendDetail(_ existing: String?, delta: String) -> String {
-        let base: String
-        if let existing, existing.hasSuffix(truncationSuffix) {
-            base = String(existing.dropLast(truncationSuffix.count))
-        } else {
-            base = existing ?? ""
-        }
-
-        return trimDetail(base + delta) ?? ""
-    }
-
-    private func itemIdentifier(_ item: SessionItem) -> String? {
-        if let id = item.id, !id.isEmpty {
-            return id
-        }
-
-        guard case .unknown(_, let payload) = item,
-              let object = payload.objectValue,
-              let id = object["id"]?.stringValue,
-              !id.isEmpty else {
-            return nil
-        }
-
-        return id
     }
 
     private func setTranscript(_ entries: [TranscriptEntry]) {

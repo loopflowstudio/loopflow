@@ -46,7 +46,7 @@ impl ExecutionProcessStatus {
 /// Process lifecycle record for an invocation backend.
 ///
 /// `ExecutionProcess` tracks execution state (running/waiting/completed), process IDs,
-/// and container metadata. Usage and conversation events live in `Session`.
+/// and container metadata. User-facing control state lives in `Session`.
 /// The two are linked through shared wave execution lineage (`run_id`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionProcess {

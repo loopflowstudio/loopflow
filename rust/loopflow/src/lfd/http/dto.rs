@@ -2,10 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
-use crate::lfd::conversations::types::ContextSnapshot;
-use crate::lfd::conversations::usage::{
-    StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
-};
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::types::{
     ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run,
@@ -410,63 +406,6 @@ pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
     pub deleted: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ConversationUsageSessionDto {
-    pub step: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wave: Option<String>,
-    pub status: String,
-    pub created_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ended_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ConversationUsageDto {
-    pub object: String,
-    pub conversation_id: String,
-    pub tokens: TokenTotals,
-    pub turns: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<ContextSnapshot>,
-    pub models: BTreeMap<String, u64>,
-    pub conversation: ConversationUsageSessionDto,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct WaveUsageDto {
-    pub object: String,
-    pub wave_id: String,
-    pub tokens: TokenTotals,
-    pub conversations: u64,
-    pub turns: u64,
-    pub models: BTreeMap<String, u64>,
-    pub by_step: BTreeMap<String, StepUsageAggregate>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UsageSummaryDto {
-    pub object: String,
-    pub group_by: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    pub groups: Vec<UsageSummaryGroupAggregate>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UsageTimeseriesDto {
-    pub object: String,
-    pub bucket: String,
-    pub group_by: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    pub buckets: Vec<UsageTimeseriesBucketAggregate>,
 }
 
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {

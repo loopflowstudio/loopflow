@@ -3,7 +3,6 @@ pub mod attention;
 pub mod auth;
 pub mod client;
 pub mod config;
-pub mod conversations;
 pub mod credential_socket;
 pub mod events;
 pub mod executor;

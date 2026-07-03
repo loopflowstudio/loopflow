@@ -282,7 +282,7 @@ curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=
 
 `/v0/catalog` returns the resolved flow + step catalog that Concerto uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
 
-## Conversations API
+## Sessions API
 
 List live sessions:
 
@@ -308,25 +308,6 @@ Attach to the tmux session:
 ```bash
 curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/attach"
 ```
-
-Send input to the provider conversation:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/conversations/<conversation_id>/input" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"fix the failing tests"}'
-```
-
-Stream provider conversation events:
-
-```bash
-curl -N "$LFD_ADDR/v0/conversations/<conversation_id>/events"
-```
-
-Conversation streams include metering events:
-
-- `context_snapshot`
-- `turn_usage`
 
 Cancel the session:
 

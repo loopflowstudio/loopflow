@@ -1,14 +1,9 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
-use crate::lfd::conversations::types::{
-    Conversation, ConversationConfig, ConversationEvent, ConversationStatus,
-    PersistedConversationEvent,
-};
 use crate::lfd::id::LfdId;
 use crate::lfd::store::catalog::{
     list_agent_history_query, list_runs_query, list_triggers_query, list_waves_query, sql, Query,
@@ -21,7 +16,7 @@ use crate::lfd::store::rows::{
     now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
-use crate::lfd::store::{ConversationFilters, ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
@@ -240,25 +235,6 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
-    }
-
-    fn map_conversation_row(row: &rusqlite::Row<'_>) -> Result<Conversation, rusqlite::Error> {
-        let config_text: String = row.get(5)?;
-        let config: ConversationConfig = serde_json::from_str(&config_text).map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(err))
-        })?;
-        Ok(Conversation {
-            id: row.get(0)?,
-            harness: row.get(1)?,
-            status: ConversationStatus::from_i32(row.get::<_, i64>(2)? as i32),
-            run_id: row.get(3)?,
-            provider_session_id: row.get(4)?,
-            config,
-            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)?),
-            ended_at: row
-                .get::<_, Option<i64>>(7)?
-                .map(crate::lfd::store::rows::unix_to_datetime),
-        })
     }
 
     fn map_control_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
@@ -564,304 +540,6 @@ impl SqliteStore {
         Ok(repos)
     }
 
-    // -- Conversations ---------------------------------------------------------------
-
-    pub fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO conversations (id, harness, status, run_id, provider_session_id, config, created_at, ended_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                conversation.id,
-                conversation.harness,
-                conversation.status.as_i32() as i64,
-                conversation.run_id,
-                conversation.provider_session_id,
-                serde_json::to_string(&conversation.config)?,
-                conversation.created_at.unix_timestamp(),
-                conversation.ended_at.map(|dt| dt.unix_timestamp()),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_conversation(&self, conversation_id: &LfdId) -> StoreResult<Option<Conversation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
-             FROM conversations WHERE id = ?1",
-        )?;
-        let row = stmt
-            .query_row(params![conversation_id], Self::map_conversation_row)
-            .optional()?;
-        Ok(row)
-    }
-
-    pub fn get_active_conversation_for_run(
-        &self,
-        run_id: &str,
-    ) -> StoreResult<Option<Conversation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
-             FROM conversations
-             WHERE run_id = ?1 AND status IN (?2, ?3, ?4)
-             ORDER BY created_at DESC
-             LIMIT 1",
-        )?;
-        let row = stmt
-            .query_row(
-                params![
-                    run_id,
-                    ConversationStatus::Starting.as_i32() as i64,
-                    ConversationStatus::Active.as_i32() as i64,
-                    ConversationStatus::Ending.as_i32() as i64
-                ],
-                Self::map_conversation_row,
-            )
-            .optional()?;
-        Ok(row)
-    }
-
-    pub fn update_provider_session_id(
-        &self,
-        conversation_id: &LfdId,
-        provider_session_id: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE conversations SET provider_session_id = ?2 WHERE id = ?1",
-            params![conversation_id, provider_session_id],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn update_conversation_status(
-        &self,
-        conversation_id: &LfdId,
-        status: ConversationStatus,
-        ended_at: Option<i64>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE conversations
-             SET status = ?2, ended_at = COALESCE(?3, ended_at)
-             WHERE id = ?1",
-            params![conversation_id, status.as_i32() as i64, ended_at],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn append_conversation_event(
-        &self,
-        conversation_id: &LfdId,
-        seq: i64,
-        event: &ConversationEvent,
-        created_at: i64,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO conversation_events (conversation_id, seq, event_type, data, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                conversation_id,
-                seq,
-                event.event_type(),
-                serde_json::to_string(event)?,
-                created_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_conversation_events(
-        &self,
-        conversation_id: &LfdId,
-        after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedConversationEvent>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = if after_seq.is_some() {
-            conn.prepare(
-                "SELECT conversation_id, seq, data, created_at
-                 FROM conversation_events
-                 WHERE conversation_id = ?1 AND seq > ?2
-                 ORDER BY seq ASC",
-            )?
-        } else {
-            conn.prepare(
-                "SELECT conversation_id, seq, data, created_at
-                 FROM conversation_events
-                 WHERE conversation_id = ?1
-                 ORDER BY seq ASC",
-            )?
-        };
-
-        let mut rows = if let Some(after_seq) = after_seq {
-            stmt.query(params![conversation_id, after_seq])?
-        } else {
-            stmt.query(params![conversation_id])?
-        };
-
-        let mut events = Vec::new();
-        while let Some(row) = rows.next()? {
-            let data: String = row.get(2)?;
-            let event: ConversationEvent = serde_json::from_str(&data)?;
-            events.push(PersistedConversationEvent {
-                conversation_id: row.get(0)?,
-                seq: row.get(1)?,
-                event,
-                created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)?),
-            });
-        }
-        Ok(events)
-    }
-
-    pub fn list_conversations_by_statuses(
-        &self,
-        statuses: &[ConversationStatus],
-    ) -> StoreResult<Vec<Conversation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let placeholders: Vec<String> = statuses
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect();
-        let sql = format!(
-            "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
-             FROM conversations WHERE status IN ({})
-             ORDER BY created_at ASC",
-            placeholders.join(", ")
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<Box<dyn ToSql>> = statuses
-            .iter()
-            .map(|s| Box::new(s.as_i32() as i64) as Box<dyn ToSql>)
-            .collect();
-        let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let mut rows = stmt.query(param_refs.as_slice())?;
-        let mut sessions = Vec::new();
-        while let Some(row) = rows.next()? {
-            sessions.push(Self::map_conversation_row(row)?);
-        }
-        Ok(sessions)
-    }
-
-    pub fn list_events_for_conversations(
-        &self,
-        conversation_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
-        if conversation_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let placeholders: Vec<String> = (1..=conversation_ids.len())
-            .map(|i| format!("?{i}"))
-            .collect();
-        let sql = format!(
-            "SELECT conversation_id, seq, data, created_at
-             FROM conversation_events
-             WHERE conversation_id IN ({})
-             ORDER BY conversation_id, seq ASC",
-            placeholders.join(", ")
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn ToSql> = conversation_ids.iter().map(|id| id as &dyn ToSql).collect();
-        let mut rows = stmt.query(params.as_slice())?;
-        let mut result: HashMap<LfdId, Vec<PersistedConversationEvent>> = HashMap::new();
-        while let Some(row) = rows.next()? {
-            let conversation_id: LfdId = row.get(0)?;
-            let data: String = row.get(2)?;
-            let event: ConversationEvent = serde_json::from_str(&data)?;
-            result
-                .entry(conversation_id.clone())
-                .or_default()
-                .push(PersistedConversationEvent {
-                    conversation_id,
-                    seq: row.get(1)?,
-                    event,
-                    created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)?),
-                });
-        }
-        Ok(result)
-    }
-
-    pub fn list_conversations_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Conversation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.harness, s.status, s.run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
-             FROM conversations s
-             JOIN runs wr ON wr.id = s.run_id
-             WHERE wr.wave_id = ?1
-             ORDER BY s.created_at ASC",
-        )?;
-        let mut rows = stmt.query(params![wave_id])?;
-        let mut sessions = Vec::new();
-        while let Some(row) = rows.next()? {
-            sessions.push(Self::map_conversation_row(row)?);
-        }
-        Ok(sessions)
-    }
-
-    pub fn list_conversations_filtered(
-        &self,
-        filters: &ConversationFilters,
-    ) -> StoreResult<Vec<Conversation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut sql = String::from(
-            "SELECT s.id, s.harness, s.status, s.run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
-             FROM conversations s",
-        );
-        let mut predicates = Vec::new();
-        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
-
-        if filters.wave.is_some() || filters.flow.is_some() {
-            sql.push_str(" JOIN runs wr ON wr.id = s.run_id");
-        }
-        if let Some(wave) = filters.wave.as_ref() {
-            predicates.push(format!("wr.wave_id = ?{}", params.len() + 1));
-            params.push(Box::new(wave.clone()));
-        }
-        if let Some(flow) = filters.flow.as_ref() {
-            predicates.push(format!("wr.snapshot_flow = ?{}", params.len() + 1));
-            params.push(Box::new(flow.clone()));
-        }
-        if let Some(step) = filters.step.as_ref() {
-            predicates.push(format!(
-                "json_extract(s.config, '$.step') = ?{}",
-                params.len() + 1
-            ));
-            params.push(Box::new(step.clone()));
-        }
-        if let Some(from) = filters.from {
-            predicates.push(format!("s.created_at >= ?{}", params.len() + 1));
-            params.push(Box::new(from));
-        }
-        if let Some(to) = filters.to {
-            predicates.push(format!("s.created_at <= ?{}", params.len() + 1));
-            params.push(Box::new(to));
-        }
-        if !predicates.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&predicates.join(" AND "));
-        }
-        sql.push_str(" ORDER BY s.created_at ASC");
-
-        let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
-        let mut rows = stmt.query(param_refs.as_slice())?;
-        let mut sessions = Vec::new();
-        while let Some(row) = rows.next()? {
-            sessions.push(Self::map_conversation_row(row)?);
-        }
-        Ok(sessions)
-    }
-
     const TERMINAL_SESSION_COLS: &str =
         "id, wave_id, run_id, parent_session_id, session_use, step, agent, cwd, argv, env, source, tmux_name, status, \
          completion_token, created_at, attached_at, started_at, completed_at";
@@ -898,14 +576,14 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_control_session(&self, conversation_id: &LfdId) -> StoreResult<Option<Session>> {
+    pub fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT {} FROM terminal_sessions WHERE id = ?1",
             Self::TERMINAL_SESSION_COLS
         ))?;
         let row = stmt
-            .query_row(params![conversation_id], Self::map_control_session_row)
+            .query_row(params![session_id], Self::map_control_session_row)
             .optional()?;
         Ok(row)
     }

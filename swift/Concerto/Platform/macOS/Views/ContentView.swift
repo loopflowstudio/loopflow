@@ -560,8 +560,6 @@ struct ContentView: View {
     private var detailContent: some View {
         if repoState.showingFlows {
             FlowsView()
-        } else if repoState.showingAnalytics {
-            AnalyticsDashboardView()
         } else if let wave = repoState.selectedWave {
             WaveWorkspaceView(wave: wave)
                 .id(wave.id)

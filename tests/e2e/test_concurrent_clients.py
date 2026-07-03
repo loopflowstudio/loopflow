@@ -71,32 +71,6 @@ def test_both_clients_stream_output(lfd_runtime: LfdRuntime, lf_client: Client) 
     assert lines["client_a"] == lines["client_b"], "both clients should observe the same result"
 
 
-def test_suggested_actions_event_type_is_parseable() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            text="\n".join(
-                [
-                    "id: 7",
-                    (
-                        'data: {"type":"suggested_actions","turn_id":"turn_1",'
-                        '"actions":[{"label":"Try again"}]}'
-                    ),
-                    "",
-                ]
-            ),
-        )
-
-    client = _mock_client(handler)
-    try:
-        events = list(client.stream_conversation_events("session-1", timeout=1))
-    finally:
-        client.close()
-
-    assert len(events) == 1
-    assert events[0].event["type"] == "suggested_actions"
-
-
 async def _assert_dual_ws_wave_event(client: Client, runtime: LfdRuntime) -> None:
     ws_url = _ws_url(runtime.base_url, "/ws")
     connect_kwargs = _ws_connect_kwargs(runtime.token, _TIMEOUT_SECONDS)

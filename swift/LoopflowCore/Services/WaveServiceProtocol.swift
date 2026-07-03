@@ -38,11 +38,6 @@ public protocol WaveServiceProtocol: Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession
-    func streamConversationEvents(
-        conversationId: String,
-        afterSeq: Int?
-    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error>
     func stopSession(_ id: String) async throws -> AgentSession
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
@@ -69,13 +64,4 @@ public protocol WaveServiceProtocol: Sendable {
     func removeRepo(path: String) async throws
     func checkConnection() async throws
     func fileDiff(waveId: String, path: String) async throws -> String
-    func usageSummary(
-        filters: UsageAnalyticsFilters,
-        groupBy: UsageGroupBy
-    ) async throws -> UsageSummary
-    func usageTimeseries(
-        filters: UsageAnalyticsFilters,
-        bucket: UsageTimeBucket,
-        groupBy: UsageGroupBy
-    ) async throws -> UsageTimeseries
 }

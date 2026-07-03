@@ -114,13 +114,11 @@ public final class RepoState {
     public var selectedWaveId: String? {
         didSet {
             if selectedWaveId != nil {
-                showingAnalytics = false
                 showingFlows = false
             }
         }
     }
 
-    public var showingAnalytics = false
     public var showingFlows = false
 
     /// Fetch the flow + step catalog for the currently selected repo.
@@ -1566,21 +1564,6 @@ public final class RepoState {
 
     public func fileDiff(waveId: String, path: String) async throws -> String {
         try await waveService.fileDiff(waveId: waveId, path: path)
-    }
-
-    public func usageSummary(
-        filters: UsageAnalyticsFilters,
-        groupBy: UsageGroupBy
-    ) async throws -> UsageSummary {
-        try await waveService.usageSummary(filters: filters, groupBy: groupBy)
-    }
-
-    public func usageTimeseries(
-        filters: UsageAnalyticsFilters,
-        bucket: UsageTimeBucket,
-        groupBy: UsageGroupBy
-    ) async throws -> UsageTimeseries {
-        try await waveService.usageTimeseries(filters: filters, bucket: bucket, groupBy: groupBy)
     }
 
     /// Apply the daemon's initial wave snapshot, scoped to this window's repo.

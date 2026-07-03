@@ -52,10 +52,6 @@ const ALL_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/009_wave_queue_state.sql"),
     },
     Migration {
-        version: "010_conversations",
-        sql: include_str!("migrations/010_conversations.sql"),
-    },
-    Migration {
         version: "011_chords_data_model",
         sql: include_str!("migrations/011_chords_data_model.sql"),
     },
@@ -390,7 +386,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for expected in ["waves", "conversations", "repos", "triggers", "runs"] {
+        for expected in ["waves", "repos", "triggers", "runs"] {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"

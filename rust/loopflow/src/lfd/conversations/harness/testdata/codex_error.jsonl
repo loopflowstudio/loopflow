@@ -1,3 +1,0 @@
-{"method":"turn/started","params":{"turn":{"id":"turn_codex_err"}}}
-{"method":"error","params":{"code":"codex_internal","message":"boom"}}
-{"method":"turn/completed","params":{"turn":{"id":"turn_codex_err","status":"failed"}}}

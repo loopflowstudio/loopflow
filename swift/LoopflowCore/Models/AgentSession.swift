@@ -284,37 +284,3 @@ public struct ContextSnapshot: Sendable, Hashable {
         self.hasClipboard = hasClipboard
     }
 }
-
-public enum AgentSessionEvent: Sendable, Hashable {
-    case turnStarted(turnId: String)
-    case turnCompleted(turnId: String, status: String)
-    case contextSnapshot(ContextSnapshot)
-    case itemStarted(turnId: String, item: SessionItem)
-    case itemUpdated(turnId: String, itemId: String, delta: ItemDelta)
-    case itemCompleted(turnId: String, item: SessionItem)
-    case textDelta(turnId: String, content: String)
-    case reasoningDelta(turnId: String, content: String)
-    case diffUpdated(turnId: String, diff: String)
-    case suggestedActions(turnId: String, actions: [SuggestedActionPayload])
-    case statusChanged(status: String)
-    case error(code: String, message: String)
-    case other(type: String, payload: JSONValue)
-}
-
-public struct ConversationEventEnvelope: Sendable, Hashable {
-    public let seq: Int?
-    public let event: AgentSessionEvent?
-    public let replayCompletedLastSeq: Int?
-
-    public init(seq: Int?, event: AgentSessionEvent) {
-        self.seq = seq
-        self.event = event
-        self.replayCompletedLastSeq = nil
-    }
-
-    public init(replayCompletedLastSeq: Int?) {
-        self.seq = nil
-        self.event = nil
-        self.replayCompletedLastSeq = replayCompletedLastSeq
-    }
-}

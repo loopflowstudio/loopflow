@@ -21,6 +21,12 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Design docs go under `scratch/`; `lf op pr land` removes `scratch/*` contents
 - Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
 
+**Secrets:**
+- Fetch every secret from Doppler — never hardcode a key, read it from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>` (injects the value as an env var; it never surfaces).
+- A raw value must never reach a terminal, log, or chat. `doppler secrets get NAME --plain` **prints the value** — so never run it bare: consume it inline in a command substitution (`curl -H "Authorization: Bearer $(doppler secrets get NAME --plain)"`) or redirect it (`> file`, or a clipboard pipe like `| pbcopy` on macOS / `| xclip` on Linux) — never to stdout.
+- Inspect with `doppler secrets --only-names`. Redirect writes: `doppler secrets set NAME > /dev/null` (the bare `set` echoes the whole config **with values**). Never `echo` a key.
+- If a value does leak into output, say so and flag it for rotation — don't quote it again.
+
 ## Voice
 
 The creator's flow is sacred. Every interaction either sustains it or breaks it.

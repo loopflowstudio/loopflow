@@ -30,6 +30,14 @@ final class PortfolioRepoState {
         return wave
     }
 
+    /// Start the wave's /goal agent if it isn't running, then resolve its tmux
+    /// connection so the caller can attach an embedded terminal. Reuses the
+    /// proven `waves/{id}/run` + attach routes.
+    func attachWaveAgent(waveId: String) async throws -> SessionConnectionInfo {
+        let session = try await waveService.ensureWaveAgent(waveId: waveId)
+        return try await waveService.attachSession(session.id)
+    }
+
     func refresh() async {
         isLoading = true
         defer { isLoading = false }

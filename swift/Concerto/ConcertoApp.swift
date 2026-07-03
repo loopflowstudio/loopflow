@@ -199,7 +199,7 @@ struct ConcertoApp: App {
                 } else if let launchRepoURL {
                     RepoWindow(repoURL: launchRepoURL, portfolioService: portfolioService)
                 } else {
-                    RepoSidebarWindow(portfolioService: portfolioService)
+                    WavesView(portfolioService: portfolioService)
                 }
             }
             .tint(.loopflowBurgundy)
@@ -222,7 +222,7 @@ struct ConcertoApp: App {
         .defaultSize(width: 900, height: 700)
 
         Window("Portfolio", id: "portfolio") {
-            PortfolioWindow(portfolioService: portfolioService)
+            WavesView(portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(theme.preferredScheme)
                 .environment(\.palette, theme.palette)

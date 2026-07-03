@@ -33,6 +33,12 @@ lfq sessions                 # every live session — the wave agent and its wor
 lfq attach <session-id>      # jump into one over tmux
 ```
 
+Run the outer loop in your terminal:
+
+```bash
+lf wave designer             # repeat lf -b goal designer --once until Ctrl-C
+```
+
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash

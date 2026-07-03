@@ -148,8 +148,9 @@ pub enum Commands {
         tmux: bool,
     },
     /// Run a wave's progress loop: loopflow owns the outer loop, each pass is
-    /// one bounded `lf goal <wave> --once`
-    Loop {
+    /// one bounded `lf -b goal <wave> --once`
+    #[command(name = "wave", alias = "loop")]
+    Wave {
         /// Wave name (matches wave/<name>/)
         name: String,
     },

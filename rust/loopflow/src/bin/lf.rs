@@ -44,7 +44,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 
 /// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &[":", "op", "goal", "loop", "help"];
+const KNOWN_COMMANDS: &[&str] = &[":", "op", "goal", "wave", "loop", "help"];
 
 fn is_value_flag(arg: &str) -> bool {
     VALUE_FLAGS.contains(&arg)
@@ -300,7 +300,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Goal { name, once, tmux }) => in_repo_runtime(&args, |_| {
             loopflow::lf::commands::goal::run(name, *once, *tmux, &cli)
         }),
-        Some(Commands::Loop { name }) => {
+        Some(Commands::Wave { name }) => {
             in_repo_runtime(&args, |_| loopflow::lf::commands::r#loop::run(name))
         }
         Some(Commands::External(external_args)) => {

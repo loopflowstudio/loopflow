@@ -177,13 +177,14 @@ pub fn prepare_goal_launch(
     repo_root: PathBuf,
     goal_message: String,
     agent: Option<String>,
+    surface: Surface,
     yolo_mode: bool,
 ) -> Result<PreparedLaunchPrompt, CoreError> {
     prepare_launch_prompt(
         config,
         LaunchPromptInput {
             repo_root: repo_root.clone(),
-            surface: Surface::Cli,
+            surface,
             no_loopflow: false,
             message: Some(goal_message),
             agent,

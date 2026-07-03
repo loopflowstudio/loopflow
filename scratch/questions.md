@@ -32,3 +32,12 @@ not substantive content. Resolution taken:
 live — reset `wave/goals/GOAL.md`'s `asana_project` and the eight existing
 `asana_id`s to the branch values, and restore the three stripped IDs. But run
 `lf op pm` to re-register the lf-loop goals in whichever project you keep.
+
+## Implement pass scope: lf wave progress arm first
+
+The design calls for the supervisor, monitor, cron, and chat arms in one branch.
+This implementation pass took the smallest shippable slice: rename the foreground
+progress command to `lf wave` (with `lf loop` as an alias) and retain each
+bounded pass's stdout/stderr under `wave/<name>/streams/` for the future monitor
+arm. Cron scheduling, monitor summarization, and in-process chat API remain
+separate follow-on work.

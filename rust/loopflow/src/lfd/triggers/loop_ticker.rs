@@ -98,7 +98,7 @@ async fn tick_loop_waves(
                         "max iterations exceeded, pausing wave"
                     );
                     let mut paused_wave = wave.clone();
-                    paused_wave.status = WaveStatus::Paused;
+                    paused_wave.set_status(WaveStatus::Paused);
                     if let Err(err) = store.update_wave(&paused_wave).await {
                         tracing::error!(
                             wave_id = %paused_wave.id,

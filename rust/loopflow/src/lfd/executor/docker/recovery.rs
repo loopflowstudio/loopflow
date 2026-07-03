@@ -223,7 +223,7 @@ impl DockerExecutor {
 
         if let Some(wave_status) = next_wave_status {
             if let Some(mut wave) = self.store.get_wave(wave_id).await? {
-                wave.status = wave_status;
+                wave.set_status(wave_status);
                 let _ = self.store.update_wave(&wave).await;
             }
         }
@@ -255,7 +255,7 @@ impl DockerExecutor {
 
                 if should_fail_wave {
                     if let Some(mut wave) = self.store.get_wave(&run.wave_id).await? {
-                        wave.status = WaveStatus::Failed;
+                        wave.set_status(WaveStatus::Failed);
                         let _ = self.store.update_wave(&wave).await;
                     }
                 }

@@ -33,10 +33,10 @@ async fn pause_wave_after_activation_conflict(
     let Some(mut paused_wave) = store.get_wave(wave.id()).await.ok().flatten() else {
         return;
     };
-    if paused_wave.status == WaveStatus::Paused {
+    if paused_wave.status() == WaveStatus::Paused {
         return;
     }
-    paused_wave.status = WaveStatus::Paused;
+    paused_wave.set_status(WaveStatus::Paused);
     if let Err(update_error) = store.update_wave(&paused_wave).await {
         tracing::warn!(
             wave_id = %wave.id(),

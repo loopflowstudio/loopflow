@@ -198,20 +198,25 @@ impl Store {
         }
     }
 
-    /// Persist the temporary single-repo mirror alongside the flat wave row.
-    /// Until the executor moves onto `RepoWork`, the flat fields are the source
-    /// of truth and `wave_repos` must reflect them exactly.
+    /// Persist the wave's `repos` as the source of truth for per-repo execution
+    /// state (worktree/branch/status/iteration). The flat wave columns are
+    /// derived from the rollup in `upsert_wave`. If a wave somehow carries no
+    /// repos, synthesize its primary row from the flat fields so we never wipe
+    /// the `wave_repos` table.
     async fn persist_wave_repos(&self, wave: &Wave) -> StoreResult<()> {
-        let repos = vec![RepoWork {
-            repo: wave.repo.clone(),
-            worktree: String::new(),
-            branch: String::new(),
-            status: wave.status,
-            iteration: wave.iteration,
-            cycle_start_iteration: wave.cycle_start_iteration,
-            position: 0,
-        }];
-        self.replace_wave_repos(wave.id(), &repos).await
+        if wave.repos.is_empty() {
+            let repos = vec![RepoWork {
+                repo: wave.repo.clone(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: wave.status,
+                iteration: wave.iteration,
+                cycle_start_iteration: wave.cycle_start_iteration,
+                position: 0,
+            }];
+            return self.replace_wave_repos(wave.id(), &repos).await;
+        }
+        self.replace_wave_repos(wave.id(), &wave.repos).await
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
@@ -2137,7 +2142,7 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.status = WaveStatus::Paused;
+        wave.set_status(WaveStatus::Paused);
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
@@ -2508,14 +2513,14 @@ mod tests {
 
         // Wave that was actively running when lfd died.
         let mut running_wave = make_wave("/repo-stuck-running");
-        running_wave.status = WaveStatus::Running;
+        running_wave.set_status(WaveStatus::Running);
         store.create_wave(&running_wave).await.expect("create wave");
         let mut running_run = make_run(&running_wave, RunStatus::Running);
         store.create_run(&running_run).await.expect("create run");
 
         // Wave that was at an interactive waitpoint.
         let mut waiting_wave = make_wave("/repo-stuck-waiting");
-        waiting_wave.status = WaveStatus::Waiting;
+        waiting_wave.set_status(WaveStatus::Waiting);
         store
             .create_wave(&waiting_wave)
             .await
@@ -2528,7 +2533,7 @@ mod tests {
 
         // Paused wave with no active run — must be left alone.
         let mut paused_wave = make_wave("/repo-paused");
-        paused_wave.status = WaveStatus::Paused;
+        paused_wave.set_status(WaveStatus::Paused);
         store
             .create_wave(&paused_wave)
             .await

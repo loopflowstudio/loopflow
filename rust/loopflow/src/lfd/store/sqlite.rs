@@ -1268,6 +1268,14 @@ impl SqliteStore {
                 WaveStatus::Waiting.as_i32() as i64,
             ],
         )?;
+        conn.execute(
+            Self::sql(Query::ResetStaleActiveRepos),
+            params![
+                WaveStatus::Idle.as_i32() as i64,
+                WaveStatus::Running.as_i32() as i64,
+                WaveStatus::Waiting.as_i32() as i64,
+            ],
+        )?;
         Ok(updated as u32)
     }
 

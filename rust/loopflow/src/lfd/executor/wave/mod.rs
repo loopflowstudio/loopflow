@@ -914,7 +914,7 @@ impl WaveExecutor {
 
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
-            wave.status = status;
+            wave.set_status(status);
             if let Err(err) = self.store.update_wave(&wave).await {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
@@ -2161,7 +2161,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        wave.status = WaveStatus::Waiting;
+        wave.set_status(WaveStatus::Waiting);
         store
             .update_wave(&wave)
             .await

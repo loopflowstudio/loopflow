@@ -1321,6 +1321,12 @@ impl PostgresStore {
                     &[&WaveStatus::Idle.as_i32(), &&stale_wave_statuses[..]],
                 )
                 .await?;
+            client
+                .execute(
+                    Self::sql(Query::ResetStaleActiveRepos),
+                    &[&WaveStatus::Idle.as_i32(), &&stale_wave_statuses[..]],
+                )
+                .await?;
             Ok(updated as u32)
         })
         .await

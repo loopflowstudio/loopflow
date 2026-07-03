@@ -80,6 +80,7 @@ pub(crate) enum Query {
     UpsertWaveRepo,
     DeleteWaveReposByWave,
     GetPendingActivationForWave,
+    ResetStaleActiveRepos,
 }
 
 impl Query {
@@ -155,10 +156,11 @@ impl Query {
         Self::UpsertWaveRepo,
         Self::DeleteWaveReposByWave,
         Self::GetPendingActivationForWave,
+        Self::ResetStaleActiveRepos,
     ];
 }
 
-const QUERY_COUNT: usize = Query::GetPendingActivationForWave as usize + 1;
+const QUERY_COUNT: usize = Query::ResetStaleActiveRepos as usize + 1;
 
 #[derive(Debug, Clone, Copy)]
 struct QueryDef {
@@ -543,6 +545,15 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         template: "SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND trigger_id IS NULL",
         sqlite_override: None,
         postgres_override: None,
+    },
+    // ResetStaleActiveRepos — mirror ResetStaleActiveWaves onto per-repo rows so
+    // the rolled-up wave status un-sticks after an lfd restart.
+    QueryDef {
+        template: "UPDATE wave_repos SET status = {p1}\n             WHERE status IN ({p2}, {p3})",
+        sqlite_override: None,
+        postgres_override: Some(
+            "UPDATE wave_repos SET status = {p1}\n             WHERE status = ANY({p2})",
+        ),
     },
 ];
 

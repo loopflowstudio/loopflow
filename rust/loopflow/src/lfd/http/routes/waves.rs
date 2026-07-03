@@ -295,8 +295,9 @@ pub async fn create_wave_handler(
         workers,
     };
     if let Some(status) = status {
-        wave.status = WaveStatus::from_str(&status)
+        let parsed = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+        wave.set_status(parsed);
     }
     state
         .store
@@ -663,8 +664,9 @@ pub async fn update_wave_handler(
     }
     wave.workers = update_wave_workers(wave.workers, payload.workers, payload.serialized);
     if let Some(status) = payload.status {
-        wave.status = WaveStatus::from_str(&status)
+        let parsed = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+        wave.set_status(parsed);
     }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {
@@ -895,11 +897,11 @@ async fn apply_run_wave_overrides(
         }
     }
 
-    if wave.status == WaveStatus::Paused {
-        wave.status = WaveStatus::Idle;
+    if wave.status() == WaveStatus::Paused {
+        wave.set_status(WaveStatus::Idle);
     }
-    if wave.status == WaveStatus::Idle {
-        wave.status = WaveStatus::Running;
+    if wave.status() == WaveStatus::Idle {
+        wave.set_status(WaveStatus::Running);
     }
 
     state
@@ -1074,8 +1076,8 @@ async fn start_run(
         }
     }
 
-    if wave.status == WaveStatus::Paused {
-        wave.status = WaveStatus::Idle;
+    if wave.status() == WaveStatus::Paused {
+        wave.set_status(WaveStatus::Idle);
     }
 
     state
@@ -1327,11 +1329,11 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.status = if has_auto_trigger {
+            wave.set_status(if has_auto_trigger {
                 WaveStatus::Paused
             } else {
                 WaveStatus::Failed
-            };
+            });
             state
                 .store
                 .update_wave(&wave)
@@ -1347,7 +1349,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.status = WaveStatus::Paused;
+            wave.set_status(WaveStatus::Paused);
             state
                 .store
                 .update_wave(&wave)

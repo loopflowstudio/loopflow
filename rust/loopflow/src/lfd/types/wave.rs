@@ -334,16 +334,64 @@ impl Wave {
         &self.area
     }
 
+    /// Wave-level status, rolled up over `repos`. `Paused` is a wave-level flag
+    /// carried by the flat `status` field (restored from the `paused` column on
+    /// read); otherwise the status is derived from the per-repo execution state:
+    /// any running wins, then failed, then waiting, else idle.
     pub fn status(&self) -> WaveStatus {
-        self.status
+        if self.status == WaveStatus::Paused {
+            return WaveStatus::Paused;
+        }
+        if self.repos.is_empty() {
+            return self.status;
+        }
+        if self.repos.iter().any(|r| r.status == WaveStatus::Running) {
+            WaveStatus::Running
+        } else if self.repos.iter().any(|r| r.status == WaveStatus::Failed) {
+            WaveStatus::Failed
+        } else if self.repos.iter().any(|r| r.status == WaveStatus::Waiting) {
+            WaveStatus::Waiting
+        } else {
+            WaveStatus::Idle
+        }
     }
 
+    /// Max iteration across `repos`. Falls back to the flat field only when a
+    /// wave carries no repos (shouldn't happen outside construction).
     pub fn iteration(&self) -> u32 {
-        self.iteration
+        self.repos
+            .iter()
+            .map(|r| r.iteration)
+            .max()
+            .unwrap_or(self.iteration)
     }
 
     pub fn cycle_start_iteration(&self) -> u32 {
-        self.cycle_start_iteration
+        self.repos
+            .iter()
+            .map(|r| r.cycle_start_iteration)
+            .max()
+            .unwrap_or(self.cycle_start_iteration)
+    }
+
+    /// Set the wave's execution status. During the repo→repos migration this
+    /// writes both the flat field (kept as the paused flag until Step 7) and
+    /// every `RepoWork`, so reads through `status()` and per-repo readers agree.
+    pub fn set_status(&mut self, status: WaveStatus) {
+        self.status = status;
+        for repo in &mut self.repos {
+            repo.status = status;
+        }
+    }
+
+    /// Mutable access to the `RepoWork` for `repo`, falling back to the primary
+    /// repo when there's no exact match. Used by the executor to record per-repo
+    /// status/iteration after dispatching a run.
+    pub fn repo_work_mut(&mut self, repo: &str) -> Option<&mut RepoWork> {
+        if let Some(pos) = self.repos.iter().position(|r| r.repo == repo) {
+            return self.repos.get_mut(pos);
+        }
+        self.repos.first_mut()
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {

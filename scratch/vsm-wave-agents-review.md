@@ -36,14 +36,15 @@ The existing `govern-*` flows were not changed. No scheduler, lfd wave execution
 ## Validation
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 cargo build
-cargo clippy -- -D warnings
-cargo test -p loopflow
+cargo clippy --all-targets -- -D warnings
 cargo test --all
+uv run ruff check python/loopflow python/tests
 uv run pytest python/tests/
+tests/e2e/test_smoke.sh
 perl -e 'alarm shift; exec @ARGV' 30 cargo run -q -p loopflow --bin lf -- goal root --system s3 --once
-git diff --check
+git diff --check main...HEAD
 ```
 
 The smoke command completed one iteration and halted because `root` has no roadmap handle or metrics to act on.

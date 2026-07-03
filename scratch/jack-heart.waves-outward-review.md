@@ -7,12 +7,15 @@
 - Reshaped Concerto into the `WavesView` surface: repo rail, disk-authored wave list, and embedded tmux attach path using bundled `lf` instead of lfd run/attach routes.
 - Trimmed the old native-chat and multipane macOS view stack, plus stale Swift tests for deleted surfaces.
 - Added `ux-research` loop steps and reorganized wave state into current `wave/concerto`, `wave/goals`, `wave/release`, and `wave/website` goals.
+- Gate tightened the launch path so detached tmux sessions cannot keep Concerto's stdout pipe open, and moved macOS process launching behind a `Platform/macOS` helper to keep shared state code platform-clean.
 
 ## Key choices
 
 - `lf goal --tmux` names sessions from the worktree basename (`lf-<repo>-<wave>`), matching Concerto's derived handle and lfd's `tmux_session_name` sanitizer.
 - Worktree creation uses a stable `{user}.{name}` branch. Gate tightened this path so an existing stable branch without a worktree is reused with `git worktree add <path> <branch>` instead of failing.
+- `lf goal --tmux` redirects the detached tmux server's stdio to `/dev/null`; Concerto polls a temp file for the first printed handle line, so GUI launch does not block waiting for EOF from a long-lived detached child.
 - Concerto treats disk-authored waves as the baseline and lfd waves as an optional overlay. Running state for disk rows comes from `tmux has-session`.
+- The Swift launch implementation lives under platform shells (`Platform/macOS` real launcher, `Platform/iOS` unavailable stub); `PortfolioRepoState` keeps only repo/wave state and deterministic naming helpers.
 - The Swift single-repo convenience initializer remains for local tests/placeholders, while wire DTO parsing requires the new `repos` field.
 - Stale tests for deleted UI components were removed rather than preserving tests for code intentionally cut from the branch.
 
@@ -22,9 +25,12 @@ Rust owns the launch contract: resolve the main repo, derive the wave worktree, 
 
 The wave wire model now carries identity at the wave level and execution state per repo. Store reads stitch `wave_repos` into `Wave.repos`; HTTP DTOs expose `RepoWorkDto`; Python and Swift models parse the same nested fixture.
 
+The local Concerto launcher resolves the bundled `lf`, runs `lf goal <wave> --tmux` from the repo root, captures the first complete stdout line as the tmux handle, and returns a `SessionConnectionInfo` for the existing Ghostty attach surface.
+
 ## Risks and bottlenecks
 
 - `lf goal --tmux` depends on `tmux`, git worktrees, and the bundled `lf` path being available in the GUI process environment.
+- The stdout-handle contract assumes `lf goal --tmux` prints exactly one handle line on success.
 - Existing local lfd databases are not migrated compatibly; this branch follows the hard-cut internal-data posture in the design doc.
 - `lf goal --tmux` does not register sessions in lfd yet, so lfd-backed live status still cannot see these client-launched sessions.
 - The hard DTO cut means downstream callers still reading `wave.repo` need to move to `wave.repos[0].repo` or repo membership checks.
@@ -41,18 +47,24 @@ The wave wire model now carries identity at the wave level and execution state p
 
 Passed:
 
-- `cargo fmt --check`
-- `cargo clippy -- -D warnings`
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets -- -D warnings`
 - `cargo test --all`
 - `cargo test -p loopflow goal::tests`
 - `uv run python -m pytest python/tests/` (`144 passed`)
 - `swift test --package-path swift` (`280` Swift Testing tests plus XCTest shim passed)
-- `uv run python -m pytest tests/regression/test_session_dto_exposes_tmux_name.py -v`
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`
+- `uv run python -m ruff check scripts/concerto-dev.py scripts/check_swift_multiplatform_boundaries.py`
+- `uv run python -m py_compile scripts/concerto-dev.py scripts/check_swift_multiplatform_boundaries.py`
+- `uv run python -m pytest tests/regression/ -v` (`4 passed`)
 - `uv run python -m pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` (`13 passed`)
 - `tests/e2e/test_smoke.sh`
+- `cd website && uv run python dev.py test` (`61 passed, 3 skipped`)
+- `docker version && cargo test -p loopflow docker_ -- --nocapture` (`11 passed`; Docker socket-dependent cases self-skipped locally)
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -only-testing:ConcertoTests/KeyboardRouterTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` (`17 passed`)
 
 Attempted but not green locally:
 
-- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
-  - Built and ran the unit test bundle, but the run failed after the UI runner could not initialize: `Authentication canceled. Canceled by user.`
-  - The same run also recorded `KeyboardRouterTests` chord-timeout assertions after an 85s delayed test pass; `swift test --package-path swift` passed that suite normally.
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -skip-testing:ConcertoUITests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
+  - Built and ran the unit bundle, but failed locally on the pre-existing `KeyboardRouterTests` chord-timeout test after the runner delayed MainActor scheduling by ~21s.
+  - `swift test --package-path swift` passed the same suite, and an isolated Xcode run of `ConcertoTests/KeyboardRouterTests` passed (`17 passed`). The failing file is not in this branch's `main...HEAD` diff.

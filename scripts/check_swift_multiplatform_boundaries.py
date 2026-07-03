@@ -43,7 +43,7 @@ def _resolve_main_ref() -> str:
 
 def _run_git_diff(*paths: str) -> str:
     base = _resolve_main_ref()
-    cmd = ["git", "diff", "--no-color", "--unified=0", f"{base}...HEAD", "--", *paths]
+    cmd = ["git", "diff", "--no-color", "--unified=0", base, "--", *paths]
     result = subprocess.run(
         cmd,
         cwd=REPO_ROOT,

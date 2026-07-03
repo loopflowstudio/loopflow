@@ -115,6 +115,12 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
         .collect::<Vec<_>>()
         .join(" ");
 
+    // Detach tmux's stdio from ours. A cold `new-session` forks the tmux server,
+    // which would otherwise inherit our stdout pipe and hold it open for the life
+    // of the detached session — a parent reading our stdout to EOF (e.g. Concerto's
+    // `readDataToEndOfFile`) would then block forever waiting for the handle. With
+    // the server's stdio pointed at /dev/null, our `println!` below is the only
+    // writer, so EOF arrives the moment we exit.
     let status = Command::new("tmux")
         .args([
             "new-session",
@@ -127,6 +133,9 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
             "-lc",
             &inner_cmd,
         ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(|err| anyhow!("failed to run tmux: {err}"))?;
     if !status.success() {
@@ -136,6 +145,9 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
     // Match lfd: let scroll reach tmux rather than the inner shell.
     let _ = Command::new("tmux")
         .args(["set-option", "-t", &handle, "mouse", "on"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
 
     println!("{handle}");

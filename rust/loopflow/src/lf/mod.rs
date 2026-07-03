@@ -348,6 +348,9 @@ pub enum PmCommand {
         /// Set to `done` to close the task
         #[arg(long = "status")]
         status: Option<String>,
+        /// PR URL to attach as a comment (the loop's write-back link)
+        #[arg(long = "pr")]
+        pr: Option<String>,
     },
     /// Show roadmap status for linked waves
     Status {
@@ -579,6 +582,7 @@ mod tests {
                             title,
                             notes,
                             status,
+                            pr,
                         },
                 },
         }) = cli.command
@@ -590,15 +594,17 @@ mod tests {
         assert_eq!(title, "Ship it");
         assert_eq!(notes.as_deref(), Some("details"));
         assert_eq!(status, None);
+        assert_eq!(pr, None);
 
         let cli = Cli::try_parse_from([
             "lf", "op", "pm", "update", "--id", "123", "--title", "Ship it", "--status", "done",
+            "--pr", "https://github.com/acme/repo/pull/7",
         ])
         .expect("parse");
         let Some(Commands::Op {
             op:
                 OpsCommand::Pm {
-                    cmd: PmCommand::Update { id, status, .. },
+                    cmd: PmCommand::Update { id, status, pr, .. },
                 },
         }) = cli.command
         else {
@@ -606,6 +612,7 @@ mod tests {
         };
         assert_eq!(id.as_deref(), Some("123"));
         assert_eq!(status.as_deref(), Some("done"));
+        assert_eq!(pr.as_deref(), Some("https://github.com/acme/repo/pull/7"));
     }
 
     #[test]

@@ -31,9 +31,9 @@ from loopflow.cli import (
     _provider_api_key_config,
     _providers_table,
     _repo_table,
+    _sessions_table,
     _split_repo_slug,
     _status_details,
-    _sessions_table,
     _usage_table,
     _wave_detail_table,
     _wave_table,
@@ -41,13 +41,12 @@ from loopflow.cli import (
 )
 from loopflow.errors import LoopflowError
 from loopflow.models import (
-    Session,
     AuthProviderStatus,
     CostRates,
     ProviderInfo,
     Repo,
-    SessionConnectionInfo,
     Session,
+    SessionConnectionInfo,
     TokenTotals,
     UsageSummary,
     Wave,

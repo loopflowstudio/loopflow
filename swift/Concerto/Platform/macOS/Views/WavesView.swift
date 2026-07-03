@@ -29,19 +29,64 @@ struct WavesView: View {
     @State private var repoStates: [String: PortfolioRepoState] = [:]
     @State private var eventService: EventService?
 
-    /// Repos shown in the rail: the persisted registry collapsed to main
-    /// worktrees and deduped. Derived off the main thread in `refreshRepos`.
+    /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
+    /// Derived off the main thread in `refreshRepos`.
     @State private var repos: [PortfolioRepo] = []
-    @State private var didSeedFromScan = false
+
+    /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
+    /// Merged with lfd's running waves so not-yet-launched waves are still listed.
+    @State private var authoredWaveNames: [String: [String]] = [:]
 
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
     @State private var didApplyInitialRepo = false
 
-    /// All waves across every repo, in the registry's repo order.
+    /// Synthetic id prefix for an authored-on-disk wave that lfd hasn't created yet.
+    private static let authoredIdPrefix = "authored:"
+
+    /// All waves across every repo: lfd's running waves merged with waves authored
+    /// on disk that lfd hasn't created yet.
     private var allWaves: [WaveViewModel] {
-        repos.flatMap { repoStates[$0.path]?.waves ?? [] }
+        repos.flatMap { mergedWaves(for: $0) }
+    }
+
+    /// lfd's live waves for a repo, plus idle placeholders for any authored wave
+    /// (a `<repo>/wave/<name>/GOAL.md` on disk) that isn't already live. Sorted
+    /// running-first, then by name.
+    private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
+        let live = repoStates[repo.path]?.waves ?? []
+        let liveNames = Set(live.map(\.name))
+        let placeholders = (authoredWaveNames[repo.path] ?? [])
+            .filter { !liveNames.contains($0) }
+            .map { authoredPlaceholder(repoPath: repo.path, name: $0) }
+        return (live + placeholders).sorted { lhs, rhs in
+            let lp = Self.statusPriority(lhs.status)
+            let rp = Self.statusPriority(rhs.status)
+            if lp != rp { return lp < rp }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
+    /// An idle, not-yet-launched row for a wave authored on disk. Its id carries the
+    /// `authoredIdPrefix` so the terminal pane knows to create-and-run on launch.
+    private func authoredPlaceholder(repoPath: String, name: String) -> WaveViewModel {
+        WaveViewModel(api: Wave(
+            id: "\(Self.authoredIdPrefix)\(repoPath)#\(name)",
+            name: name,
+            repo: repoPath,
+            status: .idle
+        ))
+    }
+
+    private static func statusPriority(_ status: WaveStatus) -> Int {
+        switch status {
+        case .running: 0
+        case .waiting: 1
+        case .failed: 2
+        case .paused: 3
+        case .idle: 4
+        }
     }
 
     private var filteredWaves: [WaveViewModel] {
@@ -94,6 +139,7 @@ struct WavesView: View {
             await prepareConnectionIfNeeded()
             let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
+            await refreshAuthoredWaves()
             if let initialMain, !didApplyInitialRepo {
                 didApplyInitialRepo = true
                 selection = .repo(initialMain)
@@ -106,6 +152,7 @@ struct WavesView: View {
             Task {
                 await prepareConnectionIfNeeded()
                 await refreshRepos()
+                await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
             }
@@ -287,7 +334,7 @@ struct WavesView: View {
         if let wave = selectedWave, let state = repoState(for: wave) {
             WaveAgentTerminalPane(
                 wave: wave,
-                attach: { try await state.attachWaveAgent(waveId: $0) },
+                attach: { _ in try await launchOrAttach(wave: wave, state: state) },
                 onClose: { selectedWaveId = nil }
             )
             .id(wave.id)
@@ -305,6 +352,18 @@ struct WavesView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Attach the wave's /goal agent. An authored-on-disk wave (synthetic id) is
+    /// created-and-run first, then selection moves to the real wave so the row and
+    /// terminal persist once lfd knows about it.
+    private func launchOrAttach(wave: WaveViewModel, state: PortfolioRepoState) async throws -> SessionConnectionInfo {
+        guard wave.id.hasPrefix(Self.authoredIdPrefix) else {
+            return try await state.attachWaveAgent(waveId: wave.id)
+        }
+        let created = try await state.createWave(name: wave.name)
+        selectedWaveId = created.id
+        return try await state.attachWaveAgent(waveId: created.id)
     }
 
     private func repoState(for wave: WaveViewModel) -> PortfolioRepoState? {
@@ -373,36 +432,70 @@ struct WavesView: View {
         return mainPath
     }
 
-    /// Seed the registry from a `~/src` scan on first empty launch, then collapse
-    /// every registry entry to its main worktree and dedupe. Runs the git/FS work
-    /// off the main thread.
+    /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
+    /// every time. The persisted registry is no longer the source; a launch-provided
+    /// `initialRepoPath` outside `~/src` is merged in (collapsed to its main worktree)
+    /// so pre-selection still resolves. Runs the git/FS work off the main thread.
     private func refreshRepos() async {
         if RepoState.uiTestMode() != nil {
             repos = portfolioService.repos
             return
         }
 
-        if portfolioService.repos.isEmpty && !didSeedFromScan {
-            didSeedFromScan = true
-            let scanned = await Task.detached { RepoScanner().scanDefaultRoot() }.value
-            for url in scanned {
-                portfolioService.addRepo(url)
-            }
-        }
-
-        let entries = portfolioService.repos
+        let initialPath = initialRepoPath
         repos = await Task.detached {
             let scanner = RepoScanner()
             var seen = Set<String>()
-            var collapsed: [PortfolioRepo] = []
-            for entry in entries {
-                let mainPath = scanner.resolveMainWorktree(entry.url).normalizedFilePath
-                guard !seen.contains(mainPath) else { continue }
-                seen.insert(mainPath)
-                collapsed.append(PortfolioRepo(path: mainPath, lastOpened: entry.lastOpened))
+            var result: [PortfolioRepo] = []
+            for url in scanner.scanDefaultRoot() {
+                let path = url.normalizedFilePath
+                guard seen.insert(path).inserted else { continue }
+                result.append(PortfolioRepo(path: path, lastOpened: Date()))
             }
-            return collapsed
+            if let initialPath {
+                let mainPath = scanner.resolveMainWorktree(URL(fileURLWithPath: initialPath)).normalizedFilePath
+                if seen.insert(mainPath).inserted {
+                    result.append(PortfolioRepo(path: mainPath, lastOpened: Date()))
+                }
+            }
+            return result
         }.value
+    }
+
+    /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
+    /// directories — off the main thread, so the list can offer them as launchable
+    /// rows before lfd has created them.
+    private func refreshAuthoredWaves() async {
+        if RepoState.uiTestMode() != nil { return }
+        let paths = repos.map(\.path)
+        authoredWaveNames = await Task.detached {
+            var result: [String: [String]] = [:]
+            for path in paths {
+                result[path] = Self.authoredWaves(inRepo: path)
+            }
+            return result
+        }.value
+    }
+
+    /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
+    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [String] {
+        let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(
+            at: waveDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        return children
+            .filter { url in
+                var isDir: ObjCBool = false
+                let goal = url.appendingPathComponent("GOAL.md")
+                return fm.fileExists(atPath: goal.path, isDirectory: &isDir) && !isDir.boolValue
+            }
+            .map { $0.lastPathComponent }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func ensureRepoStates() {

@@ -14,13 +14,15 @@ struct RepoScanner {
             return []
         }
 
-        return children
+        let mainWorktrees = children
             .filter { isDirectory($0) }
             .filter(isMainGitWorktree)
             .map(\.standardizedFileURL)
             .sorted { lhs, rhs in
                 lhs.lastPathComponent.localizedCaseInsensitiveCompare(rhs.lastPathComponent) == .orderedAscending
             }
+
+        return dropWorktreeSiblings(mainWorktrees)
     }
 
     func scanDefaultRoot() -> [URL] {
@@ -62,6 +64,20 @@ struct RepoScanner {
         // `--git-common-dir` points at the shared `<main-repo>/.git`; its parent
         // is the main repo root.
         return URL(fileURLWithPath: raw).deletingLastPathComponent().standardizedFileURL
+    }
+
+    /// Belt-and-suspenders on top of the git worktree check: drop a `<base>.<suffix>`
+    /// directory when `<base>` is itself a scanned repo — e.g. `loopflow.goalreview`
+    /// and `loopflow.waves-outward` are worktrees of `loopflow`. Standalone dotted
+    /// names (whose prefix isn't another repo) are kept.
+    private func dropWorktreeSiblings(_ repos: [URL]) -> [URL] {
+        let names = Set(repos.map(\.lastPathComponent))
+        return repos.filter { url in
+            let name = url.lastPathComponent
+            guard let dot = name.firstIndex(of: ".") else { return true }
+            let base = String(name[..<dot])
+            return !names.contains(base)
+        }
     }
 
     private func isDirectory(_ url: URL) -> Bool {

@@ -1,0 +1,1 @@
+install: sync agent skills after local installs

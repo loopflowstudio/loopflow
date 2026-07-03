@@ -45,7 +45,10 @@ durable type.
   `wave.repo` stays single on each leaf.
 - **Open:** whether a single *leaf* Looping Agent may span repos directly (many
   worktrees, coordinated cross-repo PRs) for tightly-coupled changes. Default:
-  no — chord-spanning only — until atomicity proves necessary.
+  no — chord-spanning only — until atomicity proves necessary. Item
+  `3-wave-repo-split` is the concrete `repos: [RepoWork]` design for that open
+  question; the two items are the two answers to cross-repo Goals. Land ancestry
+  first — it unblocks the chord model regardless of how the fork resolves.
 
 ## Done when
 

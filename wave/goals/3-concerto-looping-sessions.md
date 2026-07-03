@@ -29,6 +29,11 @@ UI transport details, not product nouns. Build on that model, not the old split.
   iteration count, current task, blocks, metrics from `goal/` targets.
 - **Blocks surface** — the "queue of decisions needed" lands here and/or in
   Asana.
+- **Sequence with `3-wave-repo-split`.** Its build order guts `ContentView` to a
+  repo-filtered wave list and grows the per-repo streams up from there. This
+  session list is the layer that grows on top of that skeleton — don't build the
+  dashboard against the old per-repo `Wave` shape if the identity/RepoWork split
+  is landing alongside it.
 
 ## Done when
 

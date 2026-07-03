@@ -111,7 +111,10 @@ jobs:
           restore-keys: |
             swiftpm-${{ runner.os }}-
       - name: Run Swift tests
-        run: swift test --package-path swift
+        # -gnone skips debug-info generation; `swift test` here is ~95% compile,
+        # and CI never symbolicates. Failure locations come from #file/#line
+        # macros, not debug info, so they're preserved.
+        run: swift test --package-path swift -Xswiftc -gnone
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
 

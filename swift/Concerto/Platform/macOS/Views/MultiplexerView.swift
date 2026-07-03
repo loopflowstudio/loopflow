@@ -1,0 +1,1354 @@
+// Wave multiplexer — recursive split layout with pane-scoped tmux-backed terminals.
+// The workspace persists per wave and surfaces roadmap list/detail, readme, runs,
+// and launcher panes alongside terminal, diff, markdown, and launchpad panes.
+
+import AppKit
+import SwiftUI
+import LoopflowCore
+
+struct MultiplexerView: View {
+    let wave: WaveViewModel
+
+    @Environment(RepoState.self) private var repoState
+    @State private var roadmapSelection = RoadmapSelection()
+
+    private var currentWave: WaveViewModel {
+        repoState.waveStore.wave(for: wave.id) ?? wave
+    }
+
+    private var store: MultiplexerStore { repoState.multiplexerStore }
+    private var layout: LayoutNode { store.layout(for: currentWave) }
+    private var focusedPaneId: String? { store.focusedPaneId(for: currentWave.id) }
+
+    var body: some View {
+        LayoutNodeView(
+            node: layout,
+            wave: currentWave,
+            worktreePath: currentWave.worktreePath ?? currentWave.api.localWorktree,
+            focusedPaneId: focusedPaneId
+        )
+        .background(LoopflowPalette.dark.background)
+        .environment(roadmapSelection)
+    }
+}
+
+// MARK: - Recursive layout rendering
+
+private struct LayoutNodeView: View {
+    let node: LayoutNode
+    let wave: WaveViewModel
+    let worktreePath: String?
+    let focusedPaneId: String?
+
+    var body: some View {
+        switch node {
+        case .leaf(let pane):
+            PaneContainerView(
+                pane: pane,
+                wave: wave,
+                worktreePath: worktreePath,
+                isFocused: pane.id == focusedPaneId
+            )
+        case .split(let axis, let first, let second, let ratio):
+            SplitLayoutView(
+                axis: axis,
+                first: first,
+                second: second,
+                ratio: ratio,
+                wave: wave,
+                worktreePath: worktreePath,
+                focusedPaneId: focusedPaneId
+            )
+        }
+    }
+}
+
+private struct SplitLayoutView: View {
+    let axis: SplitAxis
+    let first: LayoutNode
+    let second: LayoutNode
+    let ratio: Double
+    let wave: WaveViewModel
+    let worktreePath: String?
+    let focusedPaneId: String?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let totalSize = axis == .vertical ? geometry.size.height : geometry.size.width
+            let firstSize = totalSize * ratio
+            let secondSize = max(0, totalSize - firstSize - 1)
+
+            if axis == .vertical {
+                VStack(spacing: 0) {
+                    LayoutNodeView(node: first, wave: wave, worktreePath: worktreePath, focusedPaneId: focusedPaneId)
+                        .frame(height: firstSize)
+                    Divider()
+                    LayoutNodeView(node: second, wave: wave, worktreePath: worktreePath, focusedPaneId: focusedPaneId)
+                        .frame(height: secondSize)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    LayoutNodeView(node: first, wave: wave, worktreePath: worktreePath, focusedPaneId: focusedPaneId)
+                        .frame(width: firstSize)
+                    Divider()
+                    LayoutNodeView(node: second, wave: wave, worktreePath: worktreePath, focusedPaneId: focusedPaneId)
+                        .frame(width: secondSize)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Pane container
+
+private struct PaneContainerView: View {
+    let pane: PaneState
+    let wave: WaveViewModel
+    let worktreePath: String?
+    let isFocused: Bool
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PaneHeader(title: paneTitle, detail: paneDetail)
+            paneContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(backgroundColor)
+        .overlay {
+            Rectangle()
+                .stroke(isFocused ? Color.loopflowBurgundy.opacity(0.7) : palette.border.opacity(0.5), lineWidth: isFocused ? 2 : 0.5)
+                .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            repoState.multiplexerStore.setFocusedPane(pane.id, for: wave.id)
+        }
+    }
+
+    @ViewBuilder
+    private var paneContent: some View {
+        switch pane.type {
+        case .terminal:
+            TerminalPaneView(pane: pane, waveId: wave.id, worktreePath: worktreePath)
+        case .markdown:
+            MarkdownPaneView(pane: pane, basePath: worktreePath ?? repoState.currentRepo?.path())
+        case .diff:
+            DiffPaneView(wave: wave, worktreePath: worktreePath)
+        case .launchpad:
+            LaunchpadPaneView(pane: pane, waveId: wave.id, worktreePath: worktreePath)
+        case .roadmap:
+            RoadmapPaneView(waveId: wave.id)
+        case .roadmapDetail:
+            RoadmapDetailPaneView(waveId: wave.id)
+        case .readme:
+            ReadmePaneView(waveId: wave.id)
+        case .runs:
+            RunsPaneView(waveId: wave.id)
+        case .launcher:
+            LauncherPaneView(waveId: wave.id)
+        }
+    }
+
+    private var backgroundColor: Color {
+        pane.type == .terminal ? LoopflowPalette.dark.background : palette.surface
+    }
+
+    private var paneTitle: String {
+        pane.type.displayName
+    }
+
+    private var paneDetail: String? {
+        guard pane.type == .terminal,
+              let sessionId = pane.config.terminalSessionId,
+              let session = repoState.terminalWorkspaceStore.sessionsById[sessionId] else {
+            return nil
+        }
+        return session.agent
+    }
+}
+
+private struct PaneHeader: View {
+    let title: String
+    let detail: String?
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(title)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary.opacity(0.75))
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(palette.surfaceMuted)
+    }
+}
+
+// MARK: - Terminal pane
+
+private struct TerminalPaneView: View {
+    let pane: PaneState
+    let waveId: String
+    let worktreePath: String?
+
+    @Environment(RepoState.self) private var repoState
+    @ObservedObject private var ghosttyManager = GhosttyManager.shared
+    @State private var connectionInfo: SessionConnectionInfo?
+    @State private var errorMessage: String?
+    @State private var isAttaching = false
+
+    private var terminalSessionId: String? {
+        pane.config.terminalSessionId
+    }
+
+    private var session: Session? {
+        terminalSessionId.flatMap { repoState.terminalWorkspaceStore.sessionsById[$0] }
+    }
+
+    var body: some View {
+        Group {
+            if let errorMessage {
+                ContentUnavailableView(
+                    "Terminal unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else if terminalSessionId == nil {
+                paneUnavailable(
+                    title: "No session",
+                    systemImage: "terminal",
+                    description: "Launch a flow from the command palette to bind this pane to an lfd terminal session."
+                )
+            } else if isAttaching {
+                ProgressView("Reattaching…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LoopflowPalette.dark.background)
+            } else if let connectionInfo {
+                if connectionInfo.usesLocalTmux {
+                    GhosttyTerminalView(
+                        workingDirectory: connectionInfo.cwd,
+                        argv: ["tmux", "attach-session", "-t", connectionInfo.sessionName],
+                        sessionId: pane.id,
+                        manager: ghosttyManager
+                    )
+                    .id(connectionInfo.sessionName)
+                } else {
+                    paneUnavailable(
+                        title: "Remote tmux",
+                        systemImage: "network",
+                        description: "Attach through an external terminal for remote hosts."
+                    )
+                }
+            } else {
+                ProgressView("Reattaching…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LoopflowPalette.dark.background)
+            }
+        }
+        .task(id: terminalSessionId ?? "empty") {
+            await attachIfNeeded()
+        }
+    }
+
+    private func attachIfNeeded() async {
+        guard let terminalSessionId else {
+            connectionInfo = nil
+            errorMessage = nil
+            isAttaching = false
+            return
+        }
+        isAttaching = true
+        do {
+            if session == nil {
+                await repoState.loadSession(id: terminalSessionId, select: false)
+            }
+            connectionInfo = try await repoState.attachSession(terminalSessionId)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+            connectionInfo = nil
+        }
+        isAttaching = false
+    }
+}
+
+// MARK: - Native panes
+
+private struct MarkdownPaneView: View {
+    let pane: PaneState
+    let basePath: String?
+
+    @Environment(\.palette) private var palette
+    @State private var contents = ""
+    @State private var displayPath = ""
+
+    var body: some View {
+        Group {
+            if contents.isEmpty {
+                ContentUnavailableView(
+                    "No markdown document",
+                    systemImage: "doc.text",
+                    description: Text("Put a design doc in scratch/ or wave/ to open it here.")
+                )
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        if !displayPath.isEmpty {
+                            Text(displayPath)
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                        Text(contents)
+                            .font(Typography.code())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(palette.surface)
+            }
+        }
+        .task(id: pane.id) {
+            let fileURL = resolveMarkdownURL(from: pane.config.filePath, basePath: basePath)
+            displayPath = fileURL?.lastPathComponent ?? ""
+            contents = fileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+        }
+    }
+}
+
+private struct DiffPaneView: View {
+    let wave: WaveViewModel
+    let worktreePath: String?
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+    @State private var diffOutput = "Loading diff…"
+
+    var body: some View {
+        ScrollView {
+            Text(diffOutput)
+                .font(Typography.code())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Spacing.lg)
+        }
+        .background(palette.surface)
+        .task(id: diffTaskKey) {
+            do {
+                if let worktreePath {
+                    let output = try await runShellCommand(
+                        ["git", "-C", worktreePath, "diff", "--no-color", "--stat", "main...HEAD"]
+                    )
+                    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    diffOutput = trimmed.isEmpty ? "No diff against main." : output
+                } else if let repoRoot = repoState.currentRepo?.path(), let branch = wave.branch, !branch.isEmpty {
+                    let output = try await runShellCommand(
+                        ["git", "-C", repoRoot, "diff", "--no-color", "--stat", "main...\(branch)"]
+                    )
+                    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    diffOutput = trimmed.isEmpty ? "No diff against main." : output
+                } else {
+                    diffOutput = "No worktree or branch available for diff."
+                }
+            } catch {
+                diffOutput = "Failed to load diff.\n\n\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private var diffTaskKey: String {
+        [wave.id, worktreePath ?? "", wave.branch ?? ""].joined(separator: "|")
+    }
+}
+
+private struct RoadmapPaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(RoadmapSelection.self) private var roadmapSelection
+    @Environment(\.palette) private var palette
+
+    @FocusState private var isKeyboardFocused: Bool
+    @State private var hoveredItemId: String?
+    @State private var actionErrors: [String: String] = [:]
+    @State private var ingestingItemIds: Set<String> = []
+    @State private var reprioritizingItemIds: Set<String> = []
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var roadmapItems: [RoadmapItem] {
+        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    }
+
+    private var selectedItemId: String? {
+        roadmapSelection.selectedItemId
+    }
+
+    private var waveIsRunning: Bool {
+        guard let wave else { return false }
+        return wave.status == .running || wave.status == .waiting
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if wave?.content == nil {
+            ProgressView("Loading roadmap…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if roadmapItems.isEmpty {
+            paneUnavailable(
+                title: "No roadmap items",
+                systemImage: "list.bullet.rectangle",
+                description: "Add numbered roadmap docs under wave/ to surface them here."
+            )
+        } else {
+            roadmapList
+        }
+    }
+
+    private var roadmapList: some View {
+        ScrollViewReader { proxy in
+            roadmapScrollView(proxy: proxy)
+        }
+    }
+
+    private func roadmapScrollView(proxy: ScrollViewProxy) -> some View {
+        let itemIds = roadmapItems.map(\.id)
+
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(roadmapItems) { item in
+                    roadmapRow(item)
+                        .id(item.id)
+                }
+            }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(palette.surface)
+        .macOSFocusable()
+        .focused($isKeyboardFocused)
+        .onAppear(perform: syncSelection)
+        .onChange(of: itemIds) { _, _ in
+            syncSelection()
+        }
+        .onChange(of: selectedItemId) { _, newId in
+            guard let newId else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                proxy.scrollTo(newId, anchor: .center)
+            }
+        }
+        .onTapGesture {
+            isKeyboardFocused = true
+        }
+        .onKeyPress(.downArrow) {
+            selectNext()
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            selectPrevious()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "jJ")) { _ in
+            selectNext()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "kK")) { _ in
+            selectPrevious()
+            return .handled
+        }
+        .onKeyPress(.return) {
+            ingestSelected()
+            return .handled
+        }
+    }
+
+    private func roadmapRow(_ item: RoadmapItem) -> some View {
+        RoadmapRowView(
+            item: item,
+            isSelected: selectedItemId == item.id,
+            isHovered: hoveredItemId == item.id,
+            waveIsRunning: waveIsRunning,
+            isIngesting: ingestingItemIds.contains(item.id),
+            errorMessage: actionErrors[item.id],
+            onSelect: { select(item.id) },
+            onPlay: { ingestAndBuild(item) },
+            onHoverChanged: { isHovering in
+                hoveredItemId = isHovering ? item.id : (hoveredItemId == item.id ? nil : hoveredItemId)
+            }
+        ) {
+            priorityMenu(for: item, isLoading: reprioritizingItemIds.contains(item.id))
+        }
+    }
+
+    private func priorityMenu(for item: RoadmapItem, isLoading: Bool) -> some View {
+        Menu {
+            ForEach(RoadmapPriority.allCases, id: \.self) { priority in
+                Button {
+                    updatePriority(priority, for: item)
+                } label: {
+                    if item.priority == priority {
+                        Label(priority.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(priority.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(item.priority.displayName)
+                    .font(Typography.caption())
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(palette.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(isLoading)
+    }
+
+    private func syncSelection() {
+        guard !roadmapItems.isEmpty else {
+            roadmapSelection.select(itemId: nil)
+            return
+        }
+
+        let selectionStillValid = roadmapItems.contains(where: { $0.id == roadmapSelection.selectedItemId })
+
+        guard !selectionStillValid else { return }
+        roadmapSelection.select(itemId: roadmapItems[0].id)
+    }
+
+    private func select(_ itemId: String) {
+        roadmapSelection.select(itemId: itemId)
+        isKeyboardFocused = true
+    }
+
+    private func selectNext() {
+        moveSelection(delta: 1)
+    }
+
+    private func selectPrevious() {
+        moveSelection(delta: -1)
+    }
+
+    private func moveSelection(delta: Int) {
+        guard !roadmapItems.isEmpty else { return }
+
+        let currentIndex = roadmapItems.firstIndex { $0.id == selectedItemId } ?? 0
+        let nextIndex = (currentIndex + delta + roadmapItems.count) % roadmapItems.count
+        select(roadmapItems[nextIndex].id)
+    }
+
+    private func ingestSelected() {
+        guard let selectedItem = roadmapItems.first(where: { $0.id == selectedItemId }) else { return }
+        ingestAndBuild(selectedItem)
+    }
+
+    private func ingestAndBuild(_ item: RoadmapItem) {
+        guard let wave else { return }
+        actionErrors[item.id] = nil
+        ingestingItemIds.insert(item.id)
+        Task { @MainActor in
+            defer { ingestingItemIds.remove(item.id) }
+            do {
+                try await repoState.ingestAndBuild(wave: wave, item: item)
+            } catch {
+                actionErrors[item.id] = error.localizedDescription
+            }
+        }
+    }
+
+    private func updatePriority(_ priority: RoadmapPriority, for item: RoadmapItem) {
+        guard let wave else { return }
+        actionErrors[item.id] = nil
+        reprioritizingItemIds.insert(item.id)
+        Task { @MainActor in
+            defer { reprioritizingItemIds.remove(item.id) }
+            do {
+                try repoState.updateRoadmapPriority(wave: wave, item: item, priority: priority)
+            } catch {
+                actionErrors[item.id] = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct RoadmapRowView<PriorityControl: View>: View {
+    let item: RoadmapItem
+    let isSelected: Bool
+    let isHovered: Bool
+    let waveIsRunning: Bool
+    let isIngesting: Bool
+    let errorMessage: String?
+    let onSelect: () -> Void
+    let onPlay: () -> Void
+    let onHoverChanged: (Bool) -> Void
+    @ViewBuilder let priorityControl: () -> PriorityControl
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.sm) {
+                Text(item.title)
+                    .font(Typography.body())
+                    .foregroundStyle(item.isShipped ? palette.textSecondary : palette.text)
+                    .strikethrough(item.isShipped)
+                    .lineLimit(1)
+
+                Spacer(minLength: Spacing.sm)
+
+                if isHovered && !item.isShipped {
+                    Button(action: onPlay) {
+                        Group {
+                            if isIngesting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                        }
+                        .frame(width: HitTarget.minimum, height: HitTarget.minimum)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(waveIsRunning ? palette.textSecondary : Color.statusSuccess)
+                    .disabled(waveIsRunning || isIngesting)
+                    .accessibilityLabel("Ingest \(item.title) and run the wave")
+                }
+
+                priorityControl()
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(rowBackground)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            .overlay {
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .stroke(isSelected ? Color.loopflowBurgundy.opacity(0.4) : .clear, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            .onTapGesture(perform: onSelect)
+
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                    .padding(.horizontal, Spacing.md)
+            }
+        }
+        .hoverTracking(onHoverChanged)
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.loopflowBurgundy.opacity(0.12)
+        }
+        if isHovered {
+            return palette.surfaceMuted.opacity(0.7)
+        }
+        return Color.clear
+    }
+}
+
+private struct RoadmapDetailPaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(RoadmapSelection.self) private var roadmapSelection
+    @Environment(\.palette) private var palette
+
+    @State private var actionError: String?
+    @State private var isIngesting = false
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var roadmapItems: [RoadmapItem] {
+        sortedRoadmapItems(wave?.content?.roadmapItems ?? [])
+    }
+
+    private var selectedItem: RoadmapItem? {
+        guard let selectedItemId = roadmapSelection.selectedItemId else { return nil }
+        return roadmapItems.first(where: { $0.id == selectedItemId })
+    }
+
+    private var waveIsRunning: Bool {
+        guard let wave else { return false }
+        return wave.status == .running || wave.status == .waiting
+    }
+
+    var body: some View {
+        Group {
+            if wave?.content == nil {
+                ProgressView("Loading roadmap item…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let selectedItem {
+                let markdown = roadmapMarkdown(for: selectedItem)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Text(selectedItem.title)
+                                    .font(Typography.sectionTitle())
+                                    .foregroundStyle(Color.loopflowBurgundy)
+                                    .strikethrough(selectedItem.isShipped)
+
+                                HStack(spacing: Spacing.sm) {
+                                    Text(selectedItem.priority.displayName)
+                                    Text(selectedItem.isShipped ? "Shipped" : "Planned")
+                                }
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                ingestAndBuild(selectedItem)
+                            } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    if isIngesting {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Image(systemName: "play.fill")
+                                    }
+                                    Text("Ingest & build")
+                                        .fontWeight(.semibold)
+                                }
+                                .padding(.horizontal, Spacing.lg)
+                                .padding(.vertical, Spacing.sm)
+                                .background(playButtonBackground(for: selectedItem))
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedItem.isShipped || waveIsRunning || isIngesting)
+                            .opacity((selectedItem.isShipped || waveIsRunning) ? 0.65 : 1)
+                        }
+
+                        if !selectedItem.fileName.isEmpty {
+                            Text(selectedItem.fileName)
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.textSecondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if let markdown {
+                            Text(renderMarkdown(markdown, fullSyntax: true))
+                                .font(Typography.body())
+                                .foregroundStyle(palette.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ContentUnavailableView(
+                                "Roadmap item unavailable",
+                                systemImage: "exclamationmark.triangle",
+                                description: Text("Could not load markdown for \(selectedItem.title).")
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+
+                        if let actionError, !actionError.isEmpty {
+                            Text(actionError)
+                                .font(Typography.caption())
+                                .foregroundStyle(Color.statusError)
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .background(palette.surface)
+                .onChange(of: selectedItem.id) { _, _ in
+                    actionError = nil
+                }
+            } else {
+                paneUnavailable(
+                    title: "Select a roadmap item",
+                    systemImage: "text.document",
+                    description: "Choose a roadmap item in the list to read its full markdown."
+                )
+            }
+        }
+    }
+
+    private func roadmapMarkdown(for item: RoadmapItem) -> String? {
+        if let filePath = item.filePath,
+           let text = try? String(contentsOfFile: filePath, encoding: .utf8),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+
+        if let content = item.content, !content.isEmpty {
+            return content
+        }
+
+        return nil
+    }
+
+    private func ingestAndBuild(_ item: RoadmapItem) {
+        guard let wave else { return }
+        actionError = nil
+        isIngesting = true
+        Task { @MainActor in
+            defer { isIngesting = false }
+            do {
+                try await repoState.ingestAndBuild(wave: wave, item: item)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func playButtonBackground(for item: RoadmapItem) -> Color {
+        if item.isShipped || waveIsRunning {
+            return Color.statusNeutral
+        }
+        return Color.statusSuccess
+    }
+}
+
+private struct ReadmePaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var sections: [(String, String)] {
+        guard let content = wave?.content else { return [] }
+        return [
+            ("Vision", content.vision),
+            ("Strategy", content.strategy),
+            ("Goals", content.goals),
+            ("Risks", content.risks),
+            ("Metrics", content.metrics),
+        ].compactMap { title, text in
+            guard let text, !text.isEmpty else { return nil }
+            return (title, text)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if wave?.content == nil {
+                ProgressView("Loading README…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if sections.isEmpty {
+                paneUnavailable(
+                    title: "No README content",
+                    systemImage: "text.document",
+                    description: "Add Vision, Strategy, Goals, Risks, or Metrics sections to the wave README."
+                )
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                            VStack(alignment: .leading, spacing: Spacing.sm) {
+                                Text(section.0)
+                                    .font(Typography.caption())
+                                    .foregroundStyle(palette.textSecondary)
+                                    .textCase(.uppercase)
+                                Text(renderMarkdown(section.1))
+                                    .font(Typography.body())
+                                    .foregroundStyle(palette.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(Spacing.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(palette.surfaceMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .background(palette.surface)
+            }
+        }
+    }
+}
+
+private struct RunsPaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var runs: [Run] {
+        repoState.runStore.runs(for: waveId)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                if let wave {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text(wave.displayName)
+                            .font(Typography.sectionTitle())
+                        HStack(spacing: Spacing.sm) {
+                            Text(wave.statusText)
+                            if let branch = wave.branch, !branch.isEmpty {
+                                Text("· \(branch)")
+                            }
+                        }
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                    }
+                }
+
+                RunsTab(runs: runs) {
+                    try await repoState.combinePRs(waveId)
+                }
+            }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(palette.surface)
+    }
+}
+
+private struct LauncherPaneView: View {
+    let waveId: String
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+
+    @State private var selectedFlow = ""
+    @State private var isSendingRun = false
+    @State private var errorMessage: String?
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var isRunnableWorkspace: Bool {
+        guard let wave else { return false }
+        return wave.status == .idle || wave.status == .paused || wave.status == .failed
+    }
+
+    var body: some View {
+        Group {
+            if let wave {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.xl) {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Run this wave")
+                                .font(Typography.sectionTitle())
+                                .foregroundStyle(Color.loopflowBurgundy)
+                            Text("Pick a flow or step, then launch it directly from the workspace.")
+                                .font(Typography.body())
+                                .foregroundStyle(palette.textSecondary)
+                        }
+
+                        FlowTypeahead(
+                            wave: wave,
+                            initialSelection: selectedFlow.isEmpty ? wave.configuredFlow : selectedFlow,
+                            style: .compact,
+                            onSubmitSelection: { selection in
+                                run(selection)
+                            }
+                        ) { selection in
+                            selectedFlow = selection
+                            persistFlow(selection, for: wave)
+                        }
+
+                        Button {
+                            run(selectedFlow.isEmpty ? wave.configuredFlow : selectedFlow)
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                if isSendingRun {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "play.fill")
+                                }
+                                Text("Run")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Spacing.lg)
+                            .background(runDisabled ? Color.statusNeutral : Color.statusSuccess)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(runDisabled)
+                        .opacity(runDisabled ? 0.6 : 1)
+
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            detailRow("Status", wave.statusText)
+                            detailRow("Flow", wave.displayFlow.isEmpty ? "—" : wave.displayFlow)
+                            if let branch = wave.branch, !branch.isEmpty {
+                                detailRow("Branch", branch)
+                            }
+                            if let worktreePath = wave.worktreePath ?? wave.api.localWorktree {
+                                detailRow("Worktree", worktreePath)
+                            }
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(Typography.caption())
+                                .foregroundStyle(Color.statusError)
+                        }
+                    }
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .background(palette.surface)
+                .onAppear {
+                    selectedFlow = wave.configuredFlow
+                }
+                .onChange(of: wave.flow) { _, newFlow in
+                    if selectedFlow.isEmpty || selectedFlow == wave.configuredFlow {
+                        selectedFlow = newFlow
+                    }
+                }
+            } else {
+                paneUnavailable(
+                    title: "Wave unavailable",
+                    systemImage: "play.square",
+                    description: "Select a wave to launch it from this pane."
+                )
+            }
+        }
+    }
+
+    private var runDisabled: Bool {
+        let target = selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isSendingRun || !isRunnableWorkspace || (target.isEmpty && (wave?.configuredFlow.isEmpty ?? true))
+    }
+
+    private func run(_ selection: String) {
+        guard let wave else { return }
+        let target = selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? wave.configuredFlow : selection.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, !isSendingRun, isRunnableWorkspace else { return }
+
+        isSendingRun = true
+        errorMessage = nil
+        Task {
+            do {
+                try await repoState.runWave(wave: wave, flow: target)
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+            await MainActor.run {
+                isSendingRun = false
+            }
+        }
+    }
+
+    private func persistFlow(_ selection: String, for wave: WaveViewModel) {
+        let trimmed = selection.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != wave.configuredFlow else { return }
+        Task {
+            try? await repoState.updateWave(wave, flow: trimmed)
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(label)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .frame(width: 60, alignment: .leading)
+            Text(value)
+                .font(Typography.caption())
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct LaunchpadPaneView: View {
+    let pane: PaneState
+    let waveId: String
+    let worktreePath: String?
+
+    @Environment(RepoState.self) private var repoState
+    @Environment(\.palette) private var palette
+    @State private var selectedStep = "design"
+
+    private var wave: WaveViewModel? {
+        repoState.waveStore.wave(for: waveId)
+    }
+
+    private var terminalLauncher: TerminalLauncher {
+        TerminalLauncher()
+    }
+
+    private let loopflowSteps = [
+        "design",
+        "implement",
+        "debug",
+        "refine",
+        "review-design",
+    ]
+
+    var body: some View {
+        if let worktreePath {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Text("Start in this split")
+                            .font(Typography.sectionTitle())
+                            .foregroundStyle(Color.loopflowBurgundy)
+                        Text("Launch a fresh shell or drop straight into an lf session.")
+                            .font(Typography.body())
+                            .foregroundStyle(palette.textSecondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Text("Loopflow session")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .textCase(.uppercase)
+
+                        Picker("Step", selection: $selectedStep) {
+                            ForEach(loopflowSteps, id: \.self) { step in
+                                Text(step).tag(step)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        HStack(spacing: Spacing.sm) {
+                            launchButton("Launch lf session", icon: "sparkles") {
+                                launchPaletteSession(flow: selectedStep, worktreePath: worktreePath)
+                            }
+                            launchButton("Fresh shell", icon: "terminal") {
+                                replaceWithEmptyTerminal()
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        Text("Open in…")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .textCase(.uppercase)
+
+                        launchButton("Cursor", icon: "curlybraces") {
+                            try? terminalLauncher.openInIDE(.cursor, at: URL(fileURLWithPath: worktreePath), remoteHost: repoState.repoTarget?.remoteHost)
+                        }
+                        launchButton("Finder", icon: "folder") {
+                            terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktreePath))
+                        }
+                        if let prURL = wave?.prURL {
+                            launchButton("Pull Request", icon: "arrow.triangle.pull") {
+                                NSWorkspace.shared.open(prURL)
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(palette.surface)
+        } else {
+            paneUnavailable(
+                title: "No worktree",
+                systemImage: "folder.badge.questionmark",
+                description: "Create a worktree for this wave before launching a shell from this pane."
+            )
+        }
+    }
+
+    private func launchButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(Typography.body())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+        }
+        .buttonStyle(.plain)
+        .background(palette.surfaceMuted.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
+    private func launchPaletteSession(flow: String, worktreePath: String) {
+        Task {
+            do {
+                let response = try await repoState.createSession(
+                    waveId: waveId,
+                    flow: flow,
+                    worktree: worktreePath,
+                    agent: selectedAgent
+                )
+                _ = repoState.multiplexerStore.replacePane(
+                    pane.id,
+                    with: .terminal,
+                    config: PaneConfig(terminalSessionId: response.session.id),
+                    for: waveId
+                )
+            } catch {
+                repoState.errorMessage = "Failed to launch terminal session: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private var selectedAgent: String {
+        if let agent = wave?.agent, !agent.isEmpty {
+            return agent
+        }
+        return repoState.supportedHarnesses.first ?? "claude:opus"
+    }
+
+    private func replaceWithEmptyTerminal() {
+        _ = repoState.multiplexerStore.replacePane(
+            pane.id,
+            with: .terminal,
+            config: .empty,
+            for: waveId
+        )
+    }
+}
+
+// MARK: - Helpers
+
+extension PaneType {
+    var displayName: String {
+        switch self {
+        case .terminal: "Terminal"
+        case .markdown: "Markdown"
+        case .diff: "Diff"
+        case .launchpad: "Launchpad"
+        case .roadmap: "Roadmap"
+        case .roadmapDetail: "Roadmap Detail"
+        case .readme: "README"
+        case .runs: "Runs"
+        case .launcher: "Launcher"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .terminal: "terminal"
+        case .markdown: "doc.text"
+        case .diff: "arrow.left.arrow.right.square"
+        case .launchpad: "sparkles.rectangle.stack"
+        case .roadmap: "list.bullet.rectangle"
+        case .roadmapDetail: "doc.text.magnifyingglass"
+        case .readme: "text.document"
+        case .runs: "clock.arrow.circlepath"
+        case .launcher: "play.square"
+        }
+    }
+}
+
+func sortedRoadmapItems(_ items: [RoadmapItem]) -> [RoadmapItem] {
+    items.filter { !$0.isShipped } + items.filter(\.isShipped)
+}
+
+@ViewBuilder
+private func paneUnavailable(title: String, systemImage: String, description: String) -> some View {
+    ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+}
+
+private func resolveMarkdownURL(from configuredPath: String?, basePath: String?) -> URL? {
+    guard let basePath else { return nil }
+    let baseURL = URL(fileURLWithPath: basePath)
+
+    if let configuredPath {
+        let candidate = URL(fileURLWithPath: configuredPath, relativeTo: baseURL)
+        if FileManager.default.fileExists(atPath: candidate.path()) {
+            return candidate
+        }
+    }
+
+    let fallbackPaths = [
+        "scratch/pane-routing-spec.md",
+        "wave/agent-embedding/README.md",
+        "README.md",
+    ]
+
+    for path in fallbackPaths {
+        let candidate = baseURL.appendingPathComponent(path)
+        if FileManager.default.fileExists(atPath: candidate.path()) {
+            return candidate
+        }
+    }
+
+    return nil
+}
+
+private func runShellCommand(_ argv: [String]) async throws -> String {
+    let process = Process()
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = argv
+    process.standardOutput = stdout
+    process.standardError = stderr
+    process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+
+    try process.run()
+    process.waitUntilExit()
+
+    let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+    let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+    let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+
+    guard process.terminationStatus == 0 else {
+        let detail = stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw NSError(
+            domain: "MultiplexerView",
+            code: Int(process.terminationStatus),
+            userInfo: [NSLocalizedDescriptionKey: detail.isEmpty ? "Command failed." : detail]
+        )
+    }
+
+    return stdoutText
+}
+
+private func renderMarkdown(_ text: String, fullSyntax: Bool = false) -> AttributedString {
+    if fullSyntax {
+        return (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    }
+
+    return (try? AttributedString(
+        markdown: text,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    )) ?? AttributedString(text)
+}

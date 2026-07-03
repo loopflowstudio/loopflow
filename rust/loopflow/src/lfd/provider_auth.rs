@@ -2038,6 +2038,120 @@ async fn refresh_provider_token_with_runner(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PmOAuthEndpoint {
+    token_url: &'static str,
+    client_id_env: &'static str,
+    client_secret_env: &'static str,
+}
+
+fn pm_oauth_endpoint(provider: Provider) -> Option<PmOAuthEndpoint> {
+    match provider {
+        Provider::Asana => Some(PmOAuthEndpoint {
+            token_url: ASANA_OAUTH_TOKEN_URL,
+            client_id_env: ASANA_CLIENT_ID_ENV,
+            client_secret_env: ASANA_CLIENT_SECRET_ENV,
+        }),
+        Provider::Linear => Some(PmOAuthEndpoint {
+            token_url: LINEAR_OAUTH_TOKEN_URL,
+            client_id_env: LINEAR_CLIENT_ID_ENV,
+            client_secret_env: LINEAR_CLIENT_SECRET_ENV,
+        }),
+        Provider::Notion => Some(PmOAuthEndpoint {
+            token_url: NOTION_OAUTH_TOKEN_URL,
+            client_id_env: NOTION_CLIENT_ID_ENV,
+            client_secret_env: NOTION_CLIENT_SECRET_ENV,
+        }),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthRefreshResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<i64>,
+}
+
+/// Exchange a stored refresh token for a fresh access token via the PM provider's
+/// OAuth `grant_type=refresh_token` endpoint. Only Asana/Linear/Notion are supported;
+/// client credentials are read from the provider's `*_CLIENT_ID`/`*_CLIENT_SECRET` env vars.
+///
+/// The returned token carries `login: None`; callers should preserve the prior login.
+///
+/// # Errors
+/// Returns `AuthError::UnsupportedProvider` for non-PM providers,
+/// `AuthError::CommandUnavailable` when client credentials are absent, and
+/// `AuthError::OAuthRequest` when the network request or token endpoint rejects it.
+pub async fn refresh_pm_oauth_token(
+    provider: Provider,
+    refresh_token: &str,
+) -> Result<ProviderToken, AuthError> {
+    let endpoint =
+        pm_oauth_endpoint(provider).ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
+    let (client_id, client_secret) =
+        oauth_client_credentials(provider, endpoint.client_id_env, endpoint.client_secret_env)?;
+
+    let body = serde_urlencoded::to_string([
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id.as_str()),
+        ("client_secret", client_secret.as_str()),
+        ("refresh_token", refresh_token),
+    ])
+    .map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to encode refresh request: {err}"),
+    })?;
+
+    let response = reqwest::Client::new()
+        .post(endpoint.token_url)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| AuthError::OAuthRequest {
+            provider,
+            message: err.to_string(),
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.bytes().await.map_err(|err| AuthError::OAuthRequest {
+            provider,
+            message: err.to_string(),
+        })?;
+        let message = oauth_error_message(body.as_ref())
+            .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
+        return Err(AuthError::OAuthRequest {
+            provider,
+            message: format!("HTTP {status}: {message}"),
+        });
+    }
+
+    let payload = response
+        .json::<OAuthRefreshResponse>()
+        .await
+        .map_err(|err| AuthError::OAuthRequest {
+            provider,
+            message: format!("failed to decode refresh response: {err}"),
+        })?;
+
+    let expires_at = payload
+        .expires_in
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| now_unix() + seconds);
+
+    Ok(ProviderToken {
+        provider: provider.as_str().to_string(),
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+        expires_at,
+        login: None,
+        updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
+    })
+}
+
 async fn refresh_github_token(
     home_dir: &Path,
     runner: &dyn RefreshCommandRunner,
@@ -2717,6 +2831,23 @@ mod tests {
         .expect("oauth error should parse");
 
         assert_eq!(message, "invalid_grant: authorization code expired");
+    }
+
+    #[test]
+    fn pm_oauth_endpoint_maps_only_pm_providers() {
+        assert_eq!(
+            pm_oauth_endpoint(Provider::Asana).map(|e| e.token_url),
+            Some(ASANA_OAUTH_TOKEN_URL)
+        );
+        assert_eq!(
+            pm_oauth_endpoint(Provider::Linear).map(|e| e.token_url),
+            Some(LINEAR_OAUTH_TOKEN_URL)
+        );
+        assert_eq!(
+            pm_oauth_endpoint(Provider::Notion).map(|e| e.token_url),
+            Some(NOTION_OAUTH_TOKEN_URL)
+        );
+        assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
     }
 
     #[tokio::test]

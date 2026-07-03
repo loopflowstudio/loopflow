@@ -46,8 +46,6 @@ _PROVIDER_LABELS = {
     "codex": "Codex",
     "opencodezen": "OpenCode Zen",
     "asana": "Asana",
-    "linear": "Linear",
-    "notion": "Notion",
 }
 
 _PROVIDER_API_KEY_CONFIG = {
@@ -60,8 +58,6 @@ _METERED_API_KEY_PROVIDERS = {"claude", "codex", "opencodezen"}
 
 _PM_OAUTH_CONFIGURE_ERRORS = {
     "asana": "Asana requires OAuth. Run 'lf op auth asana' to connect.",
-    "linear": "Linear requires OAuth. Run 'lf op auth linear' to connect.",
-    "notion": "Notion requires OAuth. Run 'lf op auth notion' to connect.",
 }
 
 
@@ -931,16 +927,6 @@ def auth_zen() -> None:
 @auth_app.command("asana", help="Start Asana OAuth authentication.")
 def auth_asana() -> None:
     _connect_provider("asana")
-
-
-@auth_app.command("linear", help="Start Linear OAuth authentication.")
-def auth_linear() -> None:
-    _connect_provider("linear")
-
-
-@auth_app.command("notion", help="Start Notion OAuth authentication.")
-def auth_notion() -> None:
-    _connect_provider("notion")
 
 
 @auth_app.command("disconnect", help="Disconnect a provider.")

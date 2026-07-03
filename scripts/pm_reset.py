@@ -10,13 +10,12 @@ Usage:
 
 Flow:
     1. Find every ``wave/<name>/goal.md`` with a configured
-       ``pm.<provider>_project`` field.
-    2. DELETE each project via the provider API.
+       ``pm.asana_project`` field.
+    2. DELETE each project via the Asana API.
     3. Clear the project ID from goal frontmatter.
     4. Run ``lf op pm init --all`` to bootstrap fresh projects.
-    5. Run ``lf op pm push-diff --all`` to populate items.
 
-Only Asana is implemented at the moment. Linear/Notion raise on --provider.
+Asana is the only supported PM provider.
 """
 
 import argparse
@@ -119,11 +118,6 @@ def main() -> int:
         help="Credentials directory (default: ~/.lf/credentials)",
     )
     parser.add_argument("--skip-init", action="store_true", help="Skip `lf op pm init --all`")
-    parser.add_argument(
-        "--skip-push-diff",
-        action="store_true",
-        help="Skip `lf op pm push-diff --all`",
-    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -155,10 +149,6 @@ def main() -> int:
     if not args.skip_init:
         print("\nRe-initializing from wave/...")
         run_cmd(["lf", "op", "pm", "init", "--all"], args.dry_run, cwd=repo)
-
-    if not args.skip_push_diff:
-        print("\nPushing current state...")
-        run_cmd(["lf", "op", "pm", "push-diff", "--all"], args.dry_run, cwd=repo)
 
     print("\nDone.")
     return 0

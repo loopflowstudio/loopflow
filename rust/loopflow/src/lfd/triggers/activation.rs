@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +7,6 @@ use tokio_util::sync::CancellationToken;
 
 use super::common::{create_parallel_run, create_run_with_id, spawn_run_task_with_slot};
 use crate::lfd::events::EventHub;
-use crate::lfd::executor::cleanup_workspace_worktree;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
@@ -16,7 +14,6 @@ use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, Event, PendingActivation, Run, Wave, WaveStatus,
 };
-use crate::ops::{ingest, IngestOptions, NullProgress};
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 
@@ -75,41 +72,6 @@ fn target_branch_ref(target_branch: &str) -> Option<&str> {
         "" | "main" => None,
         branch => Some(branch),
     }
-}
-
-fn ingest_roadmap_item_for_run(wave: &Wave, run: &Run, item: &str) -> anyhow::Result<()> {
-    ingest(
-        Path::new(&run.worktree),
-        &IngestOptions {
-            wave: Some(wave.name().clone()),
-            item: Some(item.to_string()),
-        },
-        &NullProgress,
-    )
-    .map_err(|err| anyhow!("ingest failed: {err}"))?;
-
-    Ok(())
-}
-
-async fn fail_immediate_activation(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    wave: &Wave,
-    run: &mut Run,
-    error: &anyhow::Error,
-) {
-    run.status = crate::lfd::types::RunStatus::Failed;
-    run.ended_at = Some(time::OffsetDateTime::now_utc());
-    run.error = Some(error.to_string());
-    let _ = store.update_run(run).await;
-
-    if let Ok(Some(mut stored_wave)) = store.get_wave(wave.id()).await {
-        stored_wave.status = WaveStatus::Idle;
-        let _ = store.update_wave(&stored_wave).await;
-    }
-
-    let _ = cleanup_workspace_worktree(Path::new(&run.worktree));
-    event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
 #[derive(Debug, Clone)]
@@ -360,30 +322,15 @@ pub async fn spawn_immediate_activation(
         run.flow = flow_override;
     }
     if let Some(item) = roadmap_item {
-        // `ingest` is sync and, when PM is enabled, calls `block_on_pm` which
-        // tries to spin up a fresh Tokio runtime. Running it directly on the
-        // axum handler's async worker thread panics with "Cannot start a
-        // runtime from within a runtime" and leaves the HTTP response dangling.
-        // Punt to the blocking pool where `block_on` is legal.
-        let wave_for_ingest = wave.clone();
-        let run_for_ingest = run.clone();
-        let item_for_log = item.clone();
-        let ingest_result = tokio::task::spawn_blocking(move || {
-            ingest_roadmap_item_for_run(&wave_for_ingest, &run_for_ingest, &item)
-        })
-        .await
-        .unwrap_or_else(|join_err| Err(anyhow!("ingest task panicked: {join_err}")));
-        if let Err(err) = ingest_result {
-            tracing::error!(
-                wave_id = %wave.id(),
-                run_id = %run.id,
-                item = %item_for_log,
-                error = %err,
-                "failed targeted ingest before immediate activation"
-            );
-            fail_immediate_activation(store, event_hub, wave, &mut run, &err).await;
-            return Err(err);
-        }
+        // The roadmap lives in Asana; there is no local item to ingest into
+        // scratch/. A worker is handed its task at dispatch, so this is a hint
+        // for logging only — the run proceeds with the flow as configured.
+        tracing::debug!(
+            wave_id = %wave.id(),
+            run_id = %run.id,
+            item = %item,
+            "activation carries a roadmap-item hint (no local ingest)"
+        );
     }
     run.target_branch = envelope.target_branch.clone();
     run.activation_log_id = Some(dispatch_log.id.clone());

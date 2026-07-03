@@ -9,40 +9,10 @@ use crate::lf::{Cli, Commands, OpsCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
-    RebaseOptions,
+    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
+    release_bump, release_check, release_notes, release_run, release_status, release_tag,
+    AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, RebaseOptions,
 };
-
-/// Resolve which PM-enabled waves to operate on within a flow context.
-/// If no wave is specified and no --all flag, auto-detect from the repo.
-///
-/// Returns an empty vec (no-op) when the current branch has no resolvable
-/// wave or resolves to a wave without PM configured. Flows chain many ops;
-/// a CI-only or non-PM branch shouldn't fail the queue just because one
-/// step has nothing to do.
-fn resolve_pm_waves_for_flow(
-    repo: &Path,
-    wave: &Option<String>,
-    wave_flag: &Option<String>,
-    all: bool,
-) -> OpsResult<Vec<String>> {
-    if all {
-        return crate::ops::pm::list_pm_waves(repo);
-    }
-    let Some(name) = wave
-        .clone()
-        .or_else(|| wave_flag.clone())
-        .or_else(|| crate::ops::util::resolve_wave_name(repo, None))
-    else {
-        return Ok(Vec::new());
-    };
-    if !crate::ops::pm::wave_pm_is_enabled(repo, &name) {
-        return Ok(Vec::new());
-    }
-    Ok(vec![name])
-}
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
     let mut argv = vec!["lf".to_string(), "op".to_string(), item.command.clone()];
@@ -230,71 +200,15 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 Ok(())
             }
         },
-        OpsCommand::Ingest { wave, item } => {
-            ingest(
-                repo,
-                &IngestOptions {
-                    wave: wave.clone(),
-                    item: item.clone(),
-                },
-                progress,
-            )?;
-            Ok(())
-        }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
-        OpsCommand::Pm { cmd } => {
-            use crate::lf::PmCommand;
-            match cmd {
-                PmCommand::Pull {
-                    wave,
-                    wave_flag,
-                    all,
-                } => {
-                    let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
-                    if waves.is_empty() {
-                        progress.status("pm pull: no PM-enabled wave for current branch, skipping");
-                    }
-                    for w in waves {
-                        crate::ops::pm::pm_pull(
-                            repo,
-                            &crate::ops::pm::PmPullOptions { wave: w },
-                            progress,
-                        )?;
-                    }
-                    Ok(())
-                }
-                PmCommand::PushDiff {
-                    wave,
-                    wave_flag,
-                    all,
-                } => {
-                    let waves = resolve_pm_waves_for_flow(repo, wave, wave_flag, *all)?;
-                    if waves.is_empty() {
-                        progress.status(
-                            "pm push-diff: no PM-enabled wave for current branch, skipping",
-                        );
-                    }
-                    for w in waves {
-                        crate::ops::pm::pm_push_diff(
-                            repo,
-                            &crate::ops::pm::PmPushDiffOptions { wave: w },
-                            progress,
-                        )?;
-                    }
-                    Ok(())
-                }
-                _ => Err(OpsError::Message(
-                    "only pm pull and pm push-diff are supported as flow ops".to_string(),
-                )),
-            }
-        }
         OpsCommand::Cp { .. }
         | OpsCommand::Doctor
+        | OpsCommand::Pm { .. }
         | OpsCommand::Branches { .. }
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
         | OpsCommand::Auth { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/branches/wt/shell/auth commands".to_string(),
+            "ops item does not support cp/doctor/pm/branches/wt/shell/auth commands".to_string(),
         )),
     }
 }

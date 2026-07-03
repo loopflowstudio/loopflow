@@ -34,15 +34,11 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 
 ```
 wave/infra/
-├── GOAL.md                # The wave's intent and loop prompt
-├── MEMORY.md              # What the agent remembers between loops
-├── README.md              # Vision, strategy, goals, risks
-├── 1-fix-crash-loop.md    # Roadmap — urgent
-├── 2-daemon-integrity.md  # Roadmap — high
-└── 3-golden-tests.md      # Roadmap — medium
+├── GOAL.md    # The wave's intent and loop prompt
+└── MEMORY.md  # What the agent remembers between loops
 ```
 
-`GOAL.md` and `MEMORY.md` are the two canonical files. `README.md` and the numbered items are the wave's roadmap — synced to a provider (Asana, Linear, Notion) when PM is connected.
+`GOAL.md` and `MEMORY.md` are the two files a wave authors. The roadmap itself lives in Asana, not in the repo — read and edit it with `lf op pm` (see [Roadmap](#the-roadmap)).
 
 ### The Goal
 
@@ -67,57 +63,29 @@ memory.
 
 `MEMORY.md` is durable working context the wave agent writes as it goes — decisions, dead ends, what a downstream task should know. Workers inherit it as read-only context so they build with the wave's history in view; only the wave agent writes it.
 
-### The README
+### The Roadmap
 
-Every wave README follows the same structure:
+The roadmap lives in Asana. There are no local roadmap files and nothing to sync — `lf op pm` reads and edits the wave's Asana project directly.
 
-```markdown
-# Infrastructure Hardening
+Connect a wave to Asana once. `lf op pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
 
-## Vision
-What this wave achieves. One paragraph.
-
-## Strategy
-How to get there. Sequence, dependencies, approach.
-
-## Goals
-- Concrete, verifiable outcomes
-
-## Risks
-- What could go wrong, and how to mitigate
-
-## Metrics
-- How to measure success
+```yaml
+# wave/infra/GOAL.md frontmatter
+pm:
+  asana_project: 1207xxxxxxxxxxxx
 ```
 
-### Roadmap Items
+Then read and edit the roadmap:
 
-Items are priority-prefixed markdown files — the wave's work queue:
-
-```
-1-fix-crash-loop.md    # Urgent — broken or blocked; fix first
-2-daemon-integrity.md  # High — the clear next step
-3-golden-tests.md      # Medium — "when, not if"
-4-security-research.md # Low — speculative
-```
-
-Each item needs a **finish line** — one verifiable sentence, right after the title — and a **scope** that says what's in and what's out, so a worker knows when to stop:
-
-```markdown
-# Daemon Data Integrity
-
-**Finish line:** SQLite migrations are transactional, resource leaks are
-bounded, and the webhook endpoint is safe by default.
-
-## Scope
-- Transactional migrations (wrap 21 SQLite migrations in BEGIN/COMMIT)
-- Resource accumulation (bound log files, file handles, lock maps)
-- Webhook security (reject unauthenticated webhooks by default)
+```bash
+lf op pm init --wave infra                              # connect/create the Asana project
+lf op pm show --wave infra                              # print the live roadmap
+lf op pm update --wave infra --title "Daemon data integrity" --notes "..."   # add a task
+lf op pm update --wave infra --id 1207... --status done # close a task
+lf op pm status                                         # show linked waves
 ```
 
-Keep items to one PR's worth of work — roughly 1000 LOC. If an item feels like it needs splitting, it does.
-
-For PM-backed waves, `lf op ingest` refreshes the local mirror from the provider before the wave picks. Use `lf op ingest --item <filename-or-slug>` to target a specific item.
+Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels like it needs splitting, it does. Give it a clear finish line so a worker knows when to stop.
 
 ### Goal Frontmatter
 
@@ -128,6 +96,7 @@ For PM-backed waves, `lf op ingest` refreshes the local mirror from the provider
 | `mode` | Primary execution pattern: `manual` or `loop` |
 | `metrics` | Criteria the loop re-judges each iteration |
 | `agent` | Preferred agent harness/model |
+| `pm.asana_project` | Asana project id backing the wave's roadmap (written by `lf op pm init`) |
 
 Crons and triggers are live lfd state — configure them through the HTTP or Python API; they are not read from `GOAL.md`.
 
@@ -141,7 +110,7 @@ Crons and triggers are live lfd state — configure them through the HTTP or Pyt
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a `wave/infra/README.md` and roadmap items. Once the files exist in your repo, Concerto and lfq pick them up.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, Concerto and lfq pick them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -216,23 +185,23 @@ loopflow.add_trigger("mywave", signal="wave", source_wave_id="infra")
 
 ## Worked Example
 
-A `wave/billing/` directory for a billing rewrite. **README.md** sets the vision — "replace the legacy billing system with a metered usage model" — and lists concrete goals:
+A `wave/billing/` directory for a billing rewrite. **`GOAL.md`** sets the intent — "replace the legacy billing system with a metered usage model" — and the metrics the loop re-judges each iteration:
 
 - Usage events recorded within 5 seconds
 - Invoices generate correctly for all plan types
 - Legacy endpoints return the same responses during migration
 
-**Roadmap items** are scoped to one PR each:
+The **Asana roadmap** holds the tasks, each scoped to one PR:
 
 ```
-2-usage-events.md       → Event capture and storage
-2-metering-api.md       → Public metering endpoint
-3-invoice-generation.md → Monthly invoice calculation
-3-migration-shim.md     → Legacy API compatibility layer
-4-cleanup.md            → Remove old billing code
+Usage events       → Event capture and storage
+Metering API       → Public metering endpoint
+Invoice generation → Monthly invoice calculation
+Migration shim     → Legacy API compatibility layer
+Cleanup            → Remove old billing code
 ```
 
-The wave agent picks from the highest-priority level, dispatches a worker per item, and loops — folding each shipped PR into memory — until the roadmap is empty.
+The wave agent reads the roadmap with `lf op pm show`, picks the highest-priority task, dispatches a worker per task, and loops — folding each shipped PR into memory and closing the task with `lf op pm update --status done` — until the roadmap is empty.
 
 ---
 

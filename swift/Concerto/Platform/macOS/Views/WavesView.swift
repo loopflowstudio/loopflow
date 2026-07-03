@@ -19,7 +19,8 @@ struct WavesView: View {
     let portfolioService: PortfolioService
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
-    /// window). Collapsed to its main worktree before matching the rail.
+    /// window). Read AS-IS — its real path, a worktree included — so waves are
+    /// enumerated from the checkout the user actually launched from.
     var initialRepoPath: String? = nil
 
     @Environment(\.palette) private var palette
@@ -356,14 +357,41 @@ struct WavesView: View {
 
     /// Attach the wave's /goal agent. An authored-on-disk wave (synthetic id) is
     /// created-and-run first, then selection moves to the real wave so the row and
-    /// terminal persist once lfd knows about it.
+    /// terminal persist once lfd knows about it. But lfd often already has the wave
+    /// (concerto-dev seeds lfd waves from the repo's `wave/` dir on launch), so an
+    /// existing live wave is attached rather than re-created.
     private func launchOrAttach(wave: WaveViewModel, state: PortfolioRepoState) async throws -> SessionConnectionInfo {
         guard wave.id.hasPrefix(Self.authoredIdPrefix) else {
             return try await state.attachWaveAgent(waveId: wave.id)
         }
-        let created = try await state.createWave(name: wave.name)
-        selectedWaveId = created.id
-        return try await state.attachWaveAgent(waveId: created.id)
+        if let existing = await existingLiveWave(named: wave.name, in: state) {
+            selectedWaveId = existing.id
+            return try await state.attachWaveAgent(waveId: existing.id)
+        }
+        do {
+            let created = try await state.createWave(name: wave.name)
+            selectedWaveId = created.id
+            return try await state.attachWaveAgent(waveId: created.id)
+        } catch {
+            // Lost a race (seeded/created between the check and now): fall back to
+            // the now-live wave instead of surfacing "already exists".
+            await state.refresh()
+            guard let existing = state.waves.first(where: { $0.name == wave.name }) else {
+                throw error
+            }
+            selectedWaveId = existing.id
+            return try await state.attachWaveAgent(waveId: existing.id)
+        }
+    }
+
+    /// The live (lfd-known) wave for `name` in this repo, refreshing once if the
+    /// current snapshot doesn't have it. `nil` means it genuinely isn't created yet.
+    private func existingLiveWave(named name: String, in state: PortfolioRepoState) async -> WaveViewModel? {
+        if let match = state.waves.first(where: { $0.name == name }) {
+            return match
+        }
+        await state.refresh()
+        return state.waves.first(where: { $0.name == name })
     }
 
     private func repoState(for wave: WaveViewModel) -> PortfolioRepoState? {
@@ -417,25 +445,26 @@ struct WavesView: View {
         try await state.createWave(name: name)
     }
 
-    /// Register a launch-provided repo (collapsed to its main worktree) so it
-    /// shows in the rail, and return its main-worktree path for pre-selection.
+    /// Register the launch-provided repo AS-IS (its real path, a worktree included)
+    /// so reads hit that checkout, and return that path for pre-selection. The rail
+    /// row displays the collapsed main-repo name — see `refreshRepos`.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
         if RepoState.uiTestMode() != nil { return nil }
-        let url = URL(fileURLWithPath: initialRepoPath)
-        let mainPath = await Task.detached {
-            RepoScanner().resolveMainWorktree(url).normalizedFilePath
-        }.value
-        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == mainPath }) {
-            portfolioService.addRepo(URL(fileURLWithPath: mainPath))
+        let launchedPath = URL(fileURLWithPath: initialRepoPath).normalizedFilePath
+        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == launchedPath }) {
+            portfolioService.addRepo(URL(fileURLWithPath: launchedPath))
         }
-        return mainPath
+        return launchedPath
     }
 
     /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
     /// every time. The persisted registry is no longer the source; a launch-provided
-    /// `initialRepoPath` outside `~/src` is merged in (collapsed to its main worktree)
-    /// so pre-selection still resolves. Runs the git/FS work off the main thread.
+    /// `initialRepoPath` is merged in AS-IS — its real path (a worktree is fine) — so
+    /// authored-wave enumeration and lfd reads hit the checkout the user launched from.
+    /// The launched entry stands in for its main repo: the rail shows the collapsed
+    /// main-repo name, and the scanned main entry is dropped so there's a single row.
+    /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
         if RepoState.uiTestMode() != nil {
             repos = portfolioService.repos
@@ -453,10 +482,17 @@ struct WavesView: View {
                 result.append(PortfolioRepo(path: path, lastOpened: Date()))
             }
             if let initialPath {
-                let mainPath = scanner.resolveMainWorktree(URL(fileURLWithPath: initialPath)).normalizedFilePath
-                if seen.insert(mainPath).inserted {
-                    result.append(PortfolioRepo(path: mainPath, lastOpened: Date()))
-                }
+                let launchedURL = URL(fileURLWithPath: initialPath)
+                let launchedPath = launchedURL.normalizedFilePath
+                let mainURL = scanner.resolveMainWorktree(launchedURL)
+                // Drop the scanned main entry (and any dup) so the launched worktree
+                // is the one row that represents this repo, reading its own wave/ dir.
+                result.removeAll { $0.path == mainURL.normalizedFilePath || $0.path == launchedPath }
+                result.append(PortfolioRepo(
+                    path: launchedPath,
+                    lastOpened: Date(),
+                    displayNameOverride: mainURL.lastPathComponent
+                ))
             }
             return result
         }.value

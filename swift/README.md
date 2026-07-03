@@ -139,22 +139,21 @@ Define the capability in shared code, implement it in platform shell code.
 Concerto launches into a portfolio window instead of a single welcome panel:
 
 - Each repo appears as a card with live wave status, blocked count, and diff totals
-- Click a wave to open that repo window and focus the selected wave
+- Click a repo to open its repo-scoped wave list
 - Use the `+` card to scan `~/src` and add another main git worktree
 - Added repos persist between launches
 
-## Attention Queue
+## Repo Wave List
 
-Repo windows now open into a queue view when no wave is selected:
+Repo windows open into the first slice of the outward wave model:
 
-- Review-ready, failed, and queue-blocked waves are listed in urgency order
-- Click an item to open its detail without drilling into the wave first
-- Code review items offer `Ship`; step failures offer `Retry`
-- Empty queues show `Nothing needs you. Waves are running.`
+- Shows waves touching the current repo
+- Renders each row with wave name, repo chip, and rollup status
+- Keeps create-wave, open-wave detail, and in-repo workspace flows out of the exposed path for now
 
 ## Wave Workspace
 
-Selected waves now open into a multiplexer workspace:
+The multiplexer workspace remains available in the codebase, but repo windows no longer expose it as the default flow:
 
 - Default panes show a minimal **Roadmap** list, **Roadmap Detail**, and a Ghostty-backed **Terminal**
 - Roadmap rows keep just the title and priority, sort shipped items to the bottom, and reveal an inline play button on hover

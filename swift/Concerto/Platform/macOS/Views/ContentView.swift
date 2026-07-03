@@ -20,6 +20,18 @@ struct ContentView: View {
         repoFilteredWaves(repoState.waves, currentRepoPath: currentRepoPath)
     }
 
+    private var repoDisplayPath: String {
+        repoState.currentRepo?.path(percentEncoded: false)
+            ?? repoState.repoTarget?.path
+            ?? "Opening repository..."
+    }
+
+    private var navigationTitle: String {
+        repoState.currentRepo?.lastPathComponent
+            ?? repoState.repoTarget?.displayName
+            ?? "Loopflow"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -37,7 +49,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
-        .navigationTitle(repoState.currentRepo?.lastPathComponent ?? "Loopflow")
+        .navigationTitle(navigationTitle)
         .onChange(of: repoState.errorMessage) { _, newValue in
             showingError = newValue != nil
         }
@@ -57,7 +69,7 @@ struct ContentView: View {
                     .font(Typography.sectionTitle(24))
                     .foregroundStyle(palette.text)
 
-                Text(repoState.currentRepo?.path(percentEncoded: false) ?? "Opening repository...")
+                Text(repoDisplayPath)
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
@@ -129,6 +141,10 @@ func repoFilteredWaves(_ waves: [WaveViewModel], currentRepoPath: String?) -> [W
     }
 }
 
+func repoChipText(for repoPath: String) -> String {
+    URL(fileURLWithPath: repoPath.normalizedFilePath).lastPathComponent
+}
+
 private struct RepoWaveRow: View {
     let wave: WaveViewModel
 
@@ -153,6 +169,17 @@ private struct RepoWaveRow: View {
                     .font(Typography.caption())
                     .foregroundStyle(wave.status.color)
                     .accessibilityIdentifier("wave-status")
+
+                Text(repoChipText(for: wave.repo))
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: CornerRadius.sm)
+                            .fill(palette.text.opacity(0.06))
+                    )
+                    .accessibilityIdentifier("wave-repo-chip")
             }
 
             Spacer()
@@ -160,7 +187,7 @@ private struct RepoWaveRow: View {
         .padding(.vertical, Spacing.md)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(wave.displayName), \(wave.statusText)")
+        .accessibilityLabel("\(wave.displayName), \(repoChipText(for: wave.repo)), \(wave.statusText)")
     }
 }
 

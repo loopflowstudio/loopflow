@@ -27,6 +27,22 @@ struct ContentViewTests {
         #expect(repoFilteredWaves(waves, currentRepoPath: nil).isEmpty)
     }
 
+    @Test("normalizes repo paths before filtering")
+    func normalizesRepoPathsBeforeFiltering() {
+        let waves = [
+            makeWave(id: "mine", repo: "/tmp/repo-a/../repo-a"),
+        ]
+
+        let filtered = repoFilteredWaves(waves, currentRepoPath: "/tmp/repo-a")
+
+        #expect(filtered.map(\.id) == ["mine"])
+    }
+
+    @Test("repo chip uses the repository directory name")
+    func repoChipUsesRepositoryDirectoryName() {
+        #expect(repoChipText(for: "/tmp/repo-a/../repo-a") == "repo-a")
+    }
+
     private func makeWave(id: String, repo: String, status: WaveStatus = .running) -> WaveViewModel {
         WaveViewModel(
             api: Wave(

@@ -746,7 +746,7 @@ mod tests {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: wave.primary_repo().to_string(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),

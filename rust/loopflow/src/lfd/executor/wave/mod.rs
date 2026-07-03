@@ -395,7 +395,8 @@ impl WaveExecutor {
             .ok_or_else(|| anyhow!("wave not found"))?;
         self.ensure_wave_workspace(&wave).await?;
 
-        let worktree = crate::engine::worktrees::worktree_path(Path::new(wave.repo()), wave.name());
+        let worktree =
+            crate::engine::worktrees::worktree_path(Path::new(wave.primary_repo()), wave.name());
         let worktree = worktree.display().to_string();
         let session_id = LfdId::new();
         let in_flight = list_in_flight_dispatches(&self.store, wave.id(), None).await?;
@@ -1546,10 +1547,14 @@ mod tests {
     }
 
     async fn create_main_run(store: &SharedStore, wave: &Wave, status: RunStatus) -> Run {
+        let repo_work = wave
+            .repos
+            .first()
+            .expect("wave always has at least one RepoWork");
         let run = Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: repo_work.repo.clone(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),
@@ -1557,7 +1562,7 @@ mod tests {
             iteration: 0,
             step_index: 0,
             status,
-            worktree: wave.repo().clone(),
+            worktree: repo_work.repo.clone(),
             branch: "main".to_string(),
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: None,

@@ -78,7 +78,7 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let worktree = worktree_path(Path::new(wave.repo()), wave.name());
+        let worktree = worktree_path(Path::new(wave.primary_repo()), wave.name());
         let wave_dir = worktree.join("wave").join(wave.name());
 
         // Skip if wave dir was removed (cycle complete).

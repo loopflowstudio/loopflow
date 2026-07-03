@@ -48,14 +48,18 @@ pub async fn create_parallel_run(
         .map(|run| run.stack_group_id.clone())
         .unwrap_or_else(|| wave.id().to_string());
 
-    let main_repo = Path::new(wave.repo());
+    let repo_work = wave
+        .repos
+        .first()
+        .expect("wave always has at least one RepoWork");
+    let main_repo = Path::new(&repo_work.repo);
     let (wt_path, branch) =
         create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?;
 
     let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        repo: wave.repo().clone(),
+        repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
         direction: wave.direction().clone(),
@@ -123,7 +127,11 @@ pub async fn create_run_with_id(
         .map(|run| run.stack_group_id.clone())
         .unwrap_or_else(|| wave.id().to_string());
 
-    let main_repo = Path::new(wave.repo());
+    let repo_work = wave
+        .repos
+        .first()
+        .expect("wave always has at least one RepoWork");
+    let main_repo = Path::new(&repo_work.repo);
 
     // Targeted activations (non-main branch) get their own worktree
     // even for serialized waves, since the wave's shared worktree is
@@ -140,7 +148,7 @@ pub async fn create_run_with_id(
     let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        repo: wave.repo().clone(),
+        repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
         direction: wave.direction().clone(),

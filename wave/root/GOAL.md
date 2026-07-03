@@ -8,12 +8,12 @@ pm:
   asana_project: '1214270017740342'
 ---
 
-Root is the conductor wave: it gardens the other waves and owns the rhythm between them, not a product surface of its own. Keep desktop, mobile, workflows, and release moving in the right order, and make the morning garden pass feel like one coherent ritual.
+Root is the conductor wave: it gardens the other waves and owns the rhythm between them, not a product surface of its own. Keep concerto, mobile, workflows, and release moving in the right order, and make the morning garden pass feel like one coherent ritual.
 
 **Metrics to improve**
 - One morning pass in Concerto shows shipped, blocked, release health, and what needs a human.
 - Manual review and automated garden/govern passes emit one status language.
-- Desktop, mobile, workflows, and release advance in the right order.
+- Concerto, mobile, workflows, and release advance in the right order.
 
 **Milestones**
 - review-open-work-and-garden-parity: manual and automated status passes read as one system.

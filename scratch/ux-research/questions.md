@@ -20,7 +20,7 @@ Each item is a concrete persona-framed behavior a future loop can target.
    targets the wave screen's *internal* layout.
 4. **The waiting-nudge.** When a terminal-hosted wave needs you and the app isn't
    focused, is the rollup `waiting` chip enough, or is a native nudge required?
-   (Flagged as the sharp one in `wave/desktop/3-wave-surface-ux-exploration.md`.)
+   (Flagged as the sharp one in `wave/concerto/3-wave-surface-ux-exploration.md`.)
 5. **Quick-start a wave** from a repo roadmap / Asana item — authoring, not
    triage. Later.
 

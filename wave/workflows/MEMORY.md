@@ -14,7 +14,7 @@ Drives the engine: scheduling, providers, flow execution, mutation, and the gove
 - Engine work and governance UX are tightly coupled — the surface is only as good as the underlying data contracts.
 - Governance surfaces (runboard, portfolio, calibration, beat programming, release) share one engine-backed model — no dashboard fork, no UI-only shadow state.
 - Loopflow hands off interactive sessions to the vendor; it does not reimplement their chat.
-- Out of scope here: embedded-terminal/macOS build polish (→ `desktop`) and root's own morning ritual (→ `root`).
+- Out of scope here: embedded-terminal/macOS build polish (→ `concerto`) and root's own morning ritual (→ `root`).
 
 ## Next
 

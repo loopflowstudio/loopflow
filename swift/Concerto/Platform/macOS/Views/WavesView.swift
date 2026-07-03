@@ -642,7 +642,7 @@ struct WavesView: View {
         switch event {
         case .connected(let connected):
             let grouped = Dictionary(grouping: connected.waves) {
-                $0.repo.normalizedFilePath
+                $0.repos.first?.repo.normalizedFilePath ?? ""
             }
             for repo in repos {
                 repoStates[repo.path]?.applyConnectedWaves(grouped[repo.path] ?? [])
@@ -657,7 +657,7 @@ struct WavesView: View {
                 }
                 return
             }
-            repoStates[wave.repo.normalizedFilePath]?.applyWaveEvent(waveEvent)
+            repoStates[wave.repos.first?.repo.normalizedFilePath ?? ""]?.applyWaveEvent(waveEvent)
 
         case .auth(let authEvent):
             authProviderStore.handleEvent(authEvent)

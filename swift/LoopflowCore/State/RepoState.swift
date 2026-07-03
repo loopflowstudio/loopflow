@@ -557,7 +557,7 @@ public final class RepoState {
 
         if let currentRepoPath,
            let wave = event.wave,
-           wave.repo.normalizedFilePath != currentRepoPath {
+           !wave.repos.contains(where: { $0.repo.normalizedFilePath == currentRepoPath }) {
             return
         }
 
@@ -570,7 +570,7 @@ public final class RepoState {
                 refreshedWave = wave
             } else if let wave = try? await waveService.getWave(event.waveId) {
                 if let currentRepoPath,
-                   wave.repo.normalizedFilePath != currentRepoPath {
+                   !wave.repos.contains(where: { $0.repo.normalizedFilePath == currentRepoPath }) {
                     return
                 }
                 waveStore.set(makeWaveViewModel(api: wave))
@@ -1572,7 +1572,9 @@ public final class RepoState {
     /// are already repo-scoped — this closes the same gap on the bulk snapshot.
     func applyConnectedSnapshot(_ waves: [Wave]) {
         let currentRepoPath = repoTarget?.path.normalizedFilePath
-        let scoped = waves.filter { $0.repo.normalizedFilePath == currentRepoPath }
+        let scoped = waves.filter { wave in
+            wave.repos.contains { $0.repo.normalizedFilePath == currentRepoPath }
+        }
         waveStore.setAll(scoped.map(makeWaveViewModel))
     }
 

@@ -2377,7 +2377,6 @@ mod tests {
             .await
             .expect("get deleted wave")
             .is_none());
-
     }
 
     #[tokio::test]

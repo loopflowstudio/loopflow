@@ -57,7 +57,6 @@ struct WaveSidebar: View {
         @Bindable var repoState = repoState
         VStack(alignment: .leading, spacing: 0) {
             header
-            analyticsRow
             flowsRow
 
             if repoState.isActivelyConnecting {

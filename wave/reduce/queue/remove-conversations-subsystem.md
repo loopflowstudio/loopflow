@@ -1,7 +1,8 @@
 ---
-status: in-flight
+status: done
 proposal: wave/reduce/proposals/session-record-spine.md
 worker: Ohm
+completed_at_head: 42a663ee195c10ec5759c35ee83362b0b0c2ef0c
 ---
 
 # Remove the conversations subsystem
@@ -9,6 +10,9 @@ worker: Ohm
 **Finish line:** Conversation code, API surface, clients, docs, tests, and store
 hooks are gone. Nothing in the repo presents conversations as a live loopflow
 subsystem.
+
+**Result:** Shipped in HEAD `42a663ee195c10ec5759c35ee83362b0b0c2ef0c`.
+Final cleanup remains as local modifications in Swift/Python/Rust test support.
 
 ## Why
 
@@ -50,8 +54,12 @@ bring the useful pieces back under the Session Record model.
 
 - `rg -n "conversation|Conversation|conversations"` returns only ordinary prose
   uses, reduce notes, or unrelated prompt text.
-- `cargo fmt --check`
-- `cargo clippy -- -D warnings`
-- `cargo test --all`
-- `uv run pytest python/tests/`
-- `swift test --package-path swift`
+- `cargo fmt --check` passed.
+- `cargo clippy -- -D warnings` passed.
+- `uv run pytest python/tests/` passed: 144 tests.
+- `swift test --package-path swift` passed: 310 tests.
+- `cargo test --all` passed.
+- `cd website && uv run python dev.py test` passed: 61 passed, 3 skipped.
+- `tests/e2e/test_smoke.sh` passed.
+- `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v`
+  passed: 13 tests.

@@ -204,7 +204,6 @@ public final class SessionState {
         guard !trimmed.isEmpty else { return }
         guard sessionId != trimmed else { return }
 
-        cancelStreamTask()
         resetForReplay()
         sessionId = trimmed
         persistSessionId(trimmed)
@@ -265,7 +264,6 @@ public final class SessionState {
         guard let sessionId else { return }
 
         streamPhase = .ending
-        cancelStreamTask()
 
         do {
             _ = try await waveService.stopSession(sessionId)

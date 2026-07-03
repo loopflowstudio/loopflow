@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::engine::config::load_config_or_default;
 use crate::engine::worktrees::main_repo_root;
 use crate::engine::{
-    available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal, Goal,
+    available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal,
     GoalRenderContext, InFlightDispatch,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
@@ -78,7 +78,9 @@ fn build_goal_message(
     once: bool,
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<String> {
-    let goal = load_goal_for_message(repo, wave_name, goal_name)?;
+    let goal_name = goal_name.unwrap_or(wave_name);
+    let goal = load_goal(goal_name, repo)
+        .map_err(|err| anyhow!("failed to load goal '{goal_name}': {err}"))?;
     let wave_config = read_wave_config(repo, wave_name).unwrap_or_default();
     let memory = std::fs::read_to_string(repo.join("wave").join(wave_name).join("MEMORY.md"))
         .unwrap_or_default();
@@ -98,21 +100,6 @@ fn build_goal_message(
         );
     }
     Ok(message)
-}
-
-fn load_goal_for_message(repo: &Path, wave_name: &str, goal_name: Option<&str>) -> Result<Goal> {
-    let Some(goal_name) = goal_name else {
-        return load_goal(wave_name, repo)
-            .map_err(|err| anyhow!("failed to load goal for wave '{wave_name}': {err}"));
-    };
-
-    let key = crate::engine::builtins::resolve_builtin_goal(goal_name)
-        .ok_or_else(|| anyhow!("failed to load builtin goal '{goal_name}'"))?;
-    let prompt = crate::engine::builtins::get_builtin_goal(key)
-        .expect("resolve_builtin_goal returned a known key");
-    Ok(Goal {
-        prompt: prompt.to_string(),
-    })
 }
 
 /// Best-effort fetch of the wave's open dispatches from a running `lfd`.

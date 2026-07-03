@@ -7,6 +7,39 @@
 - The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; desktop consumes it.
 - lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
 
+## Progress — terminal-first rebuild (2026-07-02)
+
+- **Reset surface shipped.** `RepoSidebarWindow` (repo sidebar filters a flat
+  wave list) is now the main window, replacing the old wave-workspace/multiplexer
+  surface (kept in tree, unwired). Has a **+** new-wave launcher
+  (`CreateWaveSheet` → `WaveService.createWave` → `POST /v0/waves`, flow
+  `ship-roadmap`, `run:false`). Commits `b411c714`, `5237df25`.
+- **A2 (Wave.repo → repos:[RepoWork])** — build-green plan in `scratch/a2-plan.md`
+  (7 steps). Steps 1–2 committed green: `RepoWork` type, `wave_repos` child table
+  + store methods (mirror `wave_crons`), `Wave.repos` field, `primary_repo()`
+  bridge (delete in Step 7), repos stitched on read/write. Step 3 (executor onto
+  `RepoWork`) in flight. Ontology on this branch: `WaveRun`→`Run`, snapshot
+  flattened onto `Run`, `WaveRunStatus`→`RunStatus`.
+- **UX research loop** — `lf ux-research` (`propose→generate→evaluate→learn`),
+  state in `scratch/ux-research/`. **Loop-01 finding:** every candidate that beat
+  the plain repo-list ranked by *attention* (`failed→waiting→running→idle`) and
+  carried each wave's *reason* (`waitingReason`/diff/PRs) — the shipped row
+  discards those. Open tension: glanceable dashboard vs. `⌘K` keyboard-first; the
+  default surface optimizes one. Loop-02 queued to resolve at 30-wave scale.
+
+### Learnings (this rebuild)
+
+- **`concerto-dev` builds from the worktree it's run in** (`REPO_ROOT =
+  __file__.parent.parent`). To see a branch's UI, run `scripts/concerto-dev.py`
+  from that branch's worktree, not another. The window title shows the target repo.
+- **New views must opt into the app look** — `palette.background` +
+  `.scrollContentBackground(.hidden)` + `.tint(palette.accent)` + `Typography.*`,
+  or a `List` falls back to macOS gray-material + blue-selection chrome. Only
+  content changes; style stays.
+- **Repo list is worktree-aware.** Collapse every candidate to its main repo via
+  `git -C <dir> rev-parse --git-common-dir` (parent = main root); never present a
+  worktree. Default source is a `~/src` scan.
+
 ## Patterns (verified 2026-05-19, embedded-terminal implementation)
 
 - **lfd terminal provenance is `TerminalSession.source`; provider display is

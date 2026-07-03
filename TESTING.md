@@ -20,6 +20,38 @@ uv run pytest tests/regression/ -v     # nightly/weekly release gate
 
 Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
 
+## Changed-Aware Runner
+
+```bash
+uv run python scripts/test.py          # run only the suites your branch touched
+uv run python scripts/test.py --list   # print the plan, run nothing
+uv run python scripts/test.py --all    # run every suite (the full matrix)
+```
+
+`scripts/test.py` diffs your branch against `origin/main`, maps changed paths
+to the CI jobs above, and runs just those—fast suites first. Use it as the
+tight loop while iterating; run `--all` once before you ship.
+
+Slow suites (`concerto`, `e2e`, `docker`) stay off in changed-mode even when
+their paths change—the run prints why and how to force them:
+
+```bash
+uv run python scripts/test.py --concerto   # force the Concerto UI suite on
+uv run python scripts/test.py --base HEAD~5  # diff against a different ref
+```
+
+Path → suite mapping:
+
+| Changed | Suite | Runs |
+|---------|-------|------|
+| `rust/`, `Cargo.toml/lock` | rust | `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
+| `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
+| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone` |
+| `swift/Concerto/`, `swift/project.yml` | concerto *(slow)* | xcodegen + xcodebuild |
+| lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
+| `docker/`, lfd docker executor | docker *(slow)* | `cargo test -p loopflow docker_` |
+
 ## Python Tests
 
 Unit and integration tests for the Python client (`python/loopflow/`).

@@ -4,8 +4,7 @@
 
 Added `lf wave <name>` as the foreground Wave progress runtime. It resolves a
 wave, repeats bounded `lf -b goal <wave> --once` passes until Ctrl-C or
-`wave/<wave>/STOP`, and captures each pass's stdout/stderr under
-`wave/<name>/streams/`.
+`wave/<wave>/STOP`, inheriting the terminal for the inner pass stream.
 
 `lf loop` remains a command alias, but `lf wave` is the documented name. `lf goal`
 now has a batch path that launches through the shared headless agent runner
@@ -18,9 +17,10 @@ instead of opening an interactive session.
 - Used the existing headless agent launcher for `lf goal -b` so goal passes keep
   the same prompt assembly, harness config, and CLI availability checks as other
   batch runs.
-- Treat spawn, pipe, log, and wait failures as setup errors. Only a pass that
-  actually ran produces a pass outcome.
-- Captured stream logs as ignored runtime output with `wave/*/streams/`.
+- Treat spawn and wait failures as setup errors. Only a pass that actually ran
+  produces a pass outcome.
+- Reused the inner agent runner's existing durable logs instead of adding
+  branch-local stream capture before the monitor exists to consume it.
 - Removed branch-added local roadmap files during gate because current loopflow
   guidance makes Asana the roadmap source of truth.
 
@@ -30,14 +30,15 @@ instead of opening an interactive session.
 current `lf` binary for each inner pass. The inner pass enters
 `rust/loopflow/src/lf/commands/goal.rs`, which builds the wave goal prompt and,
 when `-b` is active, calls `launch_agent` with streaming enabled. The outer wave
-runtime tees that stream to the terminal and to the durable stream log.
+runtime inherits the terminal and lets the inner agent write its own durable
+logs.
 
 ## Risks and bottlenecks
 
 - A successful pass repeats immediately. That is the intended cadence, but a goal
   that exits quickly can run hot; failed passes have a short cooldown.
-- Stream logs merge stdout and stderr without source labels. That is enough for
-  the first monitor input, but later summarization may want tagged records.
+- Monitor work will need explicit stream capture later; this slice avoids
+  writing logs nobody reads yet.
 - `lf wave` is intentionally non-terminating. Automated smoke tests should use a
   STOP file or the unit-level `run_pass` coverage.
 - Scratch files remain gate handoff artifacts. `lf op land` is expected to clear

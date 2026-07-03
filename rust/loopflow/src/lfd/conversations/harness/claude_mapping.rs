@@ -99,7 +99,7 @@ impl ReaderState {
     }
 }
 
-/// Parse a single NDJSON line and emit SessionEvents.
+/// Parse a single NDJSON line and emit conversation events.
 pub(super) fn process_line(
     line: &str,
     turn_id: &str,

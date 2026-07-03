@@ -29,71 +29,61 @@ use tokio::task::JoinHandle;
 
 const TEST_TOKEN: &str = "test-token";
 
-const FAKE_CODEX: &str = r#"#!/usr/bin/env python3
-import json
-import select
-import sys
-import time
+const FAKE_CODEX: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
 
-turn_index = 0
+turn_index=0
 
-def send(method, params=None):
-    payload = {"jsonrpc": "2.0", "method": method, "params": params or {}}
-    print(json.dumps(payload), flush=True)
+send() {
+    printf '{"jsonrpc":"2.0","method":"%s","params":%s}\n' "$1" "$2"
+}
 
-def run_turn(content):
-    global turn_index
-    turn_index += 1
-    turn_id = f"turn_{turn_index}"
-    send("turn/started", {"turn": {"id": turn_id}})
-    send("item/agentMessage/delta", {"turn": {"id": turn_id}, "content": f"started:{content}"})
+extract_content() {
+    sed -n 's/.*"content":"\([^"]*\)".*/\1/p'
+}
 
-    deadline = time.time() + 0.8
-    while time.time() < deadline:
-        timeout = max(0.0, deadline - time.time())
-        ready, _, _ = select.select([sys.stdin], [], [], timeout)
-        if not ready:
-            break
-        line = sys.stdin.readline()
-        if not line:
-            sys.exit(0)
-        message = json.loads(line)
-        method = message.get("method")
-        params = message.get("params") or {}
-        if method == "turn/steer":
-            send(
-                "item/agentMessage/delta",
-                {"turn": {"id": turn_id}, "content": f"steered:{params.get('content', '')}"},
-            )
-        elif method == "turn/interrupt":
-            send("turn/completed", {"turn": {"id": turn_id, "status": "interrupted"}})
-            return
-        elif method == "initialize":
-            send("initialized")
-        elif method == "thread/start":
-            pass
+run_turn() {
+    turn_index=$((turn_index + 1))
+    turn_id="turn_${turn_index}"
+    send "turn/started" "{\"turn\":{\"id\":\"${turn_id}\"}}"
+    send "item/agentMessage/delta" "{\"turn\":{\"id\":\"${turn_id}\"},\"content\":\"started\"}"
 
-    send(
-        "turn/completed",
-        {
-            "turn": {"id": turn_id, "status": "completed"},
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-            "model": "fake-codex",
-        },
-    )
+    for _ in {1..3}; do
+        if ! IFS= read -r -t 1 line; then
+            continue
+        fi
+        case "$line" in
+            *turn/steer*)
+                content=$(printf '%s\n' "$line" | extract_content)
+                send "item/agentMessage/delta" "{\"turn\":{\"id\":\"${turn_id}\"},\"content\":\"steered:${content}\"}"
+                ;;
+            *turn/interrupt*)
+                send "turn/completed" "{\"turn\":{\"id\":\"${turn_id}\",\"status\":\"interrupted\"}}"
+                return
+                ;;
+            *initialize*)
+                send "initialized" "{}"
+                ;;
+        esac
+    done
 
-for line in sys.stdin:
-    message = json.loads(line)
-    method = message.get("method")
-    params = message.get("params") or {}
-    if method == "initialize":
-        send("initialized")
-    elif method == "thread/start":
-        pass
-    elif method == "turn/start":
-        run_turn(params.get("content", ""))
-    elif method == "turn/interrupt":
-        pass
+    send "turn/completed" "{\"turn\":{\"id\":\"${turn_id}\",\"status\":\"completed\"},\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"model\":\"fake-codex\"}"
+}
+
+send "initialized" "{}"
+
+while IFS= read -r line; do
+    case "$line" in
+        *initialize*)
+            send "initialized" "{}"
+            ;;
+        *thread/start*)
+            ;;
+        *turn/start*)
+            run_turn
+            ;;
+    esac
+done
 "#;
 
 const FAKE_CLAUDE: &str = r#"#!/usr/bin/env python3
@@ -183,11 +173,13 @@ async fn wait_for_session_status(
     conversation_id: &LfdId,
     expected: ConversationStatus,
 ) -> Value {
-    for _ in 0..100 {
+    let mut last_status = None;
+    for _ in 0..1000 {
         let session = conversations
             .get_conversation(conversation_id)
             .await
             .expect("get session");
+        last_status = Some(session.status);
         if session.status == expected {
             return json!({
                 "id": session.id.to_string(),
@@ -197,7 +189,13 @@ async fn wait_for_session_status(
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("session never reached expected status");
+    let events = conversations
+        .list_events(conversation_id, None)
+        .await
+        .expect("list events");
+    panic!(
+        "session never reached expected status {expected:?}; last status: {last_status:?}; events: {events:?}"
+    );
 }
 
 async fn send_input(client: &Client, base_url: &str, conversation_id: &str, text: &str) -> Value {
@@ -240,7 +238,9 @@ async fn collect_sse_until(
     loop {
         let chunk = tokio::time::timeout(Duration::from_secs(5), response.chunk())
             .await
-            .expect("timed out waiting for SSE chunk")
+            .unwrap_or_else(|_| {
+                panic!("timed out waiting for SSE chunk; events={events:?}; buffer={buffer:?}")
+            })
             .expect("read SSE chunk")
             .expect("SSE stream ended before expected event");
         buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -374,6 +374,7 @@ async fn http_session_input_steers_running_turn_starts_idle_turn_and_replays_eve
 
 #[tokio::test]
 async fn non_codex_session_input_is_rejected_before_runtime_lookup() {
+    let _env = support::EnvGuard::new(&[]);
     let tmp = tempdir().expect("tempdir");
     let store = Arc::new(
         open_store(&StorageConfig::sqlite(tmp.path().join("lfd.db")))

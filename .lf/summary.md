@@ -34,8 +34,8 @@ pub struct LfdId(String); // UUID-backed, serde/sql friendly
 
 ```rust
 enum WaveStatus { Idle, Running, Waiting, Paused, Failed }
-enum WaveRunStatus { Unspecified, Pending, Running, Waiting, Completed, Failed }
-enum WaveRunStackStatus { Active, Superseded, Merged }
+enum RunStatus { Unspecified, Pending, Running, Waiting, Completed, Failed }
+enum RunStackStatus { Active, Superseded, Merged }
 enum LivePrState { Unknown, Open, Closed, Merged }
 enum WaveMode { Loop, Manual }
 enum QueueBlockReason { MissingPr, WaveRunning, ScratchDirty, RebaseConflict, PromotionFailed }
@@ -43,12 +43,14 @@ enum QueueBlockReason { MissingPr, WaveRunning, ScratchDirty, RebaseConflict, Pr
 enum Signal { Repo, Wave, CiFailure }
 enum ActivationOutcome { Queued, Coalesced, Dropped, Dispatched }
 
-enum AgentStatus { Unspecified, Running, Waiting, Completed, Failed }
+enum ExecutionProcessStatus { Unspecified, Running, Waiting, Completed, Failed }
 
 enum AttentionKind { InteractiveStep, Algedonic }
 enum AttentionStatus { Surfaced, Viewed, Resolved }
 
-enum SessionStatus { Starting, Active, Ending, Ended, Failed }
+enum SessionStatus { Pending, Attached, Running, Succeeded, Failed, Canceled }
+enum SessionUse { WaveAgent, Worker, Palette }
+enum ConversationStatus { Starting, Active, Ending, Ended, Failed }
 enum TurnStatus { Completed, Interrupted, Failed }
 enum ItemStatus { InProgress, Completed, Failed, Declined }
 ```
@@ -64,7 +66,9 @@ pub struct Wave {
     pub repo: String,
     pub mode: WaveMode,
     pub primary_flow: String,
-    pub cron: Option<String>,
+    pub goal: String,
+    pub metrics: Vec<String>,
+    pub workers: u32,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub status: WaveStatus,
@@ -82,32 +86,30 @@ pub struct PullRequest {
     pub branch: Option<String>,
 }
 
-pub struct WaveRunSnapshot {
-    pub repo: String,
-    pub flow: String,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
-}
-
-pub struct WaveRun {
+pub struct Run {
     pub id: LfdId,
     pub wave_id: LfdId,
-    pub snapshot: WaveRunSnapshot,
+    pub repo: String,
+    pub flow: String,
+    pub task: Option<String>,
+    pub direction: Vec<String>,
+    pub area: Vec<String>,
     pub iteration: u32,
     pub step_index: u32,
-    pub status: WaveRunStatus,
+    pub status: RunStatus,
     pub worktree: String,
     pub branch: String,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
+    pub execution_cursor: Option<String>,
     pub activation_log_id: Option<LfdId>,
     pub parent_run_id: Option<LfdId>,
     pub parent_pr_number: Option<u32>,
     pub stack_position: u32,
     pub stack_group_id: String,
-    pub stack_status: WaveRunStackStatus,
+    pub stack_status: RunStackStatus,
     pub lineage_inferred: bool,
     pub target_branch: String,
     pub repair_of: Option<LfdId>,
@@ -198,18 +200,18 @@ Notes:
 - `CI_FIX_FLOW` is the exact trigger flow name `"ci-fix"`.
 - `Repo.repo_id` is canonical GitHub `"owner/repo"`, distinct from local filesystem `path`.
 
-### Agent, attention, summaries, chat memory
+### Execution, attention, summaries, chat memory
 
-Source: `rust/loopflow/src/lfd/types/agent.rs`, `attention.rs`, `summary.rs`, `chat_memory.rs`, `chat_message.rs`
+Source: `rust/loopflow/src/lfd/types/execution.rs`, `attention.rs`, `summary.rs`, `chat_memory.rs`, `chat_message.rs`
 
 ```rust
-pub struct AgentRun {
+pub struct ExecutionProcess {
     pub id: LfdId,
     pub step: String,
     pub repo: String,
     pub worktree: String,
-    pub wave_run_id: Option<LfdId>,
-    pub status: AgentStatus,
+    pub run_id: Option<LfdId>,
+    pub status: ExecutionProcessStatus,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub pid: Option<u32>,
@@ -259,11 +261,31 @@ pub struct ChatMessage {
 }
 ```
 
-### Session model
+### Session and conversation models
 
-Source: `rust/loopflow/src/lfd/sessions/types.rs`
+Source: `rust/loopflow/src/lfd/types/session.rs`, `rust/loopflow/src/lfd/conversations/types.rs`
 
 ```rust
+pub struct Session {
+    pub id: LfdId,
+    pub wave_id: LfdId,
+    pub run_id: Option<LfdId>,
+    pub parent_session_id: Option<LfdId>,
+    pub session_use: SessionUse,
+    pub step: String,
+    pub agent: String,
+    pub cwd: String,
+    pub argv: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub source: String,
+    pub tmux_name: String,
+    pub status: SessionStatus,
+    pub attached_at: Option<OffsetDateTime>,
+    pub started_at: Option<OffsetDateTime>,
+    pub completed_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+}
+
 pub struct FileEdit {
     pub path: String,
     pub kind: Option<String>,
@@ -313,7 +335,7 @@ pub struct ContextSnapshot {
     pub has_clipboard: bool,
 }
 
-pub enum SessionEvent {
+pub enum ConversationEvent {
     TurnStarted { turn_id },
     TurnCompleted { turn_id, status },
     TurnUsage { turn_id, usage },
@@ -330,7 +352,7 @@ pub enum SessionEvent {
     ProviderSessionId { provider_session_id },
 }
 
-pub struct SessionConfig {
+pub struct ConversationConfig {
     pub step: String,
     pub repo_root: String,
     pub directions: Vec<String>,
@@ -346,32 +368,33 @@ pub struct SessionConfig {
     pub client_compact: Option<bool>,
 }
 
-pub struct Session {
+pub struct Conversation {
     pub id: LfdId,
     pub harness: String,
-    pub status: SessionStatus,
-    pub wave_run_id: Option<String>,
+    pub status: ConversationStatus,
+    pub run_id: Option<LfdId>,
     pub provider_session_id: Option<String>,
-    pub config: SessionConfig,
+    pub config: ConversationConfig,
+    pub input_supported: bool,
     pub created_at: OffsetDateTime,
     pub ended_at: Option<OffsetDateTime>,
 }
 
-pub struct PersistedSessionEvent {
-    pub session_id: LfdId,
+pub struct PersistedConversationEvent {
+    pub conversation_id: LfdId,
     pub seq: i64,
-    pub event: SessionEvent,
+    pub event: ConversationEvent,
     pub created_at: OffsetDateTime,
 }
 
-pub struct CreateSessionParams {
+pub struct CreateConversationParams {
     pub harness: String,
-    pub wave_run_id: Option<String>,
-    pub config: SessionConfig,
+    pub run_id: Option<LfdId>,
+    pub config: ConversationConfig,
 }
 ```
 
-Important pattern: sessions are persisted as `(Session, PersistedSessionEvent*)`. Usage aggregation, SSE replay/follow, and UI state are derived from the event stream rather than a separate denormalized conversation table.
+Important pattern: `Session` is the attachable live control surface; provider transcript/input is a `Conversation`. Conversations are persisted as `(Conversation, PersistedConversationEvent*)`. Usage aggregation and SSE replay/follow are derived from the event stream.
 
 ## Engine Types and Prompt/Flow Model
 
@@ -783,8 +806,9 @@ Trait split:
 
 - `WaveStateStore`: waves, runs, PR state, attention, queue blocks, triggers, activations, summaries, chat memory/messages.
 - `RepoStore`: registered repos + parent/child edges.
-- `ExecutionStore`: fork runs + `AgentRun` lifecycle.
-- `SessionStore`: `Session`, status, provider session IDs, event append/list/filter.
+- `ExecutionStore`: fork runs + execution process lifecycle.
+- `ConversationStore`: `Conversation`, provider session IDs, event append/list/filter.
+- `ControlSessionStore`: attachable `Session` records and status.
 - `TokenStore`: provider OAuth/API tokens.
 - `SecretsProviderStore`: selected secrets-provider config.
 - `StoreAdmin`: health check + schema version.
@@ -796,7 +820,7 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store>;
 pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String>;
 ```
 
-Pattern: `Store` is the single service dependency injected into `HttpState`, `WaveExecutor`, `SessionManager`, and provider/secrets flows. SQLite and Postgres dispatch is explicit in `store/mod.rs`.
+Pattern: `Store` is the single service dependency injected into `HttpState`, `WaveExecutor`, `ConversationManager`, and provider/secrets flows. SQLite and Postgres dispatch is explicit in `store/mod.rs`.
 
 ## Orchestration Types
 
@@ -806,7 +830,7 @@ Source: `rust/loopflow/src/lfd/executor/mod.rs`, `executor/wave/mod.rs`, `queue.
 
 ```rust
 pub trait AgentExecutor {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32>;
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: ExecutionContext) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
     async fn write_to_workspace(&self, cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()>;
     async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()>;
@@ -822,7 +846,6 @@ pub struct WaveExecutor {
     output: OutputHub,
     runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
-    sessions: SessionManager,
     executor_type: ExecutorType,
     github_config: GitHubConfig,
 }
@@ -910,7 +933,7 @@ pub struct HttpState {
     pub http_security: HttpSecurityConfig,
     pub auth_failure_throttle: AuthFailureThrottle,
     pub ci_failure_cache: Arc<Mutex<HashSet<String>>>,
-    pub sessions: SessionManager,
+    pub conversations: ConversationManager,
 }
 
 pub struct ListResponse<T> {
@@ -920,10 +943,11 @@ pub struct ListResponse<T> {
 }
 
 pub struct WaveDto { /* Wave + git/PR/flow/trigger projection */ }
-pub struct WaveRunDto { /* WaveRun + PR state + queue view projection */ }
+pub struct RunDto { /* Run + PR state + queue view projection */ }
 pub struct TriggerDto { /* Trigger transport shape */ }
 pub struct AttentionItemDto { /* Attention transport shape */ }
-pub struct SessionUsageDto { /* aggregated token usage for one session */ }
+pub struct SessionDto { /* attachable live control surface */ }
+pub struct ConversationUsageDto { /* aggregated token usage for one conversation */ }
 pub struct WaveUsageDto { /* aggregate across a wave */ }
 pub struct UsageSummaryDto { /* grouped aggregate */ }
 pub struct UsageTimeseriesDto { /* bucketed aggregate */ }
@@ -944,11 +968,12 @@ Exact route families under `/v0`:
 - `/flows`
 - `/repos`
 - `/sessions`
+- `/conversations/{id}/input`
+- `/conversations/{id}/events`
 - `/attention`
 - `/waves`
 - `/usage`
-- `/tokens/revoke`
-- `/wave_runs`
+- `/runs`
 - `/worktrees`
 
 Security patterns:
@@ -984,15 +1009,22 @@ pub async fn combine_wave_handler(...);
 pub async fn get_wave_file_diff_handler(...);
 
 // Sessions
+pub async fn list_sessions_handler(...);
 pub async fn create_session_handler(...);
 pub async fn get_session_handler(...);
-pub async fn send_session_input_handler(...);
-pub async fn stream_session_events_handler(...); // SSE replay + follow
-pub async fn delete_session_handler(...);
+pub async fn current_session_handler(...);
+pub async fn attach_session_handler(...);
+pub async fn start_session_handler(...);
+pub async fn complete_session_handler(...);
+pub async fn cancel_session_handler(...);
 
-// Wave runs / logs
-pub async fn list_wave_runs_handler(...);
-pub async fn list_wave_runs_for_wave_handler(...);
+// Conversations
+pub async fn send_conversation_input_handler(...);
+pub async fn stream_conversation_events_handler(...); // SSE replay + follow
+
+// Runs / logs
+pub async fn list_runs_handler(...);
+pub async fn list_runs_for_wave_handler(...);
 pub async fn wave_logs_handler(...); // replay persisted log then follow OutputHub
 
 // Auth
@@ -1011,7 +1043,7 @@ pub async fn list_configs_handler(...);
 pub async fn select_secrets_handler(...);
 pub async fn sync_secrets_handler(...);
 pub async fn disconnect_secrets_handler(...);
-pub async fn get_session_usage_handler(...);
+pub async fn get_conversation_usage_handler(...);
 pub async fn get_wave_usage_handler(...);
 pub async fn get_usage_summary_handler(...);
 pub async fn get_usage_timeseries_handler(...);
@@ -1036,8 +1068,7 @@ Special route behavior:
 
 - `/v0/flows` introspects repo-local + built-in flows/steps/directions and returns `supported_harnesses`.
 - `/v0/waves/{wave_id}/logs` is plain text, not SSE.
-- `/v0/sessions/{id}/events` is SSE with replay completion sentinel `"session.replay_completed"`.
-- `/v0/tokens/revoke` requires local admin auth and operates on the connection token ledger.
+- `/v0/conversations/{id}/events` is SSE with replay completion sentinel `"conversation.replay_completed"`.
 
 ## Provider / GitHub / Secrets Integration
 
@@ -1184,9 +1215,10 @@ class PullRequest(BaseModel):
     title: Optional[str]
     branch: Optional[str]
 
-class WaveRun(BaseModel):
+class Run(BaseModel):
     id: str
     wave_id: str
+    task: Optional[str]
     iteration: int
     step_index: int
     status: str
@@ -1219,36 +1251,57 @@ class Wave(BaseModel):
     commits: list[CommitEntry]
     diff_stat: Optional[str]
     flow_steps: list[FlowStep]
-    active_run: Optional[WaveRun]
+    active_run: Optional[Run]
     created_at: Optional[datetime]
     branch: Optional[str]
     pr_url: Optional[str]
     pr_state: Optional[str]
 
-class SessionConfig(BaseModel):
+class Session(BaseModel):
+    id: str
+    object: str = "session"
+    wave_id: str
+    run_id: Optional[str]
+    parent_session_id: Optional[str]
+    session_use: str
+    step: str
+    agent: str
+    cwd: str
+    argv: list[str]
+    env: dict[str, str]
+    source: str
+    tmux_name: str
+    status: str
+    created_at: datetime
+    attached_at: Optional[datetime]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+
+class ConversationConfig(BaseModel):
     agent: Optional[str]
     cwd: Optional[str]
     system_prompt: Optional[str]
     max_turns: Optional[int]
     yolo_mode: bool = False
 
-class Session(BaseModel):
+class Conversation(BaseModel):
     id: str
-    object: str = "session"
+    object: str = "conversation"
     harness: str
     status: str
-    wave_run_id: Optional[str]
+    run_id: Optional[str]
     provider_session_id: Optional[str]
-    config: SessionConfig
+    config: ConversationConfig
+    input_supported: bool
     created_at: Optional[datetime]
     ended_at: Optional[datetime]
 
-class SessionEventEnvelope(BaseModel):
+class ConversationEventEnvelope(BaseModel):
     seq: Optional[int]
     event: dict[str, Any]
 ```
 
-Notable mismatch: Python `SessionConfig` is narrower than Rust `SessionConfig`; it exposes only a subset of fields.
+Notable split: Python `Session` mirrors the attachable tmux-backed control surface, while `Conversation` mirrors provider transcript/input state.
 
 ### `Client` API
 
@@ -1280,14 +1333,17 @@ def wave(self, name_or_id: str) -> Optional[Wave]
 def create_wave(self, name: str, repo: str, flow=None, direction=None, area=None) -> Wave
 def update_wave(self, name_or_id: str, flow=None, direction=None, area=None, status=None) -> Wave
 def delete_wave(self, name_or_id: str) -> None
-def run_wave(self, name_or_id: str, flow=None, direction=None, area=None) -> dict[str, Any]
+def run_wave(self, name_or_id: str, flow=None, direction=None, area=None) -> Session
+def ensure_wave_agent(self, name_or_id: str) -> Session
+def get_wave_agent_tree(self, name_or_id: str, active_only=True) -> WaveAgentTree
 def add_trigger(self, name_or_id: str, signal: str, flow=None, source_wave_id=None, max_iterations=None) -> dict[str, Any]
 def remove_trigger(self, name_or_id: str, trigger_id: str) -> dict[str, Any]
 def stop_wave(self, name_or_id: str) -> dict[str, Any]
 def land_wave(self, name_or_id: str, strict=None, local=None, create_pr=None, worktree=None) -> dict[str, Any]
 def next_wave(self, name_or_id: str) -> dict[str, Any]
-def wave_runs(self, wave_id=None, repo=None, limit=None) -> list[WaveRun]
+def runs(self, wave_id=None, repo=None, limit=None) -> list[Run]
 def wave_logs(self, name_or_id: str) -> Iterator[str]
+def run_worker(self, name_or_id: str, flow: str, task: str, parent_session_id=None) -> Session
 
 def list_repos(self) -> list[Repo]
 def add_repo(self, path: str) -> Repo
@@ -1297,11 +1353,12 @@ def remove_child(self, owner: str, repo: str, child_owner: str, child_repo: str)
 def list_children(self, owner: str, repo: str) -> list[Repo]
 def list_parents(self, owner: str, repo: str) -> list[Repo]
 
-def create_session(self, harness: str, wave_run_id: Optional[str] = None, config: Optional[SessionConfig] = None) -> Session
-def session(self, session_id: str) -> Optional[Session]
-def send_session_input(self, session_id: str, content: str) -> Session
-def stop_session(self, session_id: str) -> Session
-def stream_session_events(self, session_id: str, after_seq: Optional[int] = None, timeout: float = 60.0) -> Iterator[SessionEventEnvelope]
+def list_sessions(self, wave_id=None, parent_session_id=None, use=None, active_only=True) -> list[Session]
+def get_session(self, session_id: str) -> Session
+def current_session(self, cwd: str) -> Optional[Session]
+def attach_session(self, session_id: str) -> SessionConnectionInfo
+def send_conversation_input(self, session_id: str, content: str) -> Conversation
+def stream_conversation_events(self, session_id: str, after_seq: Optional[int] = None, timeout: float = 60.0) -> Iterator[ConversationEventEnvelope]
 ```
 
 `python/loopflow/api.py` is just a module-level convenience wrapper around a singleton `Client`.
@@ -1332,10 +1389,15 @@ lfq list
 lfq show <wave>
 lfq create <name> <repo>
 lfq run <wave>
+lfq wave run <wave>
+lfq worker run <wave> --flow <flow> --task <task>
 lfq stop <wave>
 lfq delete <wave>
 lfq land <wave>
 lfq logs <wave>
+lfq sessions [wave]
+lfq attach <session-id>
+lfq whoami
 lfq usage [--wave|--flow|--step|--model|--source|--group-by|--billing|--json]
 lfq providers
 
@@ -1429,8 +1491,8 @@ pub fn builtin_flow_entries() -> impl Iterator<Item = (&'static str, &'static st
 
 ## Key Patterns To Keep In Mind
 
-- `Wave` is the long-lived plan/config object; `WaveRun` is one execution instance with a frozen `snapshot`.
-- Git/PR state is treated as projection data layered onto core store records. DTOs enrich `Wave`/`WaveRun` with current worktree, diff, PR, live PR state, and queue role.
+- `Wave` is the long-lived plan/config object; `Run` is one execution instance with frozen repo/flow/task/direction fields.
+- Git/PR state is treated as projection data layered onto core store records. DTOs enrich `Wave`/`Run` with current worktree, diff, PR, live PR state, and queue role.
 - Repo relationships are a graph over registered repos (`RepoEdge`). Prompt gathering and some orchestration can include related repos.
 - Prompt context is source-tagged and token-budgeted. `ContextBreakdown` / `ContextSnapshot` are first-class outputs, not debugging leftovers.
 - Interactive sessions and headless wave execution share the same prompt-prep primitives (`prepare_launch_prompt`, `gather_context`, built-in steps/flows).

@@ -25,6 +25,11 @@ surfaces; the old dispatch route and `lf op dispatch` path are gone.
   pointed reviewers at `/v0/wave_runs`.
 - Website product-card media now has a shrink guard so the new homepage product
   image stays inside small mobile viewports.
+- The final gate pass refreshed `.lf/summary.md` so future prompt context no
+  longer describes removed `WaveRun`, `AgentRun`, or old session routes.
+- `session_input_round_trip` now uses a deterministic Bash fake Codex app-server
+  and serializes the env-mutating tests through the existing `EnvGuard`, avoiding
+  a parallel-test race without adding production test hooks.
 
 ## How It Fits Together
 
@@ -41,9 +46,10 @@ return sessions, and session `use` distinguishes `wave_agent`, `worker`, and
   reintroduced in `wave/goals/2-wave-ancestry.md`.
 - The route/model rename is broad. Fixture tests across Rust/Python/Swift are
   the main guard against DTO drift.
-- The Concerto xcodebuild UI test command built successfully and entered test
-  execution, but the macOS target runner hung waiting for UI workers in this
-  headless/no-rendering environment and was interrupted.
+- The Concerto xcodebuild UI test still needs a rendering-capable macOS runner.
+  This headless gate generated and built the project, then hung after "Testing
+  started" waiting for UI workers and was interrupted. No assertion failure was
+  produced.
 
 ## What's Not Included
 
@@ -69,10 +75,10 @@ Passed:
 - `uv run pytest tests/regression/ -v`
 - `docker version && cargo test -p loopflow docker_`
 
-Attempted:
+Attempted in this headless/no-rendering gate:
 
 - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
 
-  The project generated and built, then xcodebuild hung after "Testing started"
-  waiting for the macOS target runner to materialize. Interrupted after several
-  quiet minutes; no test assertion failure was produced.
+  With an isolated `-derivedDataPath`, the project generated and built, then
+  hung after "Testing started" waiting for the macOS UI runner. It was
+  interrupted; no assertion failure was produced.

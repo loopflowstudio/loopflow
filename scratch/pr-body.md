@@ -18,15 +18,21 @@ Expected: Rust/Python/Swift DTO fixtures agree on `Wave`, `Run`, and `Session`;
 `lfq wave run` and `lfq worker run` return durable sessions; `/v0/runs` exposes
 queue projection; `/v0/sessions` exposes attachable control surfaces.
 
-The Concerto xcodebuild UI command was attempted:
+This gate also refreshed `.lf/summary.md` and fixed the
+`session_input_round_trip` fake Codex harness so the crate passes under Cargo's
+default parallel test runner.
+
+The Concerto xcodebuild UI command was attempted in this headless/no-rendering
+gate:
 
 ```bash
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-It generated and built the project, then hung after "Testing started" waiting
-for the macOS UI runner in this no-rendering environment. `swift test
---package-path swift` passed.
+With an isolated `-derivedDataPath`, it generated and built the project, then
+hung after "Testing started" waiting for the macOS UI runner. It was interrupted
+without an assertion failure; `swift test --package-path swift` passed in this
+gate.
 
 ## Intent
 

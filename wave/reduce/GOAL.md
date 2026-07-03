@@ -2,10 +2,12 @@
 primary_flow: ship-roadmap
 mode: manual
 metrics:
-  - net concept count (steps, flows, DTO types, public types) flat-or-falling while feature waves ship
-  - duplicated abstractions known vs. resolved, incl. cross-wave convergence
-  - analysis coverage %, and max staleness in commits behind HEAD
-  - proposal funnel — drafted → agreed → executed — and arc cycle time
+- net concept count (steps, flows, DTO types, public types) flat-or-falling while feature waves ship
+- duplicated abstractions known vs. resolved, incl. cross-wave convergence
+- analysis coverage %, and max staleness in commits behind HEAD
+- proposal funnel — drafted → agreed → executed — and arc cycle time
+pm:
+  asana_project: '1216271408546327'
 ---
 
 # Goal: loopflow grows more capable while getting smaller.

@@ -1,5 +1,8 @@
 ---
 primary_flow: build
+pm:
+  provider: asana
+  asana_project: '1216271408546327'
 ---
 
 Collapse the three binaries — `lf`, `lfd`, `lfq` — toward **one workhorse plus one
@@ -10,7 +13,7 @@ for store reads/writes + tmux/docker launch, `lf q` for queue/worker). `lfd`
 shrinks to a **guarded subscription server** whose sole justification is push —
 the live wave-status and terminal-output streams Concerto needs, which a transient
 `lf` invocation cannot be. It execs `lf`; it does not reimplement behavior. This
-is a reduce wave: each note should leave the system smaller and more true. Not a
+is an architecture wave: each note should leave the system smaller and more true. Not a
 rewrite — a collapse of concepts, net-negative code each pass.
 
 **Metrics to improve**

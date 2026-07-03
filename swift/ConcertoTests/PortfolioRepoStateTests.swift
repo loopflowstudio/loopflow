@@ -21,7 +21,6 @@ struct PortfolioRepoStateTests {
         #expect(state.blockedCount == 1)
         #expect(state.totalDiff.insertions == 15)
         #expect(state.totalDiff.deletions == 9)
-        #expect(state.needsAttention)
     }
 
     @Test("wave events update and delete local waves")

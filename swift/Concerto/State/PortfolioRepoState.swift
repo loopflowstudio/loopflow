@@ -94,10 +94,6 @@ final class PortfolioRepoState {
         }
     }
 
-    var needsAttention: Bool {
-        waves.contains { $0.status == .failed || $0.status == .waiting }
-    }
-
     func diffSummary(for wave: WaveViewModel) -> String? {
         let summary = Self.parseDiffStat(wave.diffStat)
         guard summary.insertions > 0 || summary.deletions > 0 else {

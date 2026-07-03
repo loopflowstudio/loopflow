@@ -40,3 +40,16 @@ needed, no rust changes.
 - `RepoSidebarWindow.swift` (the sketch) — its `RepoSidebarWaveRow` superseded by `WaveRow`.
 - `PortfolioRepoCard`, `AddRepoCard`, `RepoTypeahead` — the old grid dashboard body (only used by PortfolioWindow).
 - Repoint `ConcertoApp` main `WindowGroup` + `"portfolio"` window to `WavesView`.
+
+## Attention / inbox: dropped (UI only) for now
+
+No attention or inbox UI this cut. Boundary:
+- **Views** — `AttentionQueueView`, `NextActionsBar`, `WaitingStateCard` already
+  deleted from the tree. Nothing surviving renders attention (`WaveRow` = PR badge
+  + diff indicator only; the rail carries no attention signal).
+- **`PortfolioRepoState.needsAttention`** — dropped; it was prod-dead (only its
+  own test referenced it).
+- **LoopflowCore attention plumbing stays** — `AttentionItem`, `AttentionStore`,
+  `RepoState.attentionStore`, `WaveServiceProtocol.listAttention/…`, the
+  `.attention` event kind. That's the daemon-fed data/wire model, not UI, and
+  removing it is a separate call that would collide with the A2/DTO work. Leave it.

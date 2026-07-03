@@ -597,8 +597,18 @@ mod tests {
         assert_eq!(pr, None);
 
         let cli = Cli::try_parse_from([
-            "lf", "op", "pm", "update", "--id", "123", "--title", "Ship it", "--status", "done",
-            "--pr", "https://github.com/acme/repo/pull/7",
+            "lf",
+            "op",
+            "pm",
+            "update",
+            "--id",
+            "123",
+            "--title",
+            "Ship it",
+            "--status",
+            "done",
+            "--pr",
+            "https://github.com/acme/repo/pull/7",
         ])
         .expect("parse");
         let Some(Commands::Op {

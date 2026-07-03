@@ -222,7 +222,7 @@ struct WavesView: View {
     private var waveListHeader: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Waves")
+                Text(headerTitle)
                     .font(Typography.caption())
                     .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(0.7))
@@ -325,14 +325,20 @@ struct WavesView: View {
         }
     }
 
-    private var selectionSubtitle: String {
+    /// The surface is named after the repo you're in (its GitHub/dir name),
+    /// e.g. "loopflow" — not a generic "Waves".
+    private var headerTitle: String {
         switch selection {
         case .all:
-            return "All repos · \(connectionSubtitle)"
+            return "All Repos"
         case .repo(let path):
-            let name = repos.first { $0.path.normalizedFilePath == path.normalizedFilePath }?.displayName
-            return "\(name ?? path) · \(connectionSubtitle)"
+            return repos.first { $0.path.normalizedFilePath == path.normalizedFilePath }?.displayName
+                ?? URL(fileURLWithPath: path).lastPathComponent
         }
+    }
+
+    private var selectionSubtitle: String {
+        connectionSubtitle
     }
 
     private var defaultCreatePath: String? {

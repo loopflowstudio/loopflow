@@ -13,12 +13,13 @@ Steers Loopflow toward persistent Goal-driven Waves: goals as the authored loop 
 
 A Wave is a durable named hub — intent (GOAL.md) + memory (MEMORY.md) + work-index (branches/PRs under the name) + a canonical live agent (a `TerminalSession` incarnation). "WaveAgent"/"Dispatch" are roles read off `(source, wave_run_id)`, not new types. Full design: `scratch/waveagent-sessions.md`.
 
-## Roadmap status (2026-07-02 read)
+## Roadmap status (2026-07-03 read)
 
 - **Item 1 goal primitive — DONE, on main.** `.lf/goals/<name>.md` resolves + overrides builtins (`engine/flow.rs:740`), builtin goals compile in (`builtins.rs:202`), wave carries `goal:`. Metric "GOAL.md is the authored wave surface" ✓.
-- **Item 2 Asana live roadmap — built, unmerged, NO PR** on branch `jack-heart.waveagent-roadmap-remote.20260702_2248` (full read/write client: `list_items`/`complete_item`/`comment`/`claim_item`; mirror+ingestion removed; Asana-only auth). My goals branch still uses the on-disk mirror. Next loop: land it or open its PR.
+- **Item 2 Asana live roadmap — foundation LANDED on main 2026-07-03** (`c113ef04 asana-only: drop Linear/Notion, remove PM mirror and ingestion`; `d370450a lfd: collapse ontology to wave/run/session`). `git diff main..jack-heart.waveagent-roadmap-remote.20260702_2248` is now EMPTY — the branch is fully absorbed; delete it. Asana client (`lfd/pm/asana.rs`) + mirror removal on main. REMAINING: wire the live loop to read Asana each iteration + write status back end-to-end (the item's "Done when").
 - **Item 3 wave-model-simplify — in-flight** as open PR #763 (waves: nest per-repo RepoWork).
-- **Item 2 wave-budget (`spend_cap`) — DISPATCHED 2026-07-02** to a worker on worktree `spend-cap`. Executive call: minimal hard cap + block→human in core, expose cost signal + pause primitive (scratch/questions.md). Reuses existing `usage_summary(wave=)`/`--billing` cost seam.
+- **Item 2 wave-budget (`spend_cap`) — RE-DISPATCHED 2026-07-03.** Prior 07-02 worker died mid-build: data layer complete but UNCOMMITTED in worktree `loopflow.spend-cap` — `money.rs` (Money integer-cents, tested), `SpendCap { rate, per_iteration }`, `Wave.spend_cap: Option<SpendCap>` (DTO no-default respected). Re-dispatched via harness Agent (lfd down) to finish: accounting off `cost_usd` seam → at-limit pause+block (`QueueBlockReason`) → chord rollup → Python/Swift DTO mirrors + `tests/fixtures/dto/` → behavioral tests. Commit-only, no push. Executive call unchanged (minimal hard cap + block→human in core; scratch/questions.md).
+- **Noise:** PR #767 "goals: draft" is just this loop's own MEMORY/scratch bookkeeping on the goals branch — not real work; ignore/close.
 
 ## Next (not yet built)
 

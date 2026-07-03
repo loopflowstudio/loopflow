@@ -25,7 +25,6 @@ local-bin/
 .lf/journal/
 .lf/summaries/
 .lf/tmp/
-wave/*/streams/
 .claude/skills/
 .agents/skills/
 *.profraw

@@ -49,6 +49,16 @@ and let setup failures (spawn, pipes, log I/O, wait) propagate as `Err` via `?`.
 Cut ~17 lines of manual match-and-rewrap; the outcome enum now models only what
 a pass that actually *ran* can produce. Also deduped the `wave/<name>` path join.
 
+Second compress pass: cut the whole stdout/stderr tee-to-file machinery from
+`loop.rs` (~110 lines → the loop now inherits the terminal via `Command::status()`).
+Nothing read `wave/<name>/streams/`, and each inner `lf -b goal` pass already
+writes durable logs under the agent's log dir — the loop's copy was a second,
+redundant capture for a monitor arm that isn't built yet (and the review notes
+that arm will likely want tagged/structured records, not the merged stream). Add
+it back with the consumer. Also removed the now-dead `wave/*/streams/` gitignore
+line and a stray committed `wave/goals/STOP` (0-byte artifact that would stop the
+`goals` wave loop instantly on every run).
+
 **Observed, left out of scope:** `goal.rs::launch_goal_batch` duplicates the
 headless-launch sequence in `run.rs` (check_cli → write prompt/context logs →
 `StreamFormat::Human` → `launch_agent` → exit-code hint). Collapsing it means a

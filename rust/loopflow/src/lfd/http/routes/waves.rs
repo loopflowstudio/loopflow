@@ -2215,7 +2215,7 @@ mod tests {
 
         assert_eq!(found.id, created.id);
         assert_eq!(found.name, "designer");
-        assert_eq!(found.repo, repo);
+        assert_eq!(found.repos[0].repo, repo);
         assert_eq!(found.primary_flow, "build");
         assert_eq!(found.direction, vec!["clarity".to_string()]);
         assert_eq!(found.area, vec!["src/".to_string()]);
@@ -2761,7 +2761,7 @@ mod tests {
         .expect("list waves");
 
         assert_eq!(listed.data.len(), 1);
-        assert_eq!(listed.data[0].repo, repo_a);
+        assert_eq!(listed.data[0].repos[0].repo, repo_a);
         assert_eq!(listed.data[0].name, "wave-a");
     }
 

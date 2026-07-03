@@ -545,7 +545,8 @@ mod tests {
 
     #[test]
     fn pm_show_accepts_wave_flag() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
+        let cli =
+            Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Op {
             op: OpsCommand::Pm {
                 cmd: PmCommand::Show { wave },
@@ -564,16 +565,17 @@ mod tests {
         ])
         .expect("parse");
         let Some(Commands::Op {
-            op: OpsCommand::Pm {
-                cmd:
-                    PmCommand::Update {
-                        wave,
-                        id,
-                        title,
-                        notes,
-                        status,
-                    },
-            },
+            op:
+                OpsCommand::Pm {
+                    cmd:
+                        PmCommand::Update {
+                            wave,
+                            id,
+                            title,
+                            notes,
+                            status,
+                        },
+                },
         }) = cli.command
         else {
             panic!("expected pm update command");
@@ -589,9 +591,10 @@ mod tests {
         ])
         .expect("parse");
         let Some(Commands::Op {
-            op: OpsCommand::Pm {
-                cmd: PmCommand::Update { id, status, .. },
-            },
+            op:
+                OpsCommand::Pm {
+                    cmd: PmCommand::Update { id, status, .. },
+                },
         }) = cli.command
         else {
             panic!("expected pm update command");

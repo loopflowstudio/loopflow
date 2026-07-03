@@ -469,7 +469,11 @@ mod tests {
 
     fn test_ctx(base_url: String, project: &str) -> PmContext {
         PmContext {
-            client: AsanaClient::with_base_url("test-token".to_string(), AsanaConfig::default(), base_url),
+            client: AsanaClient::with_base_url(
+                "test-token".to_string(),
+                AsanaConfig::default(),
+                base_url,
+            ),
             project: project.to_string(),
         }
     }
@@ -482,9 +486,9 @@ mod tests {
 
     #[test]
     fn parse_done_status_maps_synonyms_and_rejects_others() {
-        assert_eq!(parse_done_status(None).unwrap(), false);
-        assert_eq!(parse_done_status(Some("done")).unwrap(), true);
-        assert_eq!(parse_done_status(Some("Completed")).unwrap(), true);
+        assert!(!parse_done_status(None).unwrap());
+        assert!(parse_done_status(Some("done")).unwrap());
+        assert!(parse_done_status(Some("Completed")).unwrap());
         assert!(parse_done_status(Some("blocked")).is_err());
     }
 
@@ -544,7 +548,10 @@ mod tests {
                     }
                 }] }),
             ),
-            json_response(StatusCode::CREATED, json!({ "data": { "gid": "new-task" } })),
+            json_response(
+                StatusCode::CREATED,
+                json!({ "data": { "gid": "new-task" } }),
+            ),
         ])
         .await;
         let ctx = test_ctx(base_url, "proj-1");

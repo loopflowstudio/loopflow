@@ -336,14 +336,9 @@ fn builtin_build_or_silent_has_xor_branch() {
     let repo = temp.path();
 
     let items = expand_named_flow(repo, "build-or-silent");
-    // op:pm pull, ingest, xor(build, silence)
-    assert_eq!(items.len(), 3);
-    assert!(
-        matches!(&items[0], ConcreteItem::Op(_)),
-        "expected op:pm pull at index 0"
-    );
-    assert_step_name(&items[1], "ingest");
-    match &items[2] {
+    // xor(build, silence) — the roadmap decision, no local ingest
+    assert_eq!(items.len(), 1);
+    match &items[0] {
         ConcreteItem::Xor(xor_def) => {
             assert!(xor_def.paths.contains_key("build"));
             assert!(xor_def.paths.contains_key("silence"));

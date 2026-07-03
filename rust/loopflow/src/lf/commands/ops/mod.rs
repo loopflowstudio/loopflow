@@ -381,7 +381,10 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 } else {
                     "already linked"
                 };
-                println!("{}: asana project {} ({state})", result.wave, result.project_id);
+                println!(
+                    "{}: asana project {} ({state})",
+                    result.wave, result.project_id
+                );
             }
         }
         PmCommand::Show { wave } => {

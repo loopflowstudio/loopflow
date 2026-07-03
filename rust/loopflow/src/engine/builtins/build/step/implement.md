@@ -51,10 +51,10 @@ The design doc and style guides are in your context.
 
 ## Wave context
 
-If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
+If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
-- Follow the wave's principles during implementation
-- Check against compatibility matrix if mentioned
+- Follow the wave's intent and principles during implementation
+- Respect decisions and constraints recorded in `MEMORY.md`
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

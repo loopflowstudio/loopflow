@@ -1,5 +1,5 @@
 ---
-requires: wave/<wave>/README.md
+requires: wave/<wave>/GOAL.md
 produces: wave/<child>/ directories
 ---
 Decompose a wave into smaller, independent waves. The original wave is replaced entirely.
@@ -11,7 +11,8 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`
+  and its live roadmap (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -19,22 +20,21 @@ re-derive what these already record.
 
 ## Goal
 
-Wave mitosis. The parent wave ceases to exist — its content is distributed across N new waves.
+Wave mitosis. The parent wave ceases to exist — its identity and roadmap are distributed across N new waves.
 
 The numeric argument controls how many children to create (default 2).
 
-Roadmap items move as-is — each one lands in exactly one child. But the README sections need rewriting, not slicing:
+Roadmap items (Asana tasks) move as-is — each one lands in exactly one child. But `GOAL.md` needs rewriting, not slicing:
 
-- **Vision**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
-- **Goals**: scoped to each child's slice of the work.
-- **Risks**: reassessed per child. Some parent risks won't apply; new ones may emerge.
+- **Intent**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
 - **Metrics**: preserved and distributed. A metric can appear in multiple children if it spans both.
+- **Memory**: carry forward the decisions in `MEMORY.md` that each child still needs.
 
 ## Workflow
 
 1. Read the parent wave
    - Use the wave passed by argument, or ask which `wave/<name>/` to split
-   - Read the README and all roadmap item files
+   - Read `GOAL.md`, `MEMORY.md`, and the live roadmap (`lf op pm show --wave <parent>`)
 
 2. Find split boundaries
    - Look for thematic clusters, dependency chains, or independent workstreams
@@ -42,20 +42,20 @@ Roadmap items move as-is — each one lands in exactly one child. But the README
    - Each resulting wave should stand alone
 
 3. Allocate roadmap items
-   - Assign each item to exactly one child — no orphans
+   - Assign each Asana task to exactly one child — no orphans
 
 4. Create the new waves
-   - `wave/<child>/README.md` — fresh Vision and Goals for each child; Risks and Metrics carried forward and adapted
-   - `wave/<child>/<child>.yaml` — flow, area, optional direction/triggers
-   - Bucketed roadmap files from the allocated items
-   - Use `### Not here` under Vision to draw boundaries between siblings
+   - `wave/<child>/GOAL.md` — fresh intent and metrics for each child; carry forward the primary flow; draw scope boundaries between siblings
+   - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
+   - `lf op pm init --wave <child>` — connect each child's Asana project
+   - Recreate the allocated items on each child's roadmap with `lf op pm update`, and close them on the parent (`lf op pm update --id <task> --status done` is for shipped work; for a move, recreate on the child and delete/close on the parent)
 
 5. Remove the parent
    - Delete `wave/<parent>/`
    - Commit: `split-wave: <parent> → <child-a>, <child-b>`
 
 6. Verify
-   - Each child has a README, a matching YAML, and at least one roadmap file
+   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Asana project
    - No content from the parent is unaccounted for
 
 ## Guardrails

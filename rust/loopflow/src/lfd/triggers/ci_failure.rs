@@ -191,7 +191,6 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "ci-wave".to_string(),
-            repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -208,9 +207,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -274,7 +271,6 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "ci-wave-serialized".to_string(),
-            repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -291,9 +287,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -345,7 +339,7 @@ mod tests {
         let trigger = create_ci_failure_trigger(&store, &wave).await;
         let mut active_run = Run::new(LfdId::new(), wave.id.clone());
         active_run.status = RunStatus::Running;
-        active_run.repo = wave.repo.clone();
+        active_run.repo = wave.repo().to_string();
         active_run.flow = wave.primary_flow.clone();
         store
             .create_run(&active_run)

@@ -169,7 +169,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "loop-wave".to_string(),
-            repo: "/tmp/repo".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -186,9 +185,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration,
-            cycle_start_iteration,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }

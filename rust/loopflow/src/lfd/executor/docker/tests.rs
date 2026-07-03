@@ -334,7 +334,6 @@ async fn create_running_wave_and_run(store: &SharedStore, repo: &Path, name: &st
     let wave = Wave {
         id: LfdId::new(),
         name: name.to_string(),
-        repo: repo.to_string_lossy().to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
         goal: "ship-roadmap".to_string(),
@@ -351,9 +350,7 @@ async fn create_running_wave_and_run(store: &SharedStore, repo: &Path, name: &st
         }],
         direction: vec![],
         area: vec![],
-        status: WaveStatus::Running,
-        iteration: 0,
-        cycle_start_iteration: 0,
+        paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers: 1,
     };
@@ -589,7 +586,6 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
     let wave = Wave {
         id: LfdId::new(),
         name: "completed-wave".to_string(),
-        repo: tmp.path().to_string_lossy().to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
         goal: "ship-roadmap".to_string(),
@@ -606,9 +602,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         }],
         direction: vec![],
         area: vec![],
-        status: WaveStatus::Idle,
-        iteration: 0,
-        cycle_start_iteration: 0,
+        paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers: 1,
     };

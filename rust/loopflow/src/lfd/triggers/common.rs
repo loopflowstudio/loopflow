@@ -247,7 +247,6 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            repo: ".".to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -264,9 +263,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Failed,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }

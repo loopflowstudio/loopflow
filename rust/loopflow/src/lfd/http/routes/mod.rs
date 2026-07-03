@@ -501,7 +501,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -518,9 +517,7 @@ mod tests {
             }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }

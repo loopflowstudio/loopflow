@@ -214,7 +214,7 @@ async fn filter_items_for_repo(
         else {
             continue;
         };
-        if wave.repo() == repo {
+        if wave.repos.iter().any(|rw| rw.repo == repo) {
             filtered.push(item);
         }
     }

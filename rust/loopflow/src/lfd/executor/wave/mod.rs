@@ -1452,7 +1452,6 @@ mod tests {
         let wave = Wave {
             id: wave_id.clone(),
             name: "fork-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
             goal: "ship-roadmap".to_string(),
@@ -1469,9 +1468,7 @@ mod tests {
             }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Running,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -1520,7 +1517,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
             goal: "ship-roadmap".to_string(),
@@ -1537,9 +1533,7 @@ mod tests {
             }],
             direction: vec![],
             area: vec![],
-            status,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
@@ -1720,7 +1714,6 @@ mod tests {
         let target_wave = Wave {
             id: LfdId::new(),
             name: "target-wave".to_string(),
-            repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -1737,9 +1730,7 @@ mod tests {
             }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -2024,7 +2015,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        assert_eq!(updated_wave.status, WaveStatus::Failed);
+        assert_eq!(updated_wave.status(), WaveStatus::Failed);
     }
 
     #[test]

@@ -178,7 +178,6 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "cron-wave".to_string(),
-            repo: repo_tmp.path().to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -195,9 +194,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 0,
         };

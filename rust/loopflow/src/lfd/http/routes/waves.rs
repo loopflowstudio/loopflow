@@ -540,7 +540,7 @@ async fn resolve_wave_id_in_repo(
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-        if wave.repo() != repo {
+        if !wave.repos.iter().any(|rw| rw.repo == repo) {
             return Err(api_error(StatusCode::NOT_FOUND, "wave not found"));
         }
         return Ok(id);
@@ -1931,7 +1931,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -1948,9 +1947,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
@@ -2101,16 +2098,24 @@ mod tests {
 
         let repo_a = "/tmp/repo-a";
         let repo_b = "/tmp/repo-b";
-        let wave_a = make_wave(repo_a, "infra");
-        let wave_b = make_wave(repo_b, "infra");
+        // Wave names are globally unique; the scope comes from the repo the
+        // wave has a RepoWork in.
+        let wave_a = make_wave(repo_a, "infra-a");
+        let wave_b = make_wave(repo_b, "infra-b");
 
         store.create_wave(&wave_a).await.expect("create wave_a");
         store.create_wave(&wave_b).await.expect("create wave_b");
 
-        let resolved = resolve_wave_id_in_repo(&store, repo_b, "infra")
+        let resolved = resolve_wave_id_in_repo(&store, repo_b, "infra-b")
             .await
-            .expect("wave should resolve");
+            .expect("wave should resolve in its repo");
         assert_eq!(resolved, *wave_b.id());
+
+        // The same name is not found when scoped to a repo it doesn't run in.
+        let err = resolve_wave_id_in_repo(&store, repo_a, "infra-b")
+            .await
+            .expect_err("wave should not resolve outside its repo");
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -2270,7 +2275,7 @@ mod tests {
         .await
         .expect("run wave");
 
-        assert_eq!(wave.status, WaveStatus::Idle);
+        assert_eq!(wave.status(), WaveStatus::Idle);
         if let Some(run) = run {
             assert_eq!(run.flow, "design");
         }
@@ -2625,7 +2630,7 @@ mod tests {
         let repo = repo_tmp.path().to_string_lossy().to_string();
 
         let mut wave = make_wave(&repo, "designer");
-        wave.status = WaveStatus::Running;
+        wave.set_status(WaveStatus::Running);
         state
             .store
             .create_wave(&wave)
@@ -2690,7 +2695,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        assert_eq!(updated_wave.status, WaveStatus::Failed);
+        assert_eq!(updated_wave.status(), WaveStatus::Failed);
 
         let updated_session = state
             .store

@@ -108,7 +108,7 @@ pub async fn list_sessions_handler(
             else {
                 continue;
             };
-            if wave.repo() == repo {
+            if wave.repos.iter().any(|rw| rw.repo == repo) {
                 filtered.push(session);
             }
         }
@@ -344,7 +344,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "terminal-test".to_string(),
-            repo: repo.to_string(),
             mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -361,9 +360,7 @@ mod tests {
             }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }

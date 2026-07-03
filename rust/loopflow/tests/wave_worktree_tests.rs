@@ -28,7 +28,6 @@ fn make_wave(repo: &str, name: &str) -> Wave {
     Wave {
         id: LfdId::new(),
         name: name.to_string(),
-        repo: repo.to_string(),
         mode: WaveMode::Loop,
         primary_flow: "ship-roadmap".to_string(),
         goal: "ship-roadmap".to_string(),
@@ -45,9 +44,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         }],
         direction: vec![],
         area: vec![],
-        status: WaveStatus::Idle,
-        iteration: 0,
-        cycle_start_iteration: 0,
+        paused: false,
         created_at: None,
         workers: 1,
     }
@@ -93,7 +90,7 @@ async fn run_creates_worktree() {
     assert!(wt.exists(), "worktree directory should exist: {wt:?}");
     assert_ne!(
         run.worktree,
-        wave.repo().as_str(),
+        wave.repo(),
         "worktree should not be the main repo"
     );
 }

@@ -150,8 +150,6 @@ pub async fn build_wave_dto(
             repo: repo_work.repo.clone(),
             status: repo_work.status.as_str().to_string(),
             iteration: repo_work.iteration,
-            worktree: non_empty(&repo_work.worktree),
-            branch: non_empty(&repo_work.branch),
             local_worktree,
             remote_branch,
             commits,
@@ -193,16 +191,6 @@ pub async fn build_wave_dto(
         crons,
         repos,
     })
-}
-
-/// `""` maps to `None`; any other value is wrapped. Used for persisted
-/// worktree/branch fields that use the empty string as their "unset" marker.
-fn non_empty(value: &str) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
-    }
 }
 
 pub(crate) async fn build_wave_queue_views(

@@ -35,9 +35,17 @@ struct ContractTests {
         #expect(wave.flow == "build")
         #expect(wave.goal == "ship-roadmap")
         #expect(wave.status == .running)
-        #expect(wave.iteration == 3)
         #expect(wave.direction == ["ux", "clarity"])
         #expect(wave.area == ["src/"])
+
+        #expect(wave.repos.count == 1)
+        #expect(wave.repos.first?.repo == "/home/user/project")
+        #expect(wave.repos.first?.status == .running)
+        #expect(wave.repos.first?.iteration == 3)
+        #expect(wave.repos.first?.openPRCount == 1)
+        #expect(wave.repos.first?.localWorktree == "/home/user/project/.claude/worktrees/engbot")
+        #expect(wave.repos.first?.remoteBranch == "engbot/build-3")
+        #expect(wave.repos.first?.commits.count == 1)
 
         #expect(wave.triggers.count == 2)
         #expect(wave.triggers[0].signal == .repo)

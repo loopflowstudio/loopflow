@@ -1112,7 +1112,7 @@ public final class RepoState {
         let pendingWave = Wave(
             id: pendingId,
             name: "\(wave.name) (copy)",
-            repo: wave.api.repo,
+            repo: wave.repo,
             flow: wave.api.flow,
             direction: wave.api.direction,
             area: wave.api.area,

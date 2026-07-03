@@ -100,19 +100,13 @@ pub struct WaveDto {
     pub repos: Vec<RepoWorkDto>,
 }
 
-/// Per-repo execution surface for a wave: the worktree/branch/status/iteration
-/// plus the live git and PR snapshot derived at DTO-build time for one repo.
+/// Per-repo execution surface for a wave: status/iteration plus the live git
+/// (worktree/branch) and PR snapshot derived at DTO-build time for one repo.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepoWorkDto {
     pub repo: String,
     pub status: String,
     pub iteration: u32,
-    /// Persisted worktree path for this repo, omitted when unset.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worktree: Option<String>,
-    /// Persisted branch for this repo, omitted when unset.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
     /// Live worktree path inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,

@@ -76,10 +76,27 @@ class FlowStep(BaseModel):
         raise TypeError(f"Unsupported flow step value: {value!r}")
 
 
+class RepoWork(BaseModel):
+    """Per-repo execution surface for a wave. Wire type — no defaults on the
+    fields the server always emits; optional fields mirror Rust's
+    skip_serializing_if (absent → None)."""
+
+    repo: str
+    status: str
+    iteration: int
+    commits: list[CommitEntry]
+    open_pr_count: int
+    stack_count: int
+    local_worktree: Optional[str] = None
+    remote_branch: Optional[str] = None
+    diff_stat: Optional[str] = None
+    active_run: Optional[Run] = None
+    pr: Optional[PullRequest] = None
+
+
 class Wave(BaseModel):
     id: str
     name: str
-    repo: str
     mode: str = "loop"
     primary_flow: str = "ship-roadmap"
     goal: str
@@ -90,18 +107,9 @@ class Wave(BaseModel):
     triggers: list[Trigger] = Field(default_factory=list)
     crons: list[WaveCron] = Field(default_factory=list)
     status: str
-    iteration: int
-    local_worktree: Optional[str] = None
-    remote_branch: Optional[str] = None
-    commits: list[CommitEntry] = Field(default_factory=list)
-    diff_stat: Optional[str] = None
+    repos: list[RepoWork]
     flow_steps: list[FlowStep] = Field(default_factory=list)
-    active_run: Optional[Run] = None
     created_at: Optional[datetime] = None
-
-    branch: Optional[str] = None
-    pr_url: Optional[str] = None
-    pr_state: Optional[str] = None
 
     @field_validator("flow_steps", mode="before")
     @classmethod

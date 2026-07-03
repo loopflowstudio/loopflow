@@ -67,17 +67,20 @@ def _wave_table(waves: list[Wave]) -> Table:
     table.add_column("local_worktree")
     table.add_column("remote_branch")
     for wave in waves:
-        run = wave.active_run
-        local_worktree = (run.local_worktree if run else None) or wave.local_worktree or "-"
-        remote_branch = (
-            (run.remote_branch if run else None) or wave.remote_branch or wave.branch or "-"
-        )
+        primary = wave.repos[0] if wave.repos else None
+        run = primary.active_run if primary else None
+        local_worktree = (run.local_worktree if run else None) or (
+            primary.local_worktree if primary else None
+        ) or "-"
+        remote_branch = (run.remote_branch if run else None) or (
+            primary.remote_branch if primary else None
+        ) or "-"
         table.add_row(
             wave.name,
             wave.status,
             wave.primary_flow,
-            str(wave.iteration),
-            wave.repo,
+            str(primary.iteration if primary else 0),
+            primary.repo if primary else "-",
             local_worktree,
             remote_branch,
         )
@@ -92,13 +95,14 @@ def _format_wave_value(value: object) -> str:
 
 def _wave_detail_table(wave: Wave) -> Table:
     table = Table(show_header=False)
+    primary = wave.repos[0] if wave.repos else None
     rows = [
         ("id", wave.id),
         ("name", wave.name),
         ("status", wave.status),
         ("flow", wave.primary_flow),
-        ("repo", wave.repo),
-        ("iteration", wave.iteration),
+        ("repo", primary.repo if primary else "-"),
+        ("iteration", primary.iteration if primary else 0),
         ("direction", wave.direction),
         ("area", wave.area),
     ]
@@ -480,11 +484,13 @@ def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json",
         return
 
     console.print(_wave_detail_table(wave))
-    if wave.active_run:
+    primary = wave.repos[0] if wave.repos else None
+    active_run = primary.active_run if primary else None
+    if active_run:
         active = Table(title="active_run", show_header=False)
-        active.add_row("id", wave.active_run.id)
-        active.add_row("status", wave.active_run.status)
-        active.add_row("iteration", str(wave.active_run.iteration))
+        active.add_row("id", active_run.id)
+        active.add_row("status", active_run.status)
+        active.add_row("iteration", str(active_run.iteration))
         console.print(active)
 
 

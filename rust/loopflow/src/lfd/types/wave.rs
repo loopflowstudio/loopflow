@@ -237,6 +237,11 @@ pub struct Wave {
     pub metrics: Vec<String>,
     #[serde(default)]
     pub crons: Vec<WaveCron>,
+    /// Per-repo execution state, stitched from `wave_repos` on read. During the
+    /// repo→repos migration the flat `repo`/`status`/`iteration` fields remain
+    /// authoritative; `repos` mirrors them until the executor moves over.
+    #[serde(default)]
+    pub repos: Vec<RepoWork>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub status: WaveStatus,
@@ -258,12 +263,21 @@ impl Wave {
         Self {
             id,
             name,
-            repo,
+            repo: repo.clone(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo,
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -284,6 +298,16 @@ impl Wave {
 
     pub fn repo(&self) -> &String {
         &self.repo
+    }
+
+    /// Temporary bridge during the repo→repos migration. Removed in Step 7.
+    // removed in Step 7
+    #[allow(dead_code)]
+    pub fn primary_repo(&self) -> &str {
+        self.repos
+            .first()
+            .map(|r| r.repo.as_str())
+            .unwrap_or(self.repo.as_str())
     }
 
     pub fn mode(&self) -> WaveMode {
@@ -329,6 +353,21 @@ impl Wave {
     pub fn workers(&self) -> u32 {
         self.workers
     }
+}
+
+/// Per-repo execution state for a wave. Waves own identity; each `RepoWork`
+/// carries the worktree/branch/status/iteration for one repo the wave runs in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoWork {
+    pub repo: String,
+    /// Worktree path, `""` when none.
+    pub worktree: String,
+    /// Branch name, `""` when none.
+    pub branch: String,
+    pub status: WaveStatus,
+    pub iteration: u32,
+    pub cycle_start_iteration: u32,
+    pub position: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

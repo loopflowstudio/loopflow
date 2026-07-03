@@ -38,8 +38,8 @@ use crate::lfd::triggers::{
     ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
-    Event, ExecutionProcessStatus, Run, RunStatus, Session, SessionUse, Signal, Trigger, Wave,
-    WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
+    Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionUse, Signal, Trigger,
+    Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
 };
 
 #[derive(Debug, Deserialize)]
@@ -271,12 +271,21 @@ pub async fn create_wave_handler(
     let mut wave = Wave {
         id: id.clone(),
         name,
-        repo,
+        repo: repo.clone(),
         mode,
         primary_flow,
         goal,
         metrics,
         crons: Vec::new(),
+        repos: vec![RepoWork {
+            repo,
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            position: 0,
+        }],
         direction,
         area,
         status: WaveStatus::Idle,
@@ -1924,6 +1933,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

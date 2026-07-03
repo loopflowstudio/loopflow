@@ -231,7 +231,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{Run, RunStackStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoWork, Run, RunStackStatus, Wave, WaveMode, WaveStatus};
 
     async fn test_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
@@ -253,6 +253,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: ".".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Failed,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Failed,

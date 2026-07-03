@@ -1395,7 +1395,7 @@ mod tests {
     use super::*;
     use crate::engine::flow::Step;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{PullRequest, Signal, Trigger};
+    use crate::lfd::types::{PullRequest, RepoWork, Signal, Trigger};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -1458,6 +1458,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Running,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
             status: WaveStatus::Running,
@@ -1517,6 +1526,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
             status,
@@ -1704,6 +1722,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.path().to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

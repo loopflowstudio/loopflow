@@ -178,6 +178,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "041_session_parent",
         sql: include_str!("migrations/041_terminal_session_parent.sql"),
     },
+    Migration {
+        version: "042_wave_repos",
+        sql: include_str!("migrations/042_wave_repos.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

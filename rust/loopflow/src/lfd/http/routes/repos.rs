@@ -414,7 +414,7 @@ mod tests {
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{RepoId, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -467,12 +467,21 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo,
+            repo: repo.clone(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo,
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

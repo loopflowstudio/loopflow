@@ -3,8 +3,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
     ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave,
-    WaveCron, WaveMode, WaveStatus,
+    Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger,
+    Wave, WaveCron, WaveMode, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -128,6 +128,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         goal,
         metrics,
         crons: Vec::new(),
+        repos: Vec::new(),
         direction,
         area,
         status,
@@ -147,6 +148,20 @@ pub fn map_wave_cron_row(row: &impl StoreRow) -> StoreResult<WaveCron> {
         schedule: row.text(3)?,
         last_triggered_at: row.opt_bigint(4)?,
         created_at: row.opt_bigint(5)?.map(unix_to_datetime),
+    })
+}
+
+/// SELECT wave_id, repo, worktree, branch, status, iteration,
+///        cycle_start_iteration, position
+pub fn map_wave_repo_row(row: &impl StoreRow) -> StoreResult<RepoWork> {
+    Ok(RepoWork {
+        repo: row.text(1)?,
+        worktree: row.text(2)?,
+        branch: row.text(3)?,
+        status: WaveStatus::from_i32(row.int(4)?),
+        iteration: row.int(5)? as u32,
+        cycle_start_iteration: row.int(6)? as u32,
+        position: row.int(7)? as u32,
     })
 }
 

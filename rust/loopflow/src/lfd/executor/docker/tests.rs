@@ -16,7 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::{open_store, SharedStore, StorageConfig};
 use crate::lfd::types::{
-    ExecutionProcess, ExecutionProcessStatus, Run, RunStatus, Wave, WaveMode, WaveStatus,
+    ExecutionProcess, ExecutionProcessStatus, RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus,
 };
 
 use super::{
@@ -340,6 +340,15 @@ async fn create_running_wave_and_run(store: &SharedStore, repo: &Path, name: &st
         goal: "ship-roadmap".to_string(),
         metrics: Vec::new(),
         crons: Vec::new(),
+        repos: vec![RepoWork {
+            repo: repo.to_string_lossy().to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Running,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            position: 0,
+        }],
         direction: vec![],
         area: vec![],
         status: WaveStatus::Running,
@@ -586,6 +595,15 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         goal: "ship-roadmap".to_string(),
         metrics: Vec::new(),
         crons: Vec::new(),
+        repos: vec![RepoWork {
+            repo: tmp.path().to_string_lossy().to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            position: 0,
+        }],
         direction: vec![],
         area: vec![],
         status: WaveStatus::Idle,

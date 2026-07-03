@@ -156,7 +156,7 @@ fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
 mod tests {
     use super::should_pause_for_max_iterations;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode, WaveStatus};
     use time::OffsetDateTime;
 
     fn make_trigger(max_iterations: Option<u32>) -> Trigger {
@@ -175,6 +175,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: "/tmp/repo".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration,
+                cycle_start_iteration,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

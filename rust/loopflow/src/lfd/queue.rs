@@ -654,7 +654,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Run, RunStatus, Wave, WaveMode, WaveStatus,
+        PullRequest, QueueBlockReason, RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -723,6 +723,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

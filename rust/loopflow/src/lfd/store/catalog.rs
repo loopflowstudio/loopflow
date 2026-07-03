@@ -76,6 +76,9 @@ pub(crate) enum Query {
     InsertWaveCron,
     UpdateWaveCronLastTriggered,
     DeleteWaveCronsByWave,
+    ListWaveRepos,
+    UpsertWaveRepo,
+    DeleteWaveReposByWave,
     GetPendingActivationForWave,
 }
 
@@ -148,6 +151,9 @@ impl Query {
         Self::InsertWaveCron,
         Self::UpdateWaveCronLastTriggered,
         Self::DeleteWaveCronsByWave,
+        Self::ListWaveRepos,
+        Self::UpsertWaveRepo,
+        Self::DeleteWaveReposByWave,
         Self::GetPendingActivationForWave,
     ];
 }
@@ -511,6 +517,24 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     // DeleteWaveCronsByWave
     QueryDef {
         template: "DELETE FROM wave_crons WHERE wave_id = {p1}",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // ListWaveRepos
+    QueryDef {
+        template: "SELECT wave_id, repo, worktree, branch, status, iteration, cycle_start_iteration, position\n             FROM wave_repos WHERE wave_id = {p1}\n             ORDER BY position ASC",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // UpsertWaveRepo
+    QueryDef {
+        template: "INSERT INTO wave_repos (wave_id, repo, worktree, branch, status, iteration, cycle_start_iteration, position)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8})\n             ON CONFLICT(wave_id, repo) DO UPDATE SET\n                 worktree = excluded.worktree,\n                 branch = excluded.branch,\n                 status = excluded.status,\n                 iteration = excluded.iteration,\n                 cycle_start_iteration = excluded.cycle_start_iteration,\n                 position = excluded.position",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // DeleteWaveReposByWave
+    QueryDef {
+        template: "DELETE FROM wave_repos WHERE wave_id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },

@@ -13,16 +13,16 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
-    now_unix, serialize_pr,
+    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
+    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus, SessionUse,
-    Summary, Trigger, Wave, WaveCron, WaveStatus,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
+    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -850,6 +850,51 @@ impl PostgresStore {
             client
                 .execute(
                     Self::sql(Query::DeleteWaveCronsByWave),
+                    &[&wave_id.as_str()],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::ListWaveRepos), &[&wave_id])
+                .await?;
+            rows.iter().map(map_wave_repo_row).collect()
+        })
+        .await
+    }
+
+    pub async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::UpsertWaveRepo),
+                    &[
+                        &wave_id.as_str(),
+                        &repo.repo.as_str(),
+                        &repo.worktree.as_str(),
+                        &repo.branch.as_str(),
+                        &repo.status.as_i32(),
+                        &(repo.iteration as i32),
+                        &(repo.cycle_start_iteration as i32),
+                        &(repo.position as i32),
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::DeleteWaveReposByWave),
                     &[&wave_id.as_str()],
                 )
                 .await?;

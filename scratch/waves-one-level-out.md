@@ -1,105 +1,194 @@
-# Waves, one level outward
+# Waves, one level outward — Concerto rebuild
 
-## This PR builds — Slice 1 only
+> **Scope shift.** This started as "slice 1: a repo-filtered wave list on the
+> stubbed single-repo model." It has grown into a **rebuild of the Concerto
+> product UI**, on the real Wave/RepoWork schema. The slice-1 list already
+> landed (see `jack-heart.waves-outward-review.md`); it's the first tile of the
+> new surface, not a standalone deliverable.
+>
+> **This is now the `desktop` wave's roadmap.** The durable arc — vision,
+> `lfd-owned-wave-identity`, `wave-surface-ux-exploration`, `ux-iteration-loop`
+> — lives in `wave/desktop/` (GOAL.md + roadmap items 2–4). This scratch doc
+> drives only **this diff: slices A + B** — the Wave/RepoWork model split and
+> the simplest three screens that prove the architecture. It gets wiped on land;
+> the wave carries what's durable.
 
-**Scope of this run:** the blank repo-filtered wave list. Nothing else.
+## The rebuild
 
-Gut `swift/Concerto/Platform/macOS/Views/ContentView.swift` down to a bare list:
-active waves touching the current repo, rendered as rows (name · repo chips ·
-rollup status). Remove the sidebar+detail / multiplexer / session-takeover surface
-from the exposed path — start from blankness.
+Start the exposed product UI over. **Keep the code in tree — don't delete** —
+but nothing is wired into the product until it earns its spot in the new
+surface. Menus, windows, everything: re-derive from what the three screens
+actually need.
 
-- **UI-first.** Build against today's single-repo `Wave`. Stub the repo set as
-  `repos = [wave.repo]`; do NOT split `Wave`/`RepoWork` across the wire mirrors
-  yet (that's a later slice — see Build order).
-- Repo-filter = `waves.filter { $0.repos.contains(currentRepo) }` (with the stub,
-  that's `wave.repo == currentRepo`).
-- No create-wave flow, no open-a-wave detail, no context injection yet.
+### The three screens
 
-Slices 2–4 (create-wave, open-a-wave, in-repo workspace) and the `Wave`/`RepoWork`
-model split are OUT of scope for this run. See "Build order" below and
-`scratch/questions.md` for deferred forks — do not resolve them here.
+1. **Portfolio** — all active waves (name · repo chips · rollup status).
+2. **Repo view** — waves filtered to the current repo, plus **quick-start**: spin
+   up a new wave seeded from the repo's roadmap or from **Asana** data.
+3. **Wave screen** — the wave's home as a terminal multiplexer (see below).
 
-## The move
+## Thesis: terminal-first, not native-chat-first
 
-Not an inversion — a **new outer layer**. Today `Wave.repo: String` conflates the
-agent's intent with a single repo's execution. Split them:
+This is the cut the rebuild commits to. Today Concerto is a native SwiftUI
+**chat client** — it renders agent turns, reply queues, assistant-message text,
+voice input. The new wave screen hosts the agent in a **tmux pane** (the
+goal-loop harness) alongside yazi + ad-hoc terminals. Once the agent lives in
+the terminal, the native-chat stack stops earning its place. Concerto becomes a
+**window manager over tmux/ghostty sessions the daemon runs**, not a chat UI.
 
-- **Wave (outer)** — the agent's *identity*: GOAL, MEMORY, agent config, flow,
-  direction, triggers. Singular and coherent. Persists across runs and across
-  the repo fan-out. This is what the wave list shows.
-- **RepoWork (inner)** — where the agent *acts*: per-repo worktree, branch,
-  status, iteration, activeRun, PR, commits. This is basically today's `Wave`.
+## Model: identity vs execution
 
-One intent → N per-repo streams that share the wave's id/name.
+`Wave.repo: String` today conflates the agent's intent with one repo's
+execution. Split into an outer identity and an inner per-repo stream. One intent
+→ N per-repo streams sharing the wave's id/name.
 
 ```
-Wave { id, name, GOAL, MEMORY, agent, flow, direction, area, triggers, crons,
-       repos: [RepoWork] }
+Wave (outer — identity, singular, lfd-owned)
+  { id, name, GOAL, MEMORY, agent, flow, direction, area, triggers, crons,
+    repos: [RepoWork] }
 
-RepoWork { repo, worktree, branch, status, iteration, activeRun, commits,
-           diffStat, openPRCount, pr }
+RepoWork (inner — execution, per-repo)
+  { repo, worktree, branch, status, iteration, activeRun, commits,
+    diffStat, openPRCount, pr }
 ```
 
-## Repo is a filter, not a container
+Repo is a **filter, not a container**. Many-to-many: a wave references a repo
+set; a repo is touched by many waves. `waves.filter { $0.repos.contains(repo) }`.
+Wave status = rollup over its RepoWork statuses (rollup rule still open).
 
-Many-to-many. A wave references a set of repos; a repo is referenced by many
-waves.
+## GOAL / MEMORY: lfd-owned master copy
 
-- Portfolio root → all waves (+ repos).
-- Click a repo → wave list filtered to `waves.filter { $0.repos.contains(repo) }`.
-- Click a wave → its per-repo streams; inside a repo, the wave-keyed work as today.
-- Wave status = rollup over its RepoWork statuses.
+The identity's GOAL and MEMORY are a **single master copy stored by lfd, outside
+any repo**. Editable and personal — this is *your* identity, not the repo's.
+The repo copies are materialized projections that reconcile *to* the master;
+they are never the source of truth.
 
-## Two things feed the agent (distinct axes)
+- **Export (push):** on a PR to repo X, merge the master GOAL/MEMORY with X's
+  in-repo `wave/<name>/` copy and write the result into X, so the PR carries
+  `wave/<name>/{GOAL,MEMORY}.md`.
+- **Pull-in:** subscribe to repos to pull their `wave/<name>/` edits back into
+  the master.
+- Master is authoritative; both directions reconcile against it.
 
-1. **Injected context** — the *world* it works on. Per-repo, ambient, external:
-   the repo's roadmap (on disk in `main/`) and `main/wave/` history (prior waves'
-   GOAL/MEMORY). Anything with a roadmap can have it injected; same for `main/wave/`.
-   This is context injection, NOT a menu of pre-shaped waves.
-2. **Agent identity / integrity** — the *self* doing the acting. GOAL (directive),
-   MEMORY (accumulated self), agent config. Singular. One coherent self, many hands.
-   Identity does not fragment per repo.
+Consequence: the wave screen's file browser (yazi) is rooted at the **master
+wave home**, not any repo — which is exactly why the identity layer is singular
+and sits above the fan-out. It also keeps the multi-user door open: identity is
+personal + shareable (clone the master into another user's space); *firing
+state* (runs you launched) stays personal. Don't build multi-user now; just
+keep firing-state separable from identity.
 
-### Consequence: GOAL/MEMORY move UP
+## Harness engine & serialization
 
-The earlier concerto-wave-thread design wired GOAL.md/MEMORY.md to *each repo's*
-worktree. That was wrong under this model. GOAL/MEMORY are identity → they belong
-to the **wave**, singular. Each repo injects its own local roadmap + `wave/`
-history as context, but there is one GOAL and one MEMORY above the fan-out.
+The engine is the existing agent CLI, launched with `/goal`. `/goal` + the
+existing prompt generation assemble the loop; the universal **LOOPFLOW operating
+prompt** (the orchestration contract) is woven into the seed, with the wave's
+GOAL layered on top. No new engine to build.
 
-## Multi-user falls out for free
+**Wave-home file contract (the serialization).** The lfd master materializes to
+the wave home as:
+- `wave/GOAL.md` — YAML frontmatter (`primary_flow`, `mode`, `metrics`) + body
+  (the loop prompt).
+- `wave/MEMORY.md` — sectioned markdown (`Shipped` / `Model` / `Next`); the
+  accreting one.
+- `scratch/` — working files.
 
-Singular identity means a wave's agent context is shareable:
+**File-as-master.** The file is the editing surface (yazi edits it); lfd parses
+frontmatter into the Wave record. One artifact, three consumers — yazi edits,
+lfd stores, the loop injects. The Wave DTO carries parsed `goal` + `memory` +
+config; the file is authoritative because it's what the human edits.
 
-- **Agent identity (GOAL/MEMORY)** — shareable. A wave can be solo, or a
-  team/project several people work in.
-- **What you've fired** (runs, streams you launched) — personal to you.
+**Limits via read-on-demand, not compaction.** Preloading MEMORY into the
+assembled context is an optimization, not a requirement. When it exceeds budget,
+the LOOPFLOW operating prompt points the agent at `wave/MEMORY.md` (and
+`scratch/`, roadmap) to read on demand — the agent already has a shell in the
+wave home. No summarization/compaction engine to build.
 
-Solo is the one-person case of the same structure. Don't build multi-user now —
-just keep firing-state separable from identity so the team case stays open.
+## Wave screen composition
 
-Cross-user sharing, when it comes, is likely **cloning** — copy a wave's identity
-(GOAL/MEMORY/agent) into another user's space, their fired state fresh — not live
-shared session state. The identity/firing split is what makes a clean clone
-possible. Way down the line; don't build it.
+The wave's **home directory** (lfd-managed: `wave/GOAL.md`, `wave/MEMORY.md`,
+`scratch/`) is the cwd everything roots at. Three surfaces onto it:
 
-## Build order (blank outward)
+1. **Goal-loop harness** — tmux session running the chat-agent harness that
+   drives the loop. cwd = wave home.
+2. **Files** — yazi in ghostty over GOAL.md / MEMORY.md / scratch/. Same cwd.
+3. **Ad-hoc terminals** — launch arbitrary CLI sessions in the wave context.
+4. **RepoWork strip** *(lean)* — compact per-repo rows (chip · status · iter ·
+   PR). Click → drill into that repo's worktree as its own terminal workspace
+   (the worker session). Execution lives one level down from the director.
 
-Strip the exposed UI to blankness, grow from the wave list up.
+Primitives already exist: `TmuxSession.ensureBaseSession()`
+(`tmux new-session -d -s <name> -c <cwd>`), `GhosttyTerminalView`,
+`MultiplexerView` / `TerminalWorkspaceView`, `TmuxSessionRegistry`.
 
-1. **Repo-filtered wave list** — gut `ContentView` to a bare list: active waves
-   touching the current repo (name, repo chips, rollup status). Nothing else.
-2. **Create-wave** — pick a repo set; each repo contributes its on-disk context.
-3. **Open a wave** — its per-repo streams.
-4. **In-repo workspace** — reintroduce the multiplexer, wave-keyed, under a
-   selected repo.
+## Kept / dropped (the map)
 
-## Deferred (deliberately)
+Current product-view surface ≈ 11k LOC (macOS Views 9.3k + Concerto/Views 1.6k).
+The three screens need ~a third of it.
 
-- **Shared vs per-repo flow.** Identity is singular either way. A wave might run
-  one flow across all repos, or each repo diverge. Decide when we open a wave.
-- **Multi-user.** Model admits it; don't build it.
-- **The concerto-wave-thread multiplexer layout** (agent | GOAL·ROADMAP·MEMORY)
-  is superseded as a *default* — GOAL/MEMORY aren't per-repo panes anymore. The
-  in-repo workspace returns in step 4 in a form that fits the outer identity.
+**Keep (reshaped):**
+- `PortfolioWindow` → all-waves screen
+- `ContentView` (already slice-1'd) → repo view + quick-start form
+- `MultiplexerView` / `TerminalWorkspaceView` / `GhosttyTerminalView` /
+  `TmuxSession` → wave screen panes + worker workspaces
+- Plumbing (not product UI): `RepoState`/snapshots, lfd client,
+  connection/setup, palette/fonts, `ScreenshotWindow` (review infra)
+
+**Drop (doesn't earn a spot).** *Drop means unwire from the product — remove
+from app/menu/window wiring, leave the source in tree. Recover via git if a
+later screen needs it. Do not delete files.*
+- *Native-chat stack (~1.9k):* `WaveSessionView`, `SessionContextView`,
+  `VoiceInputButton`, `InteractiveSessionView`, `ReplyQueue`,
+  `SelectableAssistantMessageTextView`
+- *Structured wave-detail (~2.4k):* `WaveDetailPanel`, `WaveSidebar`,
+  `StepRunner`, `WaveRunsTab`, `FlowProgressPills`, `WaitingStateCard`,
+  `IterationTimeline`, `WaveWorkspaceView`, `WaveDetailLiveUpdates`
+- *Flow-config browser (~1.3k):* `FlowsView`, `FlowTypeahead`, `AreaTypeahead`,
+  `DirectionTypeahead`, `TypeaheadComponents` (quick-start may reuse a typeahead)
+- *Superseded:* `CatchWaveView` (→ quick-start), `CommandPalette` (defer),
+  `AttentionQueueView` + `NextActionsBar` (pending waiting-nudge decision)
+
+## Open questions
+
+- **RepoWork stream location.** Lean: drill-down (b) with a summary strip on the
+  wave screen. Alt: tile RepoWork panes directly (a) if you usually work 1–2
+  repos per wave. **Undecided.**
+- **Who owns the harness lifecycle?** Lean: **lfd** — the daemon spawns the
+  goal-loop harness so waves survive the UI (triggers + crons require it);
+  Concerto attaches to the daemon's session. Alt: Concerto-owned (UI-bound
+  waves) as a stepping stone. **Undecided.**
+- ~~**What command is the harness?**~~ **Decided:** existing agent CLI launched
+  with `/goal`; existing prompt generation + LOOPFLOW operating prompt assemble
+  the loop. See "Harness engine & serialization."
+- ~~**Serialization / limits.**~~ **Decided:** file-as-master (yazi edits, lfd
+  parses); read-on-demand instead of a compaction engine.
+- ~~**Voice input.**~~ **Decided: dropped from wiring for now.** Unwire
+  `VoiceInputButton` and the launch-time `VoiceInputService` prewarm; leave the
+  code in tree.
+- **Waiting-nudge.** How does a terminal-hosted wave signal it needs you? Rollup
+  status says `waiting`, but the interaction is inside the tmux pane. Is
+  "status chip → open the pane" enough, or does the director need a native nudge
+  (the one piece of the chat stack that might have to survive)?
+- ~~**Rollup status rule.**~~ **Decided:** `Wave.status` is derived over
+  `repos[].status` — any `running` → running; else any `failed` → failed; else
+  any `waiting` → waiting; else all `paused` → paused; else idle. Same shape for
+  a rollup `iteration` (max, or the running repo's) if the UI needs one.
+- **Merge semantics.** Semantic/LLM consolidation vs structural append for
+  GOAL/MEMORY export + pull-in. MEMORY across repos wants consolidation; GOAL is
+  likely authored-once, top-down.
+- ~~**Wire-type split.**~~ **Decided: A2 (full core split), this diff.** Not the
+  DTO-only stub — `Wave.repo: String` → `repos: Vec<RepoWork>` through the Rust
+  store + executor, both DB backends, then the Python/Swift DTO mirrors +
+  fixtures. Field boundary: identity (goal, agent, flow, direction, area,
+  triggers, crons, mode, workers) stays on `Wave`; execution (repo, worktree,
+  branch, status, iteration, activeRun, commits, diffStat, openPRCount, pr) moves
+  into `RepoWork`; `Wave.status`/`iteration` become rollups. A sequenced,
+  build-green plan is being produced before implementation; identity *storage*
+  (lfd-owned GOAL/MEMORY) stays out of scope — that's roadmap item 2.
+
+## Build order
+
+1. **Repo-filtered wave list** — done (slice 1, stubbed model).
+2. **Wave/RepoWork model split** — wire-type change; the real schema.
+3. **Wave screen** — harness pane + yazi + ad-hoc terminals + RepoWork strip.
+4. **Repo-view quick-start** — seed a wave from repo roadmap or Asana.
+5. **Worker workspace** — drill from a RepoWork into its worktree terminal.

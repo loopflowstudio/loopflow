@@ -409,8 +409,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Run, RunStackStatus, RunStatus, Wave,
-        WaveMode, WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, RepoWork, Run, RunStackStatus, RunStatus,
+        Wave, WaveMode, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -474,6 +474,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

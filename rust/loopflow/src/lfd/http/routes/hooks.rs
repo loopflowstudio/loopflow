@@ -658,7 +658,9 @@ mod tests {
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{PullRequest, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{
+        PullRequest, RepoWork, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus,
+    };
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -790,6 +792,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo_dir.path().to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

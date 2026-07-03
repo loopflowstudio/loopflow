@@ -1,5 +1,12 @@
 # Desktop wave memory
 
+## Model (design invariants)
+
+- Frame, don't render: no native chat UI, and the CLI stays the source of truth — Concerto composes around it.
+- Desktop owns wave *navigation* (which wave to open); workflows owns wave *governance* (grading, rollups, rhythm).
+- The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; desktop consumes it.
+- lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
+
 ## Patterns (verified 2026-05-19, embedded-terminal implementation)
 
 - **lfd terminal provenance is `TerminalSession.source`; provider display is

@@ -541,7 +541,7 @@ async fn record_activation_log(
 mod tests {
     use super::*;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode};
+    use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode};
     use time::OffsetDateTime;
 
     async fn create_store() -> SharedStore {
@@ -562,6 +562,15 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: ".".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

@@ -12,16 +12,16 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
-    now_unix, serialize_pr,
+    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
+    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus, SessionUse,
-    Summary, Trigger, Wave, WaveCron, WaveStatus,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
+    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -198,6 +198,20 @@ impl SqliteStore {
             crons.push(cron??);
         }
         Ok(crons)
+    }
+
+    fn read_wave_repos<P>(&self, query: Query, params: P) -> StoreResult<Vec<RepoWork>>
+    where
+        P: rusqlite::Params,
+    {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(query))?;
+        let rows = stmt.query_map(params, |row| Ok(map_wave_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for repo in rows {
+            repos.push(repo??);
+        }
+        Ok(repos)
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -801,6 +815,34 @@ impl SqliteStore {
     pub fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(Self::sql(Query::DeleteWaveCronsByWave), params![wave_id])?;
+        Ok(())
+    }
+
+    pub fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        self.read_wave_repos(Query::ListWaveRepos, params![wave_id])
+    }
+
+    pub fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::UpsertWaveRepo),
+            params![
+                wave_id.as_str(),
+                repo.repo,
+                repo.worktree,
+                repo.branch,
+                repo.status.as_i32(),
+                repo.iteration as i64,
+                repo.cycle_start_iteration as i64,
+                repo.position as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(Self::sql(Query::DeleteWaveReposByWave), params![wave_id])?;
         Ok(())
     }
 

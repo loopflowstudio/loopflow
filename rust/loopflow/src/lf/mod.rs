@@ -147,6 +147,12 @@ pub enum Commands {
         #[arg(long)]
         tmux: bool,
     },
+    /// Run a wave's progress loop: loopflow owns the outer loop, each pass is
+    /// one bounded `lf goal <wave> --once`
+    Loop {
+        /// Wave name (matches wave/<name>/)
+        name: String,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

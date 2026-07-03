@@ -47,6 +47,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         paused: false,
         created_at: None,
         workers: 1,
+        parent_wave_id: None,
     }
 }
 

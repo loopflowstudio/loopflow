@@ -16,6 +16,7 @@ WAVE_MINIMAL = {
     "triggers": [],
     "crons": [],
     "flow_steps": [],
+    "parent_wave_id": None,
     "repos": [
         {
             "repo": "/tmp/repo",

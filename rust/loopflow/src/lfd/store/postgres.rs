@@ -227,6 +227,7 @@ impl PostgresStore {
             let primary_flow = wave.primary_flow();
             let goal = wave.goal();
             let metrics = metrics_json.as_str();
+            let parent_wave_id = wave.parent_wave_id().map(|id| id.as_str());
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -242,6 +243,7 @@ impl PostgresStore {
                         &primary_flow.as_str(),
                         &goal,
                         &metrics,
+                        &parent_wave_id,
                     ],
                 )
                 .await?;
@@ -728,6 +730,16 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::ListLoopableWaves), &[])
+                .await?;
+            rows.iter().map(map_wave_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::ListChildWaves), &[&parent])
                 .await?;
             rows.iter().map(map_wave_row).collect()
         })

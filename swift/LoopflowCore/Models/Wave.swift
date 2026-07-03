@@ -253,6 +253,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var repos: [RepoWork]
     public var flowSteps: [String]
     public var createdAt: Date?
+    /// Parent wave in the chord tree. `nil` for a root wave.
+    public var parentWaveId: String?
 
     public init(
         id: String,
@@ -269,7 +271,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         crons: [WaveCron] = [],
         status: WaveStatus = .idle,
         flowSteps: [String] = [],
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        parentWaveId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -286,6 +289,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.status = status
         self.flowSteps = flowSteps
         self.createdAt = createdAt
+        self.parentWaveId = parentWaveId
     }
 
     /// Single-repo convenience mirroring the old flat shape: packs the per-repo
@@ -342,7 +346,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
             crons: crons,
             status: status,
             flowSteps: flowSteps,
-            createdAt: createdAt
+            createdAt: createdAt,
+            parentWaveId: nil
         )
     }
 }

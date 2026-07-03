@@ -37,6 +37,7 @@ struct ContractTests {
         #expect(wave.status == .running)
         #expect(wave.direction == ["ux", "clarity"])
         #expect(wave.area == ["src/"])
+        #expect(wave.parentWaveId == "wave_parent999")
 
         #expect(wave.repos.count == 1)
         #expect(wave.repos.first?.repo == "/home/user/project")

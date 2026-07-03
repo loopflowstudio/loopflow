@@ -1471,6 +1471,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         };
         store
             .create_wave(&wave)
@@ -1536,6 +1537,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 
@@ -1733,6 +1735,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         };
         store
             .create_wave(&target_wave)

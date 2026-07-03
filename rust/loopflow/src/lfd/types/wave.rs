@@ -251,6 +251,11 @@ pub struct Wave {
     /// Maximum number of active runs this wave can have at once.
     #[serde(default = "default_workers")]
     pub workers: u32,
+    /// Parent wave in the chord tree. `None` for a root wave. A chord is simply
+    /// a wave that has children (`children_of(id)` non-empty) — there is no
+    /// `wave_type` discriminator.
+    #[serde(default)]
+    pub parent_wave_id: Option<LfdId>,
 }
 
 impl Wave {
@@ -277,11 +282,23 @@ impl Wave {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: default_workers(),
+            parent_wave_id: None,
         }
+    }
+
+    /// Attach this wave to a parent, making it a child in the chord tree.
+    pub fn with_parent(mut self, parent: LfdId) -> Self {
+        self.parent_wave_id = Some(parent);
+        self
     }
 
     pub fn id(&self) -> &LfdId {
         &self.id
+    }
+
+    /// Parent wave in the chord tree, `None` for a root wave.
+    pub fn parent_wave_id(&self) -> Option<&LfdId> {
+        self.parent_wave_id.as_ref()
     }
 
     pub fn name(&self) -> &String {

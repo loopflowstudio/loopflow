@@ -198,24 +198,20 @@ impl Store {
         }
     }
 
-    /// Persist `repos` alongside the flat wave row so both representations stay
-    /// consistent. Falls back to a single `RepoWork` derived from the flat
-    /// fields when `wave.repos` is empty (shouldn't happen post-Step-2).
+    /// Persist the temporary single-repo mirror alongside the flat wave row.
+    /// Until the executor moves onto `RepoWork`, the flat fields are the source
+    /// of truth and `wave_repos` must reflect them exactly.
     async fn persist_wave_repos(&self, wave: &Wave) -> StoreResult<()> {
-        if wave.repos.is_empty() {
-            let fallback = vec![RepoWork {
-                repo: wave.repo.clone(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: wave.status,
-                iteration: wave.iteration,
-                cycle_start_iteration: wave.cycle_start_iteration,
-                position: 0,
-            }];
-            self.replace_wave_repos(wave.id(), &fallback).await
-        } else {
-            self.replace_wave_repos(wave.id(), &wave.repos).await
-        }
+        let repos = vec![RepoWork {
+            repo: wave.repo.clone(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: wave.status,
+            iteration: wave.iteration,
+            cycle_start_iteration: wave.cycle_start_iteration,
+            position: 0,
+        }];
+        self.replace_wave_repos(wave.id(), &repos).await
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
@@ -2149,6 +2145,9 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
+        assert_eq!(loaded.repos.len(), 1);
+        assert_eq!(loaded.repos[0].repo, "/repo");
+        assert_eq!(loaded.repos[0].status, WaveStatus::Paused);
         let loopable = store
             .list_loopable_waves()
             .await

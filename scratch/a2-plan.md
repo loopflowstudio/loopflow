@@ -50,7 +50,7 @@ diffStat, openPRCount, pr) moves into RepoWork; `Wave.status`/`iteration` roll u
   sqlite + postgres, new `catalog::Query` entries, `map_wave_repo_row` in `rows.rs`.
   Old `waves` columns intact. Nothing reads `wave_repos` yet.
 
-- [ ] **2 — `Wave.repos` field + bridge.** Add `pub repos: Vec<RepoWork>`; keep
+- [x] **2 — `Wave.repos` field + bridge.** DONE, green. Add `pub repos: Vec<RepoWork>`; keep
   `repo/status/iteration/cycle_start_iteration`. Add `primary_repo()`. Store loads
   `repos` (second query, like crons); `upsert_wave` also `replace_wave_repos` from
   flat fields. Update `Wave::new` + every `Wave{…}` literal (blast radius — compiler

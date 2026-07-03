@@ -22,7 +22,6 @@ from loopflow.models import (
     ModelInfo,
     ProviderInfo,
     Repo,
-    Session,
     Run,
     Wave,
 )

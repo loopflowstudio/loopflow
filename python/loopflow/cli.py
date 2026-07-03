@@ -69,12 +69,16 @@ def _wave_table(waves: list[Wave]) -> Table:
     for wave in waves:
         primary = wave.repos[0] if wave.repos else None
         run = primary.active_run if primary else None
-        local_worktree = (run.local_worktree if run else None) or (
-            primary.local_worktree if primary else None
-        ) or "-"
-        remote_branch = (run.remote_branch if run else None) or (
-            primary.remote_branch if primary else None
-        ) or "-"
+        local_worktree = (
+            (run.local_worktree if run else None)
+            or (primary.local_worktree if primary else None)
+            or "-"
+        )
+        remote_branch = (
+            (run.remote_branch if run else None)
+            or (primary.remote_branch if primary else None)
+            or "-"
+        )
         table.add_row(
             wave.name,
             wave.status,

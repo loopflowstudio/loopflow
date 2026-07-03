@@ -333,16 +333,18 @@ def cmd_run() -> int:
     _install_dev_app()
     # Dev launches read this checkout's wave/ dir + lfd AS-IS (CONCERTO_DEV_WAVE_REPO);
     # a plain production launch leaves it unset and reads the main worktree.
-    run([
-        "open",
-        "-n",
-        "--env",
-        f"CONCERTO_DEV_WAVE_REPO={REPO_ROOT}",
-        str(DEV_APP),
-        "--args",
-        "--repo",
-        str(REPO_ROOT),
-    ])
+    run(
+        [
+            "open",
+            "-n",
+            "--env",
+            f"CONCERTO_DEV_WAVE_REPO={REPO_ROOT}",
+            str(DEV_APP),
+            "--args",
+            "--repo",
+            str(REPO_ROOT),
+        ]
+    )
     return 0
 
 

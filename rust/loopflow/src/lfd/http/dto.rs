@@ -667,7 +667,6 @@ mod contract_tests {
             id: "wave_abc123".to_string(),
             object: "wave".to_string(),
             name: "engbot".to_string(),
-            repo: "/tmp/repo".to_string(),
             mode: "loop".to_string(),
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -679,30 +678,24 @@ mod contract_tests {
             triggers: Vec::new(),
             crons: Vec::new(),
             status: "idle".to_string(),
-            iteration: 0,
             workers: 1,
-            local_worktree: None,
-            remote_branch: None,
-            active_run: None,
             created_at: None,
-            commits: Vec::new(),
-            diff_stat: None,
             flow_steps: Vec::new(),
-            open_pr_count: 0,
-            stack_count: 0,
             has_stale_pr_state: false,
+            repos: Vec::new(),
         };
 
         let json = serde_json::to_value(&wave).unwrap();
         assert_eq!(json["goal"], "ship-roadmap");
         assert_eq!(json["metrics"], serde_json::json!([]));
+        assert_eq!(json["repos"], serde_json::json!([]));
     }
 
     #[test]
     fn wave_goal_is_required() {
-        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        let mut json = nested_wave_json();
         json.as_object_mut()
-            .expect("wave fixture should be an object")
+            .expect("wave payload should be an object")
             .remove("goal");
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
@@ -711,13 +704,24 @@ mod contract_tests {
 
     #[test]
     fn wave_metrics_is_required() {
-        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        let mut json = nested_wave_json();
         json.as_object_mut()
-            .expect("wave fixture should be an object")
+            .expect("wave payload should be an object")
             .remove("metrics");
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `metrics`"));
+    }
+
+    #[test]
+    fn wave_repos_is_required() {
+        let mut json = nested_wave_json();
+        json.as_object_mut()
+            .expect("wave payload should be an object")
+            .remove("repos");
+
+        let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
+        assert!(err.to_string().contains("missing field `repos`"));
     }
 
     #[test]

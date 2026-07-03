@@ -345,8 +345,6 @@ lfq attach <id>      # attach to one over tmux
 lfq logs engbot      # tail agent output
 lfq stop engbot      # stop a running wave
 lfq delete engbot    # remove wave and history
-lfq usage            # token usage summary (group by wave)
-lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf op auth status   # local provider auth for lf steps and ops
 lf op auth asana    # connect Asana locally for `lf op` / step integrations

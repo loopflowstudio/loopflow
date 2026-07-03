@@ -13,7 +13,7 @@ Loopflow has four product surfaces over one model:
 - `lfd` - daemon for HTTP API, wave scheduling, triggers, sessions, and remote
   execution.
 - `lfq` / Python API - lightweight query and control clients for lfd.
-- Concerto - Swift app for watching waves, sessions, attention, usage, and live
+- Concerto - Swift app for watching waves, sessions, attention, and live
   work.
 
 The authored repo state is the product language:

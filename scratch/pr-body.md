@@ -2,6 +2,7 @@
 
 ```bash
 rg -n "conversation|Conversation|conversations|UsageAnalytics|AnalyticsDashboard|CostEstimator" -S
+rg -n "lfq usage|scripts/test_session.py|/v0/conversations|conversations/" README.md TESTING.md docs python rust swift scripts tests wave -S
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
@@ -11,9 +12,10 @@ uv run python scripts/check_swift_multiplatform_boundaries.py
 cd website && uv run python dev.py test
 tests/e2e/test_smoke.sh
 uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
+uv run pytest tests/regression/ -v
 ```
 
-Expected: no live conversation API/client roots remain; Rust, Python, Swift package, website, and e2e smoke checks pass.
+Expected: no live conversation API/client roots or stale removed-command docs remain; Rust, Python, Swift package, website, regression, and e2e smoke checks pass.
 
 ## Intent
 
@@ -36,4 +38,4 @@ No replacement transcript subsystem, no Session Record aggregate, and no rebuilt
 
 ## Validation notes
 
-`cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. The Concerto Xcode project generated and built into testing, but the local `xcodebuild test` run hung in runner cleanup after `Testing started`; `swift test --package-path swift` and the Swift boundary guard passed.
+`cargo test -p loopflow docker_ -- --nocapture` passed, with two Docker-runtime cases skipped because `/var/run/docker.sock` was not available locally. `xcodebuild build -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` passed. The bounded local `xcodebuild test ... -skip-testing:ConcertoUITests` run timed out after 300 seconds while building test targets, before any test result; `swift test --package-path swift` and the Swift boundary guard passed.

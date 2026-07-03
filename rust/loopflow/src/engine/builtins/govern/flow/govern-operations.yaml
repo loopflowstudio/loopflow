@@ -1,4 +1,3 @@
-- ingest
 - xor:
     paths:
       build:

@@ -82,7 +82,7 @@ Every new wave ships with two default triggers: `repo` (whole repo → integrate
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf op ingest --item 2-daemon-integrity.md    # move one roadmap item to scratch/
+lf op pm show --wave designer   # print the wave's live Asana roadmap
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack workstyle step
 lf office-hours          # same thing — bare name works when unambiguous
@@ -139,7 +139,6 @@ Autonomous coordination — crons, triggers, and waves-watching-waves drive thes
 | `wave-report` | Read health signals across all waves |
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
-| `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
 | `s5-scan` | Scan wave identity, children, policy, and recent structural change |
 | `s5-assess` | Assess identity, boundary, roster, and autonomy drift |
 | `s4-scan` | Scan dependencies, advisories, upstream APIs, and other external signals |
@@ -191,12 +190,12 @@ Flows can include mechanical ops items directly:
 | Flow | Steps |
 |------|-------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
-| `build-or-silent` | op: pm pull → ingest → xor(build, silence) |
+| `build-or-silent` | xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | compress → update-wave → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land --create-pr → op: pm push-diff |
+| `deploy` | gate → op: land --create-pr |
 | `ship` | refresh-plan → implement → gate → op: pr → op: land |
 | `incident` | debug → 5whys → code → deploy |
 
@@ -206,7 +205,7 @@ Flows can include mechanical ops items directly:
 |------|-------|
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `garden-act` | mutate → review |
-| `govern-operations` | ingest → xor(s1-build, silence) |
+| `govern-operations` | xor(s1-build, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
 | `govern-control` | s3-scan → s3-assess → mutate |
 | `govern-intelligence` | s4-scan → s4-assess → mutate |
@@ -218,9 +217,9 @@ Flows can include mechanical ops items directly:
 | Flow | Steps |
 |------|-------|
 | `release` | op: release run patch |
-| `sync` | rebase → integrate-upstream → op: pm pull |
+| `sync` | rebase → integrate-upstream |
 
-`deploy` lands the branch, then syncs PM state when there is PM work to do. `sync` rebases and pulls PM state for the current branch's wave. That default-branch refresh is safe from sibling worktrees: it stashes any dirty edits on the checked-out default branch, syncs, then restores them — but only when those edits don't touch paths the sync itself rewrote. If they collide (e.g. the branch just absorbed a merge over the same files), the edits stay in a `sync_main: auto-stash` stash instead of being merged back, so a sync can never silently revert just-landed work. On branches with no PM-enabled wave, or no `wave/<name>/` changes, the PM step in either flow exits cleanly.
+`deploy` lands the branch. `sync` rebases the current branch and refreshes the default branch. That default-branch refresh is safe from sibling worktrees: it stashes any dirty edits on the checked-out default branch, syncs, then restores them — but only when those edits don't touch paths the sync itself rewrote. If they collide (e.g. the branch just absorbed a merge over the same files), the edits stay in a `sync_main: auto-stash` stash instead of being merged back, so a sync can never silently revert just-landed work.
 
 ## Release artifacts
 
@@ -345,53 +344,34 @@ lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
 lf op auth status   # local provider auth for lf steps and ops
 lf op auth asana    # connect Asana locally for `lf op` / step integrations
-lf op auth notion   # connect Notion locally for `lf op` / step integrations
-lf op auth linear  # connect Linear locally for `lf op` / step integrations
-lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana / Linear)
+lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth asana       # connect Asana with OAuth
-lfq auth linear      # connect Linear with OAuth
-lfq auth notion      # connect Notion with OAuth
 lfq auth disconnect github
 ```
 
-PM provider config:
+The roadmap lives in Asana. Pin a wave to its Asana project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
 
 ```yaml
-# .lf/config.yaml
+# wave/designer/GOAL.md frontmatter
 pm:
-  provider: notion
-notion:
-  parent_page: 32af8f99-...  # optional: reuse an existing parent page/teamspace
-  title_property: Name        # optional schema overrides
-  status_property: Status
-  done_value: Done
-  priority_property: Priority
+  asana_project: 1207xxxxxxxxxxxx
 ```
 
 ```bash
 lf op branches list --user @me --stale 60d   # preview stale remote branches
 lf op branches prune --user @me --stale 60d  # delete after confirmation
-lf op pm init pm           # connect/create one wave project, link items, write IDs
-lf op pm init --all        # bootstrap every wave/ project on the shared PM team
-lf op pm pull pm           # rewrite one wave from PM; remote changes win
-lf op pm pull --all        # rewrite every wave from PM; remote changes win
-lf op pm export pm         # push one wave to PM; local changes win
-lf op pm export --all      # push every PM-enabled wave
-lf op pm push-diff pm      # push only branch-changed items to PM; no-op if wave/<name>/ is unchanged
-lf op pm push-diff --all   # push-diff every PM-enabled wave
-lf op pm status            # show linked waves and local/remote counts
+lf op pm init --wave designer                # connect/create the Asana project, write asana_project into GOAL.md
+lf op pm show --wave designer                # print the wave's live Asana roadmap
+lf op pm update --wave designer --title "Add dark mode" --notes "..."   # create a task
+lf op pm update --wave designer --id 1207... --title "..." --status done # update or close a task
+lf op pm status                              # show linked waves
 ```
 
-Asana task descriptions preserve basic markdown formatting on sync. Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when older tasks don't have rich text yet.
-
-PM-backed `lf op ingest` refreshes the wave from the provider before it picks an item. If the pull fails, ingest warns and falls back to the local `wave/<name>/` mirror.
-
-Flow-driven `pm pull` and `pm push-diff` also skip cleanly when the current branch doesn't resolve to a PM-enabled wave. CI-only and non-PM branches can reuse the same flows without extra flags.
-Explicit `lf op pm pull <wave>` and `lf op pm push-diff <wave>` still target the named wave. Only the flow-driven variants auto-skip.
+`lf op pm` reads and edits the roadmap directly in Asana — there is no local mirror and nothing to sync. Task notes preserve basic markdown formatting: Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when a task has none yet.
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
 Use the install script or cargo to install `lf` and `lfd`.

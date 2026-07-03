@@ -1,195 +1,160 @@
 ---
 requires: diff vs main | scratch/ analysis | both
-produces: wave/<wave>/ (updated or deleted), scratch/ (folded files removed)
+produces: wave/<wave>/ (GOAL.md, MEMORY.md), roadmap updates in Asana, scratch/ cleanup
 ---
-Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
+Single owner of `wave/<wave>/`. Keeps the wave's identity current and folds what the branch learned into memory.
+
+## The wave's shape
+
+A wave is two local files plus a remote roadmap:
+
+- **`wave/<wave>/GOAL.md`** — the wave's identity: what it's for, how it judges
+  progress, the loop prompt it runs. Frontmatter carries `primary_flow` and the
+  Asana handle (`pm.asana_project`). This is the anchor; it changes rarely.
+- **`wave/<wave>/MEMORY.md`** — what the wave remembers between loops. Durable
+  observations, decisions, and context. This is where branch learnings land.
+- **The roadmap lives in Asana**, not in the repo. Read it with `lf op pm show`;
+  change it with `lf op pm update`. There is no local roadmap mirror — never
+  write `N-*.md` item files or a roadmap table.
 
 ## Orientation
 
 Before starting, orient yourself in this branch:
 
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- Read `scratch/` completely — design docs and notes for the current work live
+  here (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds
+  open questions and assumptions).
+- Read `wave/<wave>/GOAL.md` and `MEMORY.md`.
+- Read the live roadmap: `lf op pm show` (add `--wave <name>` if ambiguous).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
 
 ## Goal
 
-`wave/<wave>/` is planning scaffolding — it tracks what's left to build, not what's been built. This step is the only writer. Whether you're creating a wave from analysis, cleaning up after a build, or reconciling both at once:
+Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 
-- Shipped items are deleted, not marked as complete
-- Context that upcoming items need is folded into those items before deletion
-- New work from `scratch/` is folded into wave items or becomes new item files
-- When nothing remains and the wave is standalone, the wave directory is deleted
-- When nothing remains and the wave is a chord member, the wave persists — see "Silence" below
+- Durable learnings from `scratch/` are folded into `MEMORY.md`.
+- `GOAL.md` still describes the wave truthfully — if the branch changed the
+  wave's intent, flow, or metrics, update it. Otherwise leave it.
+- The roadmap in Asana reflects reality: shipped work is closed, new work is
+  filed, stale items are corrected — all through `lf op pm update`.
+- `scratch/` is trimmed to what a reviewer needs (see below).
 
-## Bias: fold, don't drop
+## Bias: fold into MEMORY, don't drop
 
-`scratch/` is cleared on land. Anything left there is lost. Anything folded into `wave/` survives. **Dropping content is a worse failure mode than duplicating it.**
+`scratch/` is cleared on land. Anything left there is lost. Anything folded into
+`MEMORY.md` — or pushed to the roadmap — survives. **Dropping content is a worse
+failure mode than duplicating it.**
 
-Every scratch file with planned work or future-relevant analysis must be folded into wave:
-- Proposals, open questions, analysis of upcoming work → fold into existing items or create new ones
-- Reviews with forward-looking recommendations → fold into relevant items
-- Questions about future work → fold into items or wave README risks/strategy
-- If content overlaps with what's already in wave, merge it — don't skip it
+Every scratch file with future-relevant content must land somewhere durable:
 
-Design docs for already-shipped work and other purely historical content can be left for git history. The test: does this content inform future work? If yes, fold it. If it only describes what was already built, let it go.
+- Decisions, learnings, gotchas, patterns established → fold into `MEMORY.md`.
+- Concrete future work (a next step, a follow-up, a discovered bug) → file it on
+  the roadmap with `lf op pm update --title "…" --notes "…"`.
+- Open questions about future work → `MEMORY.md`, or a roadmap item if it's
+  actionable.
+- If content overlaps what's already in `MEMORY.md`, merge it — don't skip it.
+
+Design docs for already-shipped work and other purely historical content can be
+left for git history. The test: does this content inform future work? If yes,
+fold it. If it only describes what was already built, let it go.
 
 ## Workflow
 
-1. Read the diff (if any) to understand what was built on this branch.
-2. Read `wave/<wave>/` — README and item files — to understand current state.
-3. Verify each item against the actual codebase. Check `git log main`, read relevant files, run relevant commands. For each item, ask three questions:
-   - **Shipped?** Is the finish line crossed? If yes, treat it as shipped.
-   - **Accurate?** Are file paths, function signatures, data structures, and technical approach still accurate given what's on main? Update item content to reflect the codebase as it actually is — not as it was when the item was written.
-   - **Coherent?** Is this item still worth building? The codebase evolves — other waves ship code, the user's understanding deepens, the problem shifts. An item can become stale without being shipped: the 80% case got solved a different way, the design assumed a structure that no longer exists, or the remaining value is marginal. See "Coherence" below.
-4. Read `scratch/` — every file, completely.
-5. Delete shipped items. Before deleting, fold context that remaining items need into those items.
-6. Fold scratch content into `wave/<wave>/`. Merge into existing items where there's a clear match. Create new items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
-7. If destination files already exist, merge/dedupe — but keep both sides' content. When in doubt, include it.
-8. **Trim scratch docs for shipped work.** Don't delete them — `lf op land` handles that. But strip implementation details that are now in the code. Keep only:
-   - **Validation procedures** — "Done when" checks, commands to run, expected output
-   - **Measurement instructions** — benchmarks, before/after comparisons, how to reproduce results
-   - **Try-it recipes** — quick ways for a reviewer to exercise the change
-   If a scratch doc has none of these, delete it. The goal: a reviewer landing on this branch can find how to evaluate the work without reconstructing it from the diff.
-9. If `wave/<wave>/MEMORY.md` exists, fold useful observations into remaining items and trim.
-10. If the wave directory has no remaining work items:
-    - **Standalone wave** (not referenced by any chord-wave's area): delete the entire `wave/<wave>/` directory.
-    - **Chord member** (referenced by another wave's area): keep the directory. The README survives as the wave's identity and sensor. The wave is now **silent** — alive, watching its area, but not proposing work. See "Silence" below.
+1. Read the diff (if any) to understand what this branch built.
+2. Read `GOAL.md`, `MEMORY.md`, and the live roadmap (`lf op pm show`).
+3. Read `scratch/` — every file, completely.
+4. **Reconcile the roadmap against reality.** For each item on the Asana
+   roadmap, ask:
+   - **Shipped?** If this branch (or main) crossed its finish line, close it:
+     `lf op pm update --id <task-id> --status done`.
+   - **Accurate?** If the item's description no longer matches the codebase,
+     correct it: `lf op pm update --id <task-id> --title "…" --notes "…"`.
+   - **New work surfaced?** File it: `lf op pm update --title "…" --notes "…"`.
+   Do this remotely. Never create or delete local roadmap files.
+5. **Fold scratch learnings into `MEMORY.md`.** Merge into existing sections
+   where there's a clear match; add sections for new durable context. Keep it
+   tight — memory is a working store, not an archive.
+6. **Update `GOAL.md` only if the wave's identity moved.** New primary flow,
+   changed metrics, a sharpened or redirected intent. If the branch didn't
+   change what the wave *is*, leave `GOAL.md` alone.
+7. **Trim scratch docs for shipped work.** Don't delete them — `lf op pr land`
+   handles that. Strip implementation detail that now lives in the code. Keep
+   only:
+   - **Validation procedures** — "Done when" checks, commands to run, expected
+     output.
+   - **Measurement instructions** — benchmarks, before/after, how to reproduce.
+   - **Try-it recipes** — quick ways for a reviewer to exercise the change.
+   If a scratch doc has none of these, delete it.
 
 ## Creating a new wave
 
-When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
+When `scratch/` holds a proposal and no wave exists yet, create one:
 
-1. Write `wave/<wave>/README.md` — the anchor that survives when plans change. Vision, strategy, goals, risks, metrics. **No roadmap tables or phase lists** — the item files are the roadmap.
-2. Write priority item files (`1-fix-broken-build.md`, `2-next-step.md`, `3-big-rock.md`, `4-speculative-bet.md`) — the roadmap. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
+1. Write `wave/<wave>/GOAL.md` (see below).
+2. Create `wave/<wave>/MEMORY.md` — seed it with the load-bearing context from
+   the proposal (key decisions, constraints, what's known). It can be short.
+3. Connect the roadmap: `lf op pm init --wave <name>` creates/links the wave's
+   Asana project and writes `asana_project` into `GOAL.md`.
+4. File the opening roadmap items in Asana with `lf op pm update` — the urgent
+   and next-step work, one task each. The roadmap starts in Asana, not on disk.
 
-### README.md
+### GOAL.md
 
-The README anchors the wave's identity. Concerto parses specific sections for the UI, so the structure matters.
+`GOAL.md` anchors the wave's identity. Concerto parses it for the UI.
 
-**Required sections, in order:**
+**Frontmatter:**
 
-- **H1 + `## Vision`.** What this is, who it's for, why it exists. Scope boundaries go here as natural qualifiers — "Not transcription, not dictation."
-- **`## Strategy`.** Why this approach and not the alternatives. Invariants, architecture, decisions, open questions. Sub-sections are free. Each wave reads differently.
-- **`## Goals`.** What success looks like.
-- **`## Risks`.** What could go wrong.
-- **`## Metrics`.** Numeric measurements — percentages, counts, durations, rates. Not qualitative indicators or behavioral descriptions. If you can't put a number on it, it's a goal, not a metric.
-
-Additional free sections are welcome — data models, tech direction, guardrails. The wave's own voice lives here.
-
-**README.md must not contain:**
-
-- Status indicators (shipped / in-progress / planned)
-- Retrospectives — context for remaining items gets folded into those items
-
-If the README has any of these, delete them.
-
-### Items
-
-Roadmaps are made up of items. Each item is a priority-prefixed file (`1-*.md`, `2-*.md`, `3-*.md`, `4-*.md`) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
-
-**The filename prefix carries priority meaning:**
-
-- `1-*` — Urgent: the codebase is broken or blocked; fix this before forward progress
-- `2-*` — High: the clear next step
-- `3-*` — Medium: a committed later bet; "when, not if"
-- `4-*` — Low: speculative work
-
-**Every item must open with a bold finish line.** What's true when this item is done that isn't true now? Make it specific enough that you know when you've crossed it.
-
-```markdown
-# Audit Breakdown
-
-**Finish line:** `lf implement` shows separate token rows for scratch, wave, and docs.
+```yaml
+---
+primary_flow: build            # the flow this wave loops
+pm:
+  asana_project: "1201234567890"   # written by `lf op pm init`
+---
 ```
 
-### Bucket principles
+**Body** — the loop prompt, in the wave's own voice:
 
-- **Use the smallest bucket that is honest.** Don't inflate work into `p0` just to force it to the front.
-- **Frontload the risk.** The most uncertain concrete deliverable usually belongs in `p1`, not buried behind fake staging.
-- **Keep buckets semantic, not numeric theater.** Don't recreate `01/02/03` inside a bucket. Within-bucket ordering is intentionally loose.
-- **Encode uncertainty.** Each item should state what you expect to learn and what might change.
+- What this wave is and why it exists; scope boundaries as natural qualifiers.
+- How it judges progress — the metrics that matter (numeric where possible).
+- The milestones or shape of the work ahead.
+
+**GOAL.md must not contain:** a roadmap table, status indicators
+(shipped/in-progress/planned), or item lists. The roadmap is in Asana.
 
 ## Coherence
 
-Items go stale. The codebase moves, other waves ship code that changes the
-landscape, the user's understanding evolves. When update-wave detects incoherent
-items, it reorganizes them — this is internal housekeeping, not new work.
+Roadmap items go stale — the codebase moves, other waves ship, intent evolves.
+When you find incoherent items on the roadmap, fix them in place through
+`lf op pm update`:
 
-An item is incoherent when:
-- **The finish line moved.** The goal was achieved by a different path. The item
-  describes work that's no longer needed as specified.
-- **The design diverged.** The codebase evolved in a direction incompatible with
-  the item's approach. Building it as written would fight the current architecture.
-- **The value diminished.** The 80% case is solved. What remains is marginal
-  improvement that doesn't justify the cost.
-- **Items overlap.** Multiple items now describe aspects of the same work, or
-  items in different waves cover the same ground.
+- **Finish line moved** — the goal was reached a different way → close the item.
+- **Design diverged** — building it as written would fight the current
+  architecture → rewrite its title/notes to match reality.
+- **Value diminished** — the 80% case is solved, the remainder is marginal →
+  close it or rewrite it down.
+- **Items overlap** — two items describe the same work → close one, sharpen the
+  other.
 
-When incoherence is found:
-1. Delete items that are fully obsolete (the work happened differently).
-2. Rewrite items whose goal is still valid but whose approach is stale.
-   Update the finish line, the technical approach, and the rationale to
-   reflect the codebase as it actually is.
-3. Merge items that have converged into the same work.
-4. If remaining items no longer form a compelling roadmap, rewrite the
-   set with a coherent forward-looking vision. What's the most valuable
-   thing this wave could do *now*, given everything that's changed?
-
-This reorganization is a single beat — it doesn't require human review. It's
-the wave maintaining its own coherence, the way a musician adjusts tuning
-between movements. The result should be a wave whose items, if any survive,
-describe genuinely compelling work against the current state of the world.
-
-If no items survive coherence review and the wave is a chord member, it
-becomes silent. That's fine — see below.
+This is housekeeping, not new work — the wave maintaining its own coherence. It
+doesn't need human review.
 
 ## Silence
 
-A silent wave isn't necessarily empty. It may have no items, or it may have
-had items that didn't survive coherence review. Either way, it's a chord member
-that owns an area of the problem space — watching, sensing, but not building.
+A wave with a current `GOAL.md` and `MEMORY.md` but nothing new to build is
+**silent** — alive, watching its area, not proposing work. That's a healthy
+state, not a failure. An empty roadmap is fine. Shipping mediocre work to avoid
+being empty trains the user to ignore the wave; staying quiet until there's
+something genuinely compelling earns trust that compounds.
 
-A silent wave:
-- Keeps its README (vision, strategy, goals, risks, metrics)
-- Has no roadmap item files
-- Is a valid, healthy state — not a failure or stall
-- Signals to the human: "this area is covered, add items here if you want work done"
-- Signals to the chord: "nothing compelling to build right now"
-
-Silence is the most important note a wave can play. Shipping mediocre work to
-avoid being empty trains the user to ignore the wave. A wave that stays quiet
-until it has something genuinely compelling earns trust that compounds.
-
-**When to stay silent vs close out:**
-- If the wave is a chord member → stay silent (default)
-- If the wave is standalone with no remaining purpose → delete
-- If the wave's area is still active and evolving → stay silent
-- If the human explicitly closes the wave → delete
-
-The chord's tend flow (specifically assess and play-chord) can propose waking
-a silent wave by adding items, or closing it entirely. The human reviews these
-proposals in review-chord.
-
-## What counts as "shipped"
-
-An item is shipped when the code is on main (or will be when this branch merges) and its finish line has been crossed. Don't keep items around to admire — if the work is done, delete the file.
-
-## Preserving context
-
-Shipped items often contain history that upcoming items build on — decisions made, alternatives rejected, patterns established. That context belongs in the remaining item files as free text, not as standalone shipped files.
-
-If there are no remaining items, the context doesn't need a home. Git has the history.
+Keep the wave (its `GOAL.md`/`MEMORY.md` are its identity and sensor). Delete a
+wave's directory only when it's standalone and its purpose is truly done, or the
+human explicitly closes it.
 
 ## Output
 
-Updated `wave/<wave>/` plus cleanup of `scratch/` files whose content has been folded in.
+Updated `wave/<wave>/MEMORY.md` (and `GOAL.md` if intent moved), a roadmap in
+Asana that reflects reality, and a trimmed `scratch/`.
 
-If the wave is fully shipped and scratch is empty: delete `wave/<wave>/`. Commit message: `wave: complete <wave>`.
-
-**"No changes needed" is only valid when scratch/ is empty.** If scratch has files, something must move into wave.
+**"No changes needed" is only valid when scratch/ is empty and the roadmap
+already matches reality.** If scratch has files, something must move into
+`MEMORY.md`, the roadmap, or both.

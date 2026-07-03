@@ -87,12 +87,12 @@ Update `scratch/<slug>.md`:
 
 ## Wave alignment
 
-If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
+If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
-- **Vision** — design must serve the wave's north star
-- **Goals** — "Done when" must contribute to wave success criteria. Quote the specific goals you're advancing.
-- **Risks** — "Imagine wild failure" should check against known risks. If this design introduces a new risk, name it.
-- Scope must exclude what Vision marks as "not here"
+- **Intent** — design must serve the wave's north star, stated in GOAL.md.
+- **Metrics** — "Done when" must move the wave's metrics. Quote the specific ones you're advancing.
+- **Memory** — check `MEMORY.md` for known risks and prior decisions. If this design introduces a new risk, name it.
+- Scope must exclude what GOAL.md marks as out of scope.
 
 ## Principles
 

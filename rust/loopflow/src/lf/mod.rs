@@ -253,16 +253,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Pick next wave item and move to scratch/
-    Ingest {
-        /// Wave name (auto-detected from worktree or branch if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Roadmap item filename or slug
-        #[arg(short = 'i', long = "item")]
-        item: Option<String>,
-    },
-    /// PM tool integration (bootstrap, pull, export, sync)
+    /// Roadmap in Asana (show, update, init, status)
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -318,7 +309,7 @@ pub struct BranchFilterArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Bootstrap PM provider roles for a wave
+    /// Connect (or create) the wave's Asana project; write asana_project to GOAL.md
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -329,52 +320,31 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Import projects from PM tool as waves
-    Import {
-        /// Team ID in the PM provider
-        #[arg(short = 't', long = "team")]
-        team_id: String,
-    },
-    /// Three-way sync between local wave files and PM tool
-    Sync {
+    /// Print the wave's live Asana roadmap
+    Show {
         /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Pull PM state into local wave files; remote changes win
-    Pull {
+    /// Create, edit, or close a roadmap task in Asana
+    Update {
         /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Wave name (flag form; same as positional wave)
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        /// Pull every wave under wave/
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
+        /// Existing task id to edit or close; omit to create a new task
+        #[arg(long = "id")]
+        id: Option<String>,
+        /// Task title
+        #[arg(long = "title")]
+        title: String,
+        /// Task notes/description
+        #[arg(long = "notes")]
+        notes: Option<String>,
+        /// Set to `done` to close the task
+        #[arg(long = "status")]
+        status: Option<String>,
     },
-    /// Push local wave files into PM; local changes win
-    Export {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Wave name (flag form; same as positional wave)
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        /// Export every wave under wave/
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
-    },
-    /// Push only branch-changed wave items to PM
-    #[command(name = "push-diff")]
-    PushDiff {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Wave name (flag form; same as positional wave)
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        /// Push-diff every PM-enabled wave
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
-    },
-    /// Show PM provider status for linked waves
+    /// Show roadmap status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -574,95 +544,63 @@ mod tests {
     }
 
     #[test]
-    fn pm_pull_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "pull", "pm"]).expect("parse");
+    fn pm_show_accepts_wave_flag() {
+        let cli =
+            Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Pull {
-                            wave,
-                            wave_flag,
-                            all,
-                        },
-                },
+            op: OpsCommand::Pm {
+                cmd: PmCommand::Show { wave },
+            },
         }) = cli.command
         else {
-            panic!("expected pm pull command");
+            panic!("expected pm show command");
         };
-
-        assert_eq!(wave.as_deref(), Some("pm"));
-        assert_eq!(wave_flag, None);
-        assert!(!all);
+        assert_eq!(wave.as_deref(), Some("goals"));
     }
 
     #[test]
-    fn pm_pull_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "pull", "--all"]).expect("parse");
+    fn pm_update_parses_create_and_close() {
+        let cli = Cli::try_parse_from([
+            "lf", "op", "pm", "update", "--title", "Ship it", "--notes", "details",
+        ])
+        .expect("parse");
         let Some(Commands::Op {
             op:
                 OpsCommand::Pm {
                     cmd:
-                        PmCommand::Pull {
+                        PmCommand::Update {
                             wave,
-                            wave_flag,
-                            all,
+                            id,
+                            title,
+                            notes,
+                            status,
                         },
                 },
         }) = cli.command
         else {
-            panic!("expected pm pull command");
+            panic!("expected pm update command");
         };
-
         assert_eq!(wave, None);
-        assert_eq!(wave_flag, None);
-        assert!(all);
-    }
+        assert_eq!(id, None);
+        assert_eq!(title, "Ship it");
+        assert_eq!(notes.as_deref(), Some("details"));
+        assert_eq!(status, None);
 
-    #[test]
-    fn pm_export_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "export", "pm"]).expect("parse");
+        let cli = Cli::try_parse_from([
+            "lf", "op", "pm", "update", "--id", "123", "--title", "Ship it", "--status", "done",
+        ])
+        .expect("parse");
         let Some(Commands::Op {
             op:
                 OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Export {
-                            wave,
-                            wave_flag,
-                            all,
-                        },
+                    cmd: PmCommand::Update { id, status, .. },
                 },
         }) = cli.command
         else {
-            panic!("expected pm export command");
+            panic!("expected pm update command");
         };
-
-        assert_eq!(wave.as_deref(), Some("pm"));
-        assert_eq!(wave_flag, None);
-        assert!(!all);
-    }
-
-    #[test]
-    fn pm_export_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "export", "--all"]).expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Export {
-                            wave,
-                            wave_flag,
-                            all,
-                        },
-                },
-        }) = cli.command
-        else {
-            panic!("expected pm export command");
-        };
-
-        assert_eq!(wave, None);
-        assert_eq!(wave_flag, None);
-        assert!(all);
+        assert_eq!(id.as_deref(), Some("123"));
+        assert_eq!(status.as_deref(), Some("done"));
     }
 
     #[test]

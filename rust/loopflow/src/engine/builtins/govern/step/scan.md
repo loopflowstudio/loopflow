@@ -30,9 +30,9 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 ## Workflow
 
 1. **Read wave configs.** For each member wave directory in the area:
-   - README.md — vision, strategy, goals, risks, metrics
-   - All roadmap item files (`1-*` through `4-*`, plus any legacy numbered files still present during transition)
-   - The wave YAML — flow, mode, direction, triggers
+   - `GOAL.md` — intent, metrics, primary flow, and the Asana handle
+   - `MEMORY.md` — what the wave has learned and decided
+   - The live roadmap — `lf op pm show --wave <wave-name>` (Asana is the source of truth; there are no local roadmap files)
 
 2. **Read runtime state.** For each member wave:
    - `lfq show <wave-name> --json` — live wave state from lfd

@@ -2458,8 +2458,8 @@ mod tests {
         .await
         .expect("create wave");
 
-        // The handler must return a Result — not panic and not hang — even when
-        // the PM-backed ingest code path runs inside the async handler context.
+        // The handler must return a Result — not panic and not hang — when a
+        // run carries a roadmap-item hint alongside PM config.
         let result = run_wave_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2484,66 +2484,6 @@ mod tests {
                 "unexpected status: {status}"
             ),
         }
-    }
-
-    // Reproduces the "Ingest & build" failure in Concerto: POST /waves/{id}/run
-    // with a `roadmap_item` that doesn't exist under wave/<name>/ returns an
-    // empty reply to the client. The handler should respond with a structured
-    // 400 error, not close the connection.
-    #[tokio::test]
-    async fn run_wave_with_missing_roadmap_item_returns_bad_request() {
-        let state = test_http_state().await;
-        let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
-
-        let wave_dir = repo_tmp.path().join("wave").join("designer");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(
-            wave_dir.join("1-existing-item.md"),
-            "# Existing roadmap item\n",
-        )
-        .expect("write existing roadmap item");
-
-        let Json(created) = create_wave_handler(
-            State(state.clone()),
-            Json(CreateWaveRequest {
-                repo: repo.clone(),
-                name: Some("designer".to_string()),
-                flow: Some("ship-roadmap".to_string()),
-                goal: None,
-                crons: None,
-                direction: None,
-                area: None,
-                workers: None,
-                status: Some("paused".to_string()),
-                run: false,
-                serialized: true,
-            }),
-        )
-        .await
-        .expect("create wave");
-
-        let result = run_wave_handler(
-            State(state.clone()),
-            HeaderMap::new(),
-            Path(created.id.clone()),
-            Some(Json(RunWaveRequest {
-                area: None,
-                direction: None,
-                flow: Some("build".to_string()),
-                goal: None,
-                roadmap_item: Some("does-not-exist.md".to_string()),
-            })),
-        )
-        .await;
-
-        let err = result.expect_err("expected handler to return an error, not panic or hang");
-        assert_eq!(
-            err.0,
-            StatusCode::BAD_REQUEST,
-            "expected 400 for missing roadmap item, got {err:?}"
-        );
     }
 
     #[tokio::test]

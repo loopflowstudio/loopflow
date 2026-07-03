@@ -1,12 +1,8 @@
 pub mod asana;
 mod asana_html;
-pub mod linear;
-pub mod notion;
-pub mod notion_blocks;
 
 use std::time::Duration;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -21,16 +17,6 @@ pub enum PriorityBucket {
 }
 
 impl PriorityBucket {
-    pub(crate) fn from_filename_prefix(prefix: &str) -> Option<Self> {
-        match prefix {
-            "1" => Some(Self::Urgent),
-            "2" => Some(Self::High),
-            "3" => Some(Self::Medium),
-            "4" => Some(Self::Low),
-            _ => None,
-        }
-    }
-
     pub(crate) fn from_semantic_label(label: &str) -> Option<Self> {
         match label.trim().to_ascii_lowercase().as_str() {
             "urgent" => Some(Self::Urgent),
@@ -73,40 +59,10 @@ impl PriorityBucket {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PmProviderKind {
-    Asana,
-    Linear,
-    Notion,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmConfig {
-    pub provider: PmProviderKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asana_project: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_project: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notion_project: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmProject {
     pub id: String,
     pub name: String,
-}
-
-impl PmConfig {
-    pub fn project_for(&self, provider: PmProviderKind) -> Option<&str> {
-        match provider {
-            PmProviderKind::Asana => self.asana_project.as_deref(),
-            PmProviderKind::Linear => self.linear_project.as_deref(),
-            PmProviderKind::Notion => self.notion_project.as_deref(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,129 +120,6 @@ pub enum PmError {
 
 pub type PmResult<T> = Result<T, PmError>;
 
-#[async_trait]
-pub trait PmProvider: Send + Sync {
-    async fn create_project(&self, name: &str, description: &str) -> PmResult<String>;
-    async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>>;
-    async fn init_project(&self, _project_id: &str) -> PmResult<()> {
-        Ok(())
-    }
-    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>>;
-    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String>;
-    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()>;
-    async fn complete_item(&self, item_id: &str) -> PmResult<()>;
-    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()>;
-    /// Claim an item: assign to the API token owner and set the working branch.
-    ///
-    /// Providers that support it should verify the assignment stuck (optimistic
-    /// concurrency). Return `Err` if another worker claimed the item first.
-    /// Providers without verification (Notion) treat claiming as best-effort
-    /// notification — duplicates are caught at PR time.
-    async fn claim_item(&self, item_id: &str, branch: &str) -> PmResult<()>;
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct RoadmapItemFrontmatter {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<PriorityBucket>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rank: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claimed_by: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claimed_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asana_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notion_id: Option<String>,
-}
-
-impl RoadmapItemFrontmatter {
-    fn is_empty(&self) -> bool {
-        self.priority.is_none()
-            && self.rank.is_none()
-            && self.status.is_none()
-            && self.claimed_by.is_none()
-            && self.claimed_at.is_none()
-            && self.asana_id.is_none()
-            && self.linear_id.is_none()
-            && self.notion_id.is_none()
-    }
-
-    pub fn id_for(&self, provider: PmProviderKind) -> Option<&str> {
-        match provider {
-            PmProviderKind::Asana => self.asana_id.as_deref(),
-            PmProviderKind::Linear => self.linear_id.as_deref(),
-            PmProviderKind::Notion => self.notion_id.as_deref(),
-        }
-    }
-
-    pub fn set_id(&mut self, provider: PmProviderKind, id: String) {
-        match provider {
-            PmProviderKind::Asana => self.asana_id = Some(id),
-            PmProviderKind::Linear => self.linear_id = Some(id),
-            PmProviderKind::Notion => self.notion_id = Some(id),
-        }
-    }
-
-    pub fn clear_id(&mut self, provider: PmProviderKind) {
-        match provider {
-            PmProviderKind::Asana => self.asana_id = None,
-            PmProviderKind::Linear => self.linear_id = None,
-            PmProviderKind::Notion => self.notion_id = None,
-        }
-    }
-
-    pub fn set_priority_rank(&mut self, rank: u32) {
-        self.priority = Some(PriorityBucket::from_rank(rank));
-        self.rank = None;
-    }
-
-    pub fn mark_in_progress(&mut self, claimed_by: String, claimed_at: String) {
-        self.status = Some("in-progress".to_string());
-        self.claimed_by = Some(claimed_by);
-        self.claimed_at = Some(claimed_at);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct RoadmapItemDocument {
-    pub frontmatter: RoadmapItemFrontmatter,
-    pub body: String,
-}
-
-impl RoadmapItemDocument {
-    pub fn parse(content: &str) -> PmResult<Self> {
-        let Some((frontmatter, body)) = split_frontmatter(content) else {
-            return Ok(Self {
-                frontmatter: RoadmapItemFrontmatter::default(),
-                body: content.to_string(),
-            });
-        };
-
-        let frontmatter = serde_yaml_ng::from_str::<RoadmapItemFrontmatter>(&frontmatter)
-            .map_err(|err| PmError::Message(format!("invalid roadmap frontmatter: {err}")))?;
-
-        Ok(Self { frontmatter, body })
-    }
-
-    pub fn render(&self) -> PmResult<String> {
-        if self.frontmatter.is_empty() {
-            return Ok(self.body.clone());
-        }
-
-        let frontmatter = serde_yaml_ng::to_string(&self.frontmatter).map_err(|err| {
-            PmError::Message(format!("failed to encode roadmap frontmatter: {err}"))
-        })?;
-
-        Ok(format!("---\n{}---\n{}", frontmatter, self.body))
-    }
-}
-
 pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
 const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
 
@@ -297,12 +130,6 @@ pub(crate) fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duratio
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(RETRY_AFTER_FALLBACK)
-}
-
-fn split_frontmatter(content: &str) -> Option<(String, String)> {
-    let rest = content.strip_prefix("---\n")?;
-    let (frontmatter, body) = rest.split_once("\n---\n")?;
-    Some((frontmatter.to_string(), body.to_string()))
 }
 
 #[cfg(test)]
@@ -425,54 +252,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn roadmap_item_document_parses_asana_id_frontmatter() {
-        let doc = RoadmapItemDocument::parse(
-            "---\nasana_id: \"9876543210\"\n---\n# 01: Ship offline sync\n",
-        )
-        .expect("frontmatter should parse");
-
-        assert_eq!(doc.frontmatter.asana_id.as_deref(), Some("9876543210"));
-        assert_eq!(doc.body, "# 01: Ship offline sync\n");
-    }
-
-    #[test]
-    fn roadmap_item_document_parses_without_frontmatter() {
-        let doc = RoadmapItemDocument::parse("# 01: Ship offline sync\n")
-            .expect("body-only documents should parse");
-
-        assert_eq!(doc.frontmatter.asana_id, None);
-        assert_eq!(doc.body, "# 01: Ship offline sync\n");
-    }
-
-    #[test]
-    fn roadmap_item_document_render_round_trips_provider_id() {
-        let original = RoadmapItemDocument {
-            frontmatter: RoadmapItemFrontmatter {
-                asana_id: Some("9876543210".to_string()),
-                ..RoadmapItemFrontmatter::default()
-            },
-            body: "# 01: Ship offline sync\n".to_string(),
-        };
-
-        let rendered = original.render().expect("document should render");
-        let reparsed =
-            RoadmapItemDocument::parse(&rendered).expect("rendered document should parse");
-
-        assert_eq!(reparsed, original);
-    }
-
-    #[test]
-    fn roadmap_item_document_render_omits_empty_frontmatter() {
-        let doc = RoadmapItemDocument {
-            frontmatter: RoadmapItemFrontmatter::default(),
-            body: "# 01: Ship offline sync\n".to_string(),
-        };
-
-        let rendered = doc.render().expect("document should render");
-        assert_eq!(rendered, "# 01: Ship offline sync\n");
-    }
-
-    #[test]
     fn pm_item_update_text_update_skips_rank_only_changes() {
         let update = PmItemUpdate {
             rank: Some(1),
@@ -485,52 +264,17 @@ mod tests {
     #[test]
     fn pm_item_update_text_update_preserves_name_and_description() {
         let update = PmItemUpdate {
-            name: Some("Ship Linear".to_string()),
-            description: Some("Build the GraphQL client".to_string()),
+            name: Some("Ship Asana".to_string()),
+            description: Some("Build the roadmap client".to_string()),
             rank: Some(1),
         };
 
         assert_eq!(
             update.text_update(),
             Some(PmTextUpdate {
-                name: Some("Ship Linear"),
-                description: Some("Build the GraphQL client"),
+                name: Some("Ship Asana"),
+                description: Some("Build the roadmap client"),
             })
-        );
-    }
-
-    #[test]
-    fn roadmap_item_frontmatter_clear_id_removes_selected_provider_only() {
-        let mut frontmatter = RoadmapItemFrontmatter {
-            asana_id: Some("asa-1".to_string()),
-            linear_id: Some("lin-1".to_string()),
-            notion_id: Some("not-1".to_string()),
-            ..RoadmapItemFrontmatter::default()
-        };
-
-        frontmatter.clear_id(PmProviderKind::Asana);
-        assert_eq!(frontmatter.asana_id, None);
-        assert_eq!(frontmatter.linear_id.as_deref(), Some("lin-1"));
-        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
-
-        frontmatter.clear_id(PmProviderKind::Linear);
-        assert_eq!(frontmatter.linear_id, None);
-        assert_eq!(frontmatter.notion_id.as_deref(), Some("not-1"));
-
-        frontmatter.clear_id(PmProviderKind::Notion);
-        assert_eq!(frontmatter.notion_id, None);
-    }
-
-    #[test]
-    fn roadmap_item_frontmatter_mark_in_progress_sets_claim_metadata() {
-        let mut frontmatter = RoadmapItemFrontmatter::default();
-        frontmatter.mark_in_progress("run-123".to_string(), "2026-03-29T12:00:00Z".to_string());
-
-        assert_eq!(frontmatter.status.as_deref(), Some("in-progress"));
-        assert_eq!(frontmatter.claimed_by.as_deref(), Some("run-123"));
-        assert_eq!(
-            frontmatter.claimed_at.as_deref(),
-            Some("2026-03-29T12:00:00Z")
         );
     }
 }

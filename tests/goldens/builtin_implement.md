@@ -47,10 +47,27 @@ Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
 sequencing, and reading results back.
 
+## The Roadmap Lives in Asana
+
+A wave's roadmap is not in the repo — it lives in Asana, and `lf op pm` is the
+only way to read or change it. There is no local roadmap file to edit and no
+sync step; Asana is the source of truth.
+
+```bash
+lf op pm show                                  # the wave's live roadmap
+lf op pm update --title "..." --notes "..."    # file a new task
+lf op pm update --id <task-id> --status done   # close a shipped task
+lf op pm update --id <task-id> --title "..."   # edit an existing task
+```
+
+Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
+roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
+
 ## Where To Write
 
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
+- `wave/<name>/MEMORY.md` - durable wave learnings (roadmap goes to Asana, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed
@@ -135,10 +152,10 @@ The design doc and style guides are in your context.
 
 ## Wave context
 
-If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
+If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
-- Follow the wave's principles during implementation
-- Check against compatibility matrix if mentioned
+- Follow the wave's intent and principles during implementation
+- Respect decisions and constraints recorded in `MEMORY.md`
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

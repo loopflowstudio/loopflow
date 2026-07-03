@@ -134,7 +134,6 @@ def test_dry_run_does_not_delete_or_mutate_yaml(tmp_path, monkeypatch):
             "--repo",
             str(tmp_path),
             "--skip-init",
-            "--skip-push-diff",
         ],
         check=False,
         capture_output=True,

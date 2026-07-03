@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run a live PM priority round-trip check against Linear or Asana."""
+"""Run a live PM priority round-trip check against Asana."""
 
-import argparse
 import subprocess
 
 
-def run_provider(provider: str) -> int:
+def main() -> int:
     cmd = [
         "cargo",
         "run",
@@ -14,35 +13,15 @@ def run_provider(provider: str) -> int:
         "--example",
         "pm_priority_live",
         "--",
-        provider,
+        "asana",
     ]
-    print(f"\n== {provider} ==")
-    result = subprocess.run(cmd, check=False)
-    return result.returncode
+    print("\n== asana ==")
+    if subprocess.run(cmd, check=False).returncode != 0:
+        print("\nFAIL: asana")
+        return 1
 
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--provider",
-        choices=["linear", "asana", "both"],
-        default="both",
-        help="Provider to validate",
-    )
-    args = parser.parse_args()
-
-    providers = ["linear", "asana"] if args.provider == "both" else [args.provider]
-    failures = []
-    for provider in providers:
-        if run_provider(provider) != 0:
-            failures.append(provider)
-
-    if not failures:
-        print("\nPASS")
-        return 0
-
-    print(f"\nFAIL: {', '.join(failures)}")
-    return 1
+    print("\nPASS")
+    return 0
 
 
 if __name__ == "__main__":

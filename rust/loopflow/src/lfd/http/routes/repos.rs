@@ -225,7 +225,7 @@ pub async fn list_parents_handler(
 fn build_repo_dtos(registered: Vec<Repo>, waves: Vec<Wave>) -> Vec<RepoDto> {
     let mut wave_counts: BTreeMap<String, u32> = BTreeMap::new();
     for wave in waves {
-        *wave_counts.entry(wave.repo().clone()).or_insert(0) += 1;
+        *wave_counts.entry(wave.repo().to_string()).or_insert(0) += 1;
     }
 
     let mut repos: BTreeMap<String, RepoDto> = BTreeMap::new();
@@ -414,7 +414,7 @@ mod tests {
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{RepoId, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -467,17 +467,23 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo,
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo,
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }

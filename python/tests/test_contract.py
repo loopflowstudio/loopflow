@@ -25,11 +25,21 @@ def test_wave_fixture_parses():
     assert wave.metrics == ["all roadmap items shipped", "cargo test green"]
     assert wave.mode == "loop"
     assert wave.status == "running"
-    assert wave.iteration == 3
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]
     assert len(wave.crons) == 1
     assert wave.crons[0].flow == "wave-polish"
+
+    assert len(wave.repos) == 1
+    repo = wave.repos[0]
+    assert repo.repo == "/home/user/project"
+    assert repo.status == "running"
+    assert repo.iteration == 3
+    assert repo.open_pr_count == 1
+    assert repo.local_worktree == "/home/user/project/.claude/worktrees/engbot"
+    assert repo.remote_branch == "engbot/build-3"
+    assert len(repo.commits) == 1
+    assert repo.commits[0].sha == "abc1234"
 
     assert len(wave.triggers) == 2
     assert wave.triggers[0].signal == "repo"

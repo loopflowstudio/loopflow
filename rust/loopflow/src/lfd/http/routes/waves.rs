@@ -38,8 +38,8 @@ use crate::lfd::triggers::{
     ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
-    Event, ExecutionProcessStatus, Run, RunStatus, Session, SessionUse, Signal, Trigger, Wave,
-    WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
+    Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionUse, Signal, Trigger,
+    Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
 };
 
 #[derive(Debug, Deserialize)]
@@ -237,8 +237,8 @@ pub async fn create_wave_handler(
         .or_else(|| wave_config.as_ref().and_then(|c| c.area.clone()))
         .unwrap_or_default();
 
-    // Check for duplicate wave name in the same repo.
-    let existing = wave_name_exists(&state, &repo, &name)
+    // Wave names are globally unique.
+    let existing = wave_name_exists(&state, &name)
         .await
         .map_err(map_store_error)?;
     if existing {
@@ -271,23 +271,30 @@ pub async fn create_wave_handler(
     let mut wave = Wave {
         id: id.clone(),
         name,
-        repo,
         mode,
         primary_flow,
         goal,
         metrics,
         crons: Vec::new(),
+        repos: vec![RepoWork {
+            repo,
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            position: 0,
+        }],
         direction,
         area,
-        status: WaveStatus::Idle,
-        iteration: 0,
-        cycle_start_iteration: 0,
+        paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers,
     };
     if let Some(status) = status {
-        wave.status = WaveStatus::from_str(&status)
+        let parsed = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+        wave.set_status(parsed);
     }
     state
         .store
@@ -356,7 +363,7 @@ async fn wait_for_wave_start_settle(state: &HttpState, mut wave: Wave) -> Wave {
         let Ok(Some(updated)) = state.store.get_wave(&wave_id).await else {
             continue;
         };
-        if updated.status != WaveStatus::Running {
+        if updated.status() != WaveStatus::Running {
             return updated;
         }
         wave = updated;
@@ -533,7 +540,7 @@ async fn resolve_wave_id_in_repo(
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-        if wave.repo() != repo {
+        if !wave.repos.iter().any(|rw| rw.repo == repo) {
             return Err(api_error(StatusCode::NOT_FOUND, "wave not found"));
         }
         return Ok(id);
@@ -557,10 +564,9 @@ async fn resolve_wave_id_in_repo(
 
 async fn wave_name_exists(
     state: &HttpState,
-    repo: &str,
     name: &str,
 ) -> Result<bool, crate::lfd::store::StoreError> {
-    let waves = state.store.list_waves(Some(repo)).await?;
+    let waves = state.store.list_waves(None).await?;
     Ok(waves.into_iter().any(|wave| wave.name() == name))
 }
 
@@ -601,8 +607,8 @@ pub async fn update_wave_handler(
         if !name.is_empty() && *name != *wave.name() {
             let new_name = name.clone();
 
-            // Check for duplicate name in same repo.
-            let existing = wave_name_exists(&state, wave.repo(), &new_name)
+            // Check for duplicate wave name (globally unique).
+            let existing = wave_name_exists(&state, &new_name)
                 .await
                 .map_err(map_store_error)?;
             if existing {
@@ -626,7 +632,7 @@ pub async fn update_wave_handler(
 
             // Move worktree + rename branch on disk.
             let old_name = wave.name().clone();
-            let repo = wave.repo().clone();
+            let repo = wave.repo().to_string();
             let new_name_for_wt = new_name.clone();
             run_blocking_result(
                 move || {
@@ -654,12 +660,13 @@ pub async fn update_wave_handler(
     }
     wave.workers = update_wave_workers(wave.workers, payload.workers, payload.serialized);
     if let Some(status) = payload.status {
-        wave.status = WaveStatus::from_str(&status)
+        let parsed = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+        wave.set_status(parsed);
     }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {
-        let repo = wave.repo().clone();
+        let repo = wave.repo().to_string();
         let wave_name = wave.name().clone();
         let agent = payload.agent.clone();
         let step_agents = payload.step_agents.clone();
@@ -727,7 +734,7 @@ pub async fn delete_wave_handler(
     }
 
     // Clean up the worktree on disk.
-    let repo = wave.repo().clone();
+    let repo = wave.repo().to_string();
     let wave_name = wave.name().clone();
     tokio::task::spawn_blocking(move || {
         let wt = worktree_path(std::path::Path::new(&repo), &wave_name);
@@ -886,11 +893,11 @@ async fn apply_run_wave_overrides(
         }
     }
 
-    if wave.status == WaveStatus::Paused {
-        wave.status = WaveStatus::Idle;
+    if wave.status() == WaveStatus::Paused {
+        wave.set_status(WaveStatus::Idle);
     }
-    if wave.status == WaveStatus::Idle {
-        wave.status = WaveStatus::Running;
+    if wave.status() == WaveStatus::Idle {
+        wave.set_status(WaveStatus::Running);
     }
 
     state
@@ -1065,8 +1072,8 @@ async fn start_run(
         }
     }
 
-    if wave.status == WaveStatus::Paused {
-        wave.status = WaveStatus::Idle;
+    if wave.status() == WaveStatus::Paused {
+        wave.set_status(WaveStatus::Idle);
     }
 
     state
@@ -1318,11 +1325,11 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.status = if has_auto_trigger {
+            wave.set_status(if has_auto_trigger {
                 WaveStatus::Paused
             } else {
                 WaveStatus::Failed
-            };
+            });
             state
                 .store
                 .update_wave(&wave)
@@ -1338,7 +1345,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.status = WaveStatus::Paused;
+            wave.set_status(WaveStatus::Paused);
             state
                 .store
                 .update_wave(&wave)
@@ -1521,15 +1528,18 @@ pub async fn land_wave_handler(
         .worktree
         .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
-    let worktree =
-        resolve_wave_work_dir_for_api(wave.repo().clone(), wave.name().clone(), latest_worktree)
-            .await?;
+    let worktree = resolve_wave_work_dir_for_api(
+        wave.repo().to_string(),
+        wave.name().clone(),
+        latest_worktree,
+    )
+    .await?;
 
     let strict = payload.strict.unwrap_or(false);
     let local = payload.local.unwrap_or(false);
     let create_pr = payload.create_pr.unwrap_or(true);
 
-    let repo_path = wave.repo().clone();
+    let repo_path = wave.repo().to_string();
     let land_result = run_blocking_result(
         move || {
             let progress = crate::ops::NullProgress;
@@ -1659,7 +1669,7 @@ pub async fn get_wave_file_diff_handler(
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid file path"));
     }
 
-    let repo = wave.repo().clone();
+    let repo = wave.repo().to_string();
     let wave_name = wave.name().clone();
     let diff = tokio::task::spawn_blocking(move || {
         let repo_path = std::path::Path::new(&repo);
@@ -1705,9 +1715,12 @@ async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, 
     let latest_worktree = latest_run
         .map(|run| run.worktree)
         .filter(|value| !value.is_empty());
-    let work_dir =
-        resolve_wave_work_dir_for_api(wave.repo().clone(), wave.name().clone(), latest_worktree)
-            .await?;
+    let work_dir = resolve_wave_work_dir_for_api(
+        wave.repo().to_string(),
+        wave.name().clone(),
+        latest_worktree,
+    )
+    .await?;
 
     Ok((wave, work_dir))
 }
@@ -1918,17 +1931,23 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
@@ -2079,16 +2098,24 @@ mod tests {
 
         let repo_a = "/tmp/repo-a";
         let repo_b = "/tmp/repo-b";
-        let wave_a = make_wave(repo_a, "infra");
-        let wave_b = make_wave(repo_b, "infra");
+        // Wave names are globally unique; the scope comes from the repo the
+        // wave has a RepoWork in.
+        let wave_a = make_wave(repo_a, "infra-a");
+        let wave_b = make_wave(repo_b, "infra-b");
 
         store.create_wave(&wave_a).await.expect("create wave_a");
         store.create_wave(&wave_b).await.expect("create wave_b");
 
-        let resolved = resolve_wave_id_in_repo(&store, repo_b, "infra")
+        let resolved = resolve_wave_id_in_repo(&store, repo_b, "infra-b")
             .await
-            .expect("wave should resolve");
+            .expect("wave should resolve in its repo");
         assert_eq!(resolved, *wave_b.id());
+
+        // The same name is not found when scoped to a repo it doesn't run in.
+        let err = resolve_wave_id_in_repo(&store, repo_a, "infra-b")
+            .await
+            .expect_err("wave should not resolve outside its repo");
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -2195,7 +2222,7 @@ mod tests {
 
         assert_eq!(found.id, created.id);
         assert_eq!(found.name, "designer");
-        assert_eq!(found.repo, repo);
+        assert_eq!(found.repos[0].repo, repo);
         assert_eq!(found.primary_flow, "build");
         assert_eq!(found.direction, vec!["clarity".to_string()]);
         assert_eq!(found.area, vec!["src/".to_string()]);
@@ -2248,7 +2275,7 @@ mod tests {
         .await
         .expect("run wave");
 
-        assert_eq!(wave.status, WaveStatus::Idle);
+        assert_eq!(wave.status(), WaveStatus::Idle);
         if let Some(run) = run {
             assert_eq!(run.flow, "design");
         }
@@ -2603,7 +2630,7 @@ mod tests {
         let repo = repo_tmp.path().to_string_lossy().to_string();
 
         let mut wave = make_wave(&repo, "designer");
-        wave.status = WaveStatus::Running;
+        wave.set_status(WaveStatus::Running);
         state
             .store
             .create_wave(&wave)
@@ -2668,7 +2695,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        assert_eq!(updated_wave.status, WaveStatus::Failed);
+        assert_eq!(updated_wave.status(), WaveStatus::Failed);
 
         let updated_session = state
             .store
@@ -2741,7 +2768,7 @@ mod tests {
         .expect("list waves");
 
         assert_eq!(listed.data.len(), 1);
-        assert_eq!(listed.data[0].repo, repo_a);
+        assert_eq!(listed.data[0].repos[0].repo, repo_a);
         assert_eq!(listed.data[0].name, "wave-a");
     }
 

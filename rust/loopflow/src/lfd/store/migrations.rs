@@ -178,6 +178,14 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "041_session_parent",
         sql: include_str!("migrations/041_terminal_session_parent.sql"),
     },
+    Migration {
+        version: "042_wave_repos",
+        sql: include_str!("migrations/042_wave_repos.sql"),
+    },
+    Migration {
+        version: "043_drop_legacy_wave_columns",
+        sql: include_str!("migrations/043_drop_legacy_wave_columns.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations
@@ -205,7 +213,16 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         }
         conn.execute_batch("BEGIN EXCLUSIVE")?;
         let result = (|| -> StoreResult<()> {
-            conn.execute_batch(migration.sql)?;
+            // An additive `ADD COLUMN` migration that fails only because the
+            // column already exists is effectively already applied — this
+            // happens when a migration's version id was renamed, so a db that
+            // recorded the old id re-runs it. Record it and converge rather
+            // than crashing every store that predates the rename.
+            match conn.execute_batch(migration.sql) {
+                Ok(()) => {}
+                Err(e) if e.to_string().contains("duplicate column name") => {}
+                Err(e) => return Err(e.into()),
+            }
             conn.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
                 rusqlite::params![migration.version, now_unix()],
@@ -404,5 +421,33 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         let applied_again = applied_versions_sqlite(&conn).unwrap();
         assert_eq!(applied, applied_again);
+    }
+
+    #[test]
+    fn renamed_migration_id_tolerates_existing_column() {
+        // Reproduces the `035` rename bug: a db that already has an additive
+        // column but recorded the migration under a since-renamed id would
+        // re-run its `ADD COLUMN` and crash with "duplicate column name". The
+        // runner must treat that as already-applied and converge.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+
+        // Simulate the pre-rename state: the column exists (from the first
+        // apply) but the current version id is no longer recorded.
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version = ?1",
+            rusqlite::params!["035_session_tmux_name"],
+        )
+        .unwrap();
+
+        // Previously this re-ran `ALTER TABLE terminal_sessions ADD COLUMN
+        // tmux_name` against a column that already exists and errored.
+        apply_sqlite(&conn).expect("re-apply must tolerate the existing column");
+
+        let applied = applied_versions_sqlite(&conn).unwrap();
+        assert!(
+            applied.contains("035_session_tmux_name"),
+            "migration should be recorded again after convergence"
+        );
     }
 }

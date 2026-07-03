@@ -11,6 +11,7 @@ use crate::engine::config::load_config_or_default;
 use crate::lfd::http::routes::wave_config::{read_wave_config, update_wave_goal_config};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate};
+use crate::lfd::provider_auth::{refresh_pm_oauth_token, Provider};
 use crate::lfd::store::open_store;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -122,16 +123,42 @@ async fn resolve_asana_token() -> OpsResult<String> {
             OpsError::Message("No asana credential found. Run `lf op auth asana`.".to_string())
         })?;
 
-    if token
+    let expired = token
         .expires_at
-        .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp())
-    {
-        return Err(OpsError::Message(
-            "Stored asana token has expired. Run `lf op auth asana` again.".to_string(),
-        ));
+        .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp());
+    if !expired {
+        return Ok(token.access_token);
     }
 
-    Ok(token.access_token)
+    // The stored token is expired but may be refreshable: if it carries a refresh
+    // token and the OAuth client creds are in the env, refresh in place rather than
+    // forcing the user to re-authenticate.
+    let refresh_token = token
+        .refresh_token
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    if let Some(refresh_token) = refresh_token {
+        if let Ok(mut refreshed) = refresh_pm_oauth_token(Provider::Asana, refresh_token).await {
+            if refreshed.refresh_token.is_none() {
+                refreshed.refresh_token = token.refresh_token.clone();
+            }
+            if refreshed.login.is_none() {
+                refreshed.login = token.login.clone();
+            }
+            let access_token = refreshed.access_token.clone();
+            store
+                .upsert_provider_token(&refreshed)
+                .await
+                .map_err(|err| {
+                    OpsError::Message(format!("failed to persist refreshed asana token: {err}"))
+                })?;
+            return Ok(access_token);
+        }
+    }
+
+    Err(OpsError::Message(
+        "Stored asana token has expired. Run `lf op auth asana` again.".to_string(),
+    ))
 }
 
 fn storage_config_from_env() -> OpsResult<crate::lfd::store::StorageConfig> {

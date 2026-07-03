@@ -21,7 +21,6 @@ struct PortfolioRepoStateTests {
         #expect(state.blockedCount == 1)
         #expect(state.totalDiff.insertions == 15)
         #expect(state.totalDiff.deletions == 9)
-        #expect(state.needsAttention)
     }
 
     @Test("wave events update and delete local waves")
@@ -92,6 +91,49 @@ struct PortfolioRepoStateTests {
 
         #expect(state.waves.count == 1)
         #expect(state.waves[0].id == localWave.id)
+    }
+
+    @Test("multi-repo waves match non-primary repo state")
+    func multiRepoWaveMatchesNonPrimaryRepoState() {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-secondary")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let wave = Wave(
+            id: "multi",
+            name: "multi",
+            repos: [
+                RepoWork(repo: "/tmp/portfolio-primary", status: .running),
+                RepoWork(repo: repo.path, status: .waiting),
+            ],
+            flow: "build",
+            direction: [],
+            area: ["."],
+            status: .running
+        )
+
+        state.applyConnectedWaves([wave])
+
+        #expect(state.waves.map(\.id) == ["multi"])
+    }
+
+    @Test("wave agent session name mirrors lf tmux handle")
+    func waveAgentSessionNameMirrorsLfTmuxHandle() {
+        let name = PortfolioRepoState.waveAgentSessionName(
+            repoPath: "/Users/jack/src/loopflow",
+            waveName: "concerto"
+        )
+
+        #expect(name == "lf-loopflow-concerto")
+    }
+
+    @Test("wave worktree path is deterministic sibling")
+    func waveWorktreePathIsDeterministicSibling() {
+        let path = PortfolioRepoState.waveWorktreePath(
+            repoPath: "/Users/jack/src/loopflow",
+            waveName: "feature/new*wave"
+        )
+
+        #expect(path == "/Users/jack/src/loopflow.feature-new-wave")
     }
 
     private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {

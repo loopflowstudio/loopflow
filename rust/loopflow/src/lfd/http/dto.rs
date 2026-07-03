@@ -78,7 +78,6 @@ pub struct WaveDto {
     pub id: String,
     pub object: String,
     pub name: String,
-    pub repo: String,
     pub mode: String,
     pub primary_flow: String,
     pub goal: String,
@@ -90,24 +89,39 @@ pub struct WaveDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
+    /// Wave-level status rolled up over `repos` (see `Wave::status`).
+    pub status: String,
+    pub flow_steps: Vec<String>,
+    pub has_stale_pr_state: bool,
+    pub workers: u32,
+    pub triggers: Vec<TriggerDto>,
+    pub crons: Vec<WaveCronDto>,
+    /// Per-repo execution state, one entry per repo the wave runs in.
+    pub repos: Vec<RepoWorkDto>,
+}
+
+/// Per-repo execution surface for a wave: status/iteration plus the live git
+/// (worktree/branch) and PR snapshot derived at DTO-build time for one repo.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepoWorkDto {
+    pub repo: String,
     pub status: String,
     pub iteration: u32,
+    /// Live worktree path inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,
+    /// Live branch inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_branch: Option<String>,
     pub commits: Vec<CommitEntryDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff_stat: Option<String>,
-    pub flow_steps: Vec<String>,
     pub open_pr_count: u32,
     pub stack_count: u32,
-    pub has_stale_pr_state: bool,
-    pub workers: u32,
-    pub triggers: Vec<TriggerDto>,
-    pub crons: Vec<WaveCronDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<RunDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PullRequestDto>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -564,37 +578,11 @@ mod contract_tests {
             .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
     }
 
-    #[test]
-    fn wave_fixture_deserializes() {
-        let json = fixture("wave.json");
-        let wave: WaveDto = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(wave.id, "wave_abc123");
-        assert_eq!(wave.object, "wave");
-        assert_eq!(wave.name, "engbot");
-        assert_eq!(wave.primary_flow, "build");
-        assert_eq!(wave.goal, "ship-roadmap");
-        assert_eq!(
-            wave.metrics,
-            vec!["all roadmap items shipped", "cargo test green"]
-        );
-        assert_eq!(wave.mode, "loop");
-        assert_eq!(wave.status, "running");
-        assert_eq!(wave.iteration, 3);
-        assert_eq!(wave.workers, 1);
-        assert_eq!(wave.direction, vec!["ux", "clarity"]);
-        assert_eq!(wave.area, vec!["src/"]);
-        assert_eq!(wave.open_pr_count, 1);
-
-        assert_eq!(wave.triggers.len(), 2);
-        assert_eq!(wave.triggers[0].signal, "repo");
-        assert_eq!(wave.triggers[0].flow.as_deref(), Some("integrate"));
-        assert_eq!(wave.triggers[1].signal, "ci_failure");
-        assert_eq!(wave.crons.len(), 1);
-        assert_eq!(wave.crons[0].flow, "wave-polish");
-
-        assert_eq!(wave.commits.len(), 1);
-        assert_eq!(wave.commits[0].sha, "abc1234");
+    /// The golden nested-wave payload, shared with the Python and Swift
+    /// contract suites. Parsing and shape are covered by
+    /// `tests/dto_fixtures.rs`; these tests only pin required-field behavior.
+    fn wave_fixture() -> serde_json::Value {
+        serde_json::from_str(&fixture("wave.json")).expect("wave.json parses")
     }
 
     #[test]
@@ -603,7 +591,6 @@ mod contract_tests {
             id: "wave_abc123".to_string(),
             object: "wave".to_string(),
             name: "engbot".to_string(),
-            repo: "/tmp/repo".to_string(),
             mode: "loop".to_string(),
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -615,30 +602,24 @@ mod contract_tests {
             triggers: Vec::new(),
             crons: Vec::new(),
             status: "idle".to_string(),
-            iteration: 0,
             workers: 1,
-            local_worktree: None,
-            remote_branch: None,
-            active_run: None,
             created_at: None,
-            commits: Vec::new(),
-            diff_stat: None,
             flow_steps: Vec::new(),
-            open_pr_count: 0,
-            stack_count: 0,
             has_stale_pr_state: false,
+            repos: Vec::new(),
         };
 
         let json = serde_json::to_value(&wave).unwrap();
         assert_eq!(json["goal"], "ship-roadmap");
         assert_eq!(json["metrics"], serde_json::json!([]));
+        assert_eq!(json["repos"], serde_json::json!([]));
     }
 
     #[test]
     fn wave_goal_is_required() {
-        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        let mut json = wave_fixture();
         json.as_object_mut()
-            .expect("wave fixture should be an object")
+            .expect("wave payload should be an object")
             .remove("goal");
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
@@ -647,13 +628,24 @@ mod contract_tests {
 
     #[test]
     fn wave_metrics_is_required() {
-        let mut json: serde_json::Value = serde_json::from_str(&fixture("wave.json")).unwrap();
+        let mut json = wave_fixture();
         json.as_object_mut()
-            .expect("wave fixture should be an object")
+            .expect("wave payload should be an object")
             .remove("metrics");
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `metrics`"));
+    }
+
+    #[test]
+    fn wave_repos_is_required() {
+        let mut json = wave_fixture();
+        json.as_object_mut()
+            .expect("wave payload should be an object")
+            .remove("repos");
+
+        let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
+        assert!(err.to_string().contains("missing field `repos`"));
     }
 
     #[test]

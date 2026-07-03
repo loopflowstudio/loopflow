@@ -30,5 +30,5 @@ pub use trigger::{
 };
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    Run, RunStackStatus, RunStatus, Wave, WaveCron, WaveMode, WaveStatus,
+    RepoWork, Run, RunStackStatus, RunStatus, Wave, WaveCron, WaveMode, WaveStatus,
 };

@@ -33,10 +33,10 @@ async fn pause_wave_after_activation_conflict(
     let Some(mut paused_wave) = store.get_wave(wave.id()).await.ok().flatten() else {
         return;
     };
-    if paused_wave.status == WaveStatus::Paused {
+    if paused_wave.status() == WaveStatus::Paused {
         return;
     }
-    paused_wave.status = WaveStatus::Paused;
+    paused_wave.set_status(WaveStatus::Paused);
     if let Err(update_error) = store.update_wave(&paused_wave).await {
         tracing::warn!(
             wave_id = %wave.id(),
@@ -541,7 +541,7 @@ async fn record_activation_log(
 mod tests {
     use super::*;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode};
+    use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode};
     use time::OffsetDateTime;
 
     async fn create_store() -> SharedStore {
@@ -556,17 +556,23 @@ mod tests {
         let wave = Wave {
             id: LfdId::new(),
             name: "activation-wave".to_string(),
-            repo: ".".to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: ".".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: Vec::new(),
             area: Vec::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };

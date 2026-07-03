@@ -13,16 +13,16 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
-    now_unix, serialize_pr,
+    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
+    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus, SessionUse,
-    Summary, Trigger, Wave, WaveCron, WaveStatus,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
+    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -233,13 +233,9 @@ impl PostgresStore {
                     &[
                         &wave.id().as_str(),
                         &wave.name().as_str(),
-                        &wave.repo().as_str(),
                         &direction_json.as_str(),
                         &area_json.as_str(),
                         &paused,
-                        &(wave.status().as_i32()),
-                        &(wave.iteration() as i32),
-                        &(wave.cycle_start_iteration() as i32),
                         &created_at,
                         &workers,
                         &mode,
@@ -858,6 +854,51 @@ impl PostgresStore {
         .await
     }
 
+    pub async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::ListWaveRepos), &[&wave_id])
+                .await?;
+            rows.iter().map(map_wave_repo_row).collect()
+        })
+        .await
+    }
+
+    pub async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::UpsertWaveRepo),
+                    &[
+                        &wave_id.as_str(),
+                        &repo.repo.as_str(),
+                        &repo.worktree.as_str(),
+                        &repo.branch.as_str(),
+                        &repo.status.as_i32(),
+                        &(repo.iteration as i32),
+                        &(repo.cycle_start_iteration as i32),
+                        &(repo.position as i32),
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::DeleteWaveReposByWave),
+                    &[&wave_id.as_str()],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn list_runs(
         &self,
         wave_id: Option<&LfdId>,
@@ -1265,14 +1306,14 @@ impl PostgresStore {
                     ],
                 )
                 .await?;
-            // Runs that were in flight are now Failed; the waves that owned
-            // them would otherwise stay stuck in Running/Waiting and the UI
-            // would keep their action buttons disabled. Reset them back to
-            // Idle.
+            // Runs that were in flight are now Failed; the repos that owned
+            // them would otherwise stay stuck in Running/Waiting and the
+            // rolled-up wave status would keep action buttons disabled. Reset
+            // them back to Idle.
             let stale_wave_statuses = [WaveStatus::Running.as_i32(), WaveStatus::Waiting.as_i32()];
             client
                 .execute(
-                    Self::sql(Query::ResetStaleActiveWaves),
+                    Self::sql(Query::ResetStaleActiveRepos),
                     &[&WaveStatus::Idle.as_i32(), &&stale_wave_statuses[..]],
                 )
                 .await?;

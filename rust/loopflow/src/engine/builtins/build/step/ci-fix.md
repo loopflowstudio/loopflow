@@ -19,10 +19,11 @@ Find the wave's current PR, identify the latest failing checks on its head commi
      ```bash
      cwd=$(pwd -P)
      lfq list --json | jq -r --arg cwd "$cwd" '
-       .[]
+       .[] as $wave
+       | $wave.repos[]
        | .worktree = (.active_run.local_worktree // .local_worktree // "")
        | select(.worktree != "" and ($cwd | startswith(.worktree)))
-       | [.name, (.active_run.pr.number // ""), .worktree]
+       | [$wave.name, (.active_run.pr.number // .pr.number // ""), .worktree]
        | @tsv
      ' | sort -k3 | tail -1
      ```

@@ -21,6 +21,21 @@ final class PortfolioRepoState {
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
     }
 
+    /// Create a wave against this repo's lfd via the shared create-wave path
+    /// (`POST /v0/waves`), then refresh so the new wave lands in the list.
+    @discardableResult
+    func createWave(name: String) async throws -> Wave {
+        let wave = try await waveService.createWave(name: name, repo: .local(repo.url))
+        await refresh()
+        return wave
+    }
+
+    /// Start the wave's /goal agent with local `lf goal --tmux`, then return the
+    /// tmux handle so the caller can attach without lfd.
+    func attachWaveAgent(waveName: String) async throws -> SessionConnectionInfo {
+        try await LocalWaveAgentLauncher.attach(repoPath: repoPath, waveName: waveName)
+    }
+
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
@@ -36,7 +51,7 @@ final class PortfolioRepoState {
 
     func applyConnectedWaves(_ connectedWaves: [Wave]) {
         let filtered = connectedWaves
-            .filter { $0.repo.normalizedFilePath == repoPath }
+            .filter { wave in wave.repos.contains { $0.repo.normalizedFilePath == repoPath } }
             .map { WaveViewModel(api: $0) }
         waves = Self.sortWaves(filtered)
     }
@@ -45,13 +60,13 @@ final class PortfolioRepoState {
         switch event.type {
         case .deleted:
             if let wave = event.wave,
-               wave.repo.normalizedFilePath != repoPath {
+               !wave.repos.contains(where: { $0.repo.normalizedFilePath == repoPath }) {
                 return
             }
             waves.removeAll { $0.id == event.waveId }
         case .created, .updated, .started, .stopped, .waiting:
             guard let wave = event.wave,
-                  wave.repo.normalizedFilePath == repoPath else {
+                  wave.repos.contains(where: { $0.repo.normalizedFilePath == repoPath }) else {
                 return
             }
             upsertWave(WaveViewModel(api: wave))
@@ -75,10 +90,6 @@ final class PortfolioRepoState {
             partial.insertions += stat.insertions
             partial.deletions += stat.deletions
         }
-    }
-
-    var needsAttention: Bool {
-        waves.contains { $0.status == .failed || $0.status == .waiting }
     }
 
     func diffSummary(for wave: WaveViewModel) -> String? {
@@ -125,6 +136,44 @@ final class PortfolioRepoState {
             extractCount(from: diffStat, pattern: #"(\d+)\s+insertions?\(\+\)"#),
             extractCount(from: diffStat, pattern: #"(\d+)\s+deletions?\(-\)"#)
         )
+    }
+
+    nonisolated static func waveAgentSessionName(repoPath: String, waveName: String) -> String {
+        let repoName = URL(fileURLWithPath: repoPath).lastPathComponent
+        return "lf-\(repoName)-\(sanitizeWavePathComponent(waveName))"
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+    }
+
+    nonisolated static func waveWorktreePath(repoPath: String, waveName: String) -> String {
+        let repo = URL(fileURLWithPath: repoPath)
+        return repo
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                "\(repo.lastPathComponent).\(sanitizeWavePathComponent(waveName))"
+            )
+            .normalizedFilePath
+    }
+
+    nonisolated static func waveAgentSessionExists(repoPath: String, waveName: String) -> Bool {
+        LocalWaveAgentLauncher.sessionExists(repoPath: repoPath, waveName: waveName)
+    }
+
+    private nonisolated static func sanitizeWavePathComponent(_ value: String) -> String {
+        var sanitized = ""
+        var pendingDash = false
+        for char in value {
+            if char.isASCII && (char.isLetter || char.isNumber || char == "_" || char == "-") {
+                if pendingDash && !sanitized.isEmpty {
+                    sanitized.append("-")
+                }
+                pendingDash = false
+                sanitized.append(char)
+            } else {
+                pendingDash = true
+            }
+        }
+        return sanitized.isEmpty ? "wave" : sanitized
     }
 
     private static func extractCount(from text: String, pattern: String) -> Int {

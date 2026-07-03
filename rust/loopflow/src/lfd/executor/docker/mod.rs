@@ -647,10 +647,13 @@ impl AgentExecutor for DockerExecutor {
     }
 
     async fn cleanup_wave_workspace(&self, wave: &Wave) -> Result<()> {
-        let repo = Self::resolve_host_repo(wave.repo());
-        let host_worktree = crate::engine::worktrees::worktree_path(&repo, wave.name());
-        let workspace = Self::docker_workspace_for_host_worktree(&repo, &host_worktree, "main");
-        self.cleanup_container_worktree(&workspace).await
+        for repo_work in &wave.repos {
+            let repo = Self::resolve_host_repo(&repo_work.repo);
+            let host_worktree = crate::engine::worktrees::worktree_path(&repo, wave.name());
+            let workspace = Self::docker_workspace_for_host_worktree(&repo, &host_worktree, "main");
+            self.cleanup_container_worktree(&workspace).await?;
+        }
+        Ok(())
     }
 }
 

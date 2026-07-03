@@ -3,8 +3,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
     ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave,
-    WaveCron, WaveMode, WaveStatus,
+    Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger,
+    Wave, WaveCron, WaveMode, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -98,41 +98,32 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
-/// SELECT id, name, repo, direction, area, paused, status, iteration,
-///        cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics
+/// SELECT id, name, direction, area, paused, created_at, workers, mode,
+///        primary_flow, goal, metrics
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
-    let direction = parse_json_vec(&row.text(3)?)?;
-    let area = parse_json_vec(&row.text(4)?)?;
-    let paused = row.int(5)? != 0;
-    let status_value = row.int(6)?;
-    let iteration = row.int(7)? as u32;
-    let cycle_start_iteration = row.int(8)? as u32;
-    let created_at = unix_to_datetime(row.bigint(9)?);
-    let workers = row.int(10)? as u32;
-    let mode_str = row.text(11)?;
+    let direction = parse_json_vec(&row.text(2)?)?;
+    let area = parse_json_vec(&row.text(3)?)?;
+    let paused = row.int(4)? != 0;
+    let created_at = unix_to_datetime(row.bigint(5)?);
+    let workers = row.int(6)? as u32;
+    let mode_str = row.text(7)?;
     let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
-    let primary_flow = row.text(12)?;
-    let goal = row.text(13)?;
-    let metrics = parse_json_vec(&row.text(14)?)?;
-    let mut status = WaveStatus::from_i32(status_value);
-    if paused {
-        status = WaveStatus::Paused;
-    }
+    let primary_flow = row.text(8)?;
+    let goal = row.text(9)?;
+    let metrics = parse_json_vec(&row.text(10)?)?;
 
     Ok(Wave {
         id: LfdId::from_raw(row.text(0)?),
         name: row.text(1)?,
-        repo: row.text(2)?,
         mode,
         primary_flow,
         goal,
         metrics,
         crons: Vec::new(),
+        repos: Vec::new(),
         direction,
         area,
-        status,
-        iteration,
-        cycle_start_iteration,
+        paused,
         created_at: Some(created_at),
         workers,
     })
@@ -147,6 +138,20 @@ pub fn map_wave_cron_row(row: &impl StoreRow) -> StoreResult<WaveCron> {
         schedule: row.text(3)?,
         last_triggered_at: row.opt_bigint(4)?,
         created_at: row.opt_bigint(5)?.map(unix_to_datetime),
+    })
+}
+
+/// SELECT wave_id, repo, worktree, branch, status, iteration,
+///        cycle_start_iteration, position
+pub fn map_wave_repo_row(row: &impl StoreRow) -> StoreResult<RepoWork> {
+    Ok(RepoWork {
+        repo: row.text(1)?,
+        worktree: row.text(2)?,
+        branch: row.text(3)?,
+        status: WaveStatus::from_i32(row.int(4)?),
+        iteration: row.int(5)? as u32,
+        cycle_start_iteration: row.int(6)? as u32,
+        position: row.int(7)? as u32,
     })
 }
 

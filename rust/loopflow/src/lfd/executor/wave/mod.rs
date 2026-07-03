@@ -913,7 +913,7 @@ impl WaveExecutor {
 
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
-            wave.status = status;
+            wave.set_status(status);
             if let Err(err) = self.store.update_wave(&wave).await {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
@@ -1395,7 +1395,7 @@ mod tests {
     use super::*;
     use crate::engine::flow::Step;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{PullRequest, Signal, Trigger};
+    use crate::lfd::types::{PullRequest, RepoWork, Signal, Trigger};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -1452,17 +1452,23 @@ mod tests {
         let wave = Wave {
             id: wave_id.clone(),
             name: "fork-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Manual,
             primary_flow: flow_name.to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Running,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Running,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -1511,27 +1517,37 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            repo: repo.to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: flow.to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
-            status,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
     }
 
     async fn create_main_run(store: &SharedStore, wave: &Wave, status: RunStatus) -> Run {
+        let repo_work = wave
+            .repos
+            .first()
+            .expect("wave always has at least one RepoWork");
         let run = Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: repo_work.repo.clone(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),
@@ -1539,7 +1555,7 @@ mod tests {
             iteration: 0,
             step_index: 0,
             status,
-            worktree: wave.repo().clone(),
+            worktree: repo_work.repo.clone(),
             branch: "main".to_string(),
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: None,
@@ -1698,17 +1714,23 @@ mod tests {
         let target_wave = Wave {
             id: LfdId::new(),
             name: "target-wave".to_string(),
-            repo: repo.path().to_string_lossy().to_string(),
             mode: WaveMode::Loop,
             primary_flow: "test-flow".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.path().to_string_lossy().to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec![],
             area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         };
@@ -1993,7 +2015,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        assert_eq!(updated_wave.status, WaveStatus::Failed);
+        assert_eq!(updated_wave.status(), WaveStatus::Failed);
     }
 
     #[test]
@@ -2129,7 +2151,7 @@ mod tests {
             .await
             .expect("wave lookup should succeed")
             .expect("wave should exist");
-        wave.status = WaveStatus::Waiting;
+        wave.set_status(WaveStatus::Waiting);
         store
             .update_wave(&wave)
             .await

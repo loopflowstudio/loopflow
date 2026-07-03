@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-import typer
 from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
@@ -109,10 +108,14 @@ def test_wave_table_uses_active_run_paths_when_available() -> None:
     assert "wave/reduce" in rendered
 
 
-def test_wave_table_falls_back_to_wave_branch() -> None:
+def test_wave_table_falls_back_to_repo_branch() -> None:
     payload = dict(WAVE_MINIMAL)
-    payload["remote_branch"] = "wave/fallback"
-    payload["local_worktree"] = "/tmp/fallback-wt"
+    repo = {
+        **WAVE_MINIMAL["repos"][0],
+        "remote_branch": "wave/fallback",
+        "local_worktree": "/tmp/fallback-wt",
+    }
+    payload["repos"] = [repo]
     wave = Wave.model_validate(payload)
     rendered = _render_table(wave)
 

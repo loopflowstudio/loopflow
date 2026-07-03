@@ -5,7 +5,7 @@ from __future__ import annotations
 WAVE_MINIMAL = {
     "id": "abc-123",
     "name": "reduce",
-    "repo": "/tmp/repo",
+    "mode": "loop",
     "primary_flow": "reduce",
     "goal": "ship-roadmap",
     "metrics": [],
@@ -13,7 +13,19 @@ WAVE_MINIMAL = {
     "direction": ["infra"],
     "area": [],
     "status": "running",
-    "iteration": 0,
+    "triggers": [],
+    "crons": [],
+    "flow_steps": [],
+    "repos": [
+        {
+            "repo": "/tmp/repo",
+            "status": "running",
+            "iteration": 0,
+            "commits": [],
+            "open_pr_count": 0,
+            "stack_count": 0,
+        }
+    ],
 }
 
 WAVE_FULL = {
@@ -30,26 +42,43 @@ WAVE_FULL = {
     ],
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
-    "commits": [
-        {"sha": "a1b2c3d", "message": "implement: add retry logic"},
-        {"sha": "e4f5g6h", "message": "design: initial sketch"},
+    "repos": [
+        {
+            "repo": "/tmp/repo",
+            "status": "running",
+            "iteration": 0,
+            "local_worktree": "/tmp/wt",
+            "remote_branch": "wave/reduce",
+            "commits": [
+                {"sha": "a1b2c3d", "message": "implement: add retry logic"},
+                {"sha": "e4f5g6h", "message": "design: initial sketch"},
+            ],
+            "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
+            "open_pr_count": 1,
+            "stack_count": 1,
+            "active_run": {
+                "id": "run-1",
+                "wave_id": "abc-123",
+                "iteration": 0,
+                "step_index": 0,
+                "status": "running",
+                "local_worktree": "/tmp/wt",
+                "remote_branch": "wave/reduce",
+                "pr": {
+                    "url": "https://github.com/org/repo/pull/1",
+                    "number": 1,
+                    "state": "open",
+                },
+                "started_at": "2026-02-08T02:00:00Z",
+                "flow_parents": ["parent-1"],
+            },
+            "pr": {
+                "url": "https://github.com/org/repo/pull/1",
+                "number": 1,
+                "state": "open",
+            },
+        }
     ],
-    "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
-    "active_run": {
-        "id": "run-1",
-        "wave_id": "abc-123",
-        "iteration": 0,
-        "step_index": 0,
-        "status": "running",
-        "local_worktree": "/tmp/wt",
-        "remote_branch": "wave/reduce",
-        "pr": {"url": "https://github.com/org/repo/pull/1", "number": 1, "state": "open"},
-        "started_at": "2026-02-08T02:00:00Z",
-        "flow_parents": ["parent-1"],
-    },
-    "branch": "wave/reduce",
-    "pr_url": "https://github.com/org/repo/pull/1",
-    "pr_state": "open",
 }
 
 WAVE_RUN_MINIMAL = {

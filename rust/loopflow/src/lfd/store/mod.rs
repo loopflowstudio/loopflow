@@ -5,8 +5,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, LivePrState, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session, SessionStatus, Summary,
-    Trigger, Wave, WaveCron,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, Session, SessionStatus,
+    Summary, Trigger, Wave, WaveCron,
 };
 
 pub mod catalog;
@@ -166,6 +166,45 @@ impl Store {
         WaveStateStore::delete_wave_crons(self, wave_id).await
     }
 
+    pub async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        WaveStateStore::list_wave_repos(self, wave_id).await
+    }
+
+    pub async fn replace_wave_repos(&self, wave_id: &LfdId, repos: &[RepoWork]) -> StoreResult<()> {
+        WaveStateStore::delete_wave_repos(self, wave_id).await?;
+        for repo in repos {
+            WaveStateStore::upsert_wave_repo(self, wave_id, repo).await?;
+        }
+        Ok(())
+    }
+
+    /// Stitch `repos` from the `wave_repos` table onto each wave. The store read
+    /// path fills `repos: Vec::new()` in `map_wave_row`; the actual load happens
+    /// here, in the layer that owns the store handle.
+    async fn attach_repos_vec(&self, mut waves: Vec<Wave>) -> StoreResult<Vec<Wave>> {
+        for wave in &mut waves {
+            wave.repos = WaveStateStore::list_wave_repos(self, wave.id()).await?;
+        }
+        Ok(waves)
+    }
+
+    async fn attach_repos_opt(&self, wave: Option<Wave>) -> StoreResult<Option<Wave>> {
+        match wave {
+            Some(mut wave) => {
+                wave.repos = WaveStateStore::list_wave_repos(self, wave.id()).await?;
+                Ok(Some(wave))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Persist the wave's `repos` as the source of truth for per-repo execution
+    /// state (worktree/branch/status/iteration). The wave-level `paused` column
+    /// is written in `upsert_wave`.
+    async fn persist_wave_repos(&self, wave: &Wave) -> StoreResult<()> {
+        self.replace_wave_repos(wave.id(), &wave.repos).await
+    }
+
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         WaveStateStore::get_wave(self, wave_id).await
     }
@@ -175,11 +214,13 @@ impl Store {
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::create_wave(self, wave).await
+        WaveStateStore::create_wave(self, wave).await?;
+        self.persist_wave_repos(wave).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::update_wave(self, wave).await
+        WaveStateStore::update_wave(self, wave).await?;
+        self.persist_wave_repos(wave).await
     }
 
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
@@ -606,6 +647,9 @@ pub trait WaveStateStore: Send + Sync {
         last_triggered_at: Option<i64>,
     ) -> StoreResult<()>;
     async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()>;
+    async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>>;
+    async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()>;
+    async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()>;
 
     async fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>)
         -> StoreResult<Vec<Run>>;
@@ -829,22 +873,24 @@ impl WaveStateStore for Store {
     // Keep backend dispatch explicit and centralized in this file.
     // Verbose match arms are intentional: they keep sqlite/postgres behavior greppable.
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        match &self.backend {
+        let waves = match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let repo = repo.map(str::to_string);
                 run_sqlite(store, move |store| store.list_waves(repo.as_deref())).await
             }
             StoreBackend::Postgres(store) => store.list_waves(repo).await,
-        }
+        }?;
+        self.attach_repos_vec(waves).await
     }
 
     async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
-        match &self.backend {
+        let waves = match &self.backend {
             StoreBackend::Sqlite(store) => {
                 run_sqlite(store, move |store| store.list_loopable_waves()).await
             }
             StoreBackend::Postgres(store) => store.list_loopable_waves().await,
-        }
+        }?;
+        self.attach_repos_vec(waves).await
     }
 
     async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
@@ -867,23 +913,25 @@ impl WaveStateStore for Store {
     }
 
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        match &self.backend {
+        let wave = match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
                 run_sqlite(store, move |store| store.get_wave(&wave_id)).await
             }
             StoreBackend::Postgres(store) => store.get_wave(wave_id).await,
-        }
+        }?;
+        self.attach_repos_opt(wave).await
     }
 
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        match &self.backend {
+        let wave = match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let name = name.to_string();
                 run_sqlite(store, move |store| store.get_wave_by_name(&name)).await
             }
             StoreBackend::Postgres(store) => store.get_wave_by_name(name).await,
-        }
+        }?;
+        self.attach_repos_opt(wave).await
     }
 
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -954,6 +1002,37 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.delete_wave_crons(&wave_id)).await
             }
             StoreBackend::Postgres(store) => store.delete_wave_crons(wave_id).await,
+        }
+    }
+
+    async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_wave_repos(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_wave_repos(wave_id).await,
+        }
+    }
+
+    async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                let repo = repo.clone();
+                run_sqlite(store, move |store| store.upsert_wave_repo(&wave_id, &repo)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_wave_repo(wave_id, repo).await,
+        }
+    }
+
+    async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.delete_wave_repos(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_wave_repos(wave_id).await,
         }
     }
 
@@ -1976,8 +2055,8 @@ mod tests {
     use crate::lfd::types::{
         ChatMemoryBlock, ExecutionProcess, ExecutionProcessStatus, LivePrState,
         LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-        RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave, WaveCron,
-        WaveMode, WaveStatus,
+        RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave,
+        WaveCron, WaveMode, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1987,17 +2066,23 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: repo.to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
@@ -2007,7 +2092,7 @@ mod tests {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            repo: wave.repo().clone(),
+            repo: wave.repo().to_string(),
             flow: wave.primary_flow().clone(),
             task: None,
             direction: wave.direction().clone(),
@@ -2040,7 +2125,7 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.status = WaveStatus::Paused;
+        wave.set_status(WaveStatus::Paused);
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
@@ -2048,6 +2133,9 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
+        assert_eq!(loaded.repos.len(), 1);
+        assert_eq!(loaded.repos[0].repo, "/repo");
+        assert_eq!(loaded.repos[0].status, WaveStatus::Paused);
         let loopable = store
             .list_loopable_waves()
             .await
@@ -2408,14 +2496,14 @@ mod tests {
 
         // Wave that was actively running when lfd died.
         let mut running_wave = make_wave("/repo-stuck-running");
-        running_wave.status = WaveStatus::Running;
+        running_wave.set_status(WaveStatus::Running);
         store.create_wave(&running_wave).await.expect("create wave");
         let mut running_run = make_run(&running_wave, RunStatus::Running);
         store.create_run(&running_run).await.expect("create run");
 
         // Wave that was at an interactive waitpoint.
         let mut waiting_wave = make_wave("/repo-stuck-waiting");
-        waiting_wave.status = WaveStatus::Waiting;
+        waiting_wave.set_status(WaveStatus::Waiting);
         store
             .create_wave(&waiting_wave)
             .await
@@ -2428,7 +2516,7 @@ mod tests {
 
         // Paused wave with no active run — must be left alone.
         let mut paused_wave = make_wave("/repo-paused");
-        paused_wave.status = WaveStatus::Paused;
+        paused_wave.set_status(WaveStatus::Paused);
         store
             .create_wave(&paused_wave)
             .await
@@ -2455,7 +2543,7 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(
-            running_after.status,
+            running_after.status(),
             WaveStatus::Idle,
             "wave whose run was orphaned should be reset to Idle"
         );
@@ -2465,7 +2553,7 @@ mod tests {
             .expect("get waiting wave")
             .expect("wave exists");
         assert_eq!(
-            waiting_after.status,
+            waiting_after.status(),
             WaveStatus::Idle,
             "waiting-state wave should also be reset to Idle"
         );
@@ -2475,7 +2563,7 @@ mod tests {
             .expect("get paused wave")
             .expect("wave exists");
         assert_eq!(
-            paused_after.status,
+            paused_after.status(),
             WaveStatus::Paused,
             "paused wave must keep its status across orphan cleanup"
         );
@@ -2743,7 +2831,7 @@ mod tests {
                 Run {
                     id: LfdId::new(),
                     wave_id: wave.id().clone(),
-                    repo: wave.repo().clone(),
+                    repo: wave.repo().to_string(),
                     flow: wave.primary_flow().clone(),
                     task: None,
                     direction: wave.direction().clone(),
@@ -2779,7 +2867,7 @@ mod tests {
 
         let make_pr_state =
             |pr_number: u32, state: LivePrState, head_sha: &str| LivePullRequestState {
-                repo_id: wave.repo().clone(),
+                repo_id: wave.repo().to_string(),
                 pr_number,
                 state,
                 is_draft: false,

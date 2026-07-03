@@ -17,9 +17,7 @@ from scripts.lib.lfd_runtime import LfdRuntime
 pytestmark = pytest.mark.regression
 
 
-def test_list_sessions_exposes_tmux_name(
-    lfd_runtime: LfdRuntime, api_client: ApiClient
-) -> None:
+def test_list_sessions_exposes_tmux_name(lfd_runtime: LfdRuntime, api_client: ApiClient) -> None:
     wave_id = _create_wave_with_roadmap_item(lfd_runtime, api_client)
     _trigger_run(api_client, wave_id)
 
@@ -34,9 +32,7 @@ def test_list_sessions_exposes_tmux_name(
     assert session["use"] in {"wave_agent", "worker", "palette"}
 
 
-def test_get_session_exposes_tmux_name(
-    lfd_runtime: LfdRuntime, api_client: ApiClient
-) -> None:
+def test_get_session_exposes_tmux_name(lfd_runtime: LfdRuntime, api_client: ApiClient) -> None:
     wave_id = _create_wave_with_roadmap_item(lfd_runtime, api_client)
     _trigger_run(api_client, wave_id)
 
@@ -97,6 +93,5 @@ def _wait_for_session(
             return matches[0]
         time.sleep(0.25)
     raise AssertionError(
-        f"no session appeared for wave {wave_id} within {timeout_seconds}s; "
-        f"last body: {last_body}"
+        f"no session appeared for wave {wave_id} within {timeout_seconds}s; last body: {last_body}"
     )

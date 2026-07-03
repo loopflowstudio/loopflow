@@ -40,9 +40,9 @@ and app surfaces. Loopflow should not make users choose between run id, session
 id, process id, and UI terminal pane id when they are trying to answer one
 session-shaped question.
 
-`Conversation` was the false pressure. Remove it first. Then the Session Record
-can be a small aggregate over live concepts instead of a compatibility wrapper
-around a dormant subsystem.
+`Conversation` was the false pressure, and it has now been removed (HEAD
+`42a663ee`). The Session Record can be a small aggregate over live concepts
+instead of a compatibility wrapper around a dormant subsystem.
 
 ## Shape
 
@@ -71,9 +71,9 @@ Concerto may still need a separate `TerminalWorkspace` or `TerminalPane`
 concept. A shell tab running `git status` is not automatically a Session Record.
 It becomes one only when loopflow launches or adopts it as managed work.
 
-## Post-conversation shape
+## Live-concept shape
 
-Once conversations are gone, the proposal becomes:
+With conversations gone, the proposal is now a read model over the live layers:
 
 - Keep `Run` as flow execution lineage: wave, flow, task, queue, PR, stack,
   iteration, and current step.
@@ -102,30 +102,6 @@ Build a read-model aggregator before changing storage:
 
 Prototype success means the aggregate makes existing behavior clearer without
 forcing a risky database migration.
-
-## Removal invariant
-
-The Conversation removal must pull every root:
-
-- Rust conversation manager, harnesses, runtime, types, usage helpers, routes,
-  lfd startup wiring, HTTP state, and module exports.
-- SQLite/postgres store traits and implementations for `conversations` and
-  `conversation_events`.
-- Migration references or replacement migration policy for unused conversation
-  tables.
-- Python API/client/models/tests for conversation input/events.
-- Swift service protocol, local service, session state, agent-session event
-  envelopes, and tests tied to conversation streams.
-- Docs and e2e tests for `/v0/conversations`.
-- Generated or checked-in summaries that still describe conversations as a live
-  subsystem.
-
-No compatibility shim. No empty endpoints. No "old/new" split. Git is the
-history.
-
-After that removal lands, this section should move out of the proposal and into
-the shipped queue item history. The active design can then focus entirely on the
-Session/Run/ExecutionProcess/TerminalWorkspace boundary.
 
 ## Open questions
 

@@ -44,10 +44,16 @@ diffs.
 
 ## State
 
-Study bootstrap is underway. Durable analyses now cover architecture,
-references, leverage, continuity, and the first Codex/OpenCode session-model
-comparison, all marked against HEAD `d370450a81ccdd4b8c00f3052f8271e3b515a575`.
+Study bootstrap shipped. Durable analyses cover architecture, references,
+leverage, continuity, and the Codex/OpenCode session-model comparison;
+`docs/architecture.md` gives one whole-system map. All analyses are marked
+current against HEAD `615729570782d730d2ea3b196e34779db9f63555`. The first
+reduction also shipped: the dormant conversation subsystem was pulled in HEAD
+`42a663ee`, leaving a smaller live split — `Run`, `Session`, `ExecutionProcess`,
+and agent/output events.
 
-First draft proposal: `wave/reduce/proposals/session-record-spine.md`. It is not
-approved. Next useful move is to prototype the Session Record aggregate or deepen
-the continuity audit around session lifecycle before surfacing the design gate.
+The arc now sits at the **proposal spine** (roadmap item 2). Live draft:
+`wave/reduce/proposals/session-record-spine.md` — one user-facing Session Record
+read model over the live layers. It is not approved. The next move is to deepen
+the session-lifecycle continuity audit, prototype the aggregate in a throwaway
+worktree, then surface it at the design gate and park it there.

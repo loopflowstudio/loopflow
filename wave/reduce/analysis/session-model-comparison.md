@@ -1,5 +1,5 @@
 ---
-head: d370450a81ccdd4b8c00f3052f8271e3b515a575
+head: 615729570782d730d2ea3b196e34779db9f63555
 status: bootstrap
 ---
 
@@ -9,12 +9,12 @@ status: bootstrap
 
 What should loopflow call and store as an agent session?
 
-The current system has several nearby concepts:
+The live system now has three nearby concepts (the `Conversation` subsystem was
+removed in HEAD `42a663ee`; see the shipped history in the wave and git):
 
 - `Run` - wave/flow execution lineage.
 - `Session` - tmux/control session tied to a wave and optional run.
 - `ExecutionProcess` - process/container backend state.
-- `Conversation` - provider conversation plus persisted event stream.
 - runtime events - `run.*`, `flow.*`, `step.*`, `AgentStarted`, `AgentEnded`,
   `SessionCreated`, `SessionUpdated`, and `OutputLine`.
 
@@ -129,51 +129,38 @@ Representative files:
 - `rust/loopflow/src/lfd/types/execution.rs`
 - `rust/loopflow/src/lfd/store/`
 
-### Conversation
+### Conversation (removed)
 
-`Conversation` tracks provider-level interaction and persisted events. It owns
+`Conversation` used to track provider-level interaction and persisted events —
 harness name, provider session id, run id, config, status, input support,
-context snapshots, turn/item events, and token usage.
+context snapshots, turn/item events, and token usage. Its Rust manager,
+harnesses, runtime, types, usage helpers, routes, store traits, migrations,
+Python models/client, Swift service/session-state hooks, docs, and e2e tests
+were all pulled in HEAD `42a663ee`.
 
-Statuses:
-
-```text
-starting -> active -> ending -> ended|failed
-```
-
-Representative files:
-
-- `rust/loopflow/src/lfd/conversations/types.rs`
-- `rust/loopflow/src/lfd/conversations/mod.rs`
-- `rust/loopflow/src/lfd/conversations/README.md`
-- `python/loopflow/models.py`
-
-Current direction: cut this subsystem rather than wrap it. The code was kept
-because it may be useful later, but loopflow is not currently doing enough with
-provider conversations to justify the concept. If it becomes useful later, bring
-it back from git with fresh product pressure.
+It was cut rather than wrapped: loopflow was not doing enough with provider
+conversations to justify the concept, and keeping it created a parallel model
+beside lfd sessions that made this Session Record design harder to see. Git is
+the archive. If provider transcript/input work returns, it should hang off the
+Session Record rather than reintroduce a parallel user-facing object.
 
 ## Misalignment
 
 Loopflow's product language says "sessions" are what the human watches and
-reattaches to. The implementation currently uses:
+reattaches to. Removing `Conversation` closed the worst gap — the naming
+inversion where the most session-like object was not the one called `Session`.
+What remains is a smaller, healthier split:
 
-- `Session` for terminal/control attachment.
-- `Conversation` for provider transcript/event stream that is not currently
-  earning its place.
+- `Session` for the loopflow-managed agent/control interaction.
 - `ExecutionProcess` for backend process lifecycle.
 - `Run` for wave/flow lineage.
-- `AgentStarted/AgentEnded` and `OutputLine` for older agent-shaped event
-  vocabulary.
+- `AgentStarted/AgentEnded` and `OutputLine` for agent-shaped event vocabulary
+  whose load-bearing status is not yet settled (see "Next evidence to gather").
 
-That creates a naming inversion: the most session-like thing from a coding-agent
-product perspective is `Conversation`, but the user-facing API already calls the
-terminal/control record `Session`.
-
-The split leaks into clients. Python exposes both `Session` and `Conversation`.
-Swift mirrors `Session` and `Run`, while conversation support is documented in
-Rust but not equally first-class across the native model layer. lfd events carry
-both session events and agent events.
+The open question is no longer "which of these is really the session" but
+whether a user should reason from one **Session Record** read model or keep
+stitching `Session` + `Run` + `ExecutionProcess` by hand across CLI, lfd, lfq,
+and Concerto.
 
 ## What the references suggest
 
@@ -228,9 +215,10 @@ session
 
 `Run` remains the flow execution unit. `Session` becomes the loopflow-managed
 agent interaction unit. `ExecutionProcess` becomes a backend detail.
-`Conversation` is removed for now. Future provider transcript/input work should
-return only when it can hang off the Session Record without reintroducing a
-parallel user-facing object.
+`Conversation` is already gone. The `transcript/events` and `approvals` facets
+above are therefore aspirational, not backed by current storage — future
+provider transcript/input work should return only when it can hang off the
+Session Record without reintroducing a parallel user-facing object.
 
 Do not make every Concerto terminal a Session Record. A normal CLI terminal is a
 workspace pane. It becomes a Session Record only when it is launched or adopted
@@ -266,11 +254,11 @@ until a prototype proves a smaller implementation is safe.
 ## Next evidence to gather
 
 - Trace `lfq sessions`, `lfq attach`, and Concerto session rendering against
-  current DTOs.
+  current DTOs — this is the continuity audit that feeds the proposal spine.
 - Check whether `AgentStarted`, `AgentEnded`, and `OutputLine` are legacy
   vocabulary or still load-bearing.
 - Decide whether Concerto should open ordinary terminals as standalone workspace
   panes or only as panes inside a main agent tmux session.
-- Map every conversation root before deletion: Rust manager/harness/routes/store,
-  usage aggregation, Python models/client/tests, Swift service/session state,
-  docs, e2e, migrations, and generated summaries.
+
+The conversation-root mapping this section once called for is done: every root
+was pulled in HEAD `42a663ee`.

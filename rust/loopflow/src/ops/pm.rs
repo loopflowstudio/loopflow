@@ -111,6 +111,12 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     Ok(PmContext { client, project })
 }
 
+/// Resolve the stored Asana OAuth access token for embedding in cloud scaffolds
+/// (`lf op cloud`), refreshing it in place if it has expired.
+pub(crate) fn asana_access_token() -> OpsResult<String> {
+    block_on_pm(resolve_asana_token())
+}
+
 async fn resolve_asana_token() -> OpsResult<String> {
     let store = open_store(&storage_config_from_env()?)
         .await

@@ -268,6 +268,16 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
+    /// Scaffold a vendor-cloud looping session for a wave (claude)
+    Cloud {
+        /// Vendor to scaffold for (claude)
+        vendor: String,
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Record an already-launched vendor session URL onto the wave
+        #[arg(long = "session-url")]
+        session_url: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

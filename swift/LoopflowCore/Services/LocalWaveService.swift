@@ -1010,7 +1010,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             status: status,
             flowSteps: flowSteps,
             createdAt: createdAt,
-            parentWaveId: json["parent_wave_id"] as? String
+            parentWaveId: json["parent_wave_id"] as? String,
+            cloudSessionURL: json["cloud_session_url"] as? String
         )
     }
 

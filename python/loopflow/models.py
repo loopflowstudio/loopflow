@@ -115,6 +115,7 @@ class Wave(BaseModel):
     flow_steps: list[FlowStep]
     parent_wave_id: Optional[str]
     created_at: Optional[datetime] = None
+    cloud_session_url: Optional[str] = None
 
     @field_validator("flow_steps", mode="before")
     @classmethod

@@ -14,6 +14,7 @@
   "has_stale_pr_state": false,
   "workers": 1,
   "parent_wave_id": "wave_parent999",
+  "cloud_session_url": "https://claude.ai/session/engbot",
   "crons": [
     {
       "id": "cron_001",

@@ -28,6 +28,7 @@ def test_wave_fixture_parses():
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]
     assert wave.parent_wave_id == "wave_parent999"
+    assert wave.cloud_session_url == "https://claude.ai/session/engbot"
     assert len(wave.crons) == 1
     assert wave.crons[0].flow == "wave-polish"
 

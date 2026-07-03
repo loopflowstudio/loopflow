@@ -43,6 +43,9 @@ pub(crate) struct WaveConfig {
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
+    /// Vendor-cloud session/routine URL, set by `lf op cloud <vendor> --session-url`.
+    /// Surfaced on `WaveDto` so Concerto can deep-link back out to the session.
+    pub cloud_session_url: Option<String>,
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
@@ -183,6 +186,19 @@ pub(crate) fn update_wave_goal_config(
     Ok(())
 }
 
+/// Record (or clear) the vendor-cloud session URL in `wave/<name>/GOAL.md`.
+/// Pass an empty string to clear the key.
+pub(crate) fn update_wave_cloud_session_url(
+    repo: &Path,
+    name: &str,
+    url: Option<String>,
+) -> Result<(), String> {
+    update_wave_goal_config(repo, name, |map| {
+        remove_or_set_string(map, "cloud_session_url", url);
+        Ok(())
+    })
+}
+
 /// Update agent fields in `wave/<name>/GOAL.md`, preserving existing frontmatter.
 pub(crate) fn update_wave_agent_config(
     repo: &Path,
@@ -294,6 +310,36 @@ mod tests {
                 "claude:sonnet".to_string(),
             )]))
         );
+    }
+
+    #[test]
+    fn update_wave_cloud_session_url_round_trips() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nprimary_flow: build\n---\nDrive the work.\n",
+        )
+        .expect("write");
+
+        update_wave_cloud_session_url(
+            temp.path(),
+            "scan",
+            Some("https://claude.ai/session/abc".to_string()),
+        )
+        .expect("set url");
+        let config = read_wave_config(temp.path(), "scan").expect("config");
+        assert_eq!(
+            config.cloud_session_url.as_deref(),
+            Some("https://claude.ai/session/abc")
+        );
+
+        // Empty string clears the key.
+        update_wave_cloud_session_url(temp.path(), "scan", Some(String::new())).expect("clear url");
+        let config = read_wave_config(temp.path(), "scan").expect("config");
+        assert!(config.cloud_session_url.is_none());
+        assert_eq!(config.primary_flow.as_deref(), Some("build"));
     }
 
     #[test]

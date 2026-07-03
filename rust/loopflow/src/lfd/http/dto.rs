@@ -101,6 +101,10 @@ pub struct WaveDto {
     /// Parent wave in the chord tree. `null` for a root wave. Always emitted
     /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
     pub parent_wave_id: Option<String>,
+    /// Vendor-cloud session/routine URL (`lf op cloud`), for Concerto to
+    /// deep-link back out to the running cloud loop. Absent until launched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_session_url: Option<String>,
 }
 
 /// Per-repo execution surface for a wave: status/iteration plus the live git
@@ -611,6 +615,7 @@ mod contract_tests {
             has_stale_pr_state: false,
             repos: Vec::new(),
             parent_wave_id: None,
+            cloud_session_url: None,
         };
 
         let json = serde_json::to_value(&wave).unwrap();

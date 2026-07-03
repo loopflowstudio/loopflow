@@ -1,5 +1,6 @@
 mod abandon;
 mod branches;
+mod cloud;
 mod combine;
 mod commit;
 mod error;
@@ -19,6 +20,7 @@ pub use branches::{
     list_branch_candidates, prune_branches, BranchCandidate, BranchFilterOptions,
     BranchListOptions, BranchPruneOptions,
 };
+pub use cloud::{cloud_launch, CloudLaunchOptions, CloudLaunchResult, CloudMode};
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};

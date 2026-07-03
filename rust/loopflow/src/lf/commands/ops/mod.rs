@@ -102,6 +102,11 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
         },
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
+        OpsCommand::Cloud {
+            vendor,
+            wave,
+            session_url,
+        } => cloud_cmd(vendor, wave.clone(), session_url.clone(), &progress),
     }
 }
 
@@ -439,6 +444,56 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     );
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn cloud_cmd(
+    vendor: &str,
+    wave: Option<String>,
+    session_url: Option<String>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let result = crate::ops::cloud_launch(
+        &repo_root,
+        &crate::ops::CloudLaunchOptions {
+            vendor: vendor.to_string(),
+            wave,
+            session_url,
+        },
+        progress,
+    )?;
+
+    match result.mode {
+        crate::ops::CloudMode::Record => {
+            println!(
+                "{}: recorded {} cloud session {}",
+                result.wave,
+                result.vendor,
+                result.session_url.as_deref().unwrap_or("")
+            );
+        }
+        crate::ops::CloudMode::Scaffold => {
+            println!("{}: scaffolded {} cloud loop", result.wave, result.vendor);
+            if let Some(path) = &result.prompt_path {
+                println!("  prompt: {}", path.display());
+            }
+            if let Some(path) = &result.mcp_path {
+                println!("  mcp:    {}", path.display());
+            }
+            println!("  skills: {} written", result.skills_written);
+            if let Some(link) = &result.deep_link {
+                println!("  launch: {link}");
+            }
+            println!(
+                "\nOpen the launch link, attach this repo, paste the prompt, and set a recurring schedule."
+            );
+            println!(
+                "Then run `lf op cloud {} {} --session-url <url>` to deep-link Concerto back to it.",
+                result.vendor, result.wave
+            );
         }
     }
     Ok(())

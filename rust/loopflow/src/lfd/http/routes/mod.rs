@@ -168,6 +168,9 @@ pub async fn build_wave_dto(
     let crons_list = store.list_wave_crons(wave.id()).await.unwrap_or_default();
     let crons = crons_list.into_iter().map(wave_cron_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
+    let cloud_session_url = wave_config
+        .as_ref()
+        .and_then(|config| config.cloud_session_url.clone());
 
     Ok(WaveDto {
         id: wave.id().to_string(),
@@ -190,6 +193,7 @@ pub async fn build_wave_dto(
         crons,
         repos,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
+        cloud_session_url,
     })
 }
 

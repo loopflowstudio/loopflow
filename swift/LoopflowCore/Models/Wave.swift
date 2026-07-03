@@ -255,6 +255,9 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var createdAt: Date?
     /// Parent wave in the chord tree. `nil` for a root wave.
     public var parentWaveId: String?
+    /// Vendor-cloud session/routine URL (`lf op cloud`); `NSWorkspace.open` target
+    /// for deep-linking out to the running cloud loop. Nil until launched.
+    public var cloudSessionURL: String?
 
     public init(
         id: String,
@@ -272,7 +275,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         status: WaveStatus = .idle,
         flowSteps: [String] = [],
         createdAt: Date? = nil,
-        parentWaveId: String? = nil
+        parentWaveId: String? = nil,
+        cloudSessionURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -290,6 +294,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.flowSteps = flowSteps
         self.createdAt = createdAt
         self.parentWaveId = parentWaveId
+        self.cloudSessionURL = cloudSessionURL
     }
 
     /// Single-repo convenience mirroring the old flat shape: packs the per-repo
@@ -317,7 +322,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         flowSteps: [String] = [],
         openPRCount: Int = 0,
         activeRun: Run? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        cloudSessionURL: String? = nil
     ) {
         self.init(
             id: id,
@@ -347,7 +353,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
             status: status,
             flowSteps: flowSteps,
             createdAt: createdAt,
-            parentWaveId: nil
+            parentWaveId: nil,
+            cloudSessionURL: cloudSessionURL
         )
     }
 }

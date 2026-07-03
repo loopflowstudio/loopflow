@@ -91,6 +91,9 @@ def _patch_subprocess(
             if "--verify" in cmd:
                 return subprocess.CompletedProcess(cmd, codesign_verify_rc, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, codesign_rc, stdout="", stderr="")
+        if cmd and cmd[0] == "security" and cmd[1:2] == ["find-identity"]:
+            # No signing identity available → ad-hoc signing (the CI/test path).
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(install.subprocess, "run", fake_run)

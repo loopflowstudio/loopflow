@@ -35,11 +35,10 @@ pub fn run(name: &str) -> Result<()> {
     let wave_name = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
 
-    let stop_file = main_repo.join("wave").join(&wave_name).join(STOP_FILE);
-    let lf = resolve_lf_binary();
-
     let wave_dir = main_repo.join("wave").join(&wave_name);
+    let stop_file = wave_dir.join(STOP_FILE);
     let streams_dir = wave_dir.join("streams");
+    let lf = resolve_lf_binary();
 
     println!("lf wave · {wave_name} · loopflow owns the outer loop (Ctrl-C to stop)");
 
@@ -56,7 +55,7 @@ pub fn run(name: &str) -> Result<()> {
         pass += 1;
         println!("-- lf wave · {wave_name} · pass {pass} --");
 
-        match run_pass(&lf, &main_repo, &wave_name, pass, &streams_dir) {
+        match run_pass(&lf, &main_repo, &wave_name, pass, &streams_dir)? {
             PassOutcome::Ok { log_path } => {
                 println!(
                     "lf wave · pass {pass} stream captured at {}",
@@ -76,28 +75,31 @@ pub fn run(name: &str) -> Result<()> {
                 println!("lf wave · {wave_name} · interrupted ({pass} passes)");
                 return Ok(());
             }
-            PassOutcome::SpawnError(err) => return Err(err),
         }
     }
 }
 
+/// The outcome of a pass that actually ran. Setup failures (spawn, pipes, log
+/// I/O) propagate as `Err` from `run_pass`, not as a variant here.
 enum PassOutcome {
     Ok { log_path: PathBuf },
     Failed(ExitStatus),
     Signaled,
-    SpawnError(anyhow::Error),
 }
 
 /// Run one bounded pass: `lf -b goal <wave> --once`, teeing stdout/stderr to
 /// the terminal and to a durable stream log for later monitor/chat summarization.
-fn run_pass(lf: &Path, repo: &Path, wave: &str, pass: u32, streams_dir: &Path) -> PassOutcome {
+fn run_pass(
+    lf: &Path,
+    repo: &Path,
+    wave: &str,
+    pass: u32,
+    streams_dir: &Path,
+) -> Result<PassOutcome> {
     let log_path = stream_log_path(streams_dir, pass);
-    let log_file = match create_stream_log(&log_path) {
-        Ok(file) => Arc::new(Mutex::new(file)),
-        Err(err) => return PassOutcome::SpawnError(err),
-    };
+    let log_file = Arc::new(Mutex::new(create_stream_log(&log_path)?));
 
-    let mut child = match Command::new(lf)
+    let mut child = Command::new(lf)
         .arg("-b")
         .arg("goal")
         .arg(wave)
@@ -106,52 +108,33 @@ fn run_pass(lf: &Path, repo: &Path, wave: &str, pass: u32, streams_dir: &Path) -
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-    {
-        Ok(child) => child,
-        Err(err) => {
-            return PassOutcome::SpawnError(anyhow!(
-                "failed to spawn `lf -b goal {wave} --once`: {err}"
-            ))
-        }
-    };
+        .with_context(|| format!("failed to spawn `lf -b goal {wave} --once`"))?;
 
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| anyhow!("missing stdout pipe for `lf -b goal {wave} --once`"));
+        .ok_or_else(|| anyhow!("missing stdout pipe for `lf -b goal {wave} --once`"))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| anyhow!("missing stderr pipe for `lf -b goal {wave} --once`"));
-
-    let stdout = match stdout {
-        Ok(stdout) => stdout,
-        Err(err) => return PassOutcome::SpawnError(err),
-    };
-    let stderr = match stderr {
-        Ok(stderr) => stderr,
-        Err(err) => return PassOutcome::SpawnError(err),
-    };
+        .ok_or_else(|| anyhow!("missing stderr pipe for `lf -b goal {wave} --once`"))?;
 
     let stdout_thread = tee_stream(stdout, io::stdout(), Arc::clone(&log_file));
     let stderr_thread = tee_stream(stderr, io::stderr(), Arc::clone(&log_file));
 
     let status = child.wait();
-    let stdout_result = join_stream_thread(stdout_thread, "stdout");
-    let stderr_result = join_stream_thread(stderr_thread, "stderr");
+    join_stream_thread(stdout_thread, "stdout")?;
+    join_stream_thread(stderr_thread, "stderr")?;
+    let status =
+        status.with_context(|| format!("failed to wait for `lf -b goal {wave} --once`"))?;
 
-    if let Err(err) = stdout_result.and(stderr_result) {
-        return PassOutcome::SpawnError(err);
-    }
-
-    match status {
-        Ok(status) if status.success() => PassOutcome::Ok { log_path },
-        Ok(status) if status.code().is_none() => PassOutcome::Signaled,
-        Ok(status) => PassOutcome::Failed(status),
-        Err(err) => PassOutcome::SpawnError(anyhow!(
-            "failed to wait for `lf -b goal {wave} --once`: {err}"
-        )),
-    }
+    Ok(if status.success() {
+        PassOutcome::Ok { log_path }
+    } else if status.code().is_none() {
+        PassOutcome::Signaled
+    } else {
+        PassOutcome::Failed(status)
+    })
 }
 
 fn stream_log_path(streams_dir: &Path, pass: u32) -> PathBuf {
@@ -208,13 +191,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn signaled_status_classified_as_interrupt() {
-        // A pass that fails (non-signal) cools down and retries; a signaled pass
-        // stops the loop. Guard the classification used in `run_pass`.
+    fn spawn_failure_propagates_as_error() {
+        // A missing inner binary is a setup failure, not a pass outcome — it
+        // surfaces as `Err`, bubbling out of the loop rather than cooling down.
         let missing = Path::new("/definitely/not/a/real/lf-binary");
         let streams_dir = tempfile::tempdir().unwrap();
-        let outcome = run_pass(missing, Path::new("/tmp"), "ghost", 1, streams_dir.path());
-        assert!(matches!(outcome, PassOutcome::SpawnError(_)));
+        let result = run_pass(missing, Path::new("/tmp"), "ghost", 1, streams_dir.path());
+        assert!(result.is_err());
     }
 
     #[test]

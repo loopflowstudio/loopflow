@@ -233,13 +233,9 @@ impl PostgresStore {
                     &[
                         &wave.id().as_str(),
                         &wave.name().as_str(),
-                        &wave.repo().as_str(),
                         &direction_json.as_str(),
                         &area_json.as_str(),
                         &paused,
-                        &(wave.status().as_i32()),
-                        &(wave.iteration() as i32),
-                        &(wave.cycle_start_iteration() as i32),
                         &created_at,
                         &workers,
                         &mode,
@@ -1310,17 +1306,11 @@ impl PostgresStore {
                     ],
                 )
                 .await?;
-            // Runs that were in flight are now Failed; the waves that owned
-            // them would otherwise stay stuck in Running/Waiting and the UI
-            // would keep their action buttons disabled. Reset them back to
-            // Idle.
+            // Runs that were in flight are now Failed; the repos that owned
+            // them would otherwise stay stuck in Running/Waiting and the
+            // rolled-up wave status would keep action buttons disabled. Reset
+            // them back to Idle.
             let stale_wave_statuses = [WaveStatus::Running.as_i32(), WaveStatus::Waiting.as_i32()];
-            client
-                .execute(
-                    Self::sql(Query::ResetStaleActiveWaves),
-                    &[&WaveStatus::Idle.as_i32(), &&stale_wave_statuses[..]],
-                )
-                .await?;
             client
                 .execute(
                     Self::sql(Query::ResetStaleActiveRepos),

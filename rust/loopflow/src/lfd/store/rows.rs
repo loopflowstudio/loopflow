@@ -98,31 +98,23 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
-/// SELECT id, name, repo, direction, area, paused, status, iteration,
-///        cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics
+/// SELECT id, name, direction, area, paused, created_at, workers, mode,
+///        primary_flow, goal, metrics
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
-    let direction = parse_json_vec(&row.text(3)?)?;
-    let area = parse_json_vec(&row.text(4)?)?;
-    let paused = row.int(5)? != 0;
-    let status_value = row.int(6)?;
-    let iteration = row.int(7)? as u32;
-    let cycle_start_iteration = row.int(8)? as u32;
-    let created_at = unix_to_datetime(row.bigint(9)?);
-    let workers = row.int(10)? as u32;
-    let mode_str = row.text(11)?;
+    let direction = parse_json_vec(&row.text(2)?)?;
+    let area = parse_json_vec(&row.text(3)?)?;
+    let paused = row.int(4)? != 0;
+    let created_at = unix_to_datetime(row.bigint(5)?);
+    let workers = row.int(6)? as u32;
+    let mode_str = row.text(7)?;
     let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
-    let primary_flow = row.text(12)?;
-    let goal = row.text(13)?;
-    let metrics = parse_json_vec(&row.text(14)?)?;
-    let mut status = WaveStatus::from_i32(status_value);
-    if paused {
-        status = WaveStatus::Paused;
-    }
+    let primary_flow = row.text(8)?;
+    let goal = row.text(9)?;
+    let metrics = parse_json_vec(&row.text(10)?)?;
 
     Ok(Wave {
         id: LfdId::from_raw(row.text(0)?),
         name: row.text(1)?,
-        repo: row.text(2)?,
         mode,
         primary_flow,
         goal,
@@ -131,9 +123,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         repos: Vec::new(),
         direction,
         area,
-        status,
-        iteration,
-        cycle_start_iteration,
+        paused,
         created_at: Some(created_at),
         workers,
     })

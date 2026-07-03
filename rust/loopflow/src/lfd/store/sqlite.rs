@@ -229,7 +229,6 @@ impl SqliteStore {
             params![
                 wave.id(),
                 wave.name(),
-                wave.repo(),
                 direction_json,
                 area_json,
                 if wave.status() == WaveStatus::Paused {
@@ -237,9 +236,6 @@ impl SqliteStore {
                 } else {
                     0i64
                 },
-                wave.status().as_i32() as i64,
-                wave.iteration() as i64,
-                wave.cycle_start_iteration() as i64,
                 created_at,
                 wave.workers as i64,
                 wave.mode().as_str(),
@@ -1257,17 +1253,9 @@ impl SqliteStore {
                 RunStatus::Waiting.as_i32() as i64,
             ],
         )?;
-        // Runs that were in flight are now Failed; the waves that owned them
-        // would otherwise stay stuck in Running/Waiting and the UI would keep
-        // their action buttons disabled. Reset them back to Idle.
-        conn.execute(
-            Self::sql(Query::ResetStaleActiveWaves),
-            params![
-                WaveStatus::Idle.as_i32() as i64,
-                WaveStatus::Running.as_i32() as i64,
-                WaveStatus::Waiting.as_i32() as i64,
-            ],
-        )?;
+        // Runs that were in flight are now Failed; the repos that owned them
+        // would otherwise stay stuck in Running/Waiting and the rolled-up wave
+        // status would keep their action buttons disabled. Reset them to Idle.
         conn.execute(
             Self::sql(Query::ResetStaleActiveRepos),
             params![

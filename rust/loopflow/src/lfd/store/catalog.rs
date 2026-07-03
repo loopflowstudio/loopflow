@@ -28,7 +28,6 @@ pub(crate) enum Query {
     UpdateRun,
     ListStackRuns,
     FailOrphanedRuns,
-    ResetStaleActiveWaves,
     GetLivePrState,
     UpsertLivePrState,
     ListTriggers,
@@ -104,7 +103,6 @@ impl Query {
         Self::UpdateRun,
         Self::ListStackRuns,
         Self::FailOrphanedRuns,
-        Self::ResetStaleActiveWaves,
         Self::GetLivePrState,
         Self::UpsertLivePrState,
         Self::ListTriggers,
@@ -176,27 +174,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, repo, direction, area, paused, status, iteration, cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics",
+        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, mode, primary_flow, goal, metrics\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -270,15 +268,6 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
         postgres_override: Some(
             "UPDATE runs SET status = {p1}, error = {p2}, ended_at = {p3}\n             WHERE status = ANY({p4})",
-        ),
-    },
-    QueryDef {
-        // Reset waves whose runs were just orphaned back to Idle so the UI
-        // doesn't leave them stuck in Running/Waiting after an lfd restart.
-        template: "UPDATE waves SET status = {p1}\n             WHERE status IN ({p2}, {p3})",
-        sqlite_override: None,
-        postgres_override: Some(
-            "UPDATE waves SET status = {p1}\n             WHERE status = ANY({p2})",
         ),
     },
     QueryDef {
@@ -488,7 +477,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListLoopableWaves
     QueryDef {
-        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, workers, mode, primary_flow, goal, metrics\n             FROM waves\n             WHERE mode = 'loop' AND status != 4\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics\n             FROM waves\n             WHERE mode = 'loop' AND paused = 0\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -500,7 +489,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListAllActiveCrons
     QueryDef {
-        template: "SELECT wc.id, wc.wave_id, wc.flow, wc.schedule, wc.last_triggered_at, wc.created_at\n             FROM wave_crons wc\n             JOIN waves w ON wc.wave_id = w.id\n             WHERE w.status != 4\n             ORDER BY wc.wave_id, wc.created_at, wc.flow, wc.schedule, wc.id",
+        template: "SELECT wc.id, wc.wave_id, wc.flow, wc.schedule, wc.last_triggered_at, wc.created_at\n             FROM wave_crons wc\n             JOIN waves w ON wc.wave_id = w.id\n             WHERE w.paused = 0\n             ORDER BY wc.wave_id, wc.created_at, wc.flow, wc.schedule, wc.id",
         sqlite_override: None,
         postgres_override: None,
     },

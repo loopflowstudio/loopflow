@@ -199,23 +199,9 @@ impl Store {
     }
 
     /// Persist the wave's `repos` as the source of truth for per-repo execution
-    /// state (worktree/branch/status/iteration). The flat wave columns are
-    /// derived from the rollup in `upsert_wave`. If a wave somehow carries no
-    /// repos, synthesize its primary row from the flat fields so we never wipe
-    /// the `wave_repos` table.
+    /// state (worktree/branch/status/iteration). The wave-level `paused` column
+    /// is written in `upsert_wave`.
     async fn persist_wave_repos(&self, wave: &Wave) -> StoreResult<()> {
-        if wave.repos.is_empty() {
-            let repos = vec![RepoWork {
-                repo: wave.repo.clone(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: wave.status,
-                iteration: wave.iteration,
-                cycle_start_iteration: wave.cycle_start_iteration,
-                position: 0,
-            }];
-            return self.replace_wave_repos(wave.id(), &repos).await;
-        }
         self.replace_wave_repos(wave.id(), &wave.repos).await
     }
 
@@ -2080,7 +2066,6 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            repo: repo.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
@@ -2097,9 +2082,7 @@ mod tests {
             }],
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
+            paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
         }
@@ -2560,7 +2543,7 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(
-            running_after.status,
+            running_after.status(),
             WaveStatus::Idle,
             "wave whose run was orphaned should be reset to Idle"
         );
@@ -2570,7 +2553,7 @@ mod tests {
             .expect("get waiting wave")
             .expect("wave exists");
         assert_eq!(
-            waiting_after.status,
+            waiting_after.status(),
             WaveStatus::Idle,
             "waiting-state wave should also be reset to Idle"
         );
@@ -2580,7 +2563,7 @@ mod tests {
             .expect("get paused wave")
             .expect("wave exists");
         assert_eq!(
-            paused_after.status,
+            paused_after.status(),
             WaveStatus::Paused,
             "paused wave must keep its status across orphan cleanup"
         );

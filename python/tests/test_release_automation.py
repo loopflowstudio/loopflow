@@ -329,8 +329,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert 'export LFD_HTTP_ADDR="127.0.0.1:${port}"' in tailscale_host
     assert '"$ts" serve --bg --https="$https_port" "http://127.0.0.1:${port}"' in tailscale_host
     assert '"$ts" serve --https="$https_port" off' in tailscale_host
-    assert 'install | install-update-agent | update | restart | status | logs | health | serve-off)' in tailscale_host
-    assert 'install | install-update-agent | update | restart | status | logs | health | serve | serve-off)' not in tailscale_host
+    usage_line = "install | install-update-agent | update | restart | status | logs | health"
+    assert f"{usage_line} | serve-off)" in tailscale_host
+    assert f"{usage_line} | serve | serve-off)" not in tailscale_host
 
     private_client = (ROOT / "deploy/setup-private-client.sh").read_text()
     assert "Host is required. Pass --host or set LFD_HOST." in private_client

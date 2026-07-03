@@ -111,8 +111,8 @@ def main() -> int:
             ),
             ("websocket_connected", lambda: _scenario_websocket(ws)),
             (
-                "wave_run_and_logs",
-                lambda: _scenario_wave_run_logs(
+                "wave_session_and_logs",
+                lambda: _scenario_wave_session_logs(
                     api,
                     repo_path,
                     args.logs_timeout,
@@ -207,7 +207,7 @@ def _scenario_sse_streaming(
 
         input_response = api.request(
             "POST",
-            f"/v0/sessions/{session_id}/input",
+            f"/v0/conversations/{session_id}/input",
             json={"text": "Reply with one short sentence."},
         )
         ApiAssertions.expect_status(input_response, 200)
@@ -216,7 +216,7 @@ def _scenario_sse_streaming(
         seen_session_event = False
         current_event_name = ""
 
-        with api.stream("GET", f"/v0/sessions/{session_id}/events") as response:
+        with api.stream("GET", f"/v0/conversations/{session_id}/events") as response:
             ApiAssertions.expect_status(response, 200)
             for line in response.iter_lines():
                 if time.monotonic() > deadline:
@@ -255,7 +255,7 @@ def _scenario_websocket(ws: WebSocketClient) -> None:
     _expect_connected_message(payload)
 
 
-def _scenario_wave_run_logs(
+def _scenario_wave_session_logs(
     api: ApiClient,
     repo_path: str,
     logs_timeout: float,
@@ -264,11 +264,13 @@ def _scenario_wave_run_logs(
     wave_id = _create_wave(api, repo_path, "remote-smoke-run")
     cleanup_waves.append(wave_id)
 
-    run_response = api.request("POST", f"/v0/waves/{wave_id}/run", json={})
-    ApiAssertions.expect_status(run_response, 200)
-    run_payload = ApiAssertions.expect_json_object(run_response)
-    if "started" not in run_payload:
-        raise AssertionError(f"run response missing 'started': {run_payload!r}")
+    session_response = api.request("POST", f"/v0/waves/{wave_id}/run", json={})
+    ApiAssertions.expect_status(session_response, 200)
+    session_payload = ApiAssertions.expect_json_object(session_response)
+    if session_payload.get("object") != "session":
+        raise AssertionError(f"run response was not a session: {session_payload!r}")
+    if session_payload.get("use") != "wave_agent":
+        raise AssertionError(f"run session had unexpected use: {session_payload!r}")
 
     deadline = time.monotonic() + logs_timeout
     saw_output_line = False

@@ -17,7 +17,7 @@ from typing import Any, Iterator
 import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "rust/loopflow/src/lfd/sessions/harness/testdata"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "rust/loopflow/src/lfd/conversations/harness/testdata"
 DEFAULT_TIMEOUT_SECONDS = 60
 
 

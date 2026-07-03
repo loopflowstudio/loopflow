@@ -92,17 +92,26 @@ struct TerminalWorkspaceStoreTests {
         id: String,
         waveId: String? = nil,
         createdAt: TimeInterval,
-        status: TerminalSessionStatus = .pending
-    ) -> TerminalSession {
-        TerminalSession(
+        status: SessionStatus = .pending
+    ) -> Session {
+        Session(
             id: id,
             waveId: waveId ?? "wave-\(id)",
+            runId: nil,
+            parentSessionId: nil,
+            sessionUse: .worker,
             step: "implement",
             agent: "claude",
             cwd: "/tmp/repo",
+            argv: [],
+            env: [:],
+            source: "wave_step",
             tmuxName: "lf-test-\(id)",
             status: status,
-            createdAt: Date(timeIntervalSince1970: createdAt)
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            attachedAt: nil,
+            startedAt: nil,
+            completedAt: nil
         )
     }
 }

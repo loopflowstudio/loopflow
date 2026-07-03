@@ -1,7 +1,7 @@
 CREATE TABLE attention_items (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id),
-    run_id TEXT REFERENCES wave_runs(id),
+    run_id TEXT REFERENCES runs(id),
     kind TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'surfaced',
     title TEXT NOT NULL,

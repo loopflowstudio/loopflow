@@ -28,37 +28,38 @@ public protocol WaveServiceProtocol: Sendable {
     func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
-    func run(_ id: String, overrides: RunOverrides?) async throws
+    func ensureWaveAgent(waveId: String, overrides: RunOverrides?) async throws -> Session
+    func getWaveAgentTree(waveId: String, activeOnly: Bool) async throws -> WaveAgentTree
     func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String?) async throws -> Trigger
     func removeTrigger(_ waveId: String, triggerId: String) async throws
     func createSession(
         harness: String,
-        waveRunId: String?,
+        runId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession
-    func streamSessionEvents(
-        sessionId: String,
+    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession
+    func streamConversationEvents(
+        conversationId: String,
         afterSeq: Int?
-    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error>
+    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error>
     func stopSession(_ id: String) async throws -> AgentSession
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
     func listAttention(repo: RepoTarget) async throws -> [AttentionItem]
     func getAttention(_ id: String) async throws -> AttentionItem
     func markAttentionViewed(_ id: String) async throws -> AttentionItem
-    func listTerminalSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [TerminalSession]
-    func createTerminalSession(
+    func listSessions(repo: RepoTarget, activeOnly: Bool) async throws -> [Session]
+    func createSession(
         waveId: String,
         flow: String,
         worktree: String,
         agent: String
-    ) async throws -> TerminalSessionLaunchResponse
-    func getTerminalSession(_ id: String) async throws -> TerminalSession
-    func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo
-    func startTerminalSession(_ id: String) async throws -> TerminalSession
-    func cancelTerminalSession(_ id: String) async throws -> TerminalSession
+    ) async throws -> SessionLaunchResponse
+    func getSession(_ id: String) async throws -> Session
+    func attachSession(_ id: String) async throws -> SessionConnectionInfo
+    func startSession(_ id: String) async throws -> Session
+    func cancelSession(_ id: String) async throws -> Session
     func landWave(_ id: String) async throws
     func nextWave(_ id: String) async throws -> String
     func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult

@@ -1,10 +1,10 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, ActivationOutcome, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage,
-    LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo, RepoEdge, RepoId,
-    Signal, Summary, Trigger, Wave, WaveCron, WaveMode, WaveRun, WaveRunSnapshot,
-    WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
+    ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
+    Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave,
+    WaveCron, WaveMode, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -174,7 +174,7 @@ pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
 ///        flow_parents, execution_cursor, activation_log_id, parent_run_id,
 ///        parent_pr_number, stack_position, stack_group_id, stack_status,
 ///        lineage_inferred, target_branch, repair_of
-pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
+pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
     let started_at = unix_to_datetime(row.bigint(7)?);
     let ended_at = row.opt_bigint(8)?;
     let snapshot_direction = parse_json_vec(&row.text(13)?)?;
@@ -187,26 +187,22 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let parent_pr_number = row.opt_bigint(20)?.map(|value| value as u32);
     let stack_position = row.int(21)? as u32;
     let stack_group_id = row.text(22)?;
-    let stack_status = WaveRunStackStatus::from_i32(row.int(23)?);
+    let stack_status = RunStackStatus::from_i32(row.int(23)?);
     let lineage_inferred = row.int(24)? != 0;
     let target_branch = row.text(25)?;
     let repair_of = row.opt_text(26)?.map(LfdId::from_raw);
 
-    let snapshot = WaveRunSnapshot {
+    Ok(Run {
+        id: LfdId::from_raw(row.text(0)?),
+        wave_id: LfdId::from_raw(row.text(1)?),
         repo: row.text(10)?,
         flow: row.text(11)?,
         task: row.opt_text(12)?,
         direction: snapshot_direction,
         area: snapshot_area,
-    };
-
-    Ok(WaveRun {
-        id: LfdId::from_raw(row.text(0)?),
-        wave_id: LfdId::from_raw(row.text(1)?),
-        snapshot,
         iteration: row.int(2)? as u32,
         step_index: row.int(3)? as u32,
-        status: WaveRunStatus::from_i32(row.int(4)?),
+        status: RunStatus::from_i32(row.int(4)?),
         worktree: row.text(5)?,
         branch: row.text(6)?,
         started_at: Some(started_at),
@@ -292,14 +288,14 @@ pub fn map_activation_log_row(row: &impl StoreRow) -> StoreResult<ActivationLog>
     })
 }
 
-/// SELECT id, wave_run_id, step_index, branch_index, status, worktree
+/// SELECT id, run_id, step_index, branch_index, status, worktree
 pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
     let status = ForkRunStatus::from_i64(row.int(4)? as i64)
         .ok_or_else(|| StoreError::InvalidData("invalid fork run status".to_string()))?;
 
     Ok(ForkRun {
         id: LfdId::from_raw(row.text(0)?),
-        wave_run_id: LfdId::from_raw(row.text(1)?),
+        run_id: LfdId::from_raw(row.text(1)?),
         step_index: row.int(2)? as u32,
         branch_index: row.int(3)? as u32,
         status,
@@ -307,22 +303,22 @@ pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
     })
 }
 
-/// SELECT id, step, repo, worktree, wave_run_id, status,
+/// SELECT id, step, repo, worktree, run_id, status,
 ///        started_at, ended_at, pid, container_id, model, run_mode
-pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<AgentRun> {
+pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<ExecutionProcess> {
     let started_at = unix_to_datetime(row.bigint(6)?);
     let ended_at = row.opt_bigint(7)?;
     let pid = row.opt_int(8)?;
     let container_id = row.opt_text(9)?;
-    let wave_run_id = row.opt_text(4)?;
+    let run_id = row.opt_text(4)?;
 
-    Ok(AgentRun {
+    Ok(ExecutionProcess {
         id: LfdId::from_raw(row.text(0)?),
         step: row.text(1)?,
         repo: row.text(2)?,
         worktree: row.text(3)?,
-        wave_run_id: wave_run_id.map(LfdId::from_raw),
-        status: AgentStatus::from_i32(row.int(5)?),
+        run_id: run_id.map(LfdId::from_raw),
+        status: ExecutionProcessStatus::from_i32(row.int(5)?),
         started_at: Some(started_at),
         ended_at: ended_at.map(unix_to_datetime),
         pid: pid.map(|v| v as u32),

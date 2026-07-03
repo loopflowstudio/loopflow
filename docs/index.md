@@ -86,16 +86,14 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 |------|--------------|------|
 | **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
 | **Flow** | Chains steps together | `.lf/flows/*.yaml` |
-| **Goal** | Runs a wave loop prompt | `wave/<name>/goal.md` |
+| **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
+| **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
-| **Area** | Focuses on part of the codebase | path argument |
 | **Mode** | Primary execution pattern: manual or loop | goal frontmatter / lfd |
 | **Cron** | Scheduled supplementary flow | lfd |
 | **Trigger** | Signal + flow: repo, wave, ci_failure | lfd |
 
-A wave is **goal × flow × runtime state**. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
-
-Area is the path you pass—not a file. It scopes what the wave sees and changes.
+A wave is a named agent with a goal. Its `GOAL.md` and `MEMORY.md` are authored in the repo; lfd tracks mode, crons, triggers, status, and live sessions. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
 
 | Mode | Runs |
 |------|------|
@@ -213,32 +211,17 @@ direction adds code-model rigor. Stack them to get both.
 
 ---
 
-## Wave Area
+## Docs
 
-The path you pass to `lfq`/`loopflow` when configuring waves. Scopes what the wave works on.
-
-```bash
-lfq create shipper .
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.update_wave("shipper", flow="build", area=["src/api/"])
-loopflow.run_wave("shipper")
-PY
-```
-
-Combined with flow and direction, area scopes live wave updates. Manual runs use `--docs` to prefetch files, globs, or directories:
+Repo docs are not auto-injected. A step sees only the essentials (see [What's Auto-Included](#whats-auto-included)); prefetch anything else with `--docs` — a file, a glob, or a directory:
 
 ```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.update_wave("shipper", flow="build", area=["src/api/"], direction=["clarity"])
-loopflow.run_wave("shipper")
-PY
-
-lf gate --docs src/api/
+lf gate --docs VISUAL_DESIGN.md      # one doc
+lf gate --docs 'docs/*.md'           # a glob
+lf gate --docs swift/                # every .md under a directory
 ```
+
+Point `--docs` at what a task actually needs, and let `AGENTS.md` point at the rest.
 
 ---
 
@@ -265,14 +248,11 @@ wave/                     # Wave plans (persists)
 | **Location** | Root only | Root + per-folder |
 | **Example** | "Add auth" spec | "How auth should work long-term" |
 
-`wave/` can exist at any level:
-- Root `wave/` is auto-included when a wave is in scope
-- `src/api/wave/` holds API-specific plans
-- Include extra docs explicitly with `--docs README.md,docs/`
+`wave/<name>/` holds a wave's goal, memory, and plans. Root `wave/` is auto-included in every prompt.
 
 ### What's Auto-Included
 
-Every step sees native agent instructions, LOOPFLOW.md, `scratch/`, and scoped `wave/`. Add repo docs with `--docs`; add branch changes with `--diff`.
+Every step sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPFLOW.md`, `scratch/`, and `wave/`. Nothing else — pull in extra docs with `--docs`, branch file bodies with `--diff-files`, and raw patches with `--diff`.
 
 ---
 

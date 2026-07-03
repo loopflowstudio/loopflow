@@ -1,4 +1,4 @@
-//! Wave and WaveRun types.
+//! Wave and Run types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -64,7 +64,7 @@ impl std::str::FromStr for WaveStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum WaveRunStatus {
+pub enum RunStatus {
     #[default]
     Unspecified = 0,
     Pending = 1,
@@ -74,7 +74,7 @@ pub enum WaveRunStatus {
     Failed = 5,
 }
 
-impl WaveRunStatus {
+impl RunStatus {
     pub fn from_i32(value: i32) -> Self {
         match value {
             1 => Self::Pending,
@@ -93,14 +93,14 @@ impl WaveRunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum WaveRunStackStatus {
+pub enum RunStackStatus {
     #[default]
     Active = 1,
     Superseded = 2,
     Merged = 3,
 }
 
-impl WaveRunStackStatus {
+impl RunStackStatus {
     pub fn from_i32(value: i32) -> Self {
         match value {
             2 => Self::Superseded,
@@ -340,23 +340,18 @@ pub struct PullRequest {
     pub branch: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct WaveRunSnapshot {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Run {
+    pub id: LfdId,
+    pub wave_id: LfdId,
     pub repo: String,
     pub flow: String,
     pub task: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveRun {
-    pub id: LfdId,
-    pub wave_id: LfdId,
-    pub snapshot: WaveRunSnapshot,
     pub iteration: u32,
     pub step_index: u32,
-    pub status: WaveRunStatus,
+    pub status: RunStatus,
     pub worktree: String,
     pub branch: String,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -373,7 +368,7 @@ pub struct WaveRun {
     pub stack_position: u32,
     pub stack_group_id: String,
     #[serde(default)]
-    pub stack_status: WaveRunStackStatus,
+    pub stack_status: RunStackStatus,
     #[serde(default)]
     pub lineage_inferred: bool,
     /// The branch this run targets. "main" means new branch off main (produce
@@ -431,16 +426,20 @@ pub struct QueueMergeEvent {
     pub processed_at: OffsetDateTime,
 }
 
-impl WaveRun {
+impl Run {
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
         let stack_group_id = wave_id.to_string();
         Self {
             id,
             wave_id,
-            snapshot: WaveRunSnapshot::default(),
+            repo: String::new(),
+            flow: String::new(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
             iteration: 0,
             step_index: 0,
-            status: WaveRunStatus::Pending,
+            status: RunStatus::Pending,
             worktree: String::new(),
             branch: String::new(),
             started_at: Some(OffsetDateTime::now_utc()),
@@ -453,7 +452,7 @@ impl WaveRun {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id,
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,

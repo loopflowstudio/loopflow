@@ -11,17 +11,17 @@ struct CommitFeedUpdateDecision: Equatable {
 func evaluateCommitFeedUpdate(
     previousCommitSHAs: Set<String>,
     commits: [CommitEntry],
-    isWaveRunning: Bool
+    isRunning: Bool
 ) -> CommitFeedUpdateDecision {
     let currentCommitSHAs = Set(commits.map(\.sha))
     let newCommitSHAs = currentCommitSHAs.subtracting(previousCommitSHAs)
     let isInitialSnapshot = previousCommitSHAs.isEmpty
-    let shouldAnimateInsertion = isWaveRunning && !isInitialSnapshot && !newCommitSHAs.isEmpty
+    let shouldAnimateInsertion = isRunning && !isInitialSnapshot && !newCommitSHAs.isEmpty
 
     return CommitFeedUpdateDecision(
         currentCommitSHAs: currentCommitSHAs,
         newCommitSHAs: newCommitSHAs,
         shouldAnimateInsertion: shouldAnimateInsertion,
-        shouldInvalidateDiffCache: isWaveRunning && !newCommitSHAs.isEmpty
+        shouldInvalidateDiffCache: isRunning && !newCommitSHAs.isEmpty
     )
 }

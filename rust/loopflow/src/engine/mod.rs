@@ -27,7 +27,7 @@ pub use agent::{
 };
 pub use command::{run_command, CommandError};
 pub use config::{
-    load_config, load_config_or_default, parse_agent, Config, LaunchTarget, SessionConfig,
+    load_config, load_config_or_default, parse_agent, Config, ConversationConfig, LaunchTarget,
 };
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{

@@ -219,7 +219,7 @@ struct WaveModelTests {
 
     @Test("displayFlow prefers active run flow")
     func displayFlowPrefersActiveRunFlow() {
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "design",
@@ -243,7 +243,7 @@ struct WaveModelTests {
 
     @Test("displayFlowSteps collapse to active run flow when override is running")
     func displayFlowStepsPreferActiveRunOverride() {
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "design",
@@ -266,7 +266,7 @@ struct WaveModelTests {
 
     @Test("displayFlowSteps ignore equivalent active run flow formatting")
     func displayFlowStepsIgnoreEquivalentRunFlowFormatting() {
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: " ship-roadmap ",
@@ -460,7 +460,7 @@ struct FlowStepProgressTests {
 
     @Test("stepIndex reflects active run step_index")
     func stepIndexFromActiveRun() {
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "start",
@@ -500,7 +500,7 @@ struct FlowStepProgressTests {
 
     @Test("stepIndex advances when active run updates")
     func stepIndexAdvancesWithRun() {
-        let run0 = WaveRun(
+        let run0 = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "build",
@@ -508,7 +508,7 @@ struct FlowStepProgressTests {
             repo: "/tmp/repo",
             stepIndex: 0
         )
-        let run1 = WaveRun(
+        let run1 = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "build",
@@ -552,7 +552,7 @@ struct WaveStoreReactivityTests {
         let store = WaveStore()
 
         // Initial wave at step 0
-        let run0 = WaveRun(
+        let run0 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
             stepIndex: 0
         )
@@ -567,7 +567,7 @@ struct WaveStoreReactivityTests {
         #expect(store.wave(for: "wave-1")?.stepIndex == 0)
 
         // Simulate wave_updated event: re-fetch returns step 1
-        let run1 = WaveRun(
+        let run1 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
             stepIndex: 1
         )
@@ -649,13 +649,13 @@ struct ParseWaveFromJSONTests {
     }
 }
 
-@Suite("WaveRun helpers")
-struct WaveRunHelpersTests {
+@Suite("Run helpers")
+struct RunHelpersTests {
     @Test("duration formats minutes and seconds")
     func durationFormatsMinutesAndSeconds() {
         let start = Date(timeIntervalSince1970: 0)
         let end = Date(timeIntervalSince1970: 125)
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "build",
@@ -670,7 +670,7 @@ struct WaveRunHelpersTests {
 
     @Test("relativeTime returns non-empty value")
     func relativeTimeNonEmpty() {
-        let run = WaveRun(
+        let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "build",

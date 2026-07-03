@@ -2,8 +2,8 @@
 """Verify lfd-owned embedded terminal lifecycle.
 
 Starts lfd, creates a throwaway wave for the current repo, launches a palette
-terminal session through POST /v0/terminal-sessions, and proves the tmux session
-stays attachable after the lf command exits.
+session through POST /v0/sessions, and proves the tmux session stays attachable
+after the lf command exits.
 
 Usage:
     uv run python scripts/verify_embedded_build_driver.py
@@ -127,15 +127,15 @@ def tmux_has_session(name: str) -> bool:
     return run(["tmux", "has-session", "-t", name], capture_output=True).returncode == 0
 
 
-def wait_for_terminal_status(token: str, session_id: str, timeout: float = 30) -> dict:
+def wait_for_session_status(token: str, session_id: str, timeout: float = 30) -> dict:
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
-        last = request("GET", f"/terminal-sessions/{session_id}", token)
+        last = request("GET", f"/sessions/{session_id}", token)
         if last["status"] in {"succeeded", "failed", "canceled"}:
             return last
         time.sleep(0.5)
-    fail(f"terminal session did not reach terminal status: {last}")
+    fail(f"session did not reach terminal status: {last}")
 
 
 def main() -> None:
@@ -168,7 +168,7 @@ def main() -> None:
         )
         created = request(
             "POST",
-            "/terminal-sessions",
+            "/sessions",
             token,
             {
                 "wave_id": wave["id"],
@@ -184,11 +184,13 @@ def main() -> None:
         assert connection["session_name"] == session["tmux_name"]
         if not tmux_has_session(session["tmux_name"]):
             fail("tmux session was not created")
-        completed = wait_for_terminal_status(token, session["id"])
+        completed = wait_for_session_status(token, session["id"])
         if not tmux_has_session(session["tmux_name"]):
             fail("palette tmux session exited instead of staying attachable")
+        reattached = request("POST", f"/sessions/{session['id']}/attach", token, {})
+        assert reattached["session_name"] == session["tmux_name"]
         log(f"OK: {completed['status']} session stayed attachable at {session['tmux_name']}")
-        request("POST", f"/terminal-sessions/{session['id']}/cancel", token, {})
+        request("POST", f"/sessions/{session['id']}/cancel", token, {})
     finally:
         proc.terminate()
         try:

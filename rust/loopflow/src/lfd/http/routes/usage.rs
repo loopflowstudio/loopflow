@@ -7,20 +7,20 @@ use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::lfd::conversations::types::Conversation;
+use crate::lfd::conversations::usage::{
+    aggregate_session_events, aggregate_summary, aggregate_timeseries, aggregate_wave_usage,
+    GroupBy, TimeBucket, UsageConversationData,
+};
 use crate::lfd::http::dto::{
-    format_datetime, SessionUsageDto, SessionUsageSessionDto, UsageSummaryDto, UsageTimeseriesDto,
-    WaveUsageDto,
+    format_datetime, ConversationUsageDto, ConversationUsageSessionDto, UsageSummaryDto,
+    UsageTimeseriesDto, WaveUsageDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::sessions::types::Session;
-use crate::lfd::sessions::usage::{
-    aggregate_session_events, aggregate_summary, aggregate_timeseries, aggregate_wave_usage,
-    GroupBy, TimeBucket, UsageSessionData,
-};
-use crate::lfd::store::SessionFilters;
+use crate::lfd::store::ConversationFilters;
 
 #[derive(Debug, Deserialize)]
 pub struct UsageQuery {
@@ -34,39 +34,39 @@ pub struct UsageQuery {
     pub bucket: Option<String>,
 }
 
-pub async fn get_session_usage_handler(
+pub async fn get_conversation_usage_handler(
     State(state): State<HttpState>,
-    Path(session_id): Path<String>,
-) -> ApiResult<SessionUsageDto> {
-    let session_id = parse_lfd_id(&session_id, "invalid session id")?;
-    let session = state
+    Path(conversation_id): Path<String>,
+) -> ApiResult<ConversationUsageDto> {
+    let conversation_id = parse_lfd_id(&conversation_id, "invalid conversation id")?;
+    let conversation = state
         .store
-        .get_session(&session_id)
+        .get_conversation(&conversation_id)
         .await
         .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "session not found"))?;
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "conversation not found"))?;
     let events = state
         .store
-        .list_session_events(&session_id, None)
+        .list_conversation_events(&conversation_id, None)
         .await
         .map_err(map_store_error)?;
     let usage = aggregate_session_events(&events, None);
 
-    let wave = resolve_session_wave(&state, &session).await?;
+    let wave = resolve_conversation_wave(&state, &conversation).await?;
 
-    Ok(Json(SessionUsageDto {
-        object: "session_usage".to_string(),
-        session_id: session_id.to_string(),
+    Ok(Json(ConversationUsageDto {
+        object: "conversation_usage".to_string(),
+        conversation_id: conversation_id.to_string(),
         tokens: usage.tokens,
         turns: usage.turns,
         context: usage.context,
         models: usage.models,
-        session: SessionUsageSessionDto {
-            step: session.config.step.clone(),
+        conversation: ConversationUsageSessionDto {
+            step: conversation.config.step.clone(),
             wave,
-            status: session.status.as_str().to_string(),
-            created_at: format_datetime(Some(session.created_at)),
-            ended_at: format_datetime(session.ended_at),
+            status: conversation.status.as_str().to_string(),
+            created_at: format_datetime(Some(conversation.created_at)),
+            ended_at: format_datetime(conversation.ended_at),
         },
     }))
 }
@@ -76,19 +76,19 @@ pub async fn get_wave_usage_handler(
     Path(wave_id): Path<String>,
 ) -> ApiResult<WaveUsageDto> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let sessions = state
+    let conversations = state
         .store
-        .list_sessions_for_wave(wave_id.as_str())
+        .list_conversations_for_wave(wave_id.as_str())
         .await
         .map_err(map_store_error)?;
 
-    let session_ids: Vec<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    let conversation_ids: Vec<_> = conversations.iter().map(|s| s.id.clone()).collect();
     let mut events_map = state
         .store
-        .list_events_for_sessions(&session_ids)
+        .list_events_for_conversations(&conversation_ids)
         .await
         .map_err(map_store_error)?;
-    let session_events: Vec<_> = sessions
+    let session_events: Vec<_> = conversations
         .into_iter()
         .map(|s| {
             let events = events_map.remove(&s.id).unwrap_or_default();
@@ -102,7 +102,7 @@ pub async fn get_wave_usage_handler(
         object: "wave_usage".to_string(),
         wave_id: wave_id.to_string(),
         tokens: aggregate.tokens,
-        sessions: aggregate.sessions,
+        conversations: aggregate.sessions,
         turns: aggregate.turns,
         models: aggregate.models,
         by_step: aggregate.by_step,
@@ -114,7 +114,7 @@ pub async fn get_usage_summary_handler(
     Query(query): Query<UsageQuery>,
 ) -> ApiResult<UsageSummaryDto> {
     let validated = validate_usage_query(&state, &query).await?;
-    let usage_sessions = load_usage_session_data(&state, validated.sessions).await?;
+    let usage_sessions = load_usage_session_data(&state, validated.conversations).await?;
     let groups = aggregate_summary(validated.group_by, &usage_sessions, query.model.as_deref());
 
     Ok(Json(UsageSummaryDto {
@@ -142,7 +142,7 @@ pub async fn get_usage_timeseries_handler(
     })?;
 
     let validated = validate_usage_query(&state, &query).await?;
-    let usage_sessions = load_usage_session_data(&state, validated.sessions).await?;
+    let usage_sessions = load_usage_session_data(&state, validated.conversations).await?;
     let buckets = aggregate_timeseries(
         bucket,
         validated.group_by,
@@ -164,7 +164,7 @@ struct ValidatedUsageQuery {
     group_by: GroupBy,
     from: Option<OffsetDateTime>,
     to: Option<OffsetDateTime>,
-    sessions: Vec<Session>,
+    conversations: Vec<Conversation>,
 }
 
 async fn validate_usage_query(
@@ -206,16 +206,16 @@ async fn validate_usage_query(
         None
     };
 
-    let filters = SessionFilters {
+    let filters = ConversationFilters {
         wave,
         flow: query.flow.clone(),
         step: query.step.clone(),
         from: from.map(|datetime| datetime.unix_timestamp()),
         to: to.map(|datetime| datetime.unix_timestamp()),
     };
-    let sessions = state
+    let conversations = state
         .store
-        .list_sessions_filtered(&filters)
+        .list_conversations_filtered(&filters)
         .await
         .map_err(map_store_error)?;
 
@@ -223,35 +223,35 @@ async fn validate_usage_query(
         group_by,
         from,
         to,
-        sessions,
+        conversations,
     })
 }
 
 async fn load_usage_session_data(
     state: &HttpState,
-    sessions: Vec<Session>,
-) -> Result<Vec<UsageSessionData>, ApiError> {
-    let session_ids: Vec<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    conversations: Vec<Conversation>,
+) -> Result<Vec<UsageConversationData>, ApiError> {
+    let conversation_ids: Vec<_> = conversations.iter().map(|s| s.id.clone()).collect();
     let mut events_map = state
         .store
-        .list_events_for_sessions(&session_ids)
+        .list_events_for_conversations(&conversation_ids)
         .await
         .map_err(map_store_error)?;
 
-    let wave_run_meta = load_wave_run_metadata(state, &sessions).await?;
+    let run_meta = load_run_metadata(state, &conversations).await?;
 
-    let mut usage_sessions = Vec::with_capacity(sessions.len());
-    for session in sessions {
-        let events = events_map.remove(&session.id).unwrap_or_default();
-        let (wave_id, flow) = session
-            .wave_run_id
+    let mut usage_sessions = Vec::with_capacity(conversations.len());
+    for conversation in conversations {
+        let events = events_map.remove(&conversation.id).unwrap_or_default();
+        let (wave_id, flow) = conversation
+            .run_id
             .as_deref()
             .and_then(|id| id.parse::<LfdId>().ok())
-            .and_then(|id| wave_run_meta.get(&id))
+            .and_then(|id| run_meta.get(&id))
             .cloned()
             .unwrap_or((None, None));
-        usage_sessions.push(UsageSessionData {
-            session,
+        usage_sessions.push(UsageConversationData {
+            session: conversation,
             events,
             wave_id,
             flow,
@@ -261,54 +261,51 @@ async fn load_usage_session_data(
     Ok(usage_sessions)
 }
 
-/// Batch-fetch wave_run metadata (wave_id, flow) for all sessions that have a wave_run_id.
-/// Deduplicates IDs so each wave_run is fetched at most once.
-async fn load_wave_run_metadata(
+/// Batch-fetch run metadata for all conversations that have a run_id.
+/// Deduplicates IDs so each run is fetched at most once.
+async fn load_run_metadata(
     state: &HttpState,
-    sessions: &[Session],
+    conversations: &[Conversation],
 ) -> Result<HashMap<LfdId, (Option<String>, Option<String>)>, ApiError> {
-    let unique_ids: std::collections::HashSet<LfdId> = sessions
+    let unique_ids: std::collections::HashSet<LfdId> = conversations
         .iter()
-        .filter_map(|s| s.wave_run_id.as_deref()?.parse::<LfdId>().ok())
+        .filter_map(|s| s.run_id.as_deref()?.parse::<LfdId>().ok())
         .collect();
 
     let mut meta = HashMap::with_capacity(unique_ids.len());
-    for wave_run_id in unique_ids {
+    for run_id in unique_ids {
         let wave_run = state
             .store
-            .get_wave_run(&wave_run_id)
+            .get_run(&run_id)
             .await
             .map_err(map_store_error)?;
         if let Some(run) = wave_run {
-            meta.insert(
-                wave_run_id,
-                (Some(run.wave_id.to_string()), Some(run.snapshot.flow)),
-            );
+            meta.insert(run_id, (Some(run.wave_id.to_string()), Some(run.flow)));
         }
     }
     Ok(meta)
 }
 
-async fn resolve_session_wave(
+async fn resolve_conversation_wave(
     state: &HttpState,
-    session: &Session,
+    conversation: &Conversation,
 ) -> Result<Option<String>, ApiError> {
-    if let Some(wave) = session.config.wave.as_ref() {
+    if let Some(wave) = conversation.config.wave.as_ref() {
         if !wave.trim().is_empty() {
             return Ok(Some(wave.clone()));
         }
     }
 
-    let wave_run_id = session
-        .wave_run_id
+    let run_id = conversation
+        .run_id
         .as_deref()
         .and_then(|id| id.parse::<LfdId>().ok());
-    let Some(wave_run_id) = wave_run_id else {
+    let Some(run_id) = run_id else {
         return Ok(None);
     };
     let wave_run = state
         .store
-        .get_wave_run(&wave_run_id)
+        .get_run(&run_id)
         .await
         .map_err(map_store_error)?;
     Ok(wave_run.map(|r| r.wave_id.to_string()))
@@ -332,20 +329,18 @@ mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+    use crate::lfd::conversations::types::{
+        ContextSnapshot, ConversationConfig, ConversationEvent, ConversationStatus, TurnUsage,
+    };
+    use crate::lfd::conversations::ConversationManager;
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::sessions::types::{
-        ContextSnapshot, SessionConfig, SessionEvent, SessionStatus, TurnUsage,
-    };
-    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{
-        Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
-    };
+    use crate::lfd::types::{Run, RunStackStatus, RunStatus, Wave, WaveMode, WaveStatus};
     use std::collections::HashMap;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -363,7 +358,7 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(1));
         let output_hub = OutputHub::new(128, tmp.path().join("output"));
         let event_hub = EventHub::new(128);
-        let sessions = SessionManager::new(store.clone());
+        let conversations = ConversationManager::new(store.clone());
         let executor = Arc::new(
             WaveExecutor::new(
                 store.clone(),
@@ -392,18 +387,18 @@ mod tests {
                 http_security: HttpSecurityConfig::default(),
                 auth_failure_throttle: AuthFailureThrottle::new(),
                 ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-                sessions,
+                conversations,
             },
             tmp,
         )
     }
 
     #[tokio::test]
-    async fn get_session_usage_returns_token_totals_context_and_models() {
+    async fn get_conversation_usage_returns_token_totals_context_and_models() {
         let (state, tmp) = test_http_state().await;
         let session = seed_session(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "implement".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 wave: Some("engbot".to_string()),
@@ -436,16 +431,17 @@ mod tests {
         )
         .await;
 
-        let Json(payload) = get_session_usage_handler(State(state), Path(session.id.to_string()))
-            .await
-            .expect("session usage response");
+        let Json(payload) =
+            get_conversation_usage_handler(State(state), Path(session.id.to_string()))
+                .await
+                .expect("session usage response");
 
-        assert_eq!(payload.object, "session_usage");
+        assert_eq!(payload.object, "conversation_usage");
         assert_eq!(payload.tokens.input, 200);
         assert_eq!(payload.tokens.output, 30);
         assert_eq!(payload.turns, 1);
         assert_eq!(payload.models.get("claude-sonnet-4"), Some(&1));
-        assert_eq!(payload.session.wave.as_deref(), Some("engbot"));
+        assert_eq!(payload.conversation.wave.as_deref(), Some("engbot"));
         assert_eq!(
             payload
                 .context
@@ -460,10 +456,10 @@ mod tests {
     async fn get_wave_usage_rolls_up_sessions_and_steps() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let run = seed_wave_run(&state, &wave, "build").await;
+        let run = seed_run(&state, &wave, "build").await;
         let session = seed_session(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "gate".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 wave: Some(wave.name.clone()),
@@ -494,7 +490,7 @@ mod tests {
             .expect("wave usage response");
 
         assert_eq!(payload.object, "wave_usage");
-        assert_eq!(payload.sessions, 1);
+        assert_eq!(payload.conversations, 1);
         assert_eq!(payload.turns, 1);
         assert_eq!(payload.tokens.input, 90);
         assert_eq!(payload.models.get("claude-haiku-4-5"), Some(&1));
@@ -530,12 +526,12 @@ mod tests {
     async fn usage_summary_applies_wave_flow_and_model_filters() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let build_run = seed_wave_run(&state, &wave, "build").await;
-        let gate_run = seed_wave_run(&state, &wave, "gate").await;
+        let build_run = seed_run(&state, &wave, "build").await;
+        let gate_run = seed_run(&state, &wave, "gate").await;
 
         let build_session = seed_session(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "implement".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 ..Default::default()
@@ -561,7 +557,7 @@ mod tests {
 
         let gate_session = seed_session(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "implement".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 ..Default::default()
@@ -620,7 +616,7 @@ mod tests {
     async fn usage_timeseries_groups_by_day_and_wave() {
         let (state, tmp) = test_http_state().await;
         let wave = seed_wave(&state, "engbot", &tmp).await;
-        let run = seed_wave_run(&state, &wave, "build").await;
+        let run = seed_run(&state, &wave, "build").await;
 
         let first_day = parse_datetime(Some("2026-02-01T08:00:00Z"), "from")
             .expect("parse")
@@ -631,7 +627,7 @@ mod tests {
 
         let session_a = seed_session_at(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "implement".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 ..Default::default()
@@ -658,7 +654,7 @@ mod tests {
 
         let session_b = seed_session_at(
             &state,
-            SessionConfig {
+            ConversationConfig {
                 step: "implement".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 ..Default::default()
@@ -753,20 +749,18 @@ mod tests {
         wave
     }
 
-    async fn seed_wave_run(state: &HttpState, wave: &Wave, flow: &str) -> WaveRun {
-        let run = WaveRun {
+    async fn seed_run(state: &HttpState, wave: &Wave, flow: &str) -> Run {
+        let run = Run {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: flow.to_string(),
-                task: None,
-                direction: Vec::new(),
-                area: Vec::new(),
-            },
+            repo: wave.repo.clone(),
+            flow: flow.to_string(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
             iteration: wave.iteration,
             step_index: 0,
-            status: WaveRunStatus::Completed,
+            status: RunStatus::Completed,
             worktree: String::new(),
             branch: String::new(),
             started_at: Some(OffsetDateTime::now_utc()),
@@ -779,39 +773,35 @@ mod tests {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: "stack-0".to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
             pr: None,
         };
-        state
-            .store
-            .create_wave_run(&run)
-            .await
-            .expect("create wave run");
+        state.store.create_run(&run).await.expect("create wave run");
         run
     }
 
     async fn seed_session(
         state: &HttpState,
-        config: SessionConfig,
-        wave_run_id: Option<String>,
-    ) -> Session {
-        seed_session_at(state, config, wave_run_id, OffsetDateTime::now_utc()).await
+        config: ConversationConfig,
+        run_id: Option<String>,
+    ) -> Conversation {
+        seed_session_at(state, config, run_id, OffsetDateTime::now_utc()).await
     }
 
     async fn seed_session_at(
         state: &HttpState,
-        config: SessionConfig,
-        wave_run_id: Option<String>,
+        config: ConversationConfig,
+        run_id: Option<String>,
         created_at: OffsetDateTime,
-    ) -> Session {
-        let session = Session {
+    ) -> Conversation {
+        let session = Conversation {
             id: LfdId::new(),
             harness: "claude".to_string(),
-            status: SessionStatus::Ended,
-            wave_run_id,
+            status: ConversationStatus::Ended,
+            run_id,
             provider_session_id: None,
             config,
             created_at,
@@ -819,19 +809,24 @@ mod tests {
         };
         state
             .store
-            .create_session(&session)
+            .create_conversation(&session)
             .await
             .expect("create session");
         session
     }
 
-    async fn append_turn_usage(state: &HttpState, session_id: &LfdId, seq: i64, usage: TurnUsage) {
+    async fn append_turn_usage(
+        state: &HttpState,
+        conversation_id: &LfdId,
+        seq: i64,
+        usage: TurnUsage,
+    ) {
         state
             .store
-            .append_session_event(
-                session_id,
+            .append_conversation_event(
+                conversation_id,
                 seq,
-                &SessionEvent::TurnUsage {
+                &ConversationEvent::TurnUsage {
                     turn_id: format!("turn_{seq}"),
                     usage,
                 },
@@ -843,16 +838,16 @@ mod tests {
 
     async fn append_context_snapshot(
         state: &HttpState,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         seq: i64,
         sources: HashMap<String, u64>,
     ) {
         state
             .store
-            .append_session_event(
-                session_id,
+            .append_conversation_event(
+                conversation_id,
                 seq,
-                &SessionEvent::ContextSnapshot {
+                &ConversationEvent::ContextSnapshot {
                     snapshot: ContextSnapshot {
                         sources,
                         source_counts: HashMap::new(),

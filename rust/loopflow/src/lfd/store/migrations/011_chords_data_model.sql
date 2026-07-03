@@ -5,7 +5,7 @@ DROP TABLE IF EXISTS chat_memory_blocks;
 DROP TABLE IF EXISTS summaries;
 DROP TABLE IF EXISTS fork_runs;
 DROP TABLE IF EXISTS pending_activations;
-DROP TABLE IF EXISTS wave_runs;
+DROP TABLE IF EXISTS runs;
 DROP TABLE IF EXISTS stimuli;
 DROP TABLE IF EXISTS agents;
 DROP TABLE IF EXISTS live_pr_states;
@@ -44,7 +44,7 @@ CREATE TABLE agents (
     step TEXT NOT NULL,
     repo TEXT NOT NULL,
     worktree TEXT NOT NULL,
-    wave_run_id TEXT,
+    run_id TEXT,
     status INTEGER NOT NULL,
     started_at BIGINT NOT NULL,
     ended_at BIGINT,
@@ -81,7 +81,7 @@ CREATE TABLE pending_activations (
 
 CREATE INDEX idx_pending_wave_id ON pending_activations(wave_id);
 
-CREATE TABLE wave_runs (
+CREATE TABLE runs (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
     iteration INTEGER NOT NULL,
@@ -108,24 +108,24 @@ CREATE TABLE wave_runs (
     lineage_inferred INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX idx_wave_runs_wave_id ON wave_runs(wave_id, started_at);
-CREATE INDEX idx_wave_runs_wave_id_kind_status
-ON wave_runs(wave_id, run_kind, status, started_at);
-CREATE INDEX idx_wave_runs_wave_id_stack_position
-ON wave_runs(wave_id, stack_position);
-CREATE INDEX idx_wave_runs_parent_run_id
-ON wave_runs(parent_run_id);
+CREATE INDEX idx_runs_wave_id ON runs(wave_id, started_at);
+CREATE INDEX idx_runs_wave_id_kind_status
+ON runs(wave_id, run_kind, status, started_at);
+CREATE INDEX idx_runs_wave_id_stack_position
+ON runs(wave_id, stack_position);
+CREATE INDEX idx_runs_parent_run_id
+ON runs(parent_run_id);
 
 CREATE TABLE fork_runs (
     id TEXT PRIMARY KEY,
-    wave_run_id TEXT REFERENCES wave_runs(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
     step_index INTEGER NOT NULL,
     branch_index INTEGER NOT NULL,
     status INTEGER NOT NULL,
     worktree TEXT NOT NULL
 );
 
-CREATE INDEX idx_fork_runs_wave_run_id ON fork_runs(wave_run_id, step_index);
+CREATE INDEX idx_fork_runs_run_id ON fork_runs(run_id, step_index);
 
 CREATE TABLE summaries (
     id TEXT PRIMARY KEY,
@@ -164,7 +164,7 @@ CREATE TABLE wave_queue_blocks (
     error TEXT,
     PRIMARY KEY (wave_id, run_id),
     FOREIGN KEY (wave_id) REFERENCES waves(id) ON DELETE CASCADE,
-    FOREIGN KEY (run_id) REFERENCES wave_runs(id) ON DELETE CASCADE
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_wave_queue_blocks_wave_id

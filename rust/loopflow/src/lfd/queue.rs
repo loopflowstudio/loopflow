@@ -19,7 +19,7 @@ use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapsho
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason,
-    QueueMergeEvent, WaveRun, WaveRunStackStatus,
+    QueueMergeEvent, Run, RunStackStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,9 +250,9 @@ async fn reconcile_wave_queue_with_ops(
         if inferred != run.stack_status {
             run.stack_status = inferred;
             store
-                .update_wave_run(run)
+                .update_run(run)
                 .await
-                .map_err(|err| format!("update_wave_run failed: {err}"))?;
+                .map_err(|err| format!("update_run failed: {err}"))?;
             status_changed = true;
         }
     }
@@ -329,9 +329,9 @@ async fn reconcile_wave_queue_with_ops(
     }
 
     if let Some(active_run) = store
-        .get_active_wave_run(wave_id)
+        .get_active_run(wave_id)
         .await
-        .map_err(|err| format!("get_active_wave_run failed: {err}"))?
+        .map_err(|err| format!("get_active_run failed: {err}"))?
     {
         if active_run.id != head.id {
             set_queue_block(
@@ -455,8 +455,8 @@ pub async fn handle_pr_merged_with_events(
         .into_iter()
         .find(|run| pr_number(run) == Some(merged_pr_number))
     {
-        run.stack_status = WaveRunStackStatus::Merged;
-        let _ = store.update_wave_run(&run).await;
+        run.stack_status = RunStackStatus::Merged;
+        let _ = store.update_run(&run).await;
     }
 
     if let Err(err) = reconcile_wave_queue_with_events(
@@ -474,12 +474,12 @@ pub async fn handle_pr_merged_with_events(
 }
 
 pub fn project_queue_views<F>(
-    runs: &[WaveRun],
+    runs: &[Run],
     mut live_state_for: F,
     blocks: &HashMap<LfdId, QueueBlock>,
 ) -> HashMap<LfdId, QueueRunView>
 where
-    F: FnMut(&WaveRun) -> Option<LivePullRequestState>,
+    F: FnMut(&Run) -> Option<LivePullRequestState>,
 {
     let mut live_by_run = HashMap::new();
     for run in runs {
@@ -488,7 +488,7 @@ where
 
     let head_index = runs.iter().position(|run| {
         let live = live_by_run.get(&run.id).and_then(|value| value.as_ref());
-        inferred_stack_status(run.stack_status, live) == WaveRunStackStatus::Active
+        inferred_stack_status(run.stack_status, live) == RunStackStatus::Active
     });
 
     let mut result = HashMap::with_capacity(runs.len());
@@ -496,9 +496,9 @@ where
         let block = blocks.get(&run.id);
         let live = live_by_run.get(&run.id).and_then(|value| value.as_ref());
         let role = match inferred_stack_status(run.stack_status, live) {
-            WaveRunStackStatus::Merged => QueueRole::Merged,
-            WaveRunStackStatus::Superseded => QueueRole::Superseded,
-            WaveRunStackStatus::Active => {
+            RunStackStatus::Merged => QueueRole::Merged,
+            RunStackStatus::Superseded => QueueRole::Superseded,
+            RunStackStatus::Active => {
                 if block.is_some() {
                     QueueRole::Blocked
                 } else if head_index == Some(index) {
@@ -544,34 +544,34 @@ fn queue_next_action(role: QueueRole, block: Option<&QueueBlock>, has_pr: bool) 
     }
 }
 
-fn find_queue_head_index(runs: &[WaveRun], live_snapshot: &LivePrSnapshot) -> Option<usize> {
+fn find_queue_head_index(runs: &[Run], live_snapshot: &LivePrSnapshot) -> Option<usize> {
     runs.iter().position(|run| {
         let live = live_snapshot.state_for_run(run);
-        inferred_stack_status(run.stack_status, live) == WaveRunStackStatus::Active
+        inferred_stack_status(run.stack_status, live) == RunStackStatus::Active
     })
 }
 
 fn inferred_stack_status(
-    durable: WaveRunStackStatus,
+    durable: RunStackStatus,
     live: Option<&LivePullRequestState>,
-) -> WaveRunStackStatus {
-    if durable != WaveRunStackStatus::Active {
+) -> RunStackStatus {
+    if durable != RunStackStatus::Active {
         return durable;
     }
     match live.map(|state| state.state) {
-        Some(LivePrState::Merged) => WaveRunStackStatus::Merged,
-        Some(LivePrState::Closed) => WaveRunStackStatus::Superseded,
-        _ => WaveRunStackStatus::Active,
+        Some(LivePrState::Merged) => RunStackStatus::Merged,
+        Some(LivePrState::Closed) => RunStackStatus::Superseded,
+        _ => RunStackStatus::Active,
     }
 }
 
-fn pr_number(run: &WaveRun) -> Option<u32> {
+fn pr_number(run: &Run) -> Option<u32> {
     run.pr.as_ref()?.number
 }
 
 async fn set_queue_block(
     store: &SharedStore,
-    run: &WaveRun,
+    run: &Run,
     reason: QueueBlockReason,
     conflict_files: Vec<String>,
     error: Option<String>,
@@ -654,8 +654,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        PullRequest, QueueBlockReason, Run, RunStatus, Wave, WaveMode, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -734,20 +733,18 @@ mod tests {
         }
     }
 
-    fn make_run(wave: &Wave, stack_position: u32, pr_number: u32) -> WaveRun {
-        WaveRun {
+    fn make_run(wave: &Wave, stack_position: u32, pr_number: u32) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo().clone(),
-                flow: wave.primary_flow().clone(),
-                task: None,
-                direction: wave.direction().clone(),
-                area: wave.area().clone(),
-            },
+            repo: wave.repo().clone(),
+            flow: wave.primary_flow().clone(),
+            task: None,
+            direction: wave.direction().clone(),
+            area: wave.area().clone(),
             iteration: stack_position,
             step_index: 0,
-            status: WaveRunStatus::Completed,
+            status: RunStatus::Completed,
             worktree: ".".to_string(),
             branch: format!("feature-{pr_number}"),
             started_at: Some(OffsetDateTime::now_utc()),
@@ -760,7 +757,7 @@ mod tests {
             parent_pr_number: None,
             stack_position,
             stack_group_id: wave.id().to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -774,11 +771,11 @@ mod tests {
         }
     }
 
-    async fn set_live_open(store: &SharedStore, run: &WaveRun, is_draft: bool) {
+    async fn set_live_open(store: &SharedStore, run: &Run, is_draft: bool) {
         let pr_number = pr_number(run).expect("pr number");
         store
             .upsert_live_pr_state(&LivePullRequestState {
-                repo_id: run.snapshot.repo.clone(),
+                repo_id: run.repo.clone(),
                 pr_number,
                 state: LivePrState::Open,
                 is_draft,
@@ -800,8 +797,8 @@ mod tests {
         store.create_wave(&wave).await.expect("wave");
         let run1 = make_run(&wave, 0, 11);
         let run2 = make_run(&wave, 1, 12);
-        store.create_wave_run(&run1).await.expect("run1");
-        store.create_wave_run(&run2).await.expect("run2");
+        store.create_run(&run1).await.expect("run1");
+        store.create_run(&run2).await.expect("run2");
         set_live_open(&store, &run1, true).await;
         set_live_open(&store, &run2, true).await;
 
@@ -858,8 +855,8 @@ mod tests {
         store.create_wave(&wave).await.expect("wave");
         let run1 = make_run(&wave, 0, 21);
         let run2 = make_run(&wave, 1, 22);
-        store.create_wave_run(&run1).await.expect("run1");
-        store.create_wave_run(&run2).await.expect("run2");
+        store.create_run(&run1).await.expect("run1");
+        store.create_run(&run2).await.expect("run2");
         set_live_open(&store, &run1, false).await;
         set_live_open(&store, &run2, true).await;
 
@@ -880,7 +877,7 @@ mod tests {
         let wave = make_wave(".");
         store.create_wave(&wave).await.expect("wave");
         let run = make_run(&wave, 0, 31);
-        store.create_wave_run(&run).await.expect("run");
+        store.create_run(&run).await.expect("run");
         set_live_open(&store, &run, true).await;
 
         let ops = MockOps {
@@ -928,7 +925,7 @@ mod tests {
         let wave = make_wave(".");
         store.create_wave(&wave).await.expect("wave");
         let run = make_run(&wave, 0, 41);
-        store.create_wave_run(&run).await.expect("run");
+        store.create_run(&run).await.expect("run");
         set_live_open(&store, &run, true).await;
         let event_hub = EventHub::new(8);
         let mut rx = event_hub.subscribe();
@@ -983,7 +980,7 @@ mod tests {
         let wave = make_wave(".");
         store.create_wave(&wave).await.expect("wave");
         let run = make_run(&wave, 0, 51);
-        store.create_wave_run(&run).await.expect("run");
+        store.create_run(&run).await.expect("run");
         set_live_open(&store, &run, true).await;
         let event_hub = EventHub::new(8);
         let mut rx = event_hub.subscribe();

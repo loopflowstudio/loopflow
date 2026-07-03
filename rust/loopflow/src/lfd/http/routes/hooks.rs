@@ -20,7 +20,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{Event, Signal, Trigger, Wave, WaveRun, WaveStatus, CI_FIX_FLOW};
+use crate::lfd::types::{Event, Run, Signal, Trigger, Wave, WaveStatus, CI_FIX_FLOW};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -37,7 +37,7 @@ pub struct GitHookRequest {
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
     wave_id: LfdId,
-    wave_run_id: LfdId,
+    run_id: LfdId,
     repo_full_name: String,
     branch: String,
     pr_number: u32,
@@ -353,7 +353,7 @@ pub async fn github_webhook_handler(
                         matched += 1;
                         tracing::info!(
                             wave_id = %target.wave_id,
-                            wave_run_id = %target.wave_run_id,
+                            run_id = %target.run_id,
                             repo = %event.repository.full_name,
                             branch = %target.branch,
                             commit_sha = %event.check_run.head_sha,
@@ -573,7 +573,7 @@ async fn find_wave_ci_target(
     pr_number: Option<u32>,
 ) -> Result<Option<WaveCiTarget>, String> {
     let runs = store
-        .list_wave_runs(Some(wave.id()), None)
+        .list_runs(Some(wave.id()), None)
         .await
         .map_err(|err| err.to_string())?;
     let run = runs
@@ -583,8 +583,8 @@ async fn find_wave_ci_target(
     Ok(run.and_then(|run| wave_ci_target(wave.id(), repo_full_name, &run)))
 }
 
-fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {
-    if run.snapshot.flow == CI_FIX_FLOW {
+fn run_matches_ci_target(run: &Run, branch: Option<&str>, pr_number: Option<u32>) -> bool {
+    if run.flow == CI_FIX_FLOW {
         return false;
     }
 
@@ -600,11 +600,11 @@ fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
     status == "completed" && conclusion == Some("failure")
 }
 
-fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &WaveRun) -> Option<WaveCiTarget> {
+fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &Run) -> Option<WaveCiTarget> {
     let pr = run.pr.as_ref()?;
     Some(WaveCiTarget {
         wave_id: wave_id.clone(),
-        wave_run_id: run.id.clone(),
+        run_id: run.id.clone(),
         repo_full_name: repo_full_name.to_string(),
         branch: pr.branch.clone()?,
         pr_number: pr.number?,
@@ -614,7 +614,7 @@ fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &WaveRun) -> Optio
 fn build_ci_failure_event(target: &WaveCiTarget, check_run: &CheckRun) -> Event {
     Event::ci_failure(
         target.wave_id.clone(),
-        target.wave_run_id.clone(),
+        target.run_id.clone(),
         target.pr_number,
         target.branch.clone(),
         check_run.head_sha.clone(),
@@ -651,17 +651,15 @@ mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+    use crate::lfd::conversations::ConversationManager;
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::http::state::HttpState;
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{
-        PullRequest, Signal, Trigger, Wave, WaveMode, WaveRunSnapshot, WaveRunStatus, WaveStatus,
-    };
+    use crate::lfd::types::{PullRequest, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -678,7 +676,7 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(1));
         let output_hub = OutputHub::new(128, tmp.path().join("output"));
         let event_hub = EventHub::new(128);
-        let sessions = SessionManager::new(store.clone());
+        let sessions = ConversationManager::new(store.clone());
         let executor = Arc::new(
             WaveExecutor::new(
                 store.clone(),
@@ -705,7 +703,7 @@ mod tests {
             http_security: HttpSecurityConfig::default(),
             auth_failure_throttle: AuthFailureThrottle::new(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            sessions,
+            conversations: sessions,
         }
     }
 
@@ -842,20 +840,18 @@ mod tests {
         assert_eq!(pending[0].to_sha, "def");
     }
 
-    fn wave_run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> WaveRun {
-        WaveRun {
+    fn run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: LfdId::new(),
-            snapshot: WaveRunSnapshot {
-                repo: ".".to_string(),
-                flow: flow.to_string(),
-                task: None,
-                direction: Vec::new(),
-                area: Vec::new(),
-            },
+            repo: ".".to_string(),
+            flow: flow.to_string(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
             iteration: 0,
             step_index: 0,
-            status: WaveRunStatus::Running,
+            status: RunStatus::Running,
             worktree: "/tmp/worktree".to_string(),
             branch: "feature".to_string(),
             started_at: None,
@@ -868,7 +864,7 @@ mod tests {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: "wave-group".to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            stack_status: crate::lfd::types::RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -884,20 +880,20 @@ mod tests {
 
     #[test]
     fn run_matches_ci_target_only_matches_open_main_prs() {
-        let run = wave_run_with_pr("build", Some("open"), Some("feature"));
+        let run = run_with_pr("build", Some("open"), Some("feature"));
         assert!(run_matches_ci_target(&run, Some("feature"), Some(1)));
 
-        let closed = wave_run_with_pr("build", Some("closed"), Some("feature"));
+        let closed = run_with_pr("build", Some("closed"), Some("feature"));
         assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
 
-        let unknown_state = wave_run_with_pr("build", None, Some("feature"));
+        let unknown_state = run_with_pr("build", None, Some("feature"));
         assert!(!run_matches_ci_target(
             &unknown_state,
             Some("feature"),
             Some(1)
         ));
 
-        let ci_fix = wave_run_with_pr("ci-fix", Some("open"), Some("feature"));
+        let ci_fix = run_with_pr("ci-fix", Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
     }
 

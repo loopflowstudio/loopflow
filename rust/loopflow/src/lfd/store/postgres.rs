@@ -6,27 +6,28 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 
 use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
-use crate::lfd::id::LfdId;
-use crate::lfd::sessions::types::{
-    PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
+use crate::lfd::conversations::types::{
+    Conversation, ConversationConfig, ConversationEvent, ConversationStatus,
+    PersistedConversationEvent,
 };
+use crate::lfd::id::LfdId;
 use crate::lfd::store::catalog::{
-    list_agent_history_query, list_triggers_query, list_wave_runs_query, list_waves_query, sql,
-    Query, SqlDialect,
+    list_agent_history_query, list_runs_query, list_triggers_query, list_waves_query, sql, Query,
+    SqlDialect,
 };
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
-    map_wave_run_row, now_unix, serialize_pr,
+    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row, map_wave_row,
+    now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
-use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
+use crate::lfd::store::{ConversationFilters, ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AgentStatus, AttentionItem, AttentionKind, AttentionStatus,
-    ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus,
-    Trigger, Wave, WaveCron, WaveRun, WaveRunStatus, WaveStatus,
+    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
+    ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus, SessionUse,
+    Summary, Trigger, Wave, WaveCron, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -258,13 +259,13 @@ impl PostgresStore {
         .await
     }
 
-    fn map_session_row(row: &tokio_postgres::Row) -> StoreResult<Session> {
-        let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
-        Ok(Session {
+    fn map_conversation_row(row: &tokio_postgres::Row) -> StoreResult<Conversation> {
+        let config: ConversationConfig = serde_json::from_str(row.get::<_, &str>(5))?;
+        Ok(Conversation {
             id: row.get(0),
             harness: row.get(1),
-            status: SessionStatus::from_i32(row.get::<_, i32>(2)),
-            wave_run_id: row.get(3),
+            status: ConversationStatus::from_i32(row.get::<_, i32>(2)),
+            run_id: row.get(3),
             provider_session_id: row.get(4),
             config,
             created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
@@ -274,29 +275,33 @@ impl PostgresStore {
         })
     }
 
-    fn map_terminal_session_row(row: &tokio_postgres::Row) -> StoreResult<TerminalSession> {
-        Ok(TerminalSession {
+    fn map_control_session_row(row: &tokio_postgres::Row) -> StoreResult<Session> {
+        let session_use = SessionUse::try_from(row.get::<_, &str>(4))
+            .map_err(|err| StoreError::InvalidData(err.to_string()))?;
+        Ok(Session {
             id: row.get(0),
             wave_id: row.get(1),
-            wave_run_id: row.get(2),
-            step: row.get(3),
-            agent: row.get(4),
-            cwd: row.get(5),
-            argv: serde_json::from_str(row.get::<_, &str>(6))?,
-            env: serde_json::from_str(row.get::<_, &str>(7))?,
-            source: row.get(8),
-            tmux_name: row.get(9),
-            status: TerminalSessionStatus::from_i32(row.get::<_, i32>(10)),
-            completion_token: row.get(11),
-            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(12)),
+            run_id: row.get(2),
+            parent_session_id: row.get(3),
+            session_use,
+            step: row.get(5),
+            agent: row.get(6),
+            cwd: row.get(7),
+            argv: serde_json::from_str(row.get::<_, &str>(8))?,
+            env: serde_json::from_str(row.get::<_, &str>(9))?,
+            source: row.get(10),
+            tmux_name: row.get(11),
+            status: SessionStatus::from_i32(row.get::<_, i32>(12)),
+            completion_token: row.get(13),
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(14)),
             attached_at: row
-                .get::<_, Option<i64>>(13)
+                .get::<_, Option<i64>>(15)
                 .map(crate::lfd::store::rows::unix_to_datetime),
             started_at: row
-                .get::<_, Option<i64>>(14)
+                .get::<_, Option<i64>>(16)
                 .map(crate::lfd::store::rows::unix_to_datetime),
             completed_at: row
-                .get::<_, Option<i64>>(15)
+                .get::<_, Option<i64>>(17)
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
     }
@@ -572,23 +577,23 @@ impl PostgresStore {
         .await
     }
 
-    // -- Sessions ---------------------------------------------------------------
+    // -- Conversations ---------------------------------------------------------------
 
-    pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
+    pub async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO sessions (id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+                    "INSERT INTO conversations (id, harness, status, run_id, provider_session_id, config, created_at, ended_at)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     &[
-                        &session.id,
-                        &session.harness,
-                        &session.status.as_i32(),
-                        &session.wave_run_id,
-                        &session.provider_session_id,
-                        &serde_json::to_string(&session.config)?,
-                        &session.created_at.unix_timestamp(),
-                        &session.ended_at.map(|dt| dt.unix_timestamp()),
+                        &conversation.id,
+                        &conversation.harness,
+                        &conversation.status.as_i32(),
+                        &conversation.run_id,
+                        &conversation.provider_session_id,
+                        &serde_json::to_string(&conversation.config)?,
+                        &conversation.created_at.unix_timestamp(),
+                        &conversation.ended_at.map(|dt| dt.unix_timestamp()),
                     ],
                 )
                 .await?;
@@ -597,60 +602,63 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+    pub async fn get_conversation(
+        &self,
+        conversation_id: &LfdId,
+    ) -> StoreResult<Option<Conversation>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
-                     FROM sessions
+                    "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
+                     FROM conversations
                      WHERE id = $1",
-                    &[&session_id],
+                    &[&conversation_id],
                 )
                 .await?;
-            row.as_ref().map(Self::map_session_row).transpose()
+            row.as_ref().map(Self::map_conversation_row).transpose()
         })
         .await
     }
 
-    pub async fn get_active_session_for_wave_run(
+    pub async fn get_active_conversation_for_run(
         &self,
-        wave_run_id: &str,
-    ) -> StoreResult<Option<Session>> {
-        let wave_run_id = wave_run_id.to_string();
+        run_id: &str,
+    ) -> StoreResult<Option<Conversation>> {
+        let run_id = run_id.to_string();
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
-                     FROM sessions
-                     WHERE wave_run_id = $1 AND status = ANY($2)
+                    "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
+                     FROM conversations
+                     WHERE run_id = $1 AND status = ANY($2)
                      ORDER BY created_at DESC
                      LIMIT 1",
                     &[
-                        &wave_run_id,
+                        &run_id,
                         &&[
-                            SessionStatus::Starting.as_i32(),
-                            SessionStatus::Active.as_i32(),
-                            SessionStatus::Ending.as_i32(),
+                            ConversationStatus::Starting.as_i32(),
+                            ConversationStatus::Active.as_i32(),
+                            ConversationStatus::Ending.as_i32(),
                         ][..],
                     ],
                 )
                 .await?;
-            row.as_ref().map(Self::map_session_row).transpose()
+            row.as_ref().map(Self::map_conversation_row).transpose()
         })
         .await
     }
 
     pub async fn update_provider_session_id(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         provider_session_id: &str,
     ) -> StoreResult<()> {
         let provider_session_id = provider_session_id.to_string();
         self.with_client(|client| async move {
             let updated = client
                 .execute(
-                    "UPDATE sessions SET provider_session_id = $2 WHERE id = $1",
-                    &[&session_id, &provider_session_id],
+                    "UPDATE conversations SET provider_session_id = $2 WHERE id = $1",
+                    &[&conversation_id, &provider_session_id],
                 )
                 .await?;
             if updated == 0 {
@@ -661,19 +669,19 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn update_session_status(
+    pub async fn update_conversation_status(
         &self,
-        session_id: &LfdId,
-        status: SessionStatus,
+        conversation_id: &LfdId,
+        status: ConversationStatus,
         ended_at: Option<i64>,
     ) -> StoreResult<()> {
         self.with_client(|client| async move {
             let updated = client
                 .execute(
-                    "UPDATE sessions
+                    "UPDATE conversations
                      SET status = $2, ended_at = COALESCE($3, ended_at)
                      WHERE id = $1",
-                    &[&session_id, &status.as_i32(), &ended_at],
+                    &[&conversation_id, &status.as_i32(), &ended_at],
                 )
                 .await?;
             if updated == 0 {
@@ -684,20 +692,20 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn append_session_event(
+    pub async fn append_conversation_event(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         seq: i64,
-        event: &SessionEvent,
+        event: &ConversationEvent,
         created_at: i64,
     ) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO session_events (session_id, seq, event_type, data, created_at)
+                    "INSERT INTO conversation_events (conversation_id, seq, event_type, data, created_at)
                      VALUES ($1, $2, $3, $4, $5)",
                     &[
-                        &session_id,
+                        &conversation_id,
                         &seq,
                         &event.event_type(),
                         &serde_json::to_string(event)?,
@@ -710,39 +718,39 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_session_events(
+    pub async fn list_conversation_events(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedSessionEvent>> {
+    ) -> StoreResult<Vec<PersistedConversationEvent>> {
         self.with_client(|client| async move {
             let rows = if let Some(after_seq) = after_seq {
                 client
                     .query(
-                        "SELECT session_id, seq, data, created_at
-                         FROM session_events
-                         WHERE session_id = $1 AND seq > $2
+                        "SELECT conversation_id, seq, data, created_at
+                         FROM conversation_events
+                         WHERE conversation_id = $1 AND seq > $2
                          ORDER BY seq ASC",
-                        &[&session_id, &after_seq],
+                        &[&conversation_id, &after_seq],
                     )
                     .await?
             } else {
                 client
                     .query(
-                        "SELECT session_id, seq, data, created_at
-                         FROM session_events
-                         WHERE session_id = $1
+                        "SELECT conversation_id, seq, data, created_at
+                         FROM conversation_events
+                         WHERE conversation_id = $1
                          ORDER BY seq ASC",
-                        &[&session_id],
+                        &[&conversation_id],
                     )
                     .await?
             };
 
             rows.iter()
                 .map(|row| {
-                    let event: SessionEvent = serde_json::from_str(row.get::<_, &str>(2))?;
-                    Ok(PersistedSessionEvent {
-                        session_id: row.get(0),
+                    let event: ConversationEvent = serde_json::from_str(row.get::<_, &str>(2))?;
+                    Ok(PersistedConversationEvent {
+                        conversation_id: row.get(0),
                         seq: row.get(1),
                         event,
                         created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)),
@@ -753,84 +761,87 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_sessions_by_statuses(
+    pub async fn list_conversations_by_statuses(
         &self,
-        statuses: &[SessionStatus],
-    ) -> StoreResult<Vec<Session>> {
+        statuses: &[ConversationStatus],
+    ) -> StoreResult<Vec<Conversation>> {
         let status_ints: Vec<i32> = statuses.iter().map(|s| s.as_i32()).collect();
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
-                     FROM sessions WHERE status = ANY($1)
+                    "SELECT id, harness, status, run_id, provider_session_id, config, created_at, ended_at
+                     FROM conversations WHERE status = ANY($1)
                      ORDER BY created_at ASC",
                     &[&status_ints],
                 )
                 .await?;
-            rows.iter().map(Self::map_session_row).collect()
+            rows.iter().map(Self::map_conversation_row).collect()
         })
         .await
     }
 
-    pub async fn list_events_for_sessions(
+    pub async fn list_events_for_conversations(
         &self,
-        session_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
-        if session_ids.is_empty() {
+        conversation_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
+        if conversation_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let session_id_strings: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
+        let conversation_id_strings: Vec<String> =
+            conversation_ids.iter().map(|id| id.to_string()).collect();
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT session_id, seq, data, created_at
-                     FROM session_events
-                     WHERE session_id = ANY($1)
-                     ORDER BY session_id, seq ASC",
-                    &[&session_id_strings],
+                    "SELECT conversation_id, seq, data, created_at
+                     FROM conversation_events
+                     WHERE conversation_id = ANY($1)
+                     ORDER BY conversation_id, seq ASC",
+                    &[&conversation_id_strings],
                 )
                 .await?;
-            let mut result: HashMap<LfdId, Vec<PersistedSessionEvent>> = HashMap::new();
+            let mut result: HashMap<LfdId, Vec<PersistedConversationEvent>> = HashMap::new();
             for row in &rows {
-                let session_id: LfdId = row.get(0);
-                let event: SessionEvent = serde_json::from_str(row.get::<_, &str>(2))?;
-                result
-                    .entry(session_id.clone())
-                    .or_default()
-                    .push(PersistedSessionEvent {
-                        session_id,
+                let conversation_id: LfdId = row.get(0);
+                let event: ConversationEvent = serde_json::from_str(row.get::<_, &str>(2))?;
+                result.entry(conversation_id.clone()).or_default().push(
+                    PersistedConversationEvent {
+                        conversation_id,
                         seq: row.get(1),
                         event,
                         created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)),
-                    });
+                    },
+                );
             }
             Ok(result)
         })
         .await
     }
 
-    pub async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
+    pub async fn list_conversations_for_wave(
+        &self,
+        wave_id: &str,
+    ) -> StoreResult<Vec<Conversation>> {
         let wave_id = wave_id.to_string();
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
-                     FROM sessions s
-                     JOIN wave_runs wr ON wr.id = s.wave_run_id
+                    "SELECT s.id, s.harness, s.status, s.run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+                     FROM conversations s
+                     JOIN runs wr ON wr.id = s.run_id
                      WHERE wr.wave_id = $1
                      ORDER BY s.created_at ASC",
                     &[&wave_id],
                 )
                 .await?;
-            rows.iter().map(Self::map_session_row).collect()
+            rows.iter().map(Self::map_conversation_row).collect()
         })
         .await
     }
 
-    pub async fn list_sessions_filtered(
+    pub async fn list_conversations_filtered(
         &self,
-        filters: &SessionFilters,
-    ) -> StoreResult<Vec<Session>> {
+        filters: &ConversationFilters,
+    ) -> StoreResult<Vec<Conversation>> {
         enum QueryParam {
             Text(String),
             Int(i64),
@@ -848,14 +859,14 @@ impl PostgresStore {
         let filters = filters.clone();
         self.with_client(|client| async move {
             let mut query = String::from(
-                "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
-                 FROM sessions s",
+                "SELECT s.id, s.harness, s.status, s.run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+                 FROM conversations s",
             );
             let mut predicates = Vec::new();
             let mut params: Vec<QueryParam> = Vec::new();
 
             if filters.wave.is_some() || filters.flow.is_some() {
-                query.push_str(" JOIN wave_runs wr ON wr.id = s.wave_run_id");
+                query.push_str(" JOIN runs wr ON wr.id = s.run_id");
             }
             if let Some(wave) = filters.wave.as_ref() {
                 predicates.push(format!("wr.wave_id = ${}", params.len() + 1));
@@ -886,28 +897,30 @@ impl PostgresStore {
             let param_refs: Vec<&(dyn ToSql + Sync)> =
                 params.iter().map(QueryParam::as_tosql).collect();
             let rows = client.query(&query, &param_refs).await?;
-            rows.iter().map(Self::map_session_row).collect()
+            rows.iter().map(Self::map_conversation_row).collect()
         })
         .await
     }
 
     const TERMINAL_SESSION_COLS: &str =
-        "id, wave_id, wave_run_id, step, agent, cwd, argv, env, source, tmux_name, status, \
+        "id, wave_id, run_id, parent_session_id, session_use, step, agent, cwd, argv, env, source, tmux_name, status, \
          completion_token, created_at, attached_at, started_at, completed_at";
 
-    pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+    pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
         let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
             client
                 .execute(
                     &format!(
                         "INSERT INTO terminal_sessions ({cols}) \
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"
                     ),
                     &[
                         &session.id,
                         &session.wave_id,
-                        &session.wave_run_id,
+                        &session.run_id,
+                        &session.parent_session_id,
+                        &session.session_use.as_str(),
                         &session.step,
                         &session.agent,
                         &session.cwd,
@@ -929,28 +942,28 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_terminal_session(
+    pub async fn get_control_session(
         &self,
-        session_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
+        conversation_id: &LfdId,
+    ) -> StoreResult<Option<Session>> {
         let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
                     &format!("SELECT {cols} FROM terminal_sessions WHERE id = $1"),
-                    &[&session_id],
+                    &[&conversation_id],
                 )
                 .await?;
-            row.as_ref().map(Self::map_terminal_session_row).transpose()
+            row.as_ref().map(Self::map_control_session_row).transpose()
         })
         .await
     }
 
-    pub async fn list_terminal_sessions(
+    pub async fn list_control_sessions(
         &self,
         wave_id: Option<&LfdId>,
-        statuses: Option<&[TerminalSessionStatus]>,
-    ) -> StoreResult<Vec<TerminalSession>> {
+        statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>> {
         let cols = Self::TERMINAL_SESSION_COLS;
         self.with_client(|client| async move {
             let mut sql = format!("SELECT {cols} FROM terminal_sessions");
@@ -977,62 +990,66 @@ impl PostgresStore {
                 .map(|p| p.as_ref() as &(dyn ToSql + Sync))
                 .collect();
             let rows = client.query(&sql, &param_refs).await?;
-            rows.iter().map(Self::map_terminal_session_row).collect()
+            rows.iter().map(Self::map_control_session_row).collect()
         })
         .await
     }
 
-    pub async fn get_active_terminal_session_for_wave_run(
+    pub async fn get_active_control_session_for_run(
         &self,
-        wave_run_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
+        run_id: &LfdId,
+    ) -> StoreResult<Option<Session>> {
         let cols = Self::TERMINAL_SESSION_COLS;
         let active_statuses = vec![
-            TerminalSessionStatus::Pending.as_i32(),
-            TerminalSessionStatus::Attached.as_i32(),
-            TerminalSessionStatus::Running.as_i32(),
+            SessionStatus::Pending.as_i32(),
+            SessionStatus::Attached.as_i32(),
+            SessionStatus::Running.as_i32(),
         ];
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
                     &format!(
                         "SELECT {cols} FROM terminal_sessions \
-                         WHERE wave_run_id = $1 AND status = ANY($2) \
+                         WHERE run_id = $1 AND status = ANY($2) \
                          ORDER BY created_at DESC LIMIT 1"
                     ),
-                    &[&wave_run_id, &active_statuses],
+                    &[&run_id, &active_statuses],
                 )
                 .await?;
-            row.as_ref().map(Self::map_terminal_session_row).transpose()
+            row.as_ref().map(Self::map_control_session_row).transpose()
         })
         .await
     }
 
-    pub async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+    pub async fn update_control_session(&self, session: &Session) -> StoreResult<()> {
         self.with_client(|client| async move {
             let updated = client
                 .execute(
                     "UPDATE terminal_sessions
                      SET wave_id = $2,
-                         wave_run_id = $3,
-                         step = $4,
-                         agent = $5,
-                         cwd = $6,
-                         argv = $7,
-                         env = $8,
-                         source = $9,
-                         tmux_name = $10,
-                         status = $11,
-                         completion_token = $12,
-                         created_at = $13,
-                         attached_at = $14,
-                         started_at = $15,
-                         completed_at = $16
+                         run_id = $3,
+                         parent_session_id = $4,
+                         session_use = $5,
+                         step = $6,
+                         agent = $7,
+                         cwd = $8,
+                         argv = $9,
+                         env = $10,
+                         source = $11,
+                         tmux_name = $12,
+                         status = $13,
+                         completion_token = $14,
+                         created_at = $15,
+                         attached_at = $16,
+                         started_at = $17,
+                         completed_at = $18
                      WHERE id = $1",
                     &[
                         &session.id,
                         &session.wave_id,
-                        &session.wave_run_id,
+                        &session.run_id,
+                        &session.parent_session_id,
+                        &session.session_use.as_str(),
                         &session.step,
                         &session.agent,
                         &session.cwd,
@@ -1056,7 +1073,6 @@ impl PostgresStore {
         })
         .await
     }
-
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo).await
     }
@@ -1191,13 +1207,13 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_wave_runs(
+    pub async fn list_runs(
         &self,
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<WaveRun>> {
+    ) -> StoreResult<Vec<Run>> {
         self.with_client(|client| async move {
-            let query = Self::sql(list_wave_runs_query(wave_id.is_some(), limit.is_some()));
+            let query = Self::sql(list_runs_query(wave_id.is_some(), limit.is_some()));
             let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
             if let Some(wave_id) = wave_id {
                 params.push(Box::new(wave_id.clone()));
@@ -1211,49 +1227,46 @@ impl PostgresStore {
                 .map(|v| v.as_ref() as &(dyn ToSql + Sync))
                 .collect();
             let rows = client.query(query, &params_ref).await?;
-            rows.iter().map(map_wave_run_row).collect()
+            rows.iter().map(map_run_row).collect()
         })
         .await
     }
 
-    pub async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(Self::sql(Query::GetWaveRunById), &[&wave_run_id])
+                .query_opt(Self::sql(Query::GetRunById), &[&run_id])
                 .await?;
-            row.as_ref().map(map_wave_run_row).transpose()
+            row.as_ref().map(map_run_row).transpose()
         })
         .await
     }
 
-    pub async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         self.with_client(|client| async move {
             let statuses = [
-                WaveRunStatus::Pending.as_i32(),
-                WaveRunStatus::Running.as_i32(),
-                WaveRunStatus::Waiting.as_i32(),
+                RunStatus::Pending.as_i32(),
+                RunStatus::Running.as_i32(),
+                RunStatus::Waiting.as_i32(),
             ];
             let row = client
-                .query_opt(
-                    Self::sql(Query::GetActiveWaveRun),
-                    &[&wave_id, &&statuses[..]],
-                )
+                .query_opt(Self::sql(Query::GetActiveRun), &[&wave_id, &&statuses[..]])
                 .await?;
-            row.as_ref().map(map_wave_run_row).transpose()
+            row.as_ref().map(map_run_row).transpose()
         })
         .await
     }
 
-    pub async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+    pub async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let statuses = [
-                WaveRunStatus::Pending.as_i32(),
-                WaveRunStatus::Running.as_i32(),
-                WaveRunStatus::Waiting.as_i32(),
+                RunStatus::Pending.as_i32(),
+                RunStatus::Running.as_i32(),
+                RunStatus::Waiting.as_i32(),
             ];
             let count = client
                 .query_one(
-                    Self::sql(Query::CountActiveWaveRuns),
+                    Self::sql(Query::CountActiveRuns),
                     &[&wave_id, &&statuses[..]],
                 )
                 .await?
@@ -1263,17 +1276,17 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(Self::sql(Query::GetLatestWaveRun), &[&wave_id])
+                .query_opt(Self::sql(Query::GetLatestRun), &[&wave_id])
                 .await?;
-            row.as_ref().map(map_wave_run_row).transpose()
+            row.as_ref().map(map_run_row).transpose()
         })
         .await
     }
 
-    pub async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    pub async fn create_run(&self, run: &Run) -> StoreResult<()> {
         self.with_client(|client| async move {
             let started_at = run
                 .started_at
@@ -1284,7 +1297,7 @@ impl PostgresStore {
             let execution_cursor = run.execution_cursor.clone();
             client
                 .execute(
-                    Self::sql(Query::InsertWaveRun),
+                    Self::sql(Query::InsertRun),
                     &[
                         &run.id,
                         &run.wave_id,
@@ -1296,11 +1309,11 @@ impl PostgresStore {
                         &started_at,
                         &ended_at,
                         &run.error,
-                        &run.snapshot.repo,
-                        &run.snapshot.flow,
-                        &run.snapshot.task,
-                        &serde_json::to_string(&run.snapshot.direction)?,
-                        &serde_json::to_string(&run.snapshot.area)?,
+                        &run.repo,
+                        &run.flow,
+                        &run.task,
+                        &serde_json::to_string(&run.direction)?,
+                        &serde_json::to_string(&run.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
                         &execution_cursor,
@@ -1321,13 +1334,13 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    pub async fn update_run(&self, run: &Run) -> StoreResult<()> {
         self.with_client(|client| async move {
             let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
             let execution_cursor = run.execution_cursor.clone();
             let updated = client
                 .execute(
-                    Self::sql(Query::UpdateWaveRun),
+                    Self::sql(Query::UpdateRun),
                     &[
                         &(run.iteration as i32),
                         &(run.step_index as i32),
@@ -1337,11 +1350,11 @@ impl PostgresStore {
                         &run.started_at.map(|dt| dt.unix_timestamp()),
                         &run.ended_at.map(|dt| dt.unix_timestamp()),
                         &run.error,
-                        &run.snapshot.repo,
-                        &run.snapshot.flow,
-                        &run.snapshot.task,
-                        &serde_json::to_string(&run.snapshot.direction)?,
-                        &serde_json::to_string(&run.snapshot.area)?,
+                        &run.repo,
+                        &run.flow,
+                        &run.task,
+                        &serde_json::to_string(&run.direction)?,
+                        &serde_json::to_string(&run.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
                         &execution_cursor,
@@ -1366,12 +1379,12 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::ListStackRuns), &[&wave_id])
                 .await?;
-            rows.iter().map(map_wave_run_row).collect()
+            rows.iter().map(map_run_row).collect()
         })
         .await
     }
@@ -1586,15 +1599,15 @@ impl PostgresStore {
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let run_statuses = [
-                WaveRunStatus::Pending.as_i32(),
-                WaveRunStatus::Running.as_i32(),
-                WaveRunStatus::Waiting.as_i32(),
+                RunStatus::Pending.as_i32(),
+                RunStatus::Running.as_i32(),
+                RunStatus::Waiting.as_i32(),
             ];
             let updated = client
                 .execute(
                     Self::sql(Query::FailOrphanedRuns),
                     &[
-                        &WaveRunStatus::Failed.as_i32(),
+                        &RunStatus::Failed.as_i32(),
                         &"orphaned: lfd restarted".to_string(),
                         &now_unix(),
                         &&run_statuses[..],
@@ -1876,14 +1889,14 @@ impl PostgresStore {
 
     pub async fn list_fork_runs(
         &self,
-        wave_run_id: &LfdId,
+        run_id: &LfdId,
         step_index: u32,
     ) -> StoreResult<Vec<ForkRun>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(
                     Self::sql(Query::ListForkRuns),
-                    &[&wave_run_id, &(step_index as i32)],
+                    &[&run_id, &(step_index as i32)],
                 )
                 .await?;
             rows.iter().map(map_fork_run_row).collect()
@@ -1895,22 +1908,22 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT fr.id, fr.wave_run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
+                    "SELECT fr.id, fr.run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
                      FROM fork_runs fr
-                     LEFT JOIN wave_runs wr ON wr.id = fr.wave_run_id
+                     LEFT JOIN runs wr ON wr.id = fr.run_id
                      WHERE fr.status IN ($1, $2)
                        AND (
                          wr.id IS NULL
                          OR wr.status NOT IN ($3, $4, $5)
                          OR fr.step_index <> wr.step_index
                        )
-                     ORDER BY fr.wave_run_id ASC, fr.step_index ASC, fr.branch_index ASC",
+                     ORDER BY fr.run_id ASC, fr.step_index ASC, fr.branch_index ASC",
                     &[
                         &(ForkRunStatus::Pending as i32),
                         &(ForkRunStatus::Running as i32),
-                        &WaveRunStatus::Pending.as_i32(),
-                        &WaveRunStatus::Running.as_i32(),
-                        &WaveRunStatus::Waiting.as_i32(),
+                        &RunStatus::Pending.as_i32(),
+                        &RunStatus::Running.as_i32(),
+                        &RunStatus::Waiting.as_i32(),
                     ],
                 )
                 .await?;
@@ -1926,7 +1939,7 @@ impl PostgresStore {
                     Self::sql(Query::UpsertForkRun),
                     &[
                         &fork_run.id,
-                        &fork_run.wave_run_id,
+                        &fork_run.run_id,
                         &(fork_run.step_index as i32),
                         &(fork_run.branch_index as i32),
                         &(fork_run.status as i32),
@@ -1939,12 +1952,12 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+    pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
                     Self::sql(Query::DeleteForkRuns),
-                    &[&wave_run_id, &(step_index as i32)],
+                    &[&run_id, &(step_index as i32)],
                 )
                 .await?;
             Ok(deleted as u32)
@@ -1952,7 +1965,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
+    pub async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
         self.list_agent_history(None, None, None).await
     }
 
@@ -1961,7 +1974,7 @@ impl PostgresStore {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<AgentRun>> {
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         self.with_client(|client| async move {
             let query = Self::sql(list_agent_history_query(
                 worktree.is_some(),
@@ -1990,7 +2003,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
+    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(Self::sql(Query::GetAgentById), &[&agent_id])
@@ -2003,12 +2016,12 @@ impl PostgresStore {
     pub async fn get_waiting_agent_for_wave(
         &self,
         wave_id: &LfdId,
-    ) -> StoreResult<Option<AgentRun>> {
+    ) -> StoreResult<Option<ExecutionProcess>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
                     Self::sql(Query::GetWaitingAgentForWave),
-                    &[&wave_id, &AgentStatus::Waiting.as_i32()],
+                    &[&wave_id, &ExecutionProcessStatus::Waiting.as_i32()],
                 )
                 .await?;
             row.as_ref().map(map_agent_row).transpose()
@@ -2016,31 +2029,31 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
+    pub async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let started_at = agent_run
+            let started_at = execution_run
                 .started_at
                 .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let ended_at = agent_run.ended_at.map(|dt| dt.unix_timestamp());
-            let pid = agent_run.pid.map(|v| v as i32);
-            let container_id = agent_run.container_id.as_deref();
+            let ended_at = execution_run.ended_at.map(|dt| dt.unix_timestamp());
+            let pid = execution_run.pid.map(|v| v as i32);
+            let container_id = execution_run.container_id.as_deref();
             client
                 .execute(
                     Self::sql(Query::InsertAgent),
                     &[
-                        &agent_run.id,
-                        &agent_run.step,
-                        &agent_run.repo,
-                        &agent_run.worktree,
-                        &agent_run.wave_run_id,
-                        &agent_run.status.as_i32(),
+                        &execution_run.id,
+                        &execution_run.step,
+                        &execution_run.repo,
+                        &execution_run.worktree,
+                        &execution_run.run_id,
+                        &execution_run.status.as_i32(),
                         &started_at,
                         &ended_at,
                         &pid,
                         &container_id,
-                        &agent_run.agent,
-                        &agent_run.run_mode,
+                        &execution_run.agent,
+                        &execution_run.run_mode,
                     ],
                 )
                 .await?;
@@ -2061,7 +2074,7 @@ impl PostgresStore {
             let container_id = container_id.map(str::to_string);
             let updated = client
                 .execute(
-                    Self::sql(Query::UpdateAgentStatus),
+                    Self::sql(Query::UpdateExecutionStatus),
                     &[&status, &pid, &container_id, &agent_id],
                 )
                 .await?;
@@ -2086,7 +2099,10 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
+    pub async fn get_active_agents_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::GetActiveAgentsForWave), &[&wave_id])
@@ -2117,7 +2133,10 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
+    pub async fn get_stuck_agents(
+        &self,
+        older_than_secs: u64,
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         self.with_client(|client| async move {
             let cutoff = now_unix() - older_than_secs as i64;
             let rows = client

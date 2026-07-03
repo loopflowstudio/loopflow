@@ -5,17 +5,17 @@ import Foundation
 @MainActor
 @Observable
 public final class RunStore {
-    public private(set) var runs: [String: [WaveRun]] = [:]
+    public private(set) var runs: [String: [Run]] = [:]
 
     private let maxRunsPerWave = 50
 
     public init() {}
 
-    public func setRuns(for waveId: String, _ newRuns: [WaveRun]) {
+    public func setRuns(for waveId: String, _ newRuns: [Run]) {
         runs[waveId] = Array(newRuns.prefix(maxRunsPerWave))
     }
 
-    public func runs(for waveId: String) -> [WaveRun] {
+    public func runs(for waveId: String) -> [Run] {
         runs[waveId] ?? []
     }
 

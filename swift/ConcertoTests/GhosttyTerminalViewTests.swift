@@ -33,7 +33,8 @@ struct GhosttyTerminalViewTests {
     @Test("builds a local tmux attach command from connection info")
     func buildsLocalTmuxAttachCommand() {
         let command = TerminalAttachCommand(
-            TerminalConnectionInfo(
+            SessionConnectionInfo(
+                kind: "tmux",
                 sessionName: "lfd-session-1",
                 host: "localhost",
                 cwd: "/tmp/repo",
@@ -49,7 +50,8 @@ struct GhosttyTerminalViewTests {
     @Test("builds an ssh tmux attach command for remote hosts")
     func buildsRemoteTmuxAttachCommand() {
         let command = TerminalAttachCommand(
-            TerminalConnectionInfo(
+            SessionConnectionInfo(
+                kind: "tmux",
                 sessionName: "lfd-session-1",
                 host: "lfd.example.com",
                 cwd: "/remote/repo",
@@ -65,7 +67,8 @@ struct GhosttyTerminalViewTests {
     @Test("localhost detection normalizes common local host spellings")
     func localhostDetectionNormalizesCommonValues() {
         #expect(
-            TerminalConnectionInfo(
+            SessionConnectionInfo(
+                kind: "tmux",
                 sessionName: "lfd-session-1",
                 host: "127.0.0.1",
                 cwd: "/tmp/repo",
@@ -73,7 +76,8 @@ struct GhosttyTerminalViewTests {
             ).usesLocalTmux
         )
         #expect(
-            TerminalConnectionInfo(
+            SessionConnectionInfo(
+                kind: "tmux",
                 sessionName: "lfd-session-1",
                 host: "[::1]",
                 cwd: "/tmp/repo",
@@ -81,7 +85,8 @@ struct GhosttyTerminalViewTests {
             ).usesLocalTmux
         )
         #expect(
-            !TerminalConnectionInfo(
+            !SessionConnectionInfo(
+                kind: "tmux",
                 sessionName: "lfd-session-1",
                 host: "lfd.example.com",
                 cwd: "/tmp/repo",

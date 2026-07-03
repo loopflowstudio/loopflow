@@ -311,9 +311,9 @@ struct AttentionDetailView: View {
         HStack(spacing: Spacing.sm) {
             switch item.context {
             case .interactive(let context):
-                if let sessionId = context.terminalSessionId {
+                if let sessionId = context.sessionId {
                     Button("Open Session") {
-                        repoState.openTerminalSession(sessionId)
+                        repoState.openSession(sessionId)
                     }
                     .buttonStyle(DarkButtonStyle())
                 }

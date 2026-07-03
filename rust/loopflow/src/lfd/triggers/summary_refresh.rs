@@ -77,7 +77,7 @@ async fn refresh_summaries_for_repo(
         }
 
         // Need an active run to get the worktree path.
-        let run = match store.get_active_wave_run(wave.id()).await {
+        let run = match store.get_active_run(wave.id()).await {
             Ok(Some(run)) => run,
             _ => continue,
         };

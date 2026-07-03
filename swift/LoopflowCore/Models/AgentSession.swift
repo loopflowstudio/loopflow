@@ -209,7 +209,7 @@ public struct AgentSession: Sendable, Hashable {
     public let id: String
     public let harness: String
     public let status: String
-    public let waveRunId: String?
+    public let runId: String?
     public let providerSessionId: String?
     public let inputSupported: Bool
     public let config: AgentSessionConfig
@@ -220,7 +220,7 @@ public struct AgentSession: Sendable, Hashable {
         id: String,
         harness: String,
         status: String,
-        waveRunId: String?,
+        runId: String?,
         providerSessionId: String?,
         inputSupported: Bool,
         config: AgentSessionConfig,
@@ -230,7 +230,7 @@ public struct AgentSession: Sendable, Hashable {
         self.id = id
         self.harness = harness
         self.status = status
-        self.waveRunId = waveRunId
+        self.runId = runId
         self.providerSessionId = providerSessionId
         self.inputSupported = inputSupported
         self.config = config
@@ -301,7 +301,7 @@ public enum AgentSessionEvent: Sendable, Hashable {
     case other(type: String, payload: JSONValue)
 }
 
-public struct AgentSessionEventEnvelope: Sendable, Hashable {
+public struct ConversationEventEnvelope: Sendable, Hashable {
     public let seq: Int?
     public let event: AgentSessionEvent?
     public let replayCompletedLastSeq: Int?

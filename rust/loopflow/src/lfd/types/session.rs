@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -19,7 +20,7 @@ pub fn tmux_session_name(branch: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
-pub enum TerminalSessionStatus {
+pub enum SessionStatus {
     Pending,
     Attached,
     Running,
@@ -28,7 +29,13 @@ pub enum TerminalSessionStatus {
     Canceled,
 }
 
-impl TerminalSessionStatus {
+pub const LIVE_SESSION_STATUSES: &[SessionStatus] = &[
+    SessionStatus::Pending,
+    SessionStatus::Attached,
+    SessionStatus::Running,
+];
+
+impl SessionStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -76,12 +83,63 @@ impl TerminalSessionStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum SessionUse {
+    WaveAgent,
+    Worker,
+    Palette,
+}
+
+impl SessionUse {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WaveAgent => "wave_agent",
+            Self::Worker => "worker",
+            Self::Palette => "palette",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseSessionUseError {
+    value: String,
+}
+
+impl fmt::Display for ParseSessionUseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "unknown session use '{}'", self.value)
+    }
+}
+
+impl std::error::Error for ParseSessionUseError {}
+
+impl TryFrom<&str> for SessionUse {
+    type Error = ParseSessionUseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "wave_agent" => Ok(Self::WaveAgent),
+            "worker" => Ok(Self::Worker),
+            "palette" => Ok(Self::Palette),
+            _ => Err(ParseSessionUseError {
+                value: value.to_string(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalSession {
+pub struct Session {
     pub id: LfdId,
     pub wave_id: LfdId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub wave_run_id: Option<LfdId>,
+    pub run_id: Option<LfdId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<LfdId>,
+    #[serde(rename = "use")]
+    pub session_use: SessionUse,
     pub step: String,
     pub agent: String,
     pub cwd: String,
@@ -94,7 +152,7 @@ pub struct TerminalSession {
     /// Set at creation, used for attach and cleanup.
     #[serde(default)]
     pub tmux_name: String,
-    pub status: TerminalSessionStatus,
+    pub status: SessionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attached_at: Option<OffsetDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,7 +164,7 @@ pub struct TerminalSession {
     pub completion_token: Option<String>,
 }
 
-impl TerminalSession {
+impl Session {
     pub fn is_tmux_backed(&self) -> bool {
         matches!(
             self.source.as_str(),
@@ -119,8 +177,8 @@ impl TerminalSession {
             return false;
         }
         let mut changed = false;
-        if self.status == TerminalSessionStatus::Pending {
-            self.status = TerminalSessionStatus::Attached;
+        if self.status == SessionStatus::Pending {
+            self.status = SessionStatus::Attached;
             changed = true;
         }
         if self.attached_at.is_none() {
@@ -137,7 +195,7 @@ impl TerminalSession {
         if self.attached_at.is_none() {
             self.attached_at = Some(OffsetDateTime::now_utc());
         }
-        self.status = TerminalSessionStatus::Running;
+        self.status = SessionStatus::Running;
         self.started_at = Some(OffsetDateTime::now_utc());
         true
     }
@@ -146,7 +204,7 @@ impl TerminalSession {
         if self.status.is_terminal() {
             return false;
         }
-        self.status = TerminalSessionStatus::from_exit_code(exit_code);
+        self.status = SessionStatus::from_exit_code(exit_code);
         self.completed_at = Some(OffsetDateTime::now_utc());
         true
     }
@@ -155,7 +213,7 @@ impl TerminalSession {
         if self.status.is_terminal() {
             return false;
         }
-        self.status = TerminalSessionStatus::Canceled;
+        self.status = SessionStatus::Canceled;
         self.completed_at = Some(OffsetDateTime::now_utc());
         true
     }
@@ -163,15 +221,17 @@ impl TerminalSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{TerminalSession, TerminalSessionStatus};
+    use super::{Session, SessionStatus, SessionUse};
     use crate::lfd::id::LfdId;
     use time::OffsetDateTime;
 
-    fn session(status: TerminalSessionStatus) -> TerminalSession {
-        TerminalSession {
+    fn session(status: SessionStatus) -> Session {
+        Session {
             id: LfdId::new(),
             wave_id: LfdId::new(),
-            wave_run_id: None,
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::Palette,
             step: "design".to_string(),
             agent: "claude".to_string(),
             cwd: "/tmp/repo".to_string(),
@@ -190,29 +250,36 @@ mod tests {
 
     #[test]
     fn attach_marks_pending_sessions_attached() {
-        let mut session = session(TerminalSessionStatus::Pending);
+        let mut session = session(SessionStatus::Pending);
 
         assert!(session.attach());
-        assert_eq!(session.status, TerminalSessionStatus::Attached);
+        assert_eq!(session.status, SessionStatus::Attached);
         assert!(session.attached_at.is_some());
     }
 
     #[test]
     fn start_auto_attaches_session() {
-        let mut session = session(TerminalSessionStatus::Pending);
+        let mut session = session(SessionStatus::Pending);
 
         assert!(session.start());
-        assert_eq!(session.status, TerminalSessionStatus::Running);
+        assert_eq!(session.status, SessionStatus::Running);
         assert!(session.attached_at.is_some());
         assert!(session.started_at.is_some());
     }
 
     #[test]
-    fn terminal_sessions_do_not_restart_or_complete_twice() {
-        let mut session = session(TerminalSessionStatus::Succeeded);
+    fn sessions_do_not_restart_or_complete_twice() {
+        let mut session = session(SessionStatus::Succeeded);
 
         assert!(!session.start());
         assert!(!session.complete(1));
         assert!(!session.cancel());
+    }
+
+    #[test]
+    fn session_use_rejects_unknown_values() {
+        let err = SessionUse::try_from("legacy").unwrap_err();
+
+        assert_eq!(err.to_string(), "unknown session use 'legacy'");
     }
 }

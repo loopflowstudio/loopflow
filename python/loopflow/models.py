@@ -30,7 +30,7 @@ class PullRequest(BaseModel):
     branch: Optional[str] = None
 
 
-class WaveRun(BaseModel):
+class Run(BaseModel):
     id: str
     wave_id: str
     task: Optional[str] = None
@@ -96,7 +96,7 @@ class Wave(BaseModel):
     commits: list[CommitEntry] = Field(default_factory=list)
     diff_stat: Optional[str] = None
     flow_steps: list[FlowStep] = Field(default_factory=list)
-    active_run: Optional[WaveRun] = None
+    active_run: Optional[Run] = None
     created_at: Optional[datetime] = None
 
     branch: Optional[str] = None
@@ -111,6 +111,48 @@ class Wave(BaseModel):
         if not isinstance(value, list):
             return []
         return [FlowStep.from_raw(item) for item in value]
+
+
+class Session(BaseModel):
+    id: str
+    object: str
+    wave_id: str
+    run_id: Optional[str]
+    parent_session_id: Optional[str]
+    session_use: str = Field(alias="use")
+    step: str
+    agent: str
+    cwd: str
+    argv: list[str]
+    env: dict[str, str]
+    source: str
+    tmux_name: str
+    status: str
+    created_at: datetime
+    attached_at: Optional[datetime]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+
+
+class SessionConnectionInfo(BaseModel):
+    kind: str
+    session_name: str
+    host: str
+    cwd: str
+    status: str
+
+
+class WaveAgentTreeSession(BaseModel):
+    session: Session
+    connection: Optional[SessionConnectionInfo]
+
+
+class WaveAgentTree(BaseModel):
+    object: str
+    id: str
+    wave: Wave
+    child_waves: list[Wave]
+    sessions: list[WaveAgentTreeSession]
 
 
 class AuthProviderStatus(BaseModel):
@@ -161,7 +203,7 @@ class Repo(BaseModel):
     added_at: Optional[datetime] = None
 
 
-class SessionConfig(BaseModel):
+class ConversationConfig(BaseModel):
     agent: Optional[str] = None
     cwd: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -169,20 +211,20 @@ class SessionConfig(BaseModel):
     yolo_mode: bool = False
 
 
-class Session(BaseModel):
+class Conversation(BaseModel):
     id: str
-    object: str = "session"
+    object: str = "conversation"
     harness: str
     status: str
-    wave_run_id: Optional[str] = None
+    run_id: Optional[str] = None
     provider_session_id: Optional[str] = None
-    config: SessionConfig = Field(default_factory=SessionConfig)
+    config: ConversationConfig = Field(default_factory=ConversationConfig)
     input_supported: bool = False
     created_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
 
-class SessionEventEnvelope(BaseModel):
+class ConversationEventEnvelope(BaseModel):
     seq: Optional[int] = None
     event: dict[str, Any]
 

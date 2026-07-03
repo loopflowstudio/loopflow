@@ -41,7 +41,7 @@ struct WaveDetailPanel: View {
     private let terminalLauncher = TerminalLauncher()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
+    private var waveRuns: [Run] { repoState.runStore.runs(for: wave.id) }
     private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
     private var waveContent: WaveContent? { wave.content }
     private var activeSessionState: SessionState? {
@@ -227,7 +227,7 @@ struct WaveDetailPanel: View {
                                 quickActionsBar
                             }
                         } else {
-                            WaveRunsTab(
+                            RunsTab(
                                 runs: waveRuns,
                                 onCombine: combinePRs
                             )
@@ -854,7 +854,7 @@ struct WaveDetailPanel: View {
         let decision = evaluateCommitFeedUpdate(
             previousCommitSHAs: previousCommitSHAs,
             commits: newCommits,
-            isWaveRunning: wave.status == .running
+            isRunning: wave.status == .running
         )
 
         if decision.shouldInvalidateDiffCache {

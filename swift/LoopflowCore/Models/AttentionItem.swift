@@ -42,18 +42,18 @@ public enum AttentionStatus: String, Sendable, CaseIterable, Hashable {
 /// Context for interactive attention items (step needs human input).
 public struct InteractiveAttentionContext: Sendable, Hashable {
     public let step: String?
-    public let terminalSessionId: String?
+    public let sessionId: String?
     public let designPath: String?
     public let mutationSummary: String?
 
     public init(
         step: String? = nil,
-        terminalSessionId: String? = nil,
+        sessionId: String? = nil,
         designPath: String? = nil,
         mutationSummary: String? = nil
     ) {
         self.step = step
-        self.terminalSessionId = terminalSessionId
+        self.sessionId = sessionId
         self.designPath = designPath
         self.mutationSummary = mutationSummary
     }
@@ -134,7 +134,7 @@ public extension AttentionItem {
             return .interactive(
                 InteractiveAttentionContext(
                     step: json["step"] as? String,
-                    terminalSessionId: json["terminal_session_id"] as? String,
+                    sessionId: json["session_id"] as? String,
                     designPath: json["design_path"] as? String,
                     mutationSummary: json["mutation_summary"] as? String
                 )

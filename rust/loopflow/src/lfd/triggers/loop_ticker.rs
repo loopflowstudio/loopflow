@@ -60,7 +60,7 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let active_runs = match store.count_active_wave_runs(wave.id()).await {
+        let active_runs = match store.count_active_runs(wave.id()).await {
             Ok(count) => count,
             Err(err) => {
                 tracing::error!(wave_id = %wave.id(), error = %err, "failed to count active loop runs");

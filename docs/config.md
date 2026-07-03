@@ -17,6 +17,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include branch files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
+| Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
@@ -40,10 +41,12 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
+| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
 | **scratch** | `scratch/` design artifacts | always included |
-| **wave** | `wave/<name>/` docs when a wave is scoped | `--wave NAME` |
+| **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
 | **diff** | Branch diff when requested | `--diff` |
+| **diff_files** | Files changed on this branch when requested | `diff_files: true` |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
 
@@ -107,17 +110,31 @@ Flows are YAML files in `.lf/flows/`:
 
 ## Options Reference
 
-### Docs
+### Loopflow Guidance
 
-Explicit docs paths, globs, or directories. Directory entries include markdown from ancestors and descendants.
+Ambient operating guidance for git, worktrees, PRs, and delegation. Injected by default.
 
 | | |
 |---|---|
-| **CLI** | `--docs README.md,docs/` |
-| **Config** | `docs: [README.md, docs/]` |
-| **Default** | empty |
+| **CLI** | `--no-loopflow` |
+| **Default** | included |
 
-Root README files are no longer special. `scratch/` remains ambient, and `wave/` loads when a wave is in scope.
+Use `--no-loopflow` when you want a leaner prompt without loopflow-specific process guidance.
+
+### Docs
+
+Prefetch specific files, globs, or directories into context. Not included by default.
+
+| | |
+|---|---|
+| **CLI** | `--docs PATH[,PATH...]` |
+| **Config** | `docs: [PATH, PATH]` |
+| **Default** | none (empty) |
+
+Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
+gathers `*.md` under it). Use this to pull in reference docs relevant to the
+task—it doesn't restrict which files the agent can edit. `scratch/` and
+`wave/` are always included automatically; you don't need `--docs` for them.
 
 ### Branch Files (diff_files)
 

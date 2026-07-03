@@ -29,7 +29,7 @@ struct AttentionQueueViewTests {
             context: .interactive(
                 InteractiveAttentionContext(
                     step: "review-design",
-                    terminalSessionId: "terminal-1",
+                    sessionId: "terminal-1",
                     designPath: "scratch/feature.md",
                     mutationSummary: nil
                 )
@@ -59,7 +59,7 @@ struct AttentionQueueViewTests {
             context: .interactive(
                 InteractiveAttentionContext(
                     step: "review",
-                    terminalSessionId: "terminal-1",
+                    sessionId: "terminal-1",
                     designPath: nil,
                     mutationSummary: "- Rebalance the PM wave.\n- Close stale roadmap items."
                 )

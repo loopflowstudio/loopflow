@@ -29,7 +29,7 @@ impl EventHub {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::AgentStatus;
+    use crate::lfd::types::ExecutionProcessStatus;
 
     #[tokio::test]
     async fn event_hub_delivers_executor_events() {
@@ -46,12 +46,14 @@ mod tests {
             "implement".to_string(),
             "/tmp/wt".to_string(),
         ));
-        hub.send(Event::agent_ended(agent_id, AgentStatus::Completed));
+        hub.send(Event::agent_ended(
+            agent_id,
+            ExecutionProcessStatus::Completed,
+        ));
         hub.send(Event::wave_waiting(
             wave_id.clone(),
             run_id,
             "review".to_string(),
-            None,
             None,
             None,
         ));

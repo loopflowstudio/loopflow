@@ -11,9 +11,9 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "hello from existing"))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "hello from existing"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -39,8 +39,8 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemCompleted(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemCompleted(
                         turnId: "turn_1",
                         item: .message(MessageItem(
                             id: "msg_user_1",
@@ -48,8 +48,8 @@ struct SessionStateTests {
                             phase: "user"
                         ))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .textDelta(turnId: "turn_1", content: "What are you trying to build?"))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .textDelta(turnId: "turn_1", content: "What are you trying to build?"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -95,10 +95,10 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "Hello"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "Hello"))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "Hello"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "Hello"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -123,9 +123,9 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .error(code: "oops", message: "bad thing"))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "failed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .error(code: "oops", message: "bad thing"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "failed"))),
                 ])
             ]
         )
@@ -150,14 +150,14 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "reply one"))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "reply one"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ]),
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnStarted(turnId: "turn_2"))),
-                    .success(AgentSessionEventEnvelope(seq: 4, event: .textDelta(turnId: "turn_2", content: "reply two"))),
-                    .success(AgentSessionEventEnvelope(seq: 5, event: .turnCompleted(turnId: "turn_2", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .turnStarted(turnId: "turn_2"))),
+                    .success(ConversationEventEnvelope(seq: 4, event: .textDelta(turnId: "turn_2", content: "reply two"))),
+                    .success(ConversationEventEnvelope(seq: 5, event: .turnCompleted(turnId: "turn_2", status: "completed"))),
                 ]),
             ]
         )
@@ -187,8 +187,8 @@ struct SessionStateTests {
             ],
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -208,17 +208,17 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemUpdated(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemUpdated(
                         turnId: "turn_1",
                         itemId: "cmd_1",
                         delta: .output(content: "ignored")
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .itemStarted(
+                    .success(ConversationEventEnvelope(seq: 2, event: .itemStarted(
                         turnId: "turn_1",
                         item: .command(CommandItem(id: "cmd_1", command: ["git", "status"], status: .inProgress))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -238,22 +238,22 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemStarted(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemStarted(
                         turnId: "turn_1",
                         item: .command(CommandItem(id: "cmd_1", command: ["git", "status"], status: .inProgress))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .itemUpdated(
+                    .success(ConversationEventEnvelope(seq: 2, event: .itemUpdated(
                         turnId: "turn_1",
                         itemId: "cmd_1",
                         delta: .output(content: "M src/main.rs\n")
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .itemUpdated(
+                    .success(ConversationEventEnvelope(seq: 3, event: .itemUpdated(
                         turnId: "turn_1",
                         itemId: "cmd_1",
                         delta: .output(content: "M tests/test.rs")
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 4, event: .itemCompleted(
+                    .success(ConversationEventEnvelope(seq: 4, event: .itemCompleted(
                         turnId: "turn_1",
                         item: .command(CommandItem(
                             id: "cmd_1",
@@ -262,7 +262,7 @@ struct SessionStateTests {
                             output: "M src/main.rs\nM tests/test.rs"
                         ))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 5, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 5, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -283,17 +283,17 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemStarted(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemStarted(
                         turnId: "turn_1",
                         item: .command(CommandItem(id: "cmd_1", command: ["git", "status"], status: .inProgress))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .itemStarted(
+                    .success(ConversationEventEnvelope(seq: 2, event: .itemStarted(
                         turnId: "turn_1",
                         item: .tool(ToolItem(id: "tool_1", name: "Read", status: .inProgress))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .textDelta(turnId: "turn_1", content: "done"))),
-                    .success(AgentSessionEventEnvelope(seq: 4, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .textDelta(turnId: "turn_1", content: "done"))),
+                    .success(ConversationEventEnvelope(seq: 4, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -334,12 +334,12 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemCompleted(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemCompleted(
                         turnId: "turn_1",
                         item: .tool(ToolItem(id: "tool_1", name: "Read", status: .completed, output: "done"))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -361,17 +361,17 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemStarted(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .itemStarted(
                         turnId: "turn_1",
                         item: .command(CommandItem(id: "cmd_1", command: ["cat"], status: .inProgress))
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .itemUpdated(
+                    .success(ConversationEventEnvelope(seq: 2, event: .itemUpdated(
                         turnId: "turn_1",
                         itemId: "cmd_1",
                         delta: .output(content: largeOutput)
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -396,9 +396,9 @@ struct SessionStateTests {
             getSessionResults: [.success(activeSession(id: "session_1"))],
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "replayed"))),
-                    .success(AgentSessionEventEnvelope(replayCompletedLastSeq: 1)),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "replayed"))),
+                    .success(ConversationEventEnvelope(replayCompletedLastSeq: 1)),
                 ], holdOpen: true)
             ]
         )
@@ -425,7 +425,7 @@ struct SessionStateTests {
             getSessionResults: [.success(activeSession(id: "session_1"))],
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
                 ], holdOpen: true)
             ]
         )
@@ -499,8 +499,8 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -519,7 +519,7 @@ struct SessionStateTests {
         let state = SessionState(
             waveId: "wave-test",
             sessionHarness: "codex",
-            sessionWaveRunId: "run_123",
+            sessionRunId: "run_123",
             sessionConfig: config,
             waveService: service,
             userDefaults: makeUserDefaults("config-passthrough")
@@ -529,7 +529,7 @@ struct SessionStateTests {
         await waitUntil { state.turnState == .completed }
 
         #expect(service.lastCreateSessionHarness == "codex")
-        #expect(service.lastCreateSessionWaveRunId == "run_123")
+        #expect(service.lastCreateSessionRunId == "run_123")
         #expect(service.lastCreateSessionConfig == config)
     }
 
@@ -539,8 +539,8 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .suggestedActions(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .suggestedActions(
                         turnId: "turn_1",
                         actions: [
                             SuggestedActionPayload(label: "Land PR", description: "Merge now"),
@@ -551,7 +551,7 @@ struct SessionStateTests {
                             SuggestedActionPayload(label: "Extra action"),
                         ]
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -591,16 +591,16 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .suggestedActions(
+                    .success(ConversationEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .suggestedActions(
                         turnId: "turn_1",
                         actions: [SuggestedActionPayload(label: "Land PR")]
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .suggestedActions(
+                    .success(ConversationEventEnvelope(seq: 2, event: .suggestedActions(
                         turnId: "turn_1",
                         actions: []
                     ))),
-                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -637,9 +637,9 @@ struct SessionStateTests {
         let service = MockSessionService(
             streamPlans: [
                 .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .contextSnapshot(snapshot))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                    .success(ConversationEventEnvelope(seq: 0, event: .contextSnapshot(snapshot))),
+                    .success(ConversationEventEnvelope(seq: 1, event: .turnStarted(turnId: "turn_1"))),
+                    .success(ConversationEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
                 ])
             ]
         )
@@ -658,10 +658,10 @@ struct SessionStateTests {
 }
 
 private struct StreamPlan {
-    let events: [Result<AgentSessionEventEnvelope, Error>]
+    let events: [Result<ConversationEventEnvelope, Error>]
     let holdOpen: Bool
 
-    init(events: [Result<AgentSessionEventEnvelope, Error>], holdOpen: Bool = false) {
+    init(events: [Result<ConversationEventEnvelope, Error>], holdOpen: Bool = false) {
         self.events = events
         self.holdOpen = holdOpen
     }
@@ -680,7 +680,7 @@ private final class MockSessionService: SessionService, @unchecked Sendable {
     private(set) var stopSessionCallCount = 0
     private(set) var streamCancellationCount = 0
     private(set) var lastCreateSessionHarness: String?
-    private(set) var lastCreateSessionWaveRunId: String?
+    private(set) var lastCreateSessionRunId: String?
     private(set) var lastCreateSessionConfig: AgentSessionConfig?
 
     init(
@@ -695,13 +695,13 @@ private final class MockSessionService: SessionService, @unchecked Sendable {
 
     func createSession(
         harness: String,
-        waveRunId: String?,
+        runId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let result = queue.sync { () -> Result<AgentSession, Error> in
             createSessionCallCount += 1
             lastCreateSessionHarness = harness
-            lastCreateSessionWaveRunId = waveRunId
+            lastCreateSessionRunId = runId
             lastCreateSessionConfig = config
             if createSessionResults.isEmpty {
                 return .success(activeSession(id: "session_1"))
@@ -734,15 +734,15 @@ private final class MockSessionService: SessionService, @unchecked Sendable {
         }
     }
 
-    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
+    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession {
         queue.sync { sendInputCallCount += 1 }
-        return activeSession(id: sessionId)
+        return activeSession(id: conversationId)
     }
 
-    func streamSessionEvents(
-        sessionId: String,
+    func streamConversationEvents(
+        conversationId: String,
         afterSeq: Int?
-    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error> {
+    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error> {
         let plan = queue.sync {
             streamPlans.isEmpty ? StreamPlan(events: [], holdOpen: false) : streamPlans.removeFirst()
         }
@@ -795,7 +795,7 @@ private func session(id: String, status: String, endedAt: Date? = nil) -> AgentS
         id: id,
         harness: "codex",
         status: status,
-        waveRunId: nil,
+        runId: nil,
         providerSessionId: nil,
         inputSupported: true,
         config: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),

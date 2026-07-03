@@ -4,15 +4,15 @@ import Testing
 
 @Suite("Event service parsing")
 struct EventServiceTests {
-    @Test("wave_waiting parses terminal session id")
-    func parseWaitingEventWithTerminalSession() throws {
+    @Test("wave_waiting parses session id")
+    func parseWaitingEventWithSession() throws {
         let text = """
         {
           "type": "wave_waiting",
           "wave_id": "wave-1",
-          "wave_run_id": "run-1",
+          "run_id": "run-1",
           "step": "design",
-          "terminal_session_id": "terminal-1",
+          "session_id": "terminal-1",
           "timestamp": "2026-03-17T12:00:00.000Z"
         }
         """
@@ -21,9 +21,9 @@ struct EventServiceTests {
 
         #expect(event.type == .waiting)
         #expect(event.waveId == "wave-1")
-        #expect(event.waveRunId == "run-1")
+        #expect(event.runId == "run-1")
         #expect(event.step == "design")
-        #expect(event.terminalSessionId == "terminal-1")
+        #expect(event.sessionId == "terminal-1")
     }
 }
 

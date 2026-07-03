@@ -8,11 +8,11 @@ struct TerminalWorkspaceView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(\.palette) private var palette
 
-    private var sessions: [TerminalSession] {
+    private var sessions: [Session] {
         repoState.terminalWorkspaceStore.orderedSessions(for: waveId)
     }
 
-    private var selectedSession: TerminalSession? {
+    private var selectedSession: Session? {
         repoState.terminalWorkspaceStore.selectedSession(for: waveId)
     }
 
@@ -42,12 +42,12 @@ struct TerminalWorkspaceView: View {
         }
     }
 
-    private func terminalPane(for selectedSession: TerminalSession) -> some View {
+    private func terminalPane(for selectedSession: Session) -> some View {
         VStack(spacing: 0) {
             TerminalWorkspaceTabs(
                 sessions: sessions,
                 selectedSessionId: repoState.terminalWorkspaceStore.selectedSessionId(for: waveId),
-                onSelect: { repoState.selectTerminalSession($0, waveId: waveId) }
+                onSelect: { repoState.selectSession($0, waveId: waveId) }
             )
 
             Divider()
@@ -66,7 +66,7 @@ struct TerminalWorkspaceView: View {
 }
 
 private struct TerminalWorkspaceTabs: View {
-    let sessions: [TerminalSession]
+    let sessions: [Session]
     let selectedSessionId: String?
     let onSelect: (String) -> Void
 
@@ -103,7 +103,7 @@ private struct TerminalWorkspaceTabs: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func statusColor(_ status: TerminalSessionStatus) -> Color {
+    private func statusColor(_ status: SessionStatus) -> Color {
         switch status {
         case .pending, .attached: return .statusWarning
         case .running: return .statusSuccess
@@ -114,11 +114,11 @@ private struct TerminalWorkspaceTabs: View {
 }
 
 private struct SessionTerminalSurface: View {
-    let session: TerminalSession
+    let session: Session
 
     @Environment(RepoState.self) private var repoState
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
-    @State private var connectionInfo: TerminalConnectionInfo?
+    @State private var connectionInfo: SessionConnectionInfo?
     @State private var errorMessage: String?
 
     private var directAttachCommand: TerminalAttachCommand? {
@@ -164,7 +164,7 @@ private struct SessionTerminalSurface: View {
                 return
             }
             do {
-                connectionInfo = try await repoState.attachTerminalSession(session.id)
+                connectionInfo = try await repoState.attachSession(session.id)
                 errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -184,7 +184,7 @@ struct TerminalAttachCommand: Equatable {
         self.env = env
     }
 
-    init(_ connection: TerminalConnectionInfo) {
+    init(_ connection: SessionConnectionInfo) {
         if connection.usesLocalTmux {
             self.init(
                 workingDirectory: connection.cwd,
@@ -230,11 +230,13 @@ private struct WorkspaceShell {
         try await tmuxSession.ensureBaseSession()
     }
 
-    func makeTerminalSession(existingSession: TerminalSession?) -> TerminalSession {
-        TerminalSession(
+    func makeSession(existingSession: Session?) -> Session {
+        Session(
             id: sessionId,
             waveId: waveId,
-            waveRunId: existingSession?.waveRunId,
+            runId: existingSession?.runId,
+            parentSessionId: existingSession?.parentSessionId,
+            sessionUse: existingSession?.sessionUse ?? .palette,
             step: "shell",
             agent: "interactive",
             cwd: worktreePath,
@@ -253,7 +255,7 @@ private struct WorkspaceShell {
 
 
 private struct TerminalContextSidebar: View {
-    let session: TerminalSession
+    let session: Session
     let onBackToWork: () -> Void
 
     @Environment(RepoState.self) private var repoState
@@ -269,7 +271,7 @@ private struct TerminalContextSidebar: View {
         repoState.attentionStore.ordered.filter { $0.waveId == session.waveId }
     }
 
-    private var recentRuns: [WaveRun] {
+    private var recentRuns: [Run] {
         Array(repoState.runStore.runs(for: session.waveId).prefix(3))
     }
 
@@ -399,7 +401,7 @@ private struct TerminalContextSidebar: View {
                             TmuxSessionRegistry.shared.killSession(named: userShellTmuxSessionName)
                             repoState.terminalWorkspaceStore.remove(session.id)
                         } else {
-                            _ = try? await repoState.cancelTerminalSession(session.id)
+                            _ = try? await repoState.cancelSession(session.id)
                         }
                         GhosttyManager.shared.destroySession(session.id)
                     }
@@ -407,7 +409,7 @@ private struct TerminalContextSidebar: View {
                 .buttonStyle(.bordered)
 
                 Button("Back to work") {
-                    repoState.selectTerminalSession(nil, waveId: session.waveId)
+                    repoState.selectSession(nil, waveId: session.waveId)
                     onBackToWork()
                 }
                 .buttonStyle(.bordered)
@@ -469,10 +471,10 @@ private struct TerminalContextSidebar: View {
             try await workspaceShell.ensureBaseSession()
 
             let existingSession = repoState.terminalWorkspaceStore.sessionsById[workspaceShell.sessionId]
-            let shellSession = workspaceShell.makeTerminalSession(existingSession: existingSession)
+            let shellSession = workspaceShell.makeSession(existingSession: existingSession)
 
             repoState.terminalWorkspaceStore.upsert(shellSession, select: true)
-            repoState.selectTerminalSession(shellSession.id, waveId: shellSession.waveId)
+            repoState.selectSession(shellSession.id, waveId: shellSession.waveId)
         } catch {
             repoState.errorMessage = "Failed to open embedded terminal: \(error.localizedDescription)"
         }

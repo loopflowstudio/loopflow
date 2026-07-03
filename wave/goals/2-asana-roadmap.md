@@ -27,6 +27,14 @@ priority. Existing seams: `pm_pull`, `pm_try_claim`.
 - **Blocks → human:** when stuck, surface as an Asana task assigned to the human
   and/or a Concerto block.
 
+**Target seam:** the loop reads the roadmap through a provider handle, not the
+local mirror. The future shape is a small Roadmap service the Wave agent calls
+through lfd/lfq — `list()`, `claim()`, `create()`, `update()`, `complete()` —
+with Asana as the first backend. Local markdown may stay as a fixture /
+import-export path, but the hot loop reads provider-backed state. Don't build
+the full service in this item; wire Asana behind that seam and keep the surface
+minimal.
+
 ## Done when
 
 - A Goal completes a real Asana task end-to-end: reads it, does the work, moves

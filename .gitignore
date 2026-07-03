@@ -4,6 +4,7 @@ __pycache__/
 
 # Swift
 .build/
+.build*/
 xcuserdata/
 .swiftpm/xcode/
 swift/*.xcodeproj/

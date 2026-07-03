@@ -376,7 +376,7 @@ public final class RepoState {
                     triggers: [],
                     status: .failed,
                     iteration: 2,
-                    activeRun: WaveRun(
+                    activeRun: Run(
                         id: "run-failed-1",
                         waveId: "mock-wave-5",
                         flow: "build",
@@ -396,8 +396,8 @@ public final class RepoState {
         ])
 
         // Populate mock runs for waves with history
-        let mockRuns: [WaveRun] = [
-            WaveRun(
+        let mockRuns: [Run] = [
+            Run(
                 id: "run-1",
                 waveId: "mock-wave-1",
                 flow: "build",
@@ -413,7 +413,7 @@ public final class RepoState {
                 endedAt: Date().addingTimeInterval(-6600),
                 createdAt: Date().addingTimeInterval(-7200)
             ),
-            WaveRun(
+            Run(
                 id: "run-2",
                 waveId: "mock-wave-1",
                 flow: "build",
@@ -429,7 +429,7 @@ public final class RepoState {
                 endedAt: Date().addingTimeInterval(-3000),
                 createdAt: Date().addingTimeInterval(-3600)
             ),
-            WaveRun(
+            Run(
                 id: "run-3",
                 waveId: "mock-wave-1",
                 flow: "build",
@@ -458,7 +458,7 @@ public final class RepoState {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
         if currentRepo?.path() != canonicalURL.path() {
-            cancelTrackedTerminalSessions()
+            cancelTrackedSessions()
         }
 
         resetTransientWaveState()
@@ -484,7 +484,7 @@ public final class RepoState {
     }
 
     public func closeRepo() {
-        cancelTrackedTerminalSessions()
+        cancelTrackedSessions()
         Task {
             await eventService?.disconnect()
         }
@@ -516,7 +516,7 @@ public final class RepoState {
                             self.applyConnectedSnapshot(connected.waves)
                             self.preloadWaveContent(for: self.waves)
                             await self.refreshAttention()
-                            await self.refreshTerminalSessions()
+                            await self.refreshSessions()
                             await self.refreshWorktrees()
                             self.hasCompletedInitialLoad = true
                             await self.refreshFlowsAsync()
@@ -533,7 +533,7 @@ public final class RepoState {
                         case .auth(let authEvent):
                             self.authProviderStore.handleEvent(authEvent)
                         case .terminalSession(let terminalEvent):
-                            await self.handleTerminalSessionEvent(terminalEvent)
+                            await self.handleSessionEvent(terminalEvent)
                         case .agentStarted, .agentEnded, .worktree, .secrets:
                             break
                         }
@@ -592,11 +592,11 @@ public final class RepoState {
                     let state = sessionState(for: event.waveId)
                     state.seedInitialUserMessage(initialUserMessage)
                 }
-                if let terminalSessionId = event.terminalSessionId {
+                if let sessionId = event.sessionId {
                     if selectedWaveId == nil || selectedWaveId == event.waveId {
                         markAutoPresentTerminal(for: event.waveId)
                     }
-                    await loadTerminalSession(id: terminalSessionId, select: true)
+                    await loadSession(id: sessionId, select: true)
                     if selectedWaveId == nil {
                         selectedWaveId = event.waveId
                     }
@@ -658,7 +658,7 @@ public final class RepoState {
         }
     }
 
-    private func handleTerminalSessionEvent(_ event: TerminalSessionEvent) async {
+    private func handleSessionEvent(_ event: SessionEvent) async {
         if let session = event.session {
             terminalWorkspaceStore.upsert(session, select: !session.status.isTerminal)
             if let wave = waveStore.wave(for: session.waveId) {
@@ -669,18 +669,18 @@ public final class RepoState {
             // session so "Ingest & build" (and any other run start) lands the
             // user on the running flow instead of leaving the pane hooked to
             // the empty default `lf-<waveId>-<paneId>` session.
-            if session.waveRunId != nil, !session.status.isTerminal {
+            if session.runId != nil, !session.status.isTerminal {
                 attachTerminalPane(to: session)
             }
             if session.status.isTerminal {
-                await refreshTerminalSessions()
+                await refreshSessions()
             }
         } else {
-            await refreshTerminalSessions()
+            await refreshSessions()
         }
     }
 
-    func attachTerminalPane(to session: TerminalSession) {
+    func attachTerminalPane(to session: Session) {
         guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
             return
         }
@@ -835,42 +835,42 @@ public final class RepoState {
         }
     }
 
-    public func refreshTerminalSessions() async {
+    public func refreshSessions() async {
         guard let repo = repoTarget else {
             terminalWorkspaceStore.setAll([])
             return
         }
         do {
-            let sessions = try await waveService.listTerminalSessions(repo: repo, activeOnly: true)
+            let sessions = try await waveService.listSessions(repo: repo, activeOnly: true)
             terminalWorkspaceStore.setAll(sessions)
         } catch {
-            LoggingService.model("refreshTerminalSessions: error=\(error.localizedDescription)")
+            LoggingService.model("refreshSessions: error=\(error.localizedDescription)")
         }
     }
 
-    public func loadTerminalSession(id: String, select: Bool = false) async {
+    public func loadSession(id: String, select: Bool = false) async {
         do {
-            let session = try await waveService.getTerminalSession(id)
+            let session: Session = try await waveService.getSession(id)
             terminalWorkspaceStore.upsert(session, select: select)
         } catch {
-            LoggingService.model("loadTerminalSession: error=\(error.localizedDescription)")
+            LoggingService.model("loadSession: error=\(error.localizedDescription)")
         }
     }
 
     @discardableResult
-    public func cancelTerminalSession(_ id: String) async throws -> TerminalSession {
-        let session = try await waveService.cancelTerminalSession(id)
+    public func cancelSession(_ id: String) async throws -> Session {
+        let session = try await waveService.cancelSession(id)
         terminalWorkspaceStore.upsert(session, select: false)
         return session
     }
 
-    public func createTerminalSession(
+    public func createSession(
         waveId: String,
         flow: String,
         worktree: String,
         agent: String
-    ) async throws -> TerminalSessionLaunchResponse {
-        let response = try await waveService.createTerminalSession(
+    ) async throws -> SessionLaunchResponse {
+        let response = try await waveService.createSession(
             waveId: waveId,
             flow: flow,
             worktree: worktree,
@@ -880,28 +880,28 @@ public final class RepoState {
         return response
     }
 
-    public func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {
-        try await waveService.attachTerminalSession(id)
+    public func attachSession(_ id: String) async throws -> SessionConnectionInfo {
+        try await waveService.attachSession(id)
     }
 
     @discardableResult
-    public func startTerminalSession(_ id: String) async throws -> TerminalSession {
-        let session = try await waveService.startTerminalSession(id)
+    public func startSession(_ id: String) async throws -> Session {
+        let session = try await waveService.startSession(id)
         terminalWorkspaceStore.upsert(session, select: false)
         return session
     }
 
-    public func selectTerminalSession(_ id: String?, waveId: String? = nil) {
-        focusTerminalSession(id, waveId: waveId)
+    public func selectSession(_ id: String?, waveId: String? = nil) {
+        focusSession(id, waveId: waveId)
     }
 
     /// Navigate to a terminal session from the attention queue.
     /// Selects the wave, switches to the terminal tab, and selects the session.
-    public func openTerminalSession(_ sessionId: String) {
-        focusTerminalSession(sessionId, autoPresent: true)
+    public func openSession(_ sessionId: String) {
+        focusSession(sessionId, autoPresent: true)
     }
 
-    private func focusTerminalSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
+    private func focusSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
         terminalWorkspaceStore.select(sessionId, waveId: waveId)
         guard let sessionId,
               let session = terminalWorkspaceStore.sessionsById[sessionId] else {
@@ -917,7 +917,7 @@ public final class RepoState {
 
     public func loadRuns(for waveId: String) {
         Task {
-            guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }
+            guard let runs = try? await waveService.listRuns(waveId: waveId) else { return }
             runStore.setRuns(for: waveId, runs)
         }
     }
@@ -1042,7 +1042,8 @@ public final class RepoState {
     ) async throws {
         try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
             let overrides = RunOverrides(area: area, direction: direction, flow: flow)
-            try await self.waveService.run(wave.id, overrides: overrides)
+            let session = try await self.waveService.ensureWaveAgent(waveId: wave.id, overrides: overrides)
+            self.terminalWorkspaceStore.upsert(session, select: true)
         }
     }
 
@@ -1050,7 +1051,8 @@ public final class RepoState {
         try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
             let flow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
             let overrides = RunOverrides(flow: flow, roadmapItem: item.fileName)
-            try await self.waveService.run(wave.id, overrides: overrides)
+            let session = try await self.waveService.ensureWaveAgent(waveId: wave.id, overrides: overrides)
+            self.terminalWorkspaceStore.upsert(session, select: true)
         }
         loadWaveContent(for: wave.id)
     }
@@ -1292,7 +1294,7 @@ public final class RepoState {
     }
 
     public func selectRemoteRepo(path: String) {
-        cancelTrackedTerminalSessions()
+        cancelTrackedSessions()
         resetTransientWaveState()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
@@ -1480,7 +1482,7 @@ public final class RepoState {
         )
     }
 
-    private func cancelTrackedTerminalSessions() {
+    private func cancelTrackedSessions() {
         let sessionIds = terminalWorkspaceStore.orderedSessions
             .filter { !$0.status.isTerminal }
             .map(\.id)
@@ -1489,7 +1491,7 @@ public final class RepoState {
         let service = waveService
         Task {
             for sessionId in sessionIds {
-                _ = try? await service.cancelTerminalSession(sessionId)
+                _ = try? await service.cancelSession(sessionId)
             }
         }
     }

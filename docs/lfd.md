@@ -250,7 +250,7 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
-Wave intent lives in `wave/<name>/goal.md`:
+Wave intent lives in `wave/<name>/GOAL.md`:
 
 ```markdown
 ---
@@ -282,61 +282,56 @@ curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=
 
 `/v0/catalog` returns the resolved flow + step catalog that Concerto uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
 
-## Agent sessions API
+## Conversations API
 
-Create a session:
+List live sessions:
+
+```bash
+curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, step, source, status, tmux_name}'
+```
+
+Create a palette session:
 
 ```bash
 curl -s -X POST "$LFD_ADDR/v0/sessions" \
   -H "Content-Type: application/json" \
   -d "{
-    \"harness\": \"claude\",
-    \"wave_run_id\": \"run_abc\",
-    \"step\": \"design\",
-    \"repo_root\": \"$(pwd)\",
-    \"directions\": [\"clarity\"],
-    \"agent\": \"claude-sonnet-4-6\",
-    \"cwd\": \"$(pwd)\"
+    \"wave_id\": \"lfdwave_abc\",
+    \"flow\": \"ship-roadmap\",
+    \"worktree\": \"$(pwd)\",
+    \"agent\": \"codex\"
   }"
 ```
 
-Send input:
+Attach to the tmux session:
 
 ```bash
-curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/input" \
+curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/attach"
+```
+
+Send input to the provider conversation:
+
+```bash
+curl -s -X POST "$LFD_ADDR/v0/conversations/<conversation_id>/input" \
   -H "Content-Type: application/json" \
-  -d '{"content":"fix the failing tests"}'
+  -d '{"text":"fix the failing tests"}'
 ```
 
-`repo_root` must point to a local repo containing `.lf/`, and `cwd` must resolve inside that repo root when set.
-
-Stream events:
+Stream provider conversation events:
 
 ```bash
-curl -N "$LFD_ADDR/v0/sessions/<session_id>/events"
+curl -N "$LFD_ADDR/v0/conversations/<conversation_id>/events"
 ```
 
-Session streams include metering events:
+Conversation streams include metering events:
 
 - `context_snapshot`
 - `turn_usage`
 
-Supported harnesses: `codex`, `claude`, `opencode`.
-
-Stop the session:
+Cancel the session:
 
 ```bash
-curl -s -X DELETE "$LFD_ADDR/v0/sessions/<session_id>"
-```
-
-## Terminal sessions API
-
-```bash
-curl -s "$LFD_ADDR/v0/terminal-sessions?active_only=true" | jq '.data[] | {id, wave_id, step, source, status, tmux_name}'
-```
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/terminal-sessions/<session_id>/attach"
+curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 ```
 
 The attach endpoint marks the session attached and returns tmux connection info. `lfq sessions` and `lfq attach <session-id>` wrap these endpoints for day-to-day use.
@@ -369,10 +364,10 @@ WebSocket streams also emit:
 ## Stacked PR queue state
 
 ```bash
-curl -s "$LFD_ADDR/v0/wave_runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
+curl -s "$LFD_ADDR/v0/runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
 ```
 
-`/v0/wave_runs` includes:
+`/v0/runs` includes:
 
 - `queue_role`: `ready | draft | blocked | merged | superseded`
 - `queue_block_reason` / `queue_blocked_at`

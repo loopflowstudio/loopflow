@@ -5,7 +5,7 @@ use tracing::warn;
 
 use crate::engine::git::current_branch;
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Wave, WaveRun};
+use crate::lfd::types::{Run, Wave};
 
 use super::{
     canonical_repo_url, sanitize_token, short_hash, DockerExecutor, DockerWorkspace, RepoIdentity,
@@ -39,11 +39,11 @@ impl DockerExecutor {
 
     pub(super) fn infer_fork_branch_from_worktree(
         host_worktree: &Path,
-        wave_run_id: &str,
+        run_id: &str,
     ) -> Option<String> {
         let name = host_worktree.file_name()?.to_str()?;
         let index = name.rsplit_once("-fork-")?.1.parse::<u32>().ok()?;
-        Some(format!("{wave_run_id}-fork-{index}"))
+        Some(format!("{run_id}-fork-{index}"))
     }
 
     pub(super) fn docker_workspace_for_host_worktree(
@@ -67,7 +67,7 @@ impl DockerExecutor {
         }
     }
 
-    pub(super) fn resolve_wave_run_branch(run: &WaveRun, wave: &Wave) -> String {
+    pub(super) fn resolve_run_branch(run: &Run, wave: &Wave) -> String {
         if !run.branch.trim().is_empty() {
             return run.branch.clone();
         }
@@ -112,14 +112,14 @@ impl DockerExecutor {
 
     pub(super) fn resolve_workspace_branch_for_recovery(
         cwd: &Path,
-        wave_run_id: &str,
+        run_id: &str,
         fallback: &str,
     ) -> String {
         if let Some(branch) = Self::checked_out_branch(cwd) {
             return branch;
         }
 
-        if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
+        if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, run_id) {
             return branch;
         }
 
@@ -148,7 +148,7 @@ impl DockerExecutor {
     pub(super) async fn resolve_workspace_inputs(
         &self,
         wave_id: &str,
-        wave_run_id: &str,
+        run_id: &str,
     ) -> Result<(PathBuf, String)> {
         let wave_id = LfdId::from_raw(wave_id);
         let wave = self
@@ -156,26 +156,25 @@ impl DockerExecutor {
             .get_wave(&wave_id)
             .await?
             .ok_or_else(|| anyhow!("wave not found for docker run"))?;
-        let run_id = LfdId::from_raw(wave_run_id);
+        let run_id = LfdId::from_raw(run_id);
         let run = self
             .store
-            .get_wave_run(&run_id)
+            .get_run(&run_id)
             .await?
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
-        let repo_source = Self::resolve_host_repo(&run.snapshot.repo);
-        let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
+        let repo_source = Self::resolve_host_repo(&run.repo);
+        let fallback_branch = Self::resolve_run_branch(&run, &wave);
         Ok((repo_source, fallback_branch))
     }
 
     pub(super) async fn resolve_workspace(
         &self,
         wave_id: &str,
-        wave_run_id: &str,
+        run_id: &str,
         cwd: &Path,
         context_branch: Option<&str>,
     ) -> Result<DockerWorkspace> {
-        let (repo_source, fallback_branch) =
-            self.resolve_workspace_inputs(wave_id, wave_run_id).await?;
+        let (repo_source, fallback_branch) = self.resolve_workspace_inputs(wave_id, run_id).await?;
         let branch = Self::resolve_workspace_branch(cwd, context_branch, &fallback_branch);
         Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
@@ -187,13 +186,11 @@ impl DockerExecutor {
     pub(super) async fn resolve_workspace_for_recovery(
         &self,
         wave_id: &str,
-        wave_run_id: &str,
+        run_id: &str,
         cwd: &Path,
     ) -> Result<DockerWorkspace> {
-        let (repo_source, fallback_branch) =
-            self.resolve_workspace_inputs(wave_id, wave_run_id).await?;
-        let branch =
-            Self::resolve_workspace_branch_for_recovery(cwd, wave_run_id, &fallback_branch);
+        let (repo_source, fallback_branch) = self.resolve_workspace_inputs(wave_id, run_id).await?;
+        let branch = Self::resolve_workspace_branch_for_recovery(cwd, run_id, &fallback_branch);
         Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
             cwd,

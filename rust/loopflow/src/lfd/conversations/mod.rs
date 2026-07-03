@@ -16,21 +16,21 @@ use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::ContextBreakdown;
 use crate::engine::prompt::{write_prompt_log, RelatedRepoContext, Surface};
 use crate::engine::structured_reply::ClientContext;
+use crate::lfd::conversations::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
+use crate::lfd::conversations::types::{
+    ContextSnapshot, Conversation, ConversationConfig, ConversationEvent, ConversationItem,
+    ConversationStatus, CreateConversationParams, PersistedConversationEvent,
+};
 use crate::lfd::id::LfdId;
 use crate::lfd::providers::{lookup_cost_rates, CostRates};
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
-use crate::lfd::sessions::types::{
-    ContextSnapshot, CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
-    SessionEvent, SessionItem, SessionStatus,
-};
 use crate::lfd::store::{SharedStore, Store, StoreError};
 use crate::lfd::types::RepoId;
 
 const LIVE_EVENT_BUFFER: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionManagerError {
+pub enum ConversationManagerError {
     #[error("store error: {0}")]
     Store(#[from] StoreError),
     #[error("session not found")]
@@ -38,14 +38,14 @@ pub enum SessionManagerError {
     #[error("invalid session state: expected {expected}, got {actual:?}")]
     InvalidState {
         expected: &'static str,
-        actual: SessionStatus,
+        actual: ConversationStatus,
     },
     #[error("unsupported harness: {0}")]
     UnsupportedHarness(String),
     #[error("harness not implemented yet: {0}")]
     HarnessNotImplemented(String),
-    #[error("wave run already has an active session: {0}")]
-    WaveRunSessionConflict(String),
+    #[error("run already has an active session: {0}")]
+    RunSessionConflict(String),
     #[error("invalid session config: {0}")]
     InvalidConfig(String),
     #[error("invalid repo_root: {0}")]
@@ -96,7 +96,7 @@ async fn resolve_related_repos(
 struct SessionRuntime {
     harness_name: String,
     harness: Mutex<Box<dyn Harness>>,
-    events_tx: broadcast::Sender<PersistedSessionEvent>,
+    events_tx: broadcast::Sender<PersistedConversationEvent>,
     next_seq: AtomicI64,
     seeded_user_prompt: Option<String>,
 }
@@ -107,32 +107,32 @@ impl std::fmt::Debug for SessionRuntime {
     }
 }
 
-struct SessionManagerInner {
+struct ConversationManagerInner {
     store: SharedStore,
     create_harness: CreateHarnessFn,
     scheduler: Option<Arc<Scheduler>>,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
 
-impl std::fmt::Debug for SessionManagerInner {
+impl std::fmt::Debug for ConversationManagerInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionManagerInner").finish()
+        f.debug_struct("ConversationManagerInner").finish()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SessionManager {
-    inner: Arc<SessionManagerInner>,
+pub struct ConversationManager {
+    inner: Arc<ConversationManagerInner>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SessionStartupRecovery {
-    pub sessions_failed: u32,
+pub struct ConversationStartupRecovery {
+    pub conversations_failed: u32,
     pub opencode_servers_reaped: u32,
     pub reap_errors: u32,
 }
 
-impl SessionManager {
+impl ConversationManager {
     pub fn new(store: SharedStore) -> Self {
         Self::with_create_harness_and_scheduler(store, harness::default_create_harness, None)
     }
@@ -156,7 +156,7 @@ impl SessionManager {
         scheduler: Option<Arc<Scheduler>>,
     ) -> Self {
         Self {
-            inner: Arc::new(SessionManagerInner {
+            inner: Arc::new(ConversationManagerInner {
                 store,
                 create_harness,
                 scheduler,
@@ -165,33 +165,33 @@ impl SessionManager {
         }
     }
 
-    pub async fn create_session(
+    pub async fn create_conversation(
         &self,
-        params: CreateSessionParams,
-    ) -> Result<Session, SessionManagerError> {
+        params: CreateConversationParams,
+    ) -> Result<Conversation, ConversationManagerError> {
         let harness_name = resolve_harness(&params.harness)?;
         let (session_config, prepared_prompt, breakdown) =
             self.prepare_session_prompt(params.config).await?;
 
-        if let Some(wave_run_id) = params.wave_run_id.as_deref() {
+        if let Some(run_id) = params.run_id.as_deref() {
             if self
                 .inner
                 .store
-                .get_active_session_for_wave_run(wave_run_id)
+                .get_active_conversation_for_run(run_id)
                 .await?
                 .is_some()
             {
-                return Err(SessionManagerError::WaveRunSessionConflict(
-                    wave_run_id.to_string(),
+                return Err(ConversationManagerError::RunSessionConflict(
+                    run_id.to_string(),
                 ));
             }
         }
 
-        let session = Session {
+        let session = Conversation {
             id: LfdId::new(),
             harness: harness_name.clone(),
-            status: SessionStatus::Starting,
-            wave_run_id: params.wave_run_id,
+            status: ConversationStatus::Starting,
+            run_id: params.run_id,
             provider_session_id: None,
             config: session_config,
             created_at: time::OffsetDateTime::now_utc(),
@@ -199,8 +199,8 @@ impl SessionManager {
         };
         let (harness_events_tx, harness_events_rx) = mpsc::unbounded_channel();
         let harness = (self.inner.create_harness)(&harness_name, harness_events_tx)
-            .map_err(|err| SessionManagerError::Harness(err.to_string()))?;
-        self.inner.store.create_session(&session).await?;
+            .map_err(|err| ConversationManagerError::Harness(err.to_string()))?;
+        self.inner.store.create_conversation(&session).await?;
 
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
         let seeded_user_prompt = normalized_seeded_user_prompt(&prepared_prompt.task_prompt);
@@ -220,24 +220,23 @@ impl SessionManager {
         self.append_runtime_event(
             &session.id,
             &runtime,
-            SessionEvent::StatusChanged {
-                status: SessionStatus::Starting,
+            ConversationEvent::StatusChanged {
+                status: ConversationStatus::Starting,
             },
         )
         .await?;
         self.append_runtime_event(
             &session.id,
             &runtime,
-            SessionEvent::ContextSnapshot {
+            ConversationEvent::ContextSnapshot {
                 snapshot: ContextSnapshot::from(&breakdown),
             },
         )
         .await?;
 
-        self.register_wave_session(session.wave_run_id.as_deref())
-            .await;
+        self.register_wave_session(session.run_id.as_deref()).await;
         self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
-        let auto_start = session.wave_run_id.is_some();
+        let auto_start = session.run_id.is_some();
         self.spawn_harness_startup(
             session.id.clone(),
             runtime.clone(),
@@ -250,12 +249,12 @@ impl SessionManager {
 
     async fn prepare_session_prompt(
         &self,
-        mut config: SessionConfig,
-    ) -> Result<(SessionConfig, AgentConfig, ContextBreakdown), SessionManagerError> {
+        mut config: ConversationConfig,
+    ) -> Result<(ConversationConfig, AgentConfig, ContextBreakdown), ConversationManagerError> {
         let repo_root = validate_repo_root(&config.repo_root)?;
         let step = config.step.trim().to_string();
         if step.is_empty() {
-            return Err(SessionManagerError::InvalidConfig(
+            return Err(ConversationManagerError::InvalidConfig(
                 "step is required".to_string(),
             ));
         }
@@ -301,28 +300,31 @@ impl SessionManager {
                 related_repos,
             },
         )
-        .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;
+        .map_err(|err| ConversationManagerError::InvalidConfig(err.to_string()))?;
 
         let _ = write_prompt_log(&repo_root, &prepared.prompt, &step, None);
         Ok((config, prepared.config, prepared.breakdown))
     }
 
-    pub async fn get_session(&self, session_id: &LfdId) -> Result<Session, SessionManagerError> {
+    pub async fn get_conversation(
+        &self,
+        conversation_id: &LfdId,
+    ) -> Result<Conversation, ConversationManagerError> {
         self.inner
             .store
-            .get_session(session_id)
+            .get_conversation(conversation_id)
             .await?
-            .ok_or(SessionManagerError::NotFound)
+            .ok_or(ConversationManagerError::NotFound)
     }
 
     pub async fn send_input(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         content: &str,
-    ) -> Result<(), SessionManagerError> {
-        let session = self.get_session(session_id).await?;
-        if session.status != SessionStatus::Active {
-            return Err(SessionManagerError::InvalidState {
+    ) -> Result<(), ConversationManagerError> {
+        let session = self.get_conversation(conversation_id).await?;
+        if session.status != ConversationStatus::Active {
+            return Err(ConversationManagerError::InvalidState {
                 expected: "active",
                 actual: session.status,
             });
@@ -331,16 +333,16 @@ impl SessionManager {
             .map(|kind| kind.input_supported())
             .unwrap_or(false)
         {
-            return Err(SessionManagerError::InputNotSupported(session.harness));
+            return Err(ConversationManagerError::InputNotSupported(session.harness));
         }
 
-        let runtime = self
-            .runtime(session_id)
-            .await
-            .ok_or(SessionManagerError::InvalidState {
-                expected: "runtime available",
-                actual: session.status,
-            })?;
+        let runtime =
+            self.runtime(conversation_id)
+                .await
+                .ok_or(ConversationManagerError::InvalidState {
+                    expected: "runtime available",
+                    actual: session.status,
+                })?;
 
         let send_result = {
             let mut harness = runtime.harness.lock().await;
@@ -349,39 +351,52 @@ impl SessionManager {
 
         if let Err(err) = send_result {
             if harness::is_turn_in_progress(&err) {
-                return Err(SessionManagerError::TurnAlreadyInProgress);
+                return Err(ConversationManagerError::TurnAlreadyInProgress);
             }
 
-            self.mark_session_failed(session_id, &runtime, "send_input_failed", err.to_string())
-                .await;
-            return Err(SessionManagerError::Harness(err.to_string()));
+            self.mark_session_failed(
+                conversation_id,
+                &runtime,
+                "send_input_failed",
+                err.to_string(),
+            )
+            .await;
+            return Err(ConversationManagerError::Harness(err.to_string()));
         }
 
         Ok(())
     }
 
-    pub async fn stop_session(&self, session_id: &LfdId) -> Result<Session, SessionManagerError> {
-        let session = self.get_session(session_id).await?;
+    pub async fn stop_session(
+        &self,
+        conversation_id: &LfdId,
+    ) -> Result<Conversation, ConversationManagerError> {
+        let session = self.get_conversation(conversation_id).await?;
         if session.status.is_terminal() {
             return Ok(session);
         }
 
-        if session.status == SessionStatus::Starting {
-            let runtime = self.runtime(session_id).await;
+        if session.status == ConversationStatus::Starting {
+            let runtime = self.runtime(conversation_id).await;
             self.set_status(
-                session_id,
-                SessionStatus::Failed,
+                conversation_id,
+                ConversationStatus::Failed,
                 Some(time::OffsetDateTime::now_utc().unix_timestamp()),
                 runtime.clone(),
             )
             .await?;
-            return self.get_session(session_id).await;
+            return self.get_conversation(conversation_id).await;
         }
 
-        let runtime = self.runtime(session_id).await;
-        if session.status != SessionStatus::Ending {
-            self.set_status(session_id, SessionStatus::Ending, None, runtime.clone())
-                .await?;
+        let runtime = self.runtime(conversation_id).await;
+        if session.status != ConversationStatus::Ending {
+            self.set_status(
+                conversation_id,
+                ConversationStatus::Ending,
+                None,
+                runtime.clone(),
+            )
+            .await?;
         }
 
         let final_status = if let Some(ref runtime) = runtime {
@@ -391,118 +406,126 @@ impl SessionManager {
             };
             if let Err(err) = stop_result {
                 self.append_runtime_event(
-                    session_id,
+                    conversation_id,
                     runtime,
-                    SessionEvent::Error {
+                    ConversationEvent::Error {
                         code: "session_stop_failed".to_string(),
                         message: err.to_string(),
                     },
                 )
                 .await?;
-                SessionStatus::Failed
+                ConversationStatus::Failed
             } else {
-                SessionStatus::Ended
+                ConversationStatus::Ended
             }
         } else {
-            SessionStatus::Ended
+            ConversationStatus::Ended
         };
 
         let has_runtime = runtime.is_some();
         self.set_status(
-            session_id,
+            conversation_id,
             final_status,
             Some(time::OffsetDateTime::now_utc().unix_timestamp()),
             runtime,
         )
         .await?;
         if has_runtime {
-            self.remove_runtime(session_id).await;
+            self.remove_runtime(conversation_id).await;
         }
-        self.get_session(session_id).await
+        self.get_conversation(conversation_id).await
     }
 
     pub async fn list_events(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         after_seq: Option<i64>,
-    ) -> Result<Vec<PersistedSessionEvent>, SessionManagerError> {
+    ) -> Result<Vec<PersistedConversationEvent>, ConversationManagerError> {
         // Ensure we return a clean 404 for unknown sessions.
-        let _ = self.get_session(session_id).await?;
+        let _ = self.get_conversation(conversation_id).await?;
         Ok(self
             .inner
             .store
-            .list_session_events(session_id, after_seq)
+            .list_conversation_events(conversation_id, after_seq)
             .await?)
     }
 
     pub async fn subscribe(
         &self,
-        session_id: &LfdId,
-    ) -> Result<Option<broadcast::Receiver<PersistedSessionEvent>>, SessionManagerError> {
-        let _ = self.get_session(session_id).await?;
+        conversation_id: &LfdId,
+    ) -> Result<Option<broadcast::Receiver<PersistedConversationEvent>>, ConversationManagerError>
+    {
+        let _ = self.get_conversation(conversation_id).await?;
         Ok(self
-            .runtime(session_id)
+            .runtime(conversation_id)
             .await
             .map(|runtime| runtime.events_tx.subscribe()))
     }
 
     pub async fn seeded_user_prompt(
         &self,
-        session_id: &LfdId,
-    ) -> Result<Option<String>, SessionManagerError> {
-        let _ = self.get_session(session_id).await?;
+        conversation_id: &LfdId,
+    ) -> Result<Option<String>, ConversationManagerError> {
+        let _ = self.get_conversation(conversation_id).await?;
         Ok(self
-            .runtime(session_id)
+            .runtime(conversation_id)
             .await
             .and_then(|runtime| runtime.seeded_user_prompt.clone()))
     }
 
-    pub async fn recover_orphaned_sessions(
+    pub async fn recover_orphaned_conversations(
         &self,
-    ) -> Result<SessionStartupRecovery, SessionManagerError> {
-        let mut recovery = SessionStartupRecovery::default();
+    ) -> Result<ConversationStartupRecovery, ConversationManagerError> {
+        let mut recovery = ConversationStartupRecovery::default();
         let now = time::OffsetDateTime::now_utc();
         let now_ts = now.unix_timestamp();
-        let sessions = self
+        let conversations = self
             .inner
             .store
-            .list_sessions_by_statuses(&[SessionStatus::Starting, SessionStatus::Active])
+            .list_conversations_by_statuses(&[
+                ConversationStatus::Starting,
+                ConversationStatus::Active,
+            ])
             .await?;
 
-        for session in &sessions {
+        for conversation in &conversations {
             let existing_events = self
                 .inner
                 .store
-                .list_session_events(&session.id, None)
+                .list_conversation_events(&conversation.id, None)
                 .await?;
             let mut next_seq = existing_events
                 .last()
                 .map(|event| event.seq + 1)
                 .unwrap_or(0);
 
-            let error_event = SessionEvent::Error {
-                code: "lfd_restarted_orphaned_session".to_string(),
-                message: "session was orphaned when lfd restarted".to_string(),
+            let error_event = ConversationEvent::Error {
+                code: "lfd_restarted_orphaned_conversation".to_string(),
+                message: "conversation was orphaned when lfd restarted".to_string(),
             };
             self.inner
                 .store
-                .append_session_event(&session.id, next_seq, &error_event, now_ts)
+                .append_conversation_event(&conversation.id, next_seq, &error_event, now_ts)
                 .await?;
             next_seq += 1;
 
-            let status_event = SessionEvent::StatusChanged {
-                status: SessionStatus::Failed,
+            let status_event = ConversationEvent::StatusChanged {
+                status: ConversationStatus::Failed,
             };
             self.inner
                 .store
-                .append_session_event(&session.id, next_seq, &status_event, now_ts)
+                .append_conversation_event(&conversation.id, next_seq, &status_event, now_ts)
                 .await?;
 
             self.inner
                 .store
-                .update_session_status(&session.id, SessionStatus::Failed, Some(now_ts))
+                .update_conversation_status(
+                    &conversation.id,
+                    ConversationStatus::Failed,
+                    Some(now_ts),
+                )
                 .await?;
-            recovery.sessions_failed += 1;
+            recovery.conversations_failed += 1;
         }
 
         let opencode_reap = opencode_runtime::reap_orphaned_opencode_servers();
@@ -513,31 +536,35 @@ impl SessionManager {
 
     fn spawn_harness_event_bridge(
         &self,
-        session_id: LfdId,
+        conversation_id: LfdId,
         runtime: Arc<SessionRuntime>,
-        mut harness_events_rx: mpsc::UnboundedReceiver<SessionEvent>,
+        mut harness_events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
             while let Some(event) = harness_events_rx.recv().await {
                 match event {
-                    SessionEvent::ProviderSessionId {
+                    ConversationEvent::ProviderSessionId {
                         provider_session_id,
                     } => {
                         manager
-                            .handle_provider_session_id(&session_id, &runtime, provider_session_id)
+                            .handle_provider_session_id(
+                                &conversation_id,
+                                &runtime,
+                                provider_session_id,
+                            )
                             .await;
                     }
-                    SessionEvent::Error {
+                    ConversationEvent::Error {
                         ref code,
                         ref message,
                     } => {
                         let fatal = is_terminal_harness_error(code);
                         manager
                             .append_runtime_event_or_warn(
-                                &session_id,
+                                &conversation_id,
                                 &runtime,
-                                SessionEvent::Error {
+                                ConversationEvent::Error {
                                     code: code.clone(),
                                     message: message.clone(),
                                 },
@@ -546,13 +573,23 @@ impl SessionManager {
                             .await;
                         if fatal {
                             manager
-                                .mark_session_failed(&session_id, &runtime, code, message.clone())
+                                .mark_session_failed(
+                                    &conversation_id,
+                                    &runtime,
+                                    code,
+                                    message.clone(),
+                                )
                                 .await;
                         }
                     }
                     event => {
                         manager
-                            .append_runtime_event_or_warn(&session_id, &runtime, event, "event")
+                            .append_runtime_event_or_warn(
+                                &conversation_id,
+                                &runtime,
+                                event,
+                                "event",
+                            )
                             .await;
                     }
                 }
@@ -562,7 +599,7 @@ impl SessionManager {
 
     fn spawn_harness_startup(
         &self,
-        session_id: LfdId,
+        conversation_id: LfdId,
         runtime: Arc<SessionRuntime>,
         launch: AgentConfig,
         auto_start: bool,
@@ -574,12 +611,13 @@ impl SessionManager {
                 harness.start(&launch).await
             };
 
-            let current_status = match manager.inner.store.get_session(&session_id).await {
+            let current_status = match manager.inner.store.get_conversation(&conversation_id).await
+            {
                 Ok(Some(session)) => Some(session.status),
                 Ok(None) => None,
                 Err(err) => {
                     tracing::warn!(
-                        session_id = %session_id,
+                        conversation_id = %conversation_id,
                         error = %err,
                         "failed to read session status after startup"
                     );
@@ -589,25 +627,25 @@ impl SessionManager {
 
             match result {
                 Ok(()) => {
-                    if current_status != Some(SessionStatus::Starting) {
-                        if current_status.is_some_and(SessionStatus::is_terminal) {
+                    if current_status != Some(ConversationStatus::Starting) {
+                        if current_status.is_some_and(ConversationStatus::is_terminal) {
                             manager
-                                .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                                .stop_harness_runtime(&conversation_id, &runtime, "startup_aborted")
                                 .await;
                         }
                         return;
                     }
                     if let Err(err) = manager
                         .set_status(
-                            &session_id,
-                            SessionStatus::Active,
+                            &conversation_id,
+                            ConversationStatus::Active,
                             None,
                             Some(runtime.clone()),
                         )
                         .await
                     {
                         tracing::warn!(
-                            session_id = %session_id,
+                            conversation_id = %conversation_id,
                             error = %err,
                             "failed to set active session status"
                         );
@@ -619,14 +657,14 @@ impl SessionManager {
                     if auto_start {
                         if let Err(err) = manager
                             .append_seeded_user_prompt_event(
-                                &session_id,
+                                &conversation_id,
                                 &runtime,
                                 launch.task_prompt.trim(),
                             )
                             .await
                         {
                             tracing::warn!(
-                                session_id = %session_id,
+                                conversation_id = %conversation_id,
                                 error = %err,
                                 "failed to append seeded user prompt event"
                             );
@@ -637,7 +675,7 @@ impl SessionManager {
                         };
                         if let Err(err) = send_result {
                             tracing::warn!(
-                                session_id = %session_id,
+                                conversation_id = %conversation_id,
                                 error = %err,
                                 "session auto-start failed"
                             );
@@ -645,15 +683,15 @@ impl SessionManager {
                     }
                 }
                 Err(err) => {
-                    if current_status.is_some_and(SessionStatus::is_terminal) {
+                    if current_status.is_some_and(ConversationStatus::is_terminal) {
                         manager
-                            .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                            .stop_harness_runtime(&conversation_id, &runtime, "startup_aborted")
                             .await;
                         return;
                     }
                     manager
                         .mark_session_failed(
-                            &session_id,
+                            &conversation_id,
                             &runtime,
                             "session_start_failed",
                             err.to_string(),
@@ -666,20 +704,20 @@ impl SessionManager {
 
     async fn append_seeded_user_prompt_event(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
         prompt: &str,
-    ) -> Result<(), SessionManagerError> {
+    ) -> Result<(), ConversationManagerError> {
         if prompt.is_empty() {
             return Ok(());
         }
 
         self.append_runtime_event(
-            session_id,
+            conversation_id,
             runtime,
-            SessionEvent::ItemCompleted {
+            ConversationEvent::ItemCompleted {
                 turn_id: "turn_seed_user_prompt".to_string(),
-                item: SessionItem::Message {
+                item: ConversationItem::Message {
                     id: "msg_seed_user_prompt".to_string(),
                     text: prompt.to_string(),
                     phase: Some("user".to_string()),
@@ -692,7 +730,7 @@ impl SessionManager {
 
     async fn handle_provider_session_id(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
         provider_session_id: String,
     ) {
@@ -703,11 +741,11 @@ impl SessionManager {
         if let Err(err) = self
             .inner
             .store
-            .update_provider_session_id(session_id, &provider_session_id)
+            .update_provider_session_id(conversation_id, &provider_session_id)
             .await
         {
             tracing::warn!(
-                session_id = %session_id,
+                conversation_id = %conversation_id,
                 error = %err,
                 "failed to persist provider session id"
             );
@@ -716,16 +754,16 @@ impl SessionManager {
 
     async fn mark_session_failed(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
         code: &str,
         message: String,
     ) {
         let _ = self
             .append_runtime_event(
-                session_id,
+                conversation_id,
                 runtime,
-                SessionEvent::Error {
+                ConversationEvent::Error {
                     code: code.to_string(),
                     message,
                 },
@@ -733,34 +771,38 @@ impl SessionManager {
             .await;
         let _ = self
             .set_status(
-                session_id,
-                SessionStatus::Failed,
+                conversation_id,
+                ConversationStatus::Failed,
                 Some(time::OffsetDateTime::now_utc().unix_timestamp()),
                 Some(runtime.clone()),
             )
             .await;
-        self.remove_runtime(session_id).await;
+        self.remove_runtime(conversation_id).await;
     }
 
     async fn set_status(
         &self,
-        session_id: &LfdId,
-        status: SessionStatus,
+        conversation_id: &LfdId,
+        status: ConversationStatus,
         ended_at: Option<i64>,
         runtime: Option<Arc<SessionRuntime>>,
-    ) -> Result<(), SessionManagerError> {
+    ) -> Result<(), ConversationManagerError> {
         self.inner
             .store
-            .update_session_status(session_id, status, ended_at)
+            .update_conversation_status(conversation_id, status, ended_at)
             .await?;
 
         if let Some(runtime) = runtime {
-            self.append_runtime_event(session_id, &runtime, SessionEvent::StatusChanged { status })
-                .await?;
+            self.append_runtime_event(
+                conversation_id,
+                &runtime,
+                ConversationEvent::StatusChanged { status },
+            )
+            .await?;
         }
 
         if status.is_terminal() {
-            self.on_session_terminal(session_id).await;
+            self.on_conversation_terminal(conversation_id).await;
         }
 
         Ok(())
@@ -768,14 +810,17 @@ impl SessionManager {
 
     async fn append_runtime_event_or_warn(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
-        event: SessionEvent,
+        event: ConversationEvent,
         context: &'static str,
     ) {
-        if let Err(err) = self.append_runtime_event(session_id, runtime, event).await {
+        if let Err(err) = self
+            .append_runtime_event(conversation_id, runtime, event)
+            .await
+        {
             tracing::warn!(
-                session_id = %session_id,
+                conversation_id = %conversation_id,
                 error = %err,
                 context,
                 "failed to persist harness event"
@@ -785,10 +830,10 @@ impl SessionManager {
 
     async fn append_runtime_event(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
-        mut event: SessionEvent,
-    ) -> Result<(), SessionManagerError> {
+        mut event: ConversationEvent,
+    ) -> Result<(), ConversationManagerError> {
         populate_turn_usage_cost(&runtime.harness_name, &mut event);
 
         let now = time::OffsetDateTime::now_utc();
@@ -796,11 +841,11 @@ impl SessionManager {
 
         self.inner
             .store
-            .append_session_event(session_id, seq, &event, now.unix_timestamp())
+            .append_conversation_event(conversation_id, seq, &event, now.unix_timestamp())
             .await?;
 
-        let persisted = PersistedSessionEvent {
-            session_id: session_id.clone(),
+        let persisted = PersistedConversationEvent {
+            conversation_id: conversation_id.clone(),
             seq,
             event,
             created_at: now,
@@ -809,19 +854,19 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn runtime(&self, session_id: &LfdId) -> Option<Arc<SessionRuntime>> {
+    async fn runtime(&self, conversation_id: &LfdId) -> Option<Arc<SessionRuntime>> {
         let runtimes = self.inner.runtimes.lock().await;
-        runtimes.get(session_id).cloned()
+        runtimes.get(conversation_id).cloned()
     }
 
-    async fn remove_runtime(&self, session_id: &LfdId) {
+    async fn remove_runtime(&self, conversation_id: &LfdId) {
         let mut runtimes = self.inner.runtimes.lock().await;
-        runtimes.remove(session_id);
+        runtimes.remove(conversation_id);
     }
 
     async fn stop_harness_runtime(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
         context: &'static str,
     ) {
@@ -831,17 +876,17 @@ impl SessionManager {
         };
         if let Err(err) = stop_result {
             tracing::warn!(
-                session_id = %session_id,
+                conversation_id = %conversation_id,
                 error = %err,
                 context,
                 "failed to stop session harness"
             );
         }
-        self.remove_runtime(session_id).await;
+        self.remove_runtime(conversation_id).await;
     }
 
-    async fn register_wave_session(&self, wave_run_id: Option<&str>) {
-        let Some((scheduler, wave_id)) = self.scheduler_wave_id_for_run(wave_run_id).await else {
+    async fn register_wave_session(&self, run_id: Option<&str>) {
+        let Some((scheduler, wave_id)) = self.scheduler_wave_id_for_run(run_id).await else {
             return;
         };
         if !scheduler.register_session(&wave_id) {
@@ -849,18 +894,18 @@ impl SessionManager {
         }
     }
 
-    async fn on_session_terminal(&self, session_id: &LfdId) {
-        let session = match self.inner.store.get_session(session_id).await {
-            Ok(Some(session)) => session,
+    async fn on_conversation_terminal(&self, conversation_id: &LfdId) {
+        let conversation = match self.inner.store.get_conversation(conversation_id).await {
+            Ok(Some(conversation)) => conversation,
             Ok(None) => return,
             Err(err) => {
-                tracing::warn!(session_id = %session_id, error = %err, "failed to load terminal session");
+                tracing::warn!(conversation_id = %conversation_id, error = %err, "failed to load terminal conversation");
                 return;
             }
         };
 
         let Some((scheduler, wave_id)) = self
-            .scheduler_wave_id_for_run(session.wave_run_id.as_deref())
+            .scheduler_wave_id_for_run(conversation.run_id.as_deref())
             .await
         else {
             return;
@@ -870,72 +915,74 @@ impl SessionManager {
 
     async fn scheduler_wave_id_for_run(
         &self,
-        wave_run_id: Option<&str>,
+        run_id: Option<&str>,
     ) -> Option<(Arc<Scheduler>, String)> {
         let scheduler = self.inner.scheduler.clone()?;
-        let wave_run_id = wave_run_id?;
-        let wave_id = self.wave_id_for_wave_run(wave_run_id).await?;
+        let run_id = run_id?;
+        let wave_id = self.wave_id_for_run(run_id).await?;
         Some((scheduler, wave_id))
     }
 
-    async fn wave_id_for_wave_run(&self, wave_run_id: &str) -> Option<String> {
-        let run_id = match wave_run_id.parse::<LfdId>() {
+    async fn wave_id_for_run(&self, run_id: &str) -> Option<String> {
+        let run_id = match run_id.parse::<LfdId>() {
             Ok(run_id) => run_id,
             Err(err) => {
-                tracing::warn!(wave_run_id, error = %err, "invalid wave_run_id on session");
+                tracing::warn!(run_id, error = %err, "invalid run_id on session");
                 return None;
             }
         };
 
-        match self.inner.store.get_wave_run(&run_id).await {
+        match self.inner.store.get_run(&run_id).await {
             Ok(Some(run)) => Some(run.wave_id.to_string()),
             Ok(None) => {
-                tracing::warn!(wave_run_id, "wave run referenced by session not found");
+                tracing::warn!(%run_id, "run referenced by session not found");
                 None
             }
             Err(err) => {
-                tracing::warn!(wave_run_id, error = %err, "failed to resolve wave for session");
+                tracing::warn!(%run_id, error = %err, "failed to resolve wave for session");
                 None
             }
         }
     }
 }
 
-fn resolve_harness(name: &str) -> Result<String, SessionManagerError> {
+fn resolve_harness(name: &str) -> Result<String, ConversationManagerError> {
     let requested = name.trim().to_ascii_lowercase();
     if matches!(requested.as_str(), "gemini") {
-        return Err(SessionManagerError::HarnessNotImplemented(requested));
+        return Err(ConversationManagerError::HarnessNotImplemented(requested));
     }
 
     harness::canonical_harness(&requested)
         .map(ToString::to_string)
-        .ok_or(SessionManagerError::UnsupportedHarness(requested))
+        .ok_or(ConversationManagerError::UnsupportedHarness(requested))
 }
 
-fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
+fn validate_repo_root(repo_root: &str) -> Result<PathBuf, ConversationManagerError> {
     let raw = repo_root.trim();
     if raw.is_empty() {
-        return Err(SessionManagerError::InvalidRepoRoot(
+        return Err(ConversationManagerError::InvalidRepoRoot(
             "path is empty".to_string(),
         ));
     }
 
     let path = PathBuf::from(raw);
     if !path.exists() {
-        return Err(SessionManagerError::InvalidRepoRoot(format!(
+        return Err(ConversationManagerError::InvalidRepoRoot(format!(
             "path does not exist: {raw}"
         )));
     }
     if !path.is_dir() {
-        return Err(SessionManagerError::InvalidRepoRoot(format!(
+        return Err(ConversationManagerError::InvalidRepoRoot(format!(
             "path is not a directory: {raw}"
         )));
     }
     let canonical = path.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidRepoRoot(format!("failed to resolve repo_root '{raw}': {err}"))
+        ConversationManagerError::InvalidRepoRoot(format!(
+            "failed to resolve repo_root '{raw}': {err}"
+        ))
     })?;
     if !canonical.join(".lf").is_dir() {
-        return Err(SessionManagerError::InvalidRepoRoot(format!(
+        return Err(ConversationManagerError::InvalidRepoRoot(format!(
             "missing .lf/ in repo root: {raw}"
         )));
     }
@@ -945,7 +992,7 @@ fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
 fn resolve_cwd(
     repo_root: &Path,
     cwd: Option<&str>,
-) -> Result<Option<PathBuf>, SessionManagerError> {
+) -> Result<Option<PathBuf>, ConversationManagerError> {
     let Some(trimmed) = cwd.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
@@ -958,26 +1005,26 @@ fn resolve_cwd(
     };
 
     if !resolved.exists() {
-        return Err(SessionManagerError::InvalidConfig(format!(
+        return Err(ConversationManagerError::InvalidConfig(format!(
             "cwd does not exist: {}",
             resolved.display()
         )));
     }
     if !resolved.is_dir() {
-        return Err(SessionManagerError::InvalidConfig(format!(
+        return Err(ConversationManagerError::InvalidConfig(format!(
             "cwd is not a directory: {}",
             resolved.display()
         )));
     }
 
     let canonical_cwd = resolved.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidConfig(format!(
+        ConversationManagerError::InvalidConfig(format!(
             "failed to resolve cwd '{}': {err}",
             resolved.display()
         ))
     })?;
     if !canonical_cwd.starts_with(repo_root) {
-        return Err(SessionManagerError::InvalidConfig(format!(
+        return Err(ConversationManagerError::InvalidConfig(format!(
             "cwd must be inside repo_root: {}",
             canonical_cwd.display()
         )));
@@ -994,8 +1041,8 @@ fn normalized_seeded_user_prompt(prompt: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn populate_turn_usage_cost(harness: &str, event: &mut SessionEvent) {
-    let SessionEvent::TurnUsage { usage, .. } = event else {
+fn populate_turn_usage_cost(harness: &str, event: &mut ConversationEvent) {
+    let ConversationEvent::TurnUsage { usage, .. } = event else {
         return;
     };
     if usage.cost_usd.is_some() {
@@ -1010,7 +1057,10 @@ fn populate_turn_usage_cost(harness: &str, event: &mut SessionEvent) {
     usage.cost_usd = Some(compute_usage_cost(usage, rates));
 }
 
-fn compute_usage_cost(usage: &crate::lfd::sessions::types::TurnUsage, rates: CostRates) -> f64 {
+fn compute_usage_cost(
+    usage: &crate::lfd::conversations::types::TurnUsage,
+    rates: CostRates,
+) -> f64 {
     let mtok = |tokens: u64| tokens as f64 / 1_000_000.0;
     mtok(usage.input_tokens) * rates.input_per_mtok
         + mtok(usage.output_tokens) * rates.output_per_mtok
@@ -1021,13 +1071,13 @@ fn compute_usage_cost(usage: &crate::lfd::sessions::types::TurnUsage, rates: Cos
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::sessions::harness::{Harness, HarnessError};
-    use crate::lfd::sessions::types::{
-        SessionConfig, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+    use crate::lfd::conversations::harness::{Harness, HarnessError};
+    use crate::lfd::conversations::types::{
+        ConversationConfig, ConversationEvent, ConversationItem, TurnStatus, TurnUsage,
     };
+    use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Wave, WaveRun};
+    use crate::lfd::types::{Run, Wave};
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1038,7 +1088,7 @@ mod tests {
 
     #[derive(Debug)]
     struct FakeHarness {
-        tx: mpsc::UnboundedSender<SessionEvent>,
+        tx: mpsc::UnboundedSender<ConversationEvent>,
     }
 
     #[async_trait]
@@ -1049,14 +1099,14 @@ mod tests {
 
         async fn send_input(&mut self, content: &str) -> Result<()> {
             let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
-            let _ = self.tx.send(SessionEvent::TurnStarted {
+            let _ = self.tx.send(ConversationEvent::TurnStarted {
                 turn_id: turn_id.clone(),
             });
-            let _ = self.tx.send(SessionEvent::TextDelta {
+            let _ = self.tx.send(ConversationEvent::TextDelta {
                 turn_id: turn_id.clone(),
                 content: content.to_string(),
             });
-            let _ = self.tx.send(SessionEvent::TurnCompleted {
+            let _ = self.tx.send(ConversationEvent::TurnCompleted {
                 turn_id,
                 status: TurnStatus::Completed,
             });
@@ -1070,14 +1120,14 @@ mod tests {
 
     fn fake_create_harness(
         _harness: &str,
-        event_tx: mpsc::UnboundedSender<SessionEvent>,
+        event_tx: mpsc::UnboundedSender<ConversationEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(FakeHarness { tx: event_tx }))
     }
 
     #[derive(Debug)]
     struct UsageHarness {
-        tx: mpsc::UnboundedSender<SessionEvent>,
+        tx: mpsc::UnboundedSender<ConversationEvent>,
     }
 
     #[async_trait]
@@ -1088,14 +1138,14 @@ mod tests {
 
         async fn send_input(&mut self, _content: &str) -> Result<()> {
             let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
-            let _ = self.tx.send(SessionEvent::TurnStarted {
+            let _ = self.tx.send(ConversationEvent::TurnStarted {
                 turn_id: turn_id.clone(),
             });
-            let _ = self.tx.send(SessionEvent::TurnCompleted {
+            let _ = self.tx.send(ConversationEvent::TurnCompleted {
                 turn_id: turn_id.clone(),
                 status: TurnStatus::Completed,
             });
-            let _ = self.tx.send(SessionEvent::TurnUsage {
+            let _ = self.tx.send(ConversationEvent::TurnUsage {
                 turn_id,
                 usage: TurnUsage {
                     input_tokens: 1_000_000,
@@ -1117,7 +1167,7 @@ mod tests {
 
     fn usage_create_harness(
         _harness: &str,
-        event_tx: mpsc::UnboundedSender<SessionEvent>,
+        event_tx: mpsc::UnboundedSender<ConversationEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(UsageHarness { tx: event_tx }))
     }
@@ -1142,14 +1192,14 @@ mod tests {
 
     fn busy_create_harness(
         _harness: &str,
-        _event_tx: mpsc::UnboundedSender<SessionEvent>,
+        _event_tx: mpsc::UnboundedSender<ConversationEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(BusyHarness))
     }
 
     #[derive(Debug)]
     struct ResumeAwareHarness {
-        tx: mpsc::UnboundedSender<SessionEvent>,
+        tx: mpsc::UnboundedSender<ConversationEvent>,
         send_count: usize,
         provider_session_id: Option<String>,
     }
@@ -1163,11 +1213,11 @@ mod tests {
         async fn send_input(&mut self, _content: &str) -> Result<()> {
             self.send_count += 1;
             let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
-            let _ = self.tx.send(SessionEvent::TurnStarted {
+            let _ = self.tx.send(ConversationEvent::TurnStarted {
                 turn_id: turn_id.clone(),
             });
             if self.send_count == 1 {
-                let _ = self.tx.send(SessionEvent::ProviderSessionId {
+                let _ = self.tx.send(ConversationEvent::ProviderSessionId {
                     provider_session_id: "sess_resume_1".to_string(),
                 });
             }
@@ -1175,11 +1225,11 @@ mod tests {
                 .provider_session_id
                 .clone()
                 .unwrap_or_else(|| "none".to_string());
-            let _ = self.tx.send(SessionEvent::TextDelta {
+            let _ = self.tx.send(ConversationEvent::TextDelta {
                 turn_id: turn_id.clone(),
                 content: format!("resume:{resume}"),
             });
-            let _ = self.tx.send(SessionEvent::TurnCompleted {
+            let _ = self.tx.send(ConversationEvent::TurnCompleted {
                 turn_id,
                 status: TurnStatus::Completed,
             });
@@ -1197,7 +1247,7 @@ mod tests {
 
     fn resume_aware_create_harness(
         _harness: &str,
-        event_tx: mpsc::UnboundedSender<SessionEvent>,
+        event_tx: mpsc::UnboundedSender<ConversationEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(ResumeAwareHarness {
             tx: event_tx,
@@ -1230,19 +1280,19 @@ mod tests {
 
     fn slow_start_create_harness(
         _harness: &str,
-        _event_tx: mpsc::UnboundedSender<SessionEvent>,
+        _event_tx: mpsc::UnboundedSender<ConversationEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(SlowStartHarness))
     }
 
     async fn wait_for_status(
-        manager: &SessionManager,
-        session_id: &LfdId,
-        expected: SessionStatus,
-    ) -> Session {
+        manager: &ConversationManager,
+        conversation_id: &LfdId,
+        expected: ConversationStatus,
+    ) -> Conversation {
         for _ in 0..50 {
             let session = manager
-                .get_session(session_id)
+                .get_conversation(conversation_id)
                 .await
                 .expect("session should exist");
             if session.status == expected {
@@ -1254,13 +1304,13 @@ mod tests {
     }
 
     async fn wait_for_provider_session_id(
-        manager: &SessionManager,
-        session_id: &LfdId,
+        manager: &ConversationManager,
+        conversation_id: &LfdId,
         expected: &str,
     ) {
         for _ in 0..50 {
             let session = manager
-                .get_session(session_id)
+                .get_conversation(conversation_id)
                 .await
                 .expect("session should exist");
             if session.provider_session_id.as_deref() == Some(expected) {
@@ -1271,9 +1321,9 @@ mod tests {
         panic!("session never captured expected provider session id");
     }
 
-    fn test_session_config(repo_root: &std::path::Path) -> SessionConfig {
+    fn test_session_config(repo_root: &std::path::Path) -> ConversationConfig {
         std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
-        SessionConfig {
+        ConversationConfig {
             step: "design".to_string(),
             repo_root: repo_root.to_string_lossy().to_string(),
             ..Default::default()
@@ -1282,7 +1332,7 @@ mod tests {
 
     #[test]
     fn populate_turn_usage_cost_applies_opencode_model_rates() {
-        let mut event = SessionEvent::TurnUsage {
+        let mut event = ConversationEvent::TurnUsage {
             turn_id: "turn_1".to_string(),
             usage: TurnUsage {
                 input_tokens: 1_000_000,
@@ -1297,7 +1347,7 @@ mod tests {
 
         populate_turn_usage_cost("opencode", &mut event);
 
-        let SessionEvent::TurnUsage { usage, .. } = event else {
+        let ConversationEvent::TurnUsage { usage, .. } = event else {
             panic!("expected turn usage event");
         };
         let cost = usage.cost_usd.expect("cost should be populated");
@@ -1306,7 +1356,7 @@ mod tests {
 
     #[test]
     fn populate_turn_usage_cost_does_not_override_existing_value() {
-        let mut event = SessionEvent::TurnUsage {
+        let mut event = ConversationEvent::TurnUsage {
             turn_id: "turn_1".to_string(),
             usage: TurnUsage {
                 input_tokens: 1_000_000,
@@ -1321,7 +1371,7 @@ mod tests {
 
         populate_turn_usage_cost("opencode", &mut event);
 
-        let SessionEvent::TurnUsage { usage, .. } = event else {
+        let ConversationEvent::TurnUsage { usage, .. } = event else {
             panic!("expected turn usage event");
         };
         assert_eq!(usage.cost_usd, Some(0.42));
@@ -1339,9 +1389,9 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".lf/steps")).expect("create .lf/steps");
         std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design it.").expect("write step");
 
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
         let (_, prompt, _) = manager
-            .prepare_session_prompt(SessionConfig {
+            .prepare_session_prompt(ConversationConfig {
                 step: "design".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
                 surface: Some(Surface::ConcertoIphone),
@@ -1367,12 +1417,12 @@ mod tests {
         std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design the system.")
             .expect("write step");
 
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: None,
-                config: SessionConfig {
+                run_id: None,
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
                     ..Default::default()
@@ -1387,7 +1437,7 @@ mod tests {
             .expect("list events");
 
         let snapshot = events.iter().find_map(|event| match &event.event {
-            SessionEvent::ContextSnapshot { snapshot } => Some(snapshot.clone()),
+            ConversationEvent::ContextSnapshot { snapshot } => Some(snapshot.clone()),
             _ => None,
         });
         let snapshot = snapshot.expect("context snapshot event");
@@ -1409,12 +1459,12 @@ mod tests {
         std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design the system.")
             .expect("write step");
 
-        let manager = SessionManager::with_create_harness(store, usage_create_harness);
+        let manager = ConversationManager::with_create_harness(store, usage_create_harness);
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "opencode".to_string(),
-                wave_run_id: Some("run_cost".to_string()),
-                config: SessionConfig {
+                run_id: Some("run_cost".to_string()),
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
                     ..Default::default()
@@ -1422,7 +1472,7 @@ mod tests {
             })
             .await
             .expect("create session");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         let mut cost = None;
         for _ in 0..50 {
@@ -1431,7 +1481,7 @@ mod tests {
                 .await
                 .expect("list events");
             cost = events.iter().find_map(|event| match &event.event {
-                SessionEvent::TurnUsage { usage, .. } => usage.cost_usd,
+                ConversationEvent::TurnUsage { usage, .. } => usage.cost_usd,
                 _ => None,
             });
             if cost.is_some() {
@@ -1453,13 +1503,13 @@ mod tests {
                 .expect("open sqlite store"),
         );
 
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
         std::fs::create_dir_all(tmp.path().join(".lf")).expect("create .lf for tests");
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: Some("run_1".to_string()),
-                config: SessionConfig {
+                run_id: Some("run_1".to_string()),
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
                     agent: Some("gpt-5.1-codex".to_string()),
@@ -1470,8 +1520,8 @@ mod tests {
             .await
             .expect("create session");
 
-        assert_eq!(created.status, SessionStatus::Starting);
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        assert_eq!(created.status, ConversationStatus::Starting);
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         manager
             .send_input(&created.id, "fix the failing tests")
@@ -1487,7 +1537,7 @@ mod tests {
             saw_text_delta = events.iter().any(|event| {
                 matches!(
                     &event.event,
-                    SessionEvent::TextDelta { content, .. } if content == "fix the failing tests"
+                    ConversationEvent::TextDelta { content, .. } if content == "fix the failing tests"
                 )
             });
             if saw_text_delta {
@@ -1501,7 +1551,7 @@ mod tests {
             .stop_session(&created.id)
             .await
             .expect("stop session");
-        assert_eq!(ended.status, SessionStatus::Ended);
+        assert_eq!(ended.status, ConversationStatus::Ended);
 
         let replay = manager
             .list_events(&created.id, Some(0))
@@ -1528,12 +1578,12 @@ mod tests {
         )
         .expect("write test step");
 
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: Some("run_seed".to_string()),
-                config: SessionConfig {
+                run_id: Some("run_seed".to_string()),
+                config: ConversationConfig {
                     step: "seed-step".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
                     agent: Some("gpt-5.1-codex".to_string()),
@@ -1544,7 +1594,7 @@ mod tests {
             .await
             .expect("create session");
 
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         let mut saw_seeded_prompt = false;
         for _ in 0..50 {
@@ -1555,9 +1605,9 @@ mod tests {
             saw_seeded_prompt = events.iter().any(|event| {
                 matches!(
                     &event.event,
-                    SessionEvent::ItemCompleted {
+                    ConversationEvent::ItemCompleted {
                         item:
-                            SessionItem::Message {
+                            ConversationItem::Message {
                                 text,
                                 phase: Some(phase),
                                 ..
@@ -1585,20 +1635,20 @@ mod tests {
                 .expect("open sqlite store"),
         );
         // Use default_create_harness (not fake) so unsupported harnesses are rejected.
-        let manager = SessionManager::new(store);
+        let manager = ConversationManager::new(store);
 
         let err = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "nonexistent".to_string(),
-                wave_run_id: None,
-                config: SessionConfig::default(),
+                run_id: None,
+                config: ConversationConfig::default(),
             })
             .await
             .expect_err("unsupported harness should fail");
 
         assert!(matches!(
             err,
-            SessionManagerError::UnsupportedHarness(ref name) if name == "nonexistent"
+            ConversationManagerError::UnsupportedHarness(ref name) if name == "nonexistent"
         ));
     }
 
@@ -1611,20 +1661,20 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::new(store);
+        let manager = ConversationManager::new(store);
 
         let err = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "gemini".to_string(),
-                wave_run_id: None,
-                config: SessionConfig::default(),
+                run_id: None,
+                config: ConversationConfig::default(),
             })
             .await
             .expect_err("gemini should be explicitly not implemented");
 
         assert!(matches!(
             err,
-            SessionManagerError::HarnessNotImplemented(ref name) if name == "gemini"
+            ConversationManagerError::HarnessNotImplemented(ref name) if name == "gemini"
         ));
     }
 
@@ -1643,13 +1693,13 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "opencode".to_string(),
-                wave_run_id: None,
-                config: SessionConfig {
+                run_id: None,
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: repo_root.to_string_lossy().to_string(),
                     ..Default::default()
@@ -1670,13 +1720,13 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
 
         let err = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "claude".to_string(),
-                wave_run_id: None,
-                config: SessionConfig {
+                run_id: None,
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: tmp.path().join("missing").to_string_lossy().to_string(),
                     ..Default::default()
@@ -1685,7 +1735,7 @@ mod tests {
             .await
             .expect_err("invalid repo root should fail");
 
-        assert!(matches!(err, SessionManagerError::InvalidRepoRoot(_)));
+        assert!(matches!(err, ConversationManagerError::InvalidRepoRoot(_)));
     }
 
     #[tokio::test]
@@ -1701,13 +1751,13 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
 
         let err = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "claude".to_string(),
-                wave_run_id: None,
-                config: SessionConfig {
+                run_id: None,
+                config: ConversationConfig {
                     step: "design".to_string(),
                     repo_root: repo_root.to_string_lossy().to_string(),
                     cwd: Some(outside.to_string_lossy().to_string()),
@@ -1717,11 +1767,11 @@ mod tests {
             .await
             .expect_err("cwd outside repo root should fail");
 
-        assert!(matches!(err, SessionManagerError::InvalidConfig(_)));
+        assert!(matches!(err, ConversationManagerError::InvalidConfig(_)));
     }
 
     #[tokio::test]
-    async fn create_session_enforces_single_active_session_per_wave_run() {
+    async fn create_session_enforces_single_active_session_per_run() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(
@@ -1729,22 +1779,22 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store, fake_create_harness);
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: Some("run_1".to_string()),
+                run_id: Some("run_1".to_string()),
                 config: test_session_config(tmp.path()),
             })
             .await
             .expect("first session should create");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         let err = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: Some("run_1".to_string()),
+                run_id: Some("run_1".to_string()),
                 config: test_session_config(tmp.path()),
             })
             .await
@@ -1752,7 +1802,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            SessionManagerError::WaveRunSessionConflict(ref wave_run_id) if wave_run_id == "run_1"
+            ConversationManagerError::RunSessionConflict(ref run_id) if run_id == "run_1"
         ));
     }
 
@@ -1765,29 +1815,32 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, busy_create_harness);
+        let manager = ConversationManager::with_create_harness(store, busy_create_harness);
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: None,
+                run_id: None,
                 config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         let err = manager
             .send_input(&created.id, "hello")
             .await
             .expect_err("busy harness should reject concurrent turn");
-        assert!(matches!(err, SessionManagerError::TurnAlreadyInProgress));
+        assert!(matches!(
+            err,
+            ConversationManagerError::TurnAlreadyInProgress
+        ));
 
         let session = manager
-            .get_session(&created.id)
+            .get_conversation(&created.id)
             .await
             .expect("session should still exist");
-        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(session.status, ConversationStatus::Active);
     }
 
     #[tokio::test]
@@ -1799,17 +1852,17 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, resume_aware_create_harness);
+        let manager = ConversationManager::with_create_harness(store, resume_aware_create_harness);
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: None,
+                run_id: None,
                 config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         manager
             .send_input(&created.id, "first turn")
@@ -1831,7 +1884,7 @@ mod tests {
             saw_resume = events.iter().any(|event| {
                 matches!(
                     &event.event,
-                    SessionEvent::TextDelta { content, .. } if content == "resume:sess_resume_1"
+                    ConversationEvent::TextDelta { content, .. } if content == "resume:sess_resume_1"
                 )
             });
             if saw_resume {
@@ -1843,7 +1896,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_orphaned_sessions_marks_active_as_failed() {
+    async fn recover_orphaned_conversations_marks_active_as_failed() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(
@@ -1852,16 +1905,16 @@ mod tests {
                 .expect("open sqlite store"),
         );
 
-        let manager = SessionManager::with_create_harness(store.clone(), fake_create_harness);
+        let manager = ConversationManager::with_create_harness(store.clone(), fake_create_harness);
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "claude".to_string(),
-                wave_run_id: None,
+                run_id: None,
                 config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         // Wait for the Active StatusChanged event to be persisted (set_status
         // updates the DB status before appending the event, so wait_for_status
@@ -1874,7 +1927,7 @@ mod tests {
             let has_active_event = events.iter().any(|e| {
                 matches!(
                     &e.event,
-                    SessionEvent::StatusChanged { status } if *status == SessionStatus::Active
+                    ConversationEvent::StatusChanged { status } if *status == ConversationStatus::Active
                 )
             });
             if has_active_event {
@@ -1883,19 +1936,19 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        // Simulate a new SessionManager on restart (no runtimes, orphaned session in DB).
-        let fresh_manager = SessionManager::with_create_harness(store, fake_create_harness);
+        // Simulate a new ConversationManager on restart (no runtimes, orphaned session in DB).
+        let fresh_manager = ConversationManager::with_create_harness(store, fake_create_harness);
         let recovered = fresh_manager
-            .recover_orphaned_sessions()
+            .recover_orphaned_conversations()
             .await
             .expect("orphan recovery");
-        assert_eq!(recovered.sessions_failed, 1);
+        assert_eq!(recovered.conversations_failed, 1);
 
         let session = fresh_manager
-            .get_session(&created.id)
+            .get_conversation(&created.id)
             .await
             .expect("session should exist");
-        assert_eq!(session.status, SessionStatus::Failed);
+        assert_eq!(session.status, ConversationStatus::Failed);
 
         let events = fresh_manager
             .list_events(&created.id, None)
@@ -1904,7 +1957,7 @@ mod tests {
         let has_orphan_error = events.iter().any(|event| {
             matches!(
                 &event.event,
-                SessionEvent::Error { code, .. } if code == "lfd_restarted_orphaned_session"
+                ConversationEvent::Error { code, .. } if code == "lfd_restarted_orphaned_conversation"
             )
         });
         assert!(has_orphan_error);
@@ -1920,12 +1973,12 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_harness(store, slow_start_create_harness);
+        let manager = ConversationManager::with_create_harness(store, slow_start_create_harness);
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "claude".to_string(),
-                wave_run_id: None,
+                run_id: None,
                 config: test_session_config(tmp.path()),
             })
             .await
@@ -1935,7 +1988,7 @@ mod tests {
             .stop_session(&created.id)
             .await
             .expect("stop session while starting");
-        assert_eq!(stopped.status, SessionStatus::Failed);
+        assert_eq!(stopped.status, ConversationStatus::Failed);
         assert!(
             !STARTING_STOP_CALLED.load(Ordering::SeqCst),
             "stop_session should not block on harness.stop while startup is running"
@@ -1943,10 +1996,10 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(250)).await;
         let after_start_finishes = manager
-            .get_session(&created.id)
+            .get_conversation(&created.id)
             .await
             .expect("session should exist");
-        assert_eq!(after_start_finishes.status, SessionStatus::Failed);
+        assert_eq!(after_start_finishes.status, ConversationStatus::Failed);
         assert!(
             STARTING_STOP_CALLED.load(Ordering::SeqCst),
             "startup cleanup should stop the harness once startup returns"
@@ -1963,7 +2016,7 @@ mod tests {
                 .expect("open sqlite store"),
         );
         let scheduler = Arc::new(Scheduler::new(1));
-        let manager = SessionManager::with_create_harness_and_scheduler(
+        let manager = ConversationManager::with_create_harness_and_scheduler(
             store.clone(),
             fake_create_harness,
             Some(scheduler.clone()),
@@ -1979,20 +2032,20 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
 
         let run_id = LfdId::new();
-        let mut run = WaveRun::new(run_id.clone(), wave_id.clone());
+        let mut run = Run::new(run_id.clone(), wave_id.clone());
         run.worktree = tmp.path().to_string_lossy().to_string();
         run.branch = "wave-a".to_string();
-        store.create_wave_run(&run).await.expect("create wave run");
+        store.create_run(&run).await.expect("create wave run");
 
         let created = manager
-            .create_session(CreateSessionParams {
+            .create_conversation(CreateConversationParams {
                 harness: "codex".to_string(),
-                wave_run_id: Some(run_id.to_string()),
+                run_id: Some(run_id.to_string()),
                 config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");
-        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+        let _ = wait_for_status(&manager, &created.id, ConversationStatus::Active).await;
 
         assert!(scheduler.has_active_session(wave_id.as_str()));
 

@@ -6,7 +6,7 @@ use loopflow::engine::config::BranchNameConfig;
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
 use loopflow::engine::naming::sanitize_for_branch;
 use loopflow::engine::worktrees::{branch_exists, create_with_schema, worktree_path};
-use loopflow::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
+use loopflow::lfd::executor::{create_run_with_id, ensure_wave_worktree};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::store::{open_store, SharedStore, StorageConfig};
 use loopflow::lfd::types::{Wave, WaveMode, WaveStatus};
@@ -69,14 +69,14 @@ fn run_git_output(repo: &Path, args: &[&str]) -> String {
 }
 
 #[tokio::test]
-async fn wave_run_creates_worktree() {
+async fn run_creates_worktree() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "expand");
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -90,14 +90,14 @@ async fn wave_run_creates_worktree() {
 }
 
 #[tokio::test]
-async fn wave_run_creates_branch() {
+async fn run_creates_branch() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "polish");
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -114,14 +114,14 @@ async fn wave_run_creates_branch() {
 }
 
 #[tokio::test]
-async fn wave_run_worktree_follows_naming_convention() {
+async fn run_worktree_follows_naming_convention() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "review");
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -134,20 +134,20 @@ async fn wave_run_worktree_follows_naming_convention() {
 }
 
 #[tokio::test]
-async fn wave_run_reuses_existing_worktree() {
+async fn run_reuses_existing_worktree() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "iterate");
     store.create_wave(&wave).await.unwrap();
 
     // First run creates the worktree
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run1 = create_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
     let wt_path = run1.worktree.clone();
 
     // Second run reuses the existing worktree
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run2 = create_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
     assert_eq!(run2.worktree, wt_path, "should reuse existing worktree");
@@ -155,16 +155,16 @@ async fn wave_run_reuses_existing_worktree() {
 }
 
 #[tokio::test]
-async fn wave_run_records_parent_lineage() {
+async fn run_records_parent_lineage() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run1 = create_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run2 = create_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
 

@@ -18,9 +18,9 @@ use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{AgentRun, AgentStatus, Wave};
+use crate::lfd::types::{ExecutionProcess, ExecutionProcessStatus, Wave};
 
-use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
+use super::{handle_output_line, AgentExecutor, ExecutionContext, OutputContext, StartupRecovery};
 
 mod image;
 mod io;
@@ -188,16 +188,16 @@ struct DockerWorkspace {
 
 #[derive(Debug, Clone)]
 struct ReattachTarget {
-    agent_run: AgentRun,
+    execution_run: ExecutionProcess,
     wave_id: LfdId,
-    wave_run_id: LfdId,
+    run_id: LfdId,
     container_id: String,
 }
 
 #[derive(Debug, Clone)]
 struct RehydrationPlan {
     reattach: Vec<ReattachTarget>,
-    lost: Vec<AgentRun>,
+    lost: Vec<ExecutionProcess>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -464,7 +464,7 @@ fn container_host_config(mounts: Vec<Mount>, limits: &ExecutorLimitsConfig) -> H
 
 #[async_trait]
 impl AgentExecutor for DockerExecutor {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: ExecutionContext) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
@@ -473,7 +473,7 @@ impl AgentExecutor for DockerExecutor {
         let workspace = self
             .resolve_workspace(
                 &context.wave_id,
-                &context.wave_run_id,
+                &context.run_id,
                 cwd,
                 context.branch.as_deref(),
             )
@@ -511,8 +511,7 @@ impl AgentExecutor for DockerExecutor {
                 .map(|(key, value)| format!("{key}={value}")),
         );
         let mounts = self.build_mounts(&workspace.volume.volume_name);
-        let labels =
-            Self::build_agent_labels(&context.agent_id, &context.wave_id, &context.wave_run_id);
+        let labels = Self::build_agent_labels(&context.agent_id, &context.wave_id, &context.run_id);
 
         info!(
             agent_id = %context.agent_id,
@@ -553,7 +552,7 @@ impl AgentExecutor for DockerExecutor {
             .store
             .update_agent_status(
                 &agent_lfd_id,
-                AgentStatus::Running.as_i32(),
+                ExecutionProcessStatus::Running.as_i32(),
                 None,
                 Some(&container_id),
             )

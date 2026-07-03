@@ -9,7 +9,7 @@ struct WaveDetailLiveUpdatesTests {
         let decision = evaluateCommitFeedUpdate(
             previousCommitSHAs: [],
             commits: [CommitEntry(sha: "abc123", message: "initial")],
-            isWaveRunning: true
+            isRunning: true
         )
 
         #expect(decision.newCommitSHAs == Set(["abc123"]))
@@ -25,7 +25,7 @@ struct WaveDetailLiveUpdatesTests {
                 CommitEntry(sha: "def456", message: "new"),
                 CommitEntry(sha: "abc123", message: "old")
             ],
-            isWaveRunning: true
+            isRunning: true
         )
 
         #expect(decision.newCommitSHAs == Set(["def456"]))
@@ -41,7 +41,7 @@ struct WaveDetailLiveUpdatesTests {
                 CommitEntry(sha: "def456", message: "new"),
                 CommitEntry(sha: "abc123", message: "old")
             ],
-            isWaveRunning: false
+            isRunning: false
         )
 
         #expect(decision.newCommitSHAs == Set(["def456"]))
@@ -57,7 +57,7 @@ struct WaveDetailLiveUpdatesTests {
                 CommitEntry(sha: "def456", message: "new"),
                 CommitEntry(sha: "abc123", message: "old")
             ],
-            isWaveRunning: true
+            isRunning: true
         )
 
         #expect(decision.newCommitSHAs.isEmpty)

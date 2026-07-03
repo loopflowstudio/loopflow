@@ -1,4 +1,4 @@
-// PullRequest - metadata for a single PR, typically attached to a WaveRun.
+// PullRequest - metadata for a single PR, typically attached to a Run.
 
 import Foundation
 

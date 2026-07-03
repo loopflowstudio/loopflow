@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    attention, auth as auth_routes, catalog, flows, hooks, providers, repos, sessions, system,
-    terminal_sessions, usage, wave_runs, waves, worktrees, ws,
+    attention, auth as auth_routes, catalog, conversations, flows, hooks, providers, repos, runs,
+    session_controls, system, usage, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -77,47 +77,43 @@ pub fn router(state: HttpState) -> Router {
             "/repos/{owner}/{repo}/parents",
             get(repos::list_parents_handler),
         )
-        .route("/sessions", post(sessions::create_session_handler))
         .route(
-            "/terminal-sessions",
-            get(terminal_sessions::list_terminal_sessions_handler)
-                .post(terminal_sessions::create_terminal_session_handler),
+            "/sessions",
+            get(session_controls::list_sessions_handler)
+                .post(session_controls::create_session_handler),
         )
         .route(
-            "/terminal-sessions/{id}",
-            get(terminal_sessions::get_terminal_session_handler),
+            "/sessions/current",
+            get(session_controls::current_session_handler),
+        )
+        .route("/sessions/{id}", get(session_controls::get_session_handler))
+        .route(
+            "/sessions/{id}/attach",
+            post(session_controls::attach_session_handler),
         )
         .route(
-            "/terminal-sessions/{id}/attach",
-            post(terminal_sessions::attach_terminal_session_handler),
+            "/sessions/{id}/start",
+            post(session_controls::start_session_handler),
         )
         .route(
-            "/terminal-sessions/{id}/start",
-            post(terminal_sessions::start_terminal_session_handler),
+            "/sessions/{id}/complete",
+            post(session_controls::complete_session_handler),
         )
         .route(
-            "/terminal-sessions/{id}/complete",
-            post(terminal_sessions::complete_terminal_session_handler),
+            "/sessions/{id}/cancel",
+            post(session_controls::cancel_session_handler),
         )
         .route(
-            "/terminal-sessions/{id}/cancel",
-            post(terminal_sessions::cancel_terminal_session_handler),
+            "/conversations/{id}/input",
+            post(conversations::send_conversation_input_handler),
         )
         .route(
-            "/sessions/{id}",
-            get(sessions::get_session_handler).delete(sessions::delete_session_handler),
+            "/conversations/{id}/events",
+            get(conversations::stream_conversation_events_handler),
         )
         .route(
-            "/sessions/{id}/input",
-            post(sessions::send_session_input_handler),
-        )
-        .route(
-            "/sessions/{id}/events",
-            get(sessions::stream_session_events_handler),
-        )
-        .route(
-            "/sessions/{id}/usage",
-            get(usage::get_session_usage_handler),
+            "/conversations/{id}/usage",
+            get(usage::get_conversation_usage_handler),
         )
         .route(
             "/attention",
@@ -151,9 +147,10 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
-            "/waves/{wave_id}/dispatch",
-            post(waves::dispatch_wave_handler),
+            "/waves/{wave_id}/agent-tree",
+            get(waves::get_wave_agent_tree_handler),
         )
+        .route("/waves/{wave_id}/workers", post(waves::run_worker_handler))
         .route(
             "/waves/{wave_id}/triggers",
             post(waves::add_trigger_handler),
@@ -191,16 +188,16 @@ pub fn router(state: HttpState) -> Router {
         )
         .route(
             "/waves/{wave_id}/runs",
-            get(wave_runs::list_wave_runs_for_wave_handler),
+            get(runs::list_runs_for_wave_handler),
         )
         .route("/waves/{wave_id}/usage", get(usage::get_wave_usage_handler))
-        .route("/waves/{wave_id}/logs", get(wave_runs::wave_logs_handler))
+        .route("/waves/{wave_id}/logs", get(runs::wave_logs_handler))
         .route("/usage/summary", get(usage::get_usage_summary_handler))
         .route(
             "/usage/timeseries",
             get(usage::get_usage_timeseries_handler),
         )
-        .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
+        .route("/runs", get(runs::list_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
         .layer(DefaultBodyLimit::max(max_json_body_bytes))
         .route_layer(middleware::from_fn_with_state(

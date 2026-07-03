@@ -1,4 +1,4 @@
-//! Agent run types.
+//! Execution process types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -8,7 +8,7 @@ use crate::lfd::id::LfdId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum AgentStatus {
+pub enum ExecutionProcessStatus {
     #[default]
     Unspecified = 0,
     Running = 1,
@@ -17,7 +17,7 @@ pub enum AgentStatus {
     Failed = 4,
 }
 
-impl AgentStatus {
+impl ExecutionProcessStatus {
     pub fn from_i32(value: i32) -> Self {
         match value {
             1 => Self::Running,
@@ -43,19 +43,19 @@ impl AgentStatus {
     }
 }
 
-/// Process lifecycle record for an agent invocation.
+/// Process lifecycle record for an invocation backend.
 ///
-/// `AgentRun` tracks execution state (running/waiting/completed), process IDs,
+/// `ExecutionProcess` tracks execution state (running/waiting/completed), process IDs,
 /// and container metadata. Usage and conversation events live in `Session`.
-/// The two are linked through shared wave execution lineage (`wave_run_id`).
+/// The two are linked through shared wave execution lineage (`run_id`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRun {
+pub struct ExecutionProcess {
     pub id: LfdId,
     pub step: String,
     pub repo: String,
     pub worktree: String,
-    pub wave_run_id: Option<LfdId>,
-    pub status: AgentStatus,
+    pub run_id: Option<LfdId>,
+    pub status: ExecutionProcessStatus,
     #[serde(with = "time::serde::rfc3339::option")]
     pub started_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]

@@ -16,7 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::{open_store, SharedStore, StorageConfig};
 use crate::lfd::types::{
-    AgentRun, AgentStatus, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    ExecutionProcess, ExecutionProcessStatus, Run, RunStatus, Wave, WaveMode, WaveStatus,
 };
 
 use super::{
@@ -330,11 +330,7 @@ impl DockerRecoveryBackend for MockDockerRecoveryBackend {
     }
 }
 
-async fn create_running_wave_and_run(
-    store: &SharedStore,
-    repo: &Path,
-    name: &str,
-) -> (Wave, WaveRun) {
+async fn create_running_wave_and_run(store: &SharedStore, repo: &Path, name: &str) -> (Wave, Run) {
     let wave = Wave {
         id: LfdId::new(),
         name: name.to_string(),
@@ -357,19 +353,17 @@ async fn create_running_wave_and_run(
         .await
         .expect("wave should be created");
 
-    let run = WaveRun {
+    let run = Run {
         id: LfdId::new(),
         wave_id: wave.id().clone(),
-        snapshot: WaveRunSnapshot {
-            repo: repo.to_string_lossy().to_string(),
-            flow: "test-flow".to_string(),
-            task: None,
-            direction: vec![],
-            area: vec![],
-        },
+        repo: repo.to_string_lossy().to_string(),
+        flow: "test-flow".to_string(),
+        task: None,
+        direction: vec![],
+        area: vec![],
         iteration: 0,
         step_index: 0,
-        status: WaveRunStatus::Running,
+        status: RunStatus::Running,
         worktree: repo.to_string_lossy().to_string(),
         branch: "main".to_string(),
         started_at: Some(OffsetDateTime::now_utc()),
@@ -382,27 +376,27 @@ async fn create_running_wave_and_run(
         parent_pr_number: None,
         stack_position: 0,
         stack_group_id: wave.id().to_string(),
-        stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+        stack_status: crate::lfd::types::RunStackStatus::Active,
         lineage_inferred: false,
         target_branch: "main".to_string(),
         repair_of: None,
         pr: None,
     };
     store
-        .create_wave_run(&run)
+        .create_run(&run)
         .await
         .expect("wave run should be created");
     (wave, run)
 }
 
-fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> AgentRun {
-    AgentRun {
+fn make_running_agent(run: &Run, container_id: Option<&str>, name: &str) -> ExecutionProcess {
+    ExecutionProcess {
         id: LfdId::new(),
         step: name.to_string(),
-        repo: run.snapshot.repo.clone(),
+        repo: run.repo.clone(),
         worktree: run.worktree.clone(),
-        wave_run_id: Some(run.id.clone()),
-        status: AgentStatus::Running,
+        run_id: Some(run.id.clone()),
+        status: ExecutionProcessStatus::Running,
         started_at: Some(OffsetDateTime::now_utc()),
         ended_at: None,
         pid: None,
@@ -534,15 +528,15 @@ async fn docker_startup_rehydrates_running_agents_and_cleans_orphans() {
         .await
         .expect("get lost agent")
         .expect("lost agent exists");
-    assert_eq!(lost_agent_after.status, AgentStatus::Failed);
+    assert_eq!(lost_agent_after.status, ExecutionProcessStatus::Failed);
     assert!(lost_agent_after.ended_at.is_some());
 
     let lost_run_after = store
-        .get_wave_run(&lost_run.id)
+        .get_run(&lost_run.id)
         .await
         .expect("get lost run")
         .expect("lost run exists");
-    assert_eq!(lost_run_after.status, WaveRunStatus::Failed);
+    assert_eq!(lost_run_after.status, RunStatus::Failed);
     assert_eq!(
         lost_run_after.error.as_deref(),
         Some("container lost during lfd restart.")
@@ -556,11 +550,11 @@ async fn docker_startup_rehydrates_running_agents_and_cleans_orphans() {
     assert_eq!(lost_wave_after.status(), WaveStatus::Failed);
 
     let rehydrated_run_after = store
-        .get_wave_run(&rehydrated_run.id)
+        .get_run(&rehydrated_run.id)
         .await
         .expect("get rehydrated run")
         .expect("rehydrated run exists");
-    assert_eq!(rehydrated_run_after.status, WaveRunStatus::Running);
+    assert_eq!(rehydrated_run_after.status, RunStatus::Running);
 
     let rehydrated_wave_after = store
         .get_wave(rehydrated_wave.id())
@@ -605,19 +599,17 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         .await
         .expect("wave should be created");
 
-    let run = WaveRun {
+    let run = Run {
         id: LfdId::new(),
         wave_id: wave.id().clone(),
-        snapshot: WaveRunSnapshot {
-            repo: tmp.path().to_string_lossy().to_string(),
-            flow: "test-flow".to_string(),
-            task: None,
-            direction: vec![],
-            area: vec![],
-        },
+        repo: tmp.path().to_string_lossy().to_string(),
+        flow: "test-flow".to_string(),
+        task: None,
+        direction: vec![],
+        area: vec![],
         iteration: 0,
         step_index: 0,
-        status: WaveRunStatus::Completed,
+        status: RunStatus::Completed,
         worktree: tmp.path().to_string_lossy().to_string(),
         branch: "main".to_string(),
         started_at: Some(OffsetDateTime::now_utc()),
@@ -630,14 +622,14 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         parent_pr_number: None,
         stack_position: 0,
         stack_group_id: wave.id().to_string(),
-        stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+        stack_status: crate::lfd::types::RunStackStatus::Active,
         lineage_inferred: false,
         target_branch: "main".to_string(),
         repair_of: None,
         pr: None,
     };
     store
-        .create_wave_run(&run)
+        .create_run(&run)
         .await
         .expect("wave run should be created");
 
@@ -681,15 +673,15 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         .await
         .expect("get agent")
         .expect("agent exists");
-    assert_eq!(agent_after.status, AgentStatus::Failed);
+    assert_eq!(agent_after.status, ExecutionProcessStatus::Failed);
     assert!(agent_after.ended_at.is_some());
 
     let run_after = store
-        .get_wave_run(&run.id)
+        .get_run(&run.id)
         .await
         .expect("get run")
         .expect("run exists");
-    assert_eq!(run_after.status, WaveRunStatus::Completed);
+    assert_eq!(run_after.status, RunStatus::Completed);
 
     let wave_after = store
         .get_wave(wave.id())

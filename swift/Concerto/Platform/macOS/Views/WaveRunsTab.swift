@@ -1,8 +1,8 @@
 import SwiftUI
 import LoopflowCore
 
-struct WaveRunsTab: View {
-    let runs: [WaveRun]
+struct RunsTab: View {
+    let runs: [Run]
     let onCombine: () async throws -> CombinePRsResult
 
     @Environment(\.palette) private var palette
@@ -15,7 +15,7 @@ struct WaveRunsTab: View {
 
     private let terminalLauncher = TerminalLauncher()
 
-    private var openPRRuns: [WaveRun] {
+    private var openPRRuns: [Run] {
         sortedRuns.filter { $0.pr?.state == .open || $0.pr?.state == .draft }
     }
 
@@ -48,7 +48,7 @@ struct WaveRunsTab: View {
                     .foregroundStyle(palette.textSecondary)
             } else {
                 ForEach(sortedRuns) { run in
-                    WaveRunRow(run: run)
+                    RunRow(run: run)
                 }
             }
         }
@@ -69,7 +69,7 @@ struct WaveRunsTab: View {
         }
     }
 
-    private var sortedRuns: [WaveRun] {
+    private var sortedRuns: [Run] {
         runs.sorted { lhs, rhs in
             if lhs.iteration == rhs.iteration {
                 return (lhs.startedAt ?? lhs.createdAt) > (rhs.startedAt ?? rhs.createdAt)
@@ -141,8 +141,8 @@ struct WaveRunsTab: View {
     }
 }
 
-private struct WaveRunRow: View {
-    let run: WaveRun
+private struct RunRow: View {
+    let run: Run
 
     @Environment(\.palette) private var palette
     @State private var isExpanded = false

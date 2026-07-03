@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 @Observable
 public final class TerminalWorkspaceStore {
-    public private(set) var sessionsById: [String: TerminalSession] = [:]
+    public private(set) var sessionsById: [String: Session] = [:]
     public private(set) var orderedSessionIds: [String] = []
     public private(set) var selectedSessionIdsByWave: [String: String] = [:]
     public var selectedSessionId: String?
@@ -16,15 +16,15 @@ public final class TerminalWorkspaceStore {
         self.userDefaults = userDefaults
     }
 
-    public var orderedSessions: [TerminalSession] {
+    public var orderedSessions: [Session] {
         orderedSessionIds.compactMap { sessionsById[$0] }
     }
 
-    public var selectedSession: TerminalSession? {
+    public var selectedSession: Session? {
         session(id: selectedSessionId)
     }
 
-    public func orderedSessions(for waveId: String) -> [TerminalSession] {
+    public func orderedSessions(for waveId: String) -> [Session] {
         orderedSessions.filter { $0.waveId == waveId }
     }
 
@@ -34,7 +34,7 @@ public final class TerminalWorkspaceStore {
             ?? nextSelectableSessionId(for: waveId)
     }
 
-    public func selectedSession(for waveId: String) -> TerminalSession? {
+    public func selectedSession(for waveId: String) -> Session? {
         session(id: selectedSessionId(for: waveId))
     }
 
@@ -43,7 +43,7 @@ public final class TerminalWorkspaceStore {
         restoreSelection()
     }
 
-    public func setAll(_ sessions: [TerminalSession]) {
+    public func setAll(_ sessions: [Session]) {
         sessionsById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         let activeIds = Set(sessionsById.keys)
 
@@ -60,7 +60,7 @@ public final class TerminalWorkspaceStore {
         persist()
     }
 
-    public func upsert(_ session: TerminalSession, select: Bool = false) {
+    public func upsert(_ session: Session, select: Bool = false) {
         sessionsById[session.id] = session
         if !orderedSessionIds.contains(session.id) {
             orderedSessionIds.append(session.id)
@@ -97,7 +97,7 @@ public final class TerminalWorkspaceStore {
         persist()
     }
 
-    public func activeSession(for waveId: String) -> TerminalSession? {
+    public func activeSession(for waveId: String) -> Session? {
         selectedSession(for: waveId) ?? orderedSessions.first { $0.waveId == waveId && !$0.status.isTerminal }
     }
 
@@ -192,12 +192,12 @@ public final class TerminalWorkspaceStore {
         return session.id
     }
 
-    private func session(id: String?) -> TerminalSession? {
+    private func session(id: String?) -> Session? {
         guard let id else { return nil }
         return sessionsById[id]
     }
 
-    private func activeSession(id: String?) -> TerminalSession? {
+    private func activeSession(id: String?) -> Session? {
         guard let session = session(id: id),
               !session.status.isTerminal else {
             return nil

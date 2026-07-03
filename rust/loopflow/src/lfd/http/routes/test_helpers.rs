@@ -1,12 +1,12 @@
 use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
 use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+use crate::lfd::conversations::ConversationManager;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::output::OutputHub;
 use crate::lfd::provider_auth::ProviderAuthService;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::{open_store, StorageConfig};
 use std::path::Path;
 use std::process::Command;
@@ -26,7 +26,7 @@ pub async fn test_http_state() -> HttpState {
     let scheduler = Arc::new(Scheduler::new(1));
     let output_hub = OutputHub::new(128, tmp.path().join("output"));
     let event_hub = EventHub::new(128);
-    let sessions = SessionManager::new(store.clone());
+    let sessions = ConversationManager::new(store.clone());
     let executor = Arc::new(
         WaveExecutor::new(
             store.clone(),
@@ -54,7 +54,7 @@ pub async fn test_http_state() -> HttpState {
         http_security: HttpSecurityConfig::default(),
         auth_failure_throttle: AuthFailureThrottle::new(),
         ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        sessions,
+        conversations: sessions,
     }
 }
 

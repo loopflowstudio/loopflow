@@ -57,10 +57,16 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `--docs PATH[,PATH...]` | Include docs files, globs, or directories |
+| `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
-| `--diff-files / --no-diff-files` | Include files touched by branch |
+| `--diff-files / --no-diff-files` | Include files touched by branch (default: off) |
 | `--diff / --no-diff` | Include raw `git diff` output |
+
+### Loopflow Guidance
+
+| Flag | Description |
+|------|-------------|
+| `--no-loopflow` | Omit `LOOPFLOW.md` operating guidance |
 
 ### Clipboard
 
@@ -105,7 +111,7 @@ lf ship -w feature-branch
 
 | Flag | Description |
 |------|-------------|
-| `--docs PATH[,PATH...]` | Include docs files, globs, or directories |
+| `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
 | `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
@@ -118,10 +124,10 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
+| **Agent doc** (AGENTS.md / CLAUDE.md / STYLE.md) | ✓ included | — |
 | **Loopflow operating guidance** | ✓ included | `--no-loopflow` |
 | **scratch/** | ✓ included | — |
-| **wave/** (when scoped) | ✓ included | — |
-| **Branch files** (files you've changed) | — | `--diff-files` |
+| **wave/** | ✓ included | — |
 
 ## What's Opt-In
 
@@ -146,11 +152,15 @@ See [Configuration](config.md) for setting defaults via config file.
 lf debug -c
 ```
 
-### Review with docs
+### Prefetch docs into context
 
 ```bash
-lf qa --docs README.md,docs/
+lf qa --docs src/api/
 ```
+
+Gathers `*.md` under `src/api/` into context before the prompt runs. Unlike
+the old area scope, `--docs` only prefetches—it doesn't restrict which
+files the agent touches.
 
 ### Use a different model
 
@@ -165,13 +175,15 @@ lf gate -d ux
 lf implement -d ux,clarity
 ```
 
-### Skip loopflow operating guidance
+### Disable loopflow operating guidance
 
 ```bash
 lf gate --no-loopflow
 ```
 
-Loopflow guidance is included by default for git, worktrees, PRs, and delegation.
+`LOOPFLOW.md` carries loopflow-specific guidance for git, worktrees, PRs, and
+delegation, and is injected by default. Use `--no-loopflow` for a leaner
+prompt.
 
 ### Include clipboard content
 

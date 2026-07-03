@@ -14,18 +14,19 @@ from .errors import LoopflowError, WaveAlreadyRunning
 from .models import (
     AuthFlow,
     AuthProviderStatus,
+    Conversation,
     ProviderInfo,
     Repo,
     Session,
-    SessionConfig,
-    SessionEventEnvelope,
+    ConversationEventEnvelope,
+    SessionConnectionInfo,
     UsageSummary,
     Wave,
-    WaveRun,
+    WaveAgentTree,
+    Run,
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
-_ACTIVE_TERMINAL_SESSION_STATUSES = {"pending", "attached", "running"}
 
 
 def _compact_dict(**values: Any) -> dict[str, Any]:
@@ -252,9 +253,25 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         goal: Optional[str] = None,
-    ) -> dict[str, Any]:
+    ) -> Session:
         body = _compact_dict(flow=flow, goal=goal, direction=direction, area=area)
-        return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
+        payload = self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
+        return Session.model_validate(payload)
+
+    def ensure_wave_agent(self, name_or_id: str) -> Session:
+        return self.run_wave(name_or_id)
+
+    def get_wave_agent_tree(
+        self,
+        name_or_id: str,
+        active_only: bool = True,
+    ) -> WaveAgentTree:
+        payload = self._request_json(
+            "GET",
+            f"/v0/waves/{name_or_id}/agent-tree",
+            params={"active_only": "true" if active_only else "false"},
+        )
+        return WaveAgentTree.model_validate(payload)
 
     def add_trigger(
         self,
@@ -299,19 +316,19 @@ class Client:
     def next_wave(self, name_or_id: str) -> dict[str, Any]:
         return self._request_json("POST", f"/v0/waves/{name_or_id}/next")
 
-    def wave_runs(
+    def runs(
         self,
         wave_id: Optional[str] = None,
         repo: Optional[str] = None,
         limit: Optional[int] = None,
-    ) -> list[WaveRun]:
+    ) -> list[Run]:
         params = _compact_dict(
             wave_id=wave_id,
             repo=repo,
             limit=str(limit) if limit is not None else None,
         )
-        payload = self._request_json("GET", "/v0/wave_runs", params=params)
-        return self._parse_model_list(payload, WaveRun)
+        payload = self._request_json("GET", "/v0/runs", params=params)
+        return self._parse_model_list(payload, Run)
 
     def wave_logs(self, name_or_id: str) -> Iterator[str]:
         try:
@@ -330,72 +347,77 @@ class Client:
         except httpx.RequestError as exc:
             raise ConnectionError(str(exc)) from exc
 
-    def list_terminal_sessions(
+    def run_worker(
+        self,
+        name_or_id: str,
+        flow: str,
+        task: str,
+        parent_session_id: Optional[str] = None,
+    ) -> Session:
+        body = _compact_dict(flow=flow, task=task, parent_session_id=parent_session_id)
+        payload = self._request_json("POST", f"/v0/waves/{name_or_id}/workers", json=body)
+        return Session.model_validate(payload)
+
+    def list_sessions(
         self,
         wave_id: Optional[str] = None,
-        statuses: Optional[list[str]] = None,
-    ) -> list[dict[str, Any]]:
-        params = _compact_dict(wave_id=wave_id)
-        if statuses and set(statuses).issubset(_ACTIVE_TERMINAL_SESSION_STATUSES):
-            params["active_only"] = "true"
-        payload = self._request_json("GET", "/v0/terminal-sessions", params=params)
-        sessions = self._parse_dict_list(payload)
-        if statuses is None:
-            return sessions
-        return [session for session in sessions if session.get("status") in statuses]
+        parent_session_id: Optional[str] = None,
+        use: Optional[str] = None,
+        active_only: bool = True,
+    ) -> list[Session]:
+        params = _compact_dict(
+            wave_id=wave_id,
+            parent_session_id=parent_session_id,
+            use=use,
+            active_only="true" if active_only else "false",
+        )
+        payload = self._request_json("GET", "/v0/sessions", params=params)
+        return [Session.model_validate(item) for item in self._parse_dict_list(payload)]
 
-    def attach_terminal_session(self, session_id: str) -> dict[str, Any]:
-        payload = self._request_json("POST", f"/v0/terminal-sessions/{session_id}/attach")
-        if not isinstance(payload, dict):
-            raise LoopflowError("invalid terminal session attach response payload")
-        return payload
+    def get_session(self, session_id: str) -> Session:
+        payload = self._request_json("GET", f"/v0/sessions/{session_id}")
+        return Session.model_validate(payload)
+
+    def current_session(self, cwd: str) -> Optional[Session]:
+        payload = self._request_json(
+            "GET",
+            "/v0/sessions/current",
+            params={"cwd": cwd},
+            allow_not_found=True,
+        )
+        if payload is None:
+            return None
+        return Session.model_validate(payload)
+
+    def attach_session(self, session_id: str) -> SessionConnectionInfo:
+        payload = self._request_json("POST", f"/v0/sessions/{session_id}/attach")
+        return SessionConnectionInfo.model_validate(payload)
 
     def list_attention(self, status: Optional[str] = None) -> list[dict[str, Any]]:
         params = _compact_dict(status=status)
         payload = self._request_json("GET", "/v0/attention", params=params)
         return self._parse_dict_list(payload)
 
-    def create_session(
-        self,
-        harness: str,
-        wave_run_id: Optional[str] = None,
-        config: Optional[SessionConfig] = None,
-    ) -> Session:
-        body: dict[str, Any] = {"harness": harness, "config": {}}
-        if wave_run_id is not None:
-            body["wave_run_id"] = wave_run_id
-        if config is not None:
-            body["config"] = config.model_dump(exclude_none=True)
-        payload = self._request_json("POST", "/v0/sessions", json=body)
-        return Session.model_validate(payload)
-
-    def session(self, session_id: str) -> Optional[Session]:
-        return self._request_optional_model(f"/v0/sessions/{session_id}", Session)
-
-    def send_session_input(self, session_id: str, content: str) -> Session:
+    def send_conversation_input(self, session_id: str, content: str) -> Conversation:
         payload = self._request_json(
             "POST",
-            f"/v0/sessions/{session_id}/input",
+            f"/v0/conversations/{session_id}/input",
             json={"text": content},
         )
-        return Session.model_validate(payload)
+        return Conversation.model_validate(payload)
 
-    def stop_session(self, session_id: str) -> Session:
-        payload = self._request_json("DELETE", f"/v0/sessions/{session_id}")
-        return Session.model_validate(payload)
-
-    def stream_session_events(
+    def stream_conversation_events(
         self,
         session_id: str,
         after_seq: Optional[int] = None,
         timeout: float = 60.0,
-    ) -> Iterator[SessionEventEnvelope]:
+    ) -> Iterator[ConversationEventEnvelope]:
         params = _compact_dict(after_seq=str(after_seq) if after_seq is not None else None)
 
         try:
             with self._client.stream(
                 "GET",
-                f"/v0/sessions/{session_id}/events",
+                f"/v0/conversations/{session_id}/events",
                 params=params or None,
                 timeout=timeout,
             ) as response:
@@ -429,7 +451,7 @@ class Client:
                     if not isinstance(event, dict):
                         continue
 
-                    yield SessionEventEnvelope(seq=pending_seq, event=event)
+                    yield ConversationEventEnvelope(seq=pending_seq, event=event)
                     pending_seq = None
         except httpx.RequestError as exc:
             raise ConnectionError(str(exc)) from exc

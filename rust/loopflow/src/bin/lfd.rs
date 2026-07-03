@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::config::{LfdConfig, StorageType};
+use loopflow::lfd::conversations::ConversationManager;
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -17,7 +18,6 @@ use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
-use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
 
 fn env_flag(name: &str) -> bool {
@@ -148,7 +148,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
     let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);
-    let session_manager = SessionManager::new_with_scheduler(store.clone(), scheduler.clone());
+    let conversation_manager =
+        ConversationManager::new_with_scheduler(store.clone(), scheduler.clone());
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(
         store.clone(),
@@ -189,12 +190,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
     }
 
-    match session_manager.recover_orphaned_sessions().await {
+    match conversation_manager.recover_orphaned_conversations().await {
         Ok(recovery) => {
-            if recovery.sessions_failed > 0 {
+            if recovery.conversations_failed > 0 {
                 tracing::info!(
-                    count = recovery.sessions_failed,
-                    "recovered orphaned sessions from previous lfd"
+                    count = recovery.conversations_failed,
+                    "recovered orphaned conversations from previous lfd"
                 );
             }
             if recovery.opencode_servers_reaped > 0 {
@@ -213,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "session orphan recovery failed"),
     }
 
-    match executor.reconcile_terminal_sessions().await {
+    match executor.reconcile_sessions().await {
         Ok(completed) if completed > 0 => {
             tracing::info!(
                 count = completed,
@@ -305,7 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
-        sessions: session_manager,
+        conversations: conversation_manager,
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

@@ -104,8 +104,10 @@ distinct so this isn't "cleaned up" as the old manual sneaking back.
   chord-as-wave-with-children structure for free, no new field. Open: whether a
   single *leaf* Looping Agent may span repos directly (one agent, many worktrees,
   coordinated cross-repo PRs) for tightly-coupled changes (e.g. add a server
-  endpoint + consume it in the client atomically). Lean: chord-spanning by
-  default; add multi-repo leaf agents only if coupled changes need atomicity.
+  endpoint + consume it in the client atomically). The concrete design for the
+  multi-repo-leaf answer — a wave holding `repos: [RepoWork]`, repo as a filter —
+  is spelled out as a roadmap item. Lean: chord-spanning by default; add
+  multi-repo leaf agents only if coupled changes need atomicity.
 
 ## Risks
 

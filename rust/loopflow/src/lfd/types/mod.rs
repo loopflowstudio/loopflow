@@ -3,33 +3,32 @@
 //! These replace the proto-generated types, giving us clean Rust types
 //! without gRPC/proto dependencies.
 
-mod agent;
 mod attention;
 mod chat_memory;
 mod chat_message;
 mod event;
+mod execution;
 mod repo;
+mod session;
 mod summary;
-mod terminal_session;
 mod trigger;
 mod wave;
 
-pub use agent::{AgentRun, AgentStatus};
 pub use attention::{AttentionItem, AttentionKind, AttentionStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use event::Event;
+pub use execution::{ExecutionProcess, ExecutionProcessStatus};
 pub use repo::{Repo, RepoEdge, RepoId};
-pub use summary::Summary;
-pub use terminal_session::{
-    tmux_session_name, TerminalSession, TerminalSessionStatus, PALETTE_TERMINAL_SOURCE,
-    TMUX_TERMINAL_SOURCE,
+pub use session::{
+    tmux_session_name, Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES,
+    PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
 };
+pub use summary::Summary;
 pub use trigger::{
     ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,
 };
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    Wave, WaveCron, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-    WaveStatus,
+    Run, RunStackStatus, RunStatus, Wave, WaveCron, WaveMode, WaveStatus,
 };

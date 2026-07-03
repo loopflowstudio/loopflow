@@ -1,6 +1,6 @@
 """Guards against three-mirror DTO drift that previously broke Concerto's
-terminal auto-attach: the Rust `TerminalSession` struct had `tmux_name` but
-`TerminalSessionDto` dropped it on the HTTP wire, so Concerto's Swift parser
+session auto-attach: the Rust `Session` struct had `tmux_name` but
+`SessionDto` dropped it on the HTTP wire, so Concerto's Swift parser
 (which requires the field) silently discarded every session it fetched over
 HTTP and the terminal pane stayed pointed at an empty default session.
 """
@@ -17,32 +17,34 @@ from scripts.lib.lfd_runtime import LfdRuntime
 pytestmark = pytest.mark.regression
 
 
-def test_list_terminal_sessions_exposes_tmux_name(
+def test_list_sessions_exposes_tmux_name(
     lfd_runtime: LfdRuntime, api_client: ApiClient
 ) -> None:
     wave_id = _create_wave_with_roadmap_item(lfd_runtime, api_client)
     _trigger_run(api_client, wave_id)
 
-    session = _wait_for_terminal_session(api_client, wave_id)
+    session = _wait_for_session(api_client, wave_id)
     assert "tmux_name" in session, (
-        f"TerminalSessionDto missing tmux_name — wire keys: {sorted(session.keys())}"
+        f"SessionDto missing tmux_name — wire keys: {sorted(session.keys())}"
     )
     assert session["tmux_name"], "tmux_name must not be empty"
     assert session["tmux_name"].startswith("lf-"), (
         f"unexpected tmux session name: {session['tmux_name']}"
     )
+    assert session["use"] in {"wave_agent", "worker", "palette"}
 
 
-def test_get_terminal_session_exposes_tmux_name(
+def test_get_session_exposes_tmux_name(
     lfd_runtime: LfdRuntime, api_client: ApiClient
 ) -> None:
     wave_id = _create_wave_with_roadmap_item(lfd_runtime, api_client)
     _trigger_run(api_client, wave_id)
 
-    listed = _wait_for_terminal_session(api_client, wave_id)
-    fetched = api_client.request("GET", f"/v0/terminal-sessions/{listed['id']}").json()
+    listed = _wait_for_session(api_client, wave_id)
+    fetched = api_client.request("GET", f"/v0/sessions/{listed['id']}").json()
 
     assert "tmux_name" in fetched
+    assert "use" in fetched
     assert fetched["tmux_name"] == listed["tmux_name"]
 
 
@@ -80,13 +82,13 @@ def _trigger_run(client: ApiClient, wave_id: str) -> None:
     )
 
 
-def _wait_for_terminal_session(
+def _wait_for_session(
     client: ApiClient, wave_id: str, timeout_seconds: float = 10.0
 ) -> dict[str, object]:
     deadline = time.time() + timeout_seconds
     last_body = ""
     while time.time() < deadline:
-        response = client.request("GET", "/v0/terminal-sessions")
+        response = client.request("GET", "/v0/sessions")
         response.raise_for_status()
         body = response.json()
         last_body = response.text
@@ -95,6 +97,6 @@ def _wait_for_terminal_session(
             return matches[0]
         time.sleep(0.25)
     raise AssertionError(
-        f"no terminal_session appeared for wave {wave_id} within {timeout_seconds}s; "
+        f"no session appeared for wave {wave_id} within {timeout_seconds}s; "
         f"last body: {last_body}"
     )

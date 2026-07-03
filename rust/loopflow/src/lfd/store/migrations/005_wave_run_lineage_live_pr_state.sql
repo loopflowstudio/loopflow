@@ -1,22 +1,22 @@
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN parent_run_id TEXT;
 
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN parent_pr_number BIGINT;
 
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN stack_position INTEGER NOT NULL DEFAULT 0;
 
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN stack_group_id TEXT NOT NULL DEFAULT '';
 
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN stack_status INTEGER NOT NULL DEFAULT 1;
 
-ALTER TABLE wave_runs
+ALTER TABLE runs
 ADD COLUMN lineage_inferred INTEGER NOT NULL DEFAULT 0;
 
-UPDATE wave_runs
+UPDATE runs
 SET stack_group_id = wave_id
 WHERE stack_group_id = '';
 
@@ -25,39 +25,39 @@ WITH ordered AS (
         id,
         LAG(id) OVER (PARTITION BY wave_id ORDER BY iteration, started_at, id) AS parent_id,
         ROW_NUMBER() OVER (PARTITION BY wave_id ORDER BY iteration, started_at, id) - 1 AS position
-    FROM wave_runs
+    FROM runs
     WHERE run_kind = 1
 )
-UPDATE wave_runs
+UPDATE runs
 SET
-    parent_run_id = COALESCE(wave_runs.parent_run_id, (
+    parent_run_id = COALESCE(runs.parent_run_id, (
         SELECT ordered.parent_id
         FROM ordered
-        WHERE ordered.id = wave_runs.id
+        WHERE ordered.id = runs.id
     )),
     stack_position = CASE
-        WHEN wave_runs.parent_run_id IS NULL THEN COALESCE((
+        WHEN runs.parent_run_id IS NULL THEN COALESCE((
             SELECT ordered.position
             FROM ordered
-            WHERE ordered.id = wave_runs.id
+            WHERE ordered.id = runs.id
         ), stack_position)
         ELSE stack_position
     END,
     lineage_inferred = CASE
-        WHEN wave_runs.parent_run_id IS NULL AND (
+        WHEN runs.parent_run_id IS NULL AND (
             SELECT ordered.parent_id
             FROM ordered
-            WHERE ordered.id = wave_runs.id
+            WHERE ordered.id = runs.id
         ) IS NOT NULL THEN 1
         ELSE lineage_inferred
     END
 WHERE run_kind = 1;
 
-CREATE INDEX IF NOT EXISTS idx_wave_runs_wave_id_stack_position
-ON wave_runs(wave_id, stack_position);
+CREATE INDEX IF NOT EXISTS idx_runs_wave_id_stack_position
+ON runs(wave_id, stack_position);
 
-CREATE INDEX IF NOT EXISTS idx_wave_runs_parent_run_id
-ON wave_runs(parent_run_id);
+CREATE INDEX IF NOT EXISTS idx_runs_parent_run_id
+ON runs(parent_run_id);
 
 CREATE TABLE IF NOT EXISTS live_pr_states (
     repo_id TEXT NOT NULL,

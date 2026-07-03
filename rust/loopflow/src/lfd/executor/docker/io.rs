@@ -36,13 +36,13 @@ impl DockerExecutor {
     pub(super) fn build_agent_labels(
         agent_id: &str,
         wave_id: &str,
-        wave_run_id: &str,
+        run_id: &str,
     ) -> HashMap<String, String> {
         HashMap::from([
             (LABEL_MANAGED.to_string(), "true".to_string()),
             (LABEL_AGENT_ID.to_string(), agent_id.to_string()),
             (LABEL_WAVE_ID.to_string(), wave_id.to_string()),
-            (LABEL_WAVE_RUN_ID.to_string(), wave_run_id.to_string()),
+            (LABEL_WAVE_RUN_ID.to_string(), run_id.to_string()),
         ])
     }
 

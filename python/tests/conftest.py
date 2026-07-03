@@ -71,17 +71,17 @@ REPO_MINIMAL = {
     "added_at": "2026-02-24T12:00:00Z",
 }
 
-SESSION_MINIMAL = {
+CONVERSATION_MINIMAL = {
     "id": "session-1",
-    "object": "session",
+    "object": "conversation",
     "harness": "claude",
     "status": "active",
     "config": {},
 }
 
-SESSION_FULL = {
-    **SESSION_MINIMAL,
-    "wave_run_id": "run-1",
+CONVERSATION_FULL = {
+    **CONVERSATION_MINIMAL,
+    "run_id": "run-1",
     "provider_session_id": "provider-1",
     "input_supported": False,
     "config": {

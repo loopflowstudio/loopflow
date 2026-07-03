@@ -113,6 +113,7 @@ class Wave(BaseModel):
     status: str
     repos: list[RepoWork]
     flow_steps: list[FlowStep]
+    parent_wave_id: Optional[str]
     created_at: Optional[datetime] = None
 
     @field_validator("flow_steps", mode="before")

@@ -242,6 +242,7 @@ impl SqliteStore {
                 wave.primary_flow(),
                 wave.goal(),
                 metrics_json,
+                wave.parent_wave_id(),
             ],
         )?;
         Ok(())
@@ -726,6 +727,17 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::ListLoopableWaves))?;
         let rows = stmt.query_map([], |row| Ok(map_wave_row(row)))?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
+    }
+
+    pub fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListChildWaves))?;
+        let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
         for wave in rows {
             waves.push(wave??);

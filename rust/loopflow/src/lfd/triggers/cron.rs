@@ -197,6 +197,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 0,
+            parent_wave_id: None,
         };
         state.store.create_wave(&wave).await.expect("create wave");
 

@@ -189,6 +189,7 @@ pub async fn build_wave_dto(
         triggers,
         crons,
         repos,
+        parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
 }
 
@@ -519,6 +520,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 

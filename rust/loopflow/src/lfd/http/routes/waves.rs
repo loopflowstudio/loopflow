@@ -290,6 +290,7 @@ pub async fn create_wave_handler(
         paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
         workers,
+        parent_wave_id: None,
     };
     if let Some(status) = status {
         let parsed = WaveStatus::from_str(&status)
@@ -809,6 +810,15 @@ pub async fn get_wave_agent_tree_handler(
     let root_wave = build_wave_dto(&state.store, &state.github, wave, false)
         .await
         .map_err(map_store_error)?;
+    let children = state
+        .store
+        .list_child_waves(&wave_id)
+        .await
+        .map_err(map_store_error)?;
+    let child_waves =
+        crate::lfd::http::routes::build_wave_dtos(&state.store, &state.github, children, false)
+            .await
+            .map_err(map_store_error)?;
     let statuses = query
         .active_only
         .unwrap_or(true)
@@ -834,7 +844,7 @@ pub async fn get_wave_agent_tree_handler(
         object: "wave_agent_tree".to_string(),
         id: format!("tree-{wave_id}"),
         wave: root_wave,
-        child_waves: Vec::new(),
+        child_waves,
         sessions,
     }))
 }
@@ -1950,6 +1960,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 
@@ -2416,6 +2427,7 @@ mod tests {
 
         assert_eq!(response.object, "wave_agent_tree");
         assert_eq!(response.wave.id, wave.id().to_string());
+        // This wave is a leaf (no child waves), so the chord tree is empty here.
         assert_eq!(response.child_waves.len(), 0);
         let child_node = response
             .sessions
@@ -2434,6 +2446,57 @@ mod tests {
             Some("lf-worker")
         );
     }
+
+    // A chord's WaveAgentTree exposes its children: one leaf child wave per
+    // repo, each with its own repo. This is the two-repo chord shape — the
+    // ancestry query drives which children a chord would loop.
+    #[tokio::test]
+    async fn get_wave_agent_tree_returns_child_waves_for_chord() {
+        let state = test_http_state_with_runner().await;
+        let repo_a = tempdir().expect("tempdir a");
+        let repo_b = tempdir().expect("tempdir b");
+        init_git_repo(repo_a.path());
+        init_git_repo(repo_b.path());
+
+        let chord = make_wave(&repo_a.path().to_string_lossy(), "chord-root");
+        state.store.create_wave(&chord).await.expect("seed chord");
+
+        let child_a = make_wave(&repo_a.path().to_string_lossy(), "chord-child-a")
+            .with_parent(chord.id().clone());
+        let child_b = make_wave(&repo_b.path().to_string_lossy(), "chord-child-b")
+            .with_parent(chord.id().clone());
+        state
+            .store
+            .create_wave(&child_a)
+            .await
+            .expect("seed child a");
+        state
+            .store
+            .create_wave(&child_b)
+            .await
+            .expect("seed child b");
+
+        let Json(response) = get_wave_agent_tree_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(chord.id().to_string()),
+            Query(GetWaveAgentTreeQuery {
+                active_only: Some(true),
+            }),
+        )
+        .await
+        .expect("get wave agent tree");
+
+        assert_eq!(response.child_waves.len(), 2);
+        let repos: Vec<&str> = response
+            .child_waves
+            .iter()
+            .flat_map(|w| w.repos.iter().map(|r| r.repo.as_str()))
+            .collect();
+        assert!(repos.contains(&repo_a.path().to_string_lossy().as_ref()));
+        assert!(repos.contains(&repo_b.path().to_string_lossy().as_ref()));
+    }
+
     // Reproduces the "Ingest & build" empty-reply bug: when a wave has PM
     // configured, POST /waves/{id}/run with a roadmap_item aborts the HTTP
     // connection without a response, because the ingest code path calls

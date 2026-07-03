@@ -1009,7 +1009,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             crons: crons,
             status: status,
             flowSteps: flowSteps,
-            createdAt: createdAt
+            createdAt: createdAt,
+            parentWaveId: json["parent_wave_id"] as? String
         )
     }
 

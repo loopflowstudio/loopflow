@@ -205,6 +205,12 @@ impl Store {
         self.replace_wave_repos(wave.id(), &wave.repos).await
     }
 
+    /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
+    /// ordered by creation, each stitched with its `repos`.
+    pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+        WaveStateStore::children_of(self, parent).await
+    }
+
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         WaveStateStore::get_wave(self, wave_id).await
     }
@@ -635,6 +641,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>>;
     async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>>;
     async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>>;
+    async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>>;
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
@@ -910,6 +917,17 @@ impl WaveStateStore for Store {
             }
             StoreBackend::Postgres(store) => store.list_all_active_crons().await,
         }
+    }
+
+    async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+        let waves = match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let parent = parent.clone();
+                run_sqlite(store, move |store| store.list_child_waves(&parent)).await
+            }
+            StoreBackend::Postgres(store) => store.list_child_waves(parent).await,
+        }?;
+        self.attach_repos_vec(waves).await
     }
 
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
@@ -2085,6 +2103,7 @@ mod tests {
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
+            parent_wave_id: None,
         }
     }
 
@@ -2473,6 +2492,57 @@ mod tests {
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
         run_store_basic_suite(&store).await;
+    }
+
+    // A chord is a wave whose children point back at it via `parent_wave_id`.
+    // `list_child_waves` returns those children (ordered, repos stitched); a
+    // leaf wave returns none. This is the ancestry the WaveAgentTree needs.
+    #[tokio::test]
+    async fn sqlite_wave_ancestry_and_children() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let parent = make_wave("/chord");
+        store.create_wave(&parent).await.expect("create parent");
+
+        let child_a = make_wave("/repo-a").with_parent(parent.id().clone());
+        let child_b = make_wave("/repo-b").with_parent(parent.id().clone());
+        store.create_wave(&child_a).await.expect("create child a");
+        store.create_wave(&child_b).await.expect("create child b");
+
+        // Wave exposes its parent relation after a round-trip.
+        let reloaded = store
+            .get_wave(child_a.id())
+            .await
+            .expect("get child")
+            .expect("child exists");
+        assert_eq!(reloaded.parent_wave_id(), Some(parent.id()));
+
+        // Chord contents = children where parent_wave_id = id, one per repo.
+        let children = store
+            .list_child_waves(parent.id())
+            .await
+            .expect("list children");
+        assert_eq!(children.len(), 2);
+        let repos: Vec<&str> = children.iter().map(|w| w.repo()).collect();
+        assert!(repos.contains(&"/repo-a"));
+        assert!(repos.contains(&"/repo-b"));
+
+        // A leaf wave has no children.
+        assert!(store
+            .list_child_waves(child_a.id())
+            .await
+            .expect("leaf children")
+            .is_empty());
+
+        // The root wave itself has no parent.
+        let root = store
+            .get_wave(parent.id())
+            .await
+            .expect("get parent")
+            .expect("parent exists");
+        assert_eq!(root.parent_wave_id(), None);
     }
 
     #[tokio::test]

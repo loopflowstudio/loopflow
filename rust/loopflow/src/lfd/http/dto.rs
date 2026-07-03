@@ -98,6 +98,9 @@ pub struct WaveDto {
     pub crons: Vec<WaveCronDto>,
     /// Per-repo execution state, one entry per repo the wave runs in.
     pub repos: Vec<RepoWorkDto>,
+    /// Parent wave in the chord tree. `null` for a root wave. Always emitted
+    /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
+    pub parent_wave_id: Option<String>,
 }
 
 /// Per-repo execution surface for a wave: status/iteration plus the live git
@@ -607,6 +610,7 @@ mod contract_tests {
             flow_steps: Vec::new(),
             has_stale_pr_state: false,
             repos: Vec::new(),
+            parent_wave_id: None,
         };
 
         let json = serde_json::to_value(&wave).unwrap();

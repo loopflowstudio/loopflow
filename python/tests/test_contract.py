@@ -27,6 +27,7 @@ def test_wave_fixture_parses():
     assert wave.status == "running"
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]
+    assert wave.parent_wave_id == "wave_parent999"
     assert len(wave.crons) == 1
     assert wave.crons[0].flow == "wave-polish"
 

@@ -37,6 +37,7 @@ fn wave_fixture_nests_repo_work() {
     assert_eq!(wave.name, "engbot");
     assert_eq!(wave.primary_flow, "build");
     assert_eq!(wave.status, "running");
+    assert_eq!(wave.parent_wave_id.as_deref(), Some("wave_parent999"));
 
     assert_eq!(wave.repos.len(), 1);
     let repo = &wave.repos[0];

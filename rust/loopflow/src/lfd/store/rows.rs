@@ -99,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers, mode,
-///        primary_flow, goal, metrics
+///        primary_flow, goal, metrics, parent_wave_id
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(2)?)?;
     let area = parse_json_vec(&row.text(3)?)?;
@@ -111,6 +111,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let primary_flow = row.text(8)?;
     let goal = row.text(9)?;
     let metrics = parse_json_vec(&row.text(10)?)?;
+    let parent_wave_id = row.opt_text(11)?.map(LfdId::from_raw);
 
     Ok(Wave {
         id: LfdId::from_raw(row.text(0)?),
@@ -126,6 +127,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         paused,
         created_at: Some(created_at),
         workers,
+        parent_wave_id,
     })
 }
 

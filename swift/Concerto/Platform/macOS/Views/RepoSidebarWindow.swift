@@ -391,6 +391,14 @@ private struct CreateWaveSheet: View {
                     }
                 }
                 .labelsHidden()
+                .pickerStyle(.menu)
+                .font(Typography.body())
+                .tint(palette.accent)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.surfaceMuted)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 .disabled(isCreating)
             }
 
@@ -400,8 +408,12 @@ private struct CreateWaveSheet: View {
                     .foregroundStyle(palette.textSecondary)
 
                 TextField("Wave name", text: $waveName)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(Typography.body())
+                    .foregroundStyle(palette.text)
+                    .padding(Spacing.md)
+                    .background(palette.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                     .focused($isNameFocused)
                     .onSubmit(submit)
                     .disabled(isCreating)

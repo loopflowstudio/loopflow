@@ -1,5 +1,5 @@
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, WaveProviderUsage};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
     ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
@@ -356,6 +356,17 @@ pub fn map_chat_memory_block_row(row: &impl StoreRow) -> StoreResult<ChatMemoryB
         content: row.text(2)?,
         position: row.int(3)? as u32,
         updated_at: Some(unix_to_datetime(row.bigint(4)?)),
+    })
+}
+
+/// SELECT wave, provider, SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens)
+pub fn map_wave_provider_usage_row(row: &impl StoreRow) -> StoreResult<WaveProviderUsage> {
+    Ok(WaveProviderUsage {
+        wave: LfdId::from_raw(row.text(0)?),
+        provider: row.text(1)?,
+        input_tokens: row.bigint(2)?.max(0) as u64,
+        output_tokens: row.bigint(3)?.max(0) as u64,
+        cache_read_tokens: row.bigint(4)?.max(0) as u64,
     })
 }
 

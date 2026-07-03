@@ -1,21 +1,24 @@
 ---
-primary_flow: ship-wave
-pm:
-  provider: asana
-  asana_project: '1216257841007033'
+primary_flow: ship-roadmap
+mode: manual
+workers: 0
+metrics:
+  - Docs have one source (docs/) — no drifting website/docs copy
+  - A push to main deploys the site with smoke-test and rollback
+  - A library change and its public story can land in the same PR
+  - The public site matches what lf actually does today
 ---
 
-The website lives next to the code it describes: docs single-sourced from
-`docs/`, deployed from this repo to fly.io, content true to what `lf` actually
-does — so the library and its public story evolve in lockstep.
+Run one loop iteration for the Website wave.
 
-**Metrics to improve**
-- Doc sources: 2 → 1 (canonical `docs/` only)
-- Doc hosts: 2 (Pages + site) → 1 (site)
-- Deploy: push-to-main → live + 200 on loopflow.studio, rollback proven
-- Stale product claims in `content.yaml`/pages → 0
+You keep the public story living next to the code it describes. Docs are
+single-source from `docs/`; the public site serves them; a change to the library
+and its public telling can land together. This wave *moves and trues-up* what
+exists — it is not a redesign, and new visioning waits until the base is clean.
 
-**Milestones**
-- Truth-sync `content.yaml`/pages; kill the stale WorkOS-auth claim
-- Reconcile docs + `DOCS_NAV` to the canonical set; finish Pages retirement
-- Register `website/tests` in `TESTING.md`
+Read the roadmap, judge the site against the metrics, and pick the next useful
+move: migrate a page out of the private repo, align copy to what `lf` does today,
+harden the deploy-and-rollback path, or kill a stale docs copy. Dispatch the
+appropriate flow against it. The north: keeping the public docs current is as
+easy as editing the code. If no safe move remains, record the blocker instead of
+inventing work.

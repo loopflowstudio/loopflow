@@ -14,6 +14,14 @@ pub enum StreamEvent {
     Text(String),
     /// A tool invocation, with a short summary of what it did.
     ToolUse { name: String, summary: String },
+    /// Token usage reported by the agent for a turn/step. Fields are optional
+    /// because providers report different subsets (codex/claude split
+    /// input/output; cache reads only appear on some providers).
+    Usage {
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+    },
     /// Final result event with cost and timing.
     Result {
         subtype: ResultSubtype,
@@ -148,11 +156,11 @@ impl StreamParser {
                 None => ParseResult::Skipped,
             },
             "step_start" => ParseResult::Skipped,
-            "step_finish" => ParseResult::Events(vec![parse_opencode_finish(&v)]),
+            "step_finish" => ParseResult::Events(parse_opencode_finish(&v)),
 
             // ── Shared ──────────────────────────────────────────────
             // Both Claude and Gemini emit "result" events (different schemas).
-            "result" => ParseResult::Events(vec![parse_result(&v)]),
+            "result" => ParseResult::Events(parse_result(&v)),
 
             // Both Codex and Gemini emit "error" events.
             "error" => ParseResult::Skipped,
@@ -274,12 +282,14 @@ fn parse_codex_item(v: &serde_json::Value) -> Vec<StreamEvent> {
 }
 
 fn parse_codex_turn_completed(v: &serde_json::Value) -> Vec<StreamEvent> {
-    // Codex doesn't report cost or duration in the JSON output
-    let usage = v.get("usage");
-    let _ = usage; // available for future use
+    // Codex doesn't report cost or duration in the JSON output, but it does
+    // report token usage as {"usage":{"input_tokens":_,"output_tokens":_}}.
     let mut events = Vec::new();
     if let Some(text) = extract_codex_turn_text(v) {
         events.push(StreamEvent::Text(text));
+    }
+    if let Some(usage) = v.get("usage").and_then(parse_token_usage) {
+        events.push(usage);
     }
     events.push(StreamEvent::Result {
         subtype: ResultSubtype::Success,
@@ -404,21 +414,63 @@ fn parse_opencode_text(v: &serde_json::Value) -> Option<StreamEvent> {
     Some(StreamEvent::Text(text.to_string()))
 }
 
-fn parse_opencode_finish(v: &serde_json::Value) -> StreamEvent {
+fn parse_opencode_finish(v: &serde_json::Value) -> Vec<StreamEvent> {
     let part = v.get("part");
     let cost = part.and_then(|p| p.get("cost")).and_then(|c| c.as_f64());
-    StreamEvent::Result {
+    let mut events = Vec::new();
+    // OpenCode reports usage as {"part":{"tokens":{"input":_,"output":_}}}.
+    if let Some(tokens) = part.and_then(|p| p.get("tokens")) {
+        let input_tokens = json_u64(tokens.get("input"));
+        let output_tokens = json_u64(tokens.get("output"));
+        let cache_read_tokens = tokens
+            .get("cache")
+            .and_then(|c| json_u64(c.get("read")))
+            .or_else(|| json_u64(tokens.get("cache_read")));
+        if input_tokens.is_some() || output_tokens.is_some() || cache_read_tokens.is_some() {
+            events.push(StreamEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+            });
+        }
+    }
+    events.push(StreamEvent::Result {
         subtype: ResultSubtype::Success,
         cost_usd: cost,
         duration_secs: None,
-    }
+    });
+    events
 }
 
 // ── Shared parsing ──────────────────────────────────────────────────────────
 
+/// Read a JSON number as a `u64`, ignoring negatives and non-numbers.
+fn json_u64(value: Option<&serde_json::Value>) -> Option<u64> {
+    value.and_then(|v| v.as_u64())
+}
+
+/// Parse a Claude/codex-style `usage` object into a `Usage` event.
+/// Shape: `{"input_tokens":_,"output_tokens":_,"cache_read_input_tokens":_}`.
+/// Returns `None` when no token fields are present.
+fn parse_token_usage(usage: &serde_json::Value) -> Option<StreamEvent> {
+    let input_tokens = json_u64(usage.get("input_tokens"));
+    let output_tokens = json_u64(usage.get("output_tokens"));
+    let cache_read_tokens = json_u64(usage.get("cache_read_input_tokens"))
+        .or_else(|| json_u64(usage.get("cache_read_tokens")));
+    if input_tokens.is_none() && output_tokens.is_none() && cache_read_tokens.is_none() {
+        return None;
+    }
+    Some(StreamEvent::Usage {
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+    })
+}
+
 /// Parse a "result" event — works for both Claude and Gemini.
-/// Claude uses "subtype", Gemini uses "status".
-fn parse_result(v: &serde_json::Value) -> StreamEvent {
+/// Claude uses "subtype", Gemini uses "status". Claude also carries a `usage`
+/// object, which is emitted as a separate `Usage` event before the `Result`.
+fn parse_result(v: &serde_json::Value) -> Vec<StreamEvent> {
     let subtype_str = v
         .get("subtype")
         .or_else(|| v.get("status"))
@@ -447,11 +499,16 @@ fn parse_result(v: &serde_json::Value) -> StreamEvent {
                 .and_then(|d| d.as_f64())
                 .map(|ms| ms / 1000.0)
         });
-    StreamEvent::Result {
+    let mut events = Vec::new();
+    if let Some(usage) = v.get("usage").and_then(parse_token_usage) {
+        events.push(usage);
+    }
+    events.push(StreamEvent::Result {
         subtype,
         cost_usd,
         duration_secs,
-    }
+    });
+    events
 }
 
 // ── Tool summarizer (Claude) ────────────────────────────────────────────────
@@ -543,6 +600,9 @@ pub fn render_event(event: &StreamEvent, use_color: bool) -> (String, String) {
                 (String::new(), line)
             }
         }
+        // Usage is bookkeeping, not display output — accumulated by the
+        // executor, never rendered to the user's stream.
+        StreamEvent::Usage { .. } => (String::new(), String::new()),
         StreamEvent::Result {
             subtype,
             cost_usd,
@@ -770,11 +830,39 @@ mod tests {
         let line = r#"{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}"#;
         assert_eq!(
             parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: None,
-            }])
+            ParseResult::Events(vec![
+                StreamEvent::Usage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(50),
+                    cache_read_tokens: None,
+                },
+                StreamEvent::Result {
+                    subtype: ResultSubtype::Success,
+                    cost_usd: None,
+                    duration_secs: None,
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn claude_result_emits_usage() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"result","subtype":"success","total_cost_usd":0.05,"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":1500}}"#;
+        assert_eq!(
+            parser.feed_line(line),
+            ParseResult::Events(vec![
+                StreamEvent::Usage {
+                    input_tokens: Some(200),
+                    output_tokens: Some(80),
+                    cache_read_tokens: Some(1500),
+                },
+                StreamEvent::Result {
+                    subtype: ResultSubtype::Success,
+                    cost_usd: Some(0.05),
+                    duration_secs: None,
+                }
+            ])
         );
     }
 
@@ -897,11 +985,18 @@ mod tests {
         let line = r#"{"type":"step_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"step-finish","tokens":{"input":1234,"output":567},"cost":0.05}}"#;
         assert_eq!(
             parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: Some(0.05),
-                duration_secs: None,
-            }])
+            ParseResult::Events(vec![
+                StreamEvent::Usage {
+                    input_tokens: Some(1234),
+                    output_tokens: Some(567),
+                    cache_read_tokens: None,
+                },
+                StreamEvent::Result {
+                    subtype: ResultSubtype::Success,
+                    cost_usd: Some(0.05),
+                    duration_secs: None,
+                }
+            ])
         );
     }
 

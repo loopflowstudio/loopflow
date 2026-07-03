@@ -72,10 +72,25 @@ impl Writers {
     }
 }
 
+/// Running token totals for one run, summed from `StreamEvent::Usage` events.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UsageTotals {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+}
+
+impl UsageTotals {
+    pub fn is_empty(&self) -> bool {
+        self.input_tokens == 0 && self.output_tokens == 0 && self.cache_read_tokens == 0
+    }
+}
+
 #[derive(Clone)]
 pub struct OutputHub {
     sender: broadcast::Sender<OutputEvent>,
     writers: std::sync::Arc<Mutex<Writers>>,
+    usage: std::sync::Arc<Mutex<HashMap<String, UsageTotals>>>,
     output_dir: PathBuf,
 }
 
@@ -94,8 +109,35 @@ impl OutputHub {
         Self {
             sender,
             writers,
+            usage: std::sync::Arc::new(Mutex::new(HashMap::new())),
             output_dir,
         }
+    }
+
+    /// Add token counts to a run's running usage total. Called as
+    /// `StreamEvent::Usage` events are parsed from the agent's stream.
+    pub fn add_usage(
+        &self,
+        run_id: &str,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+    ) {
+        if let Ok(mut usage) = self.usage.lock() {
+            let entry = usage.entry(run_id.to_string()).or_default();
+            entry.input_tokens += input_tokens.unwrap_or(0);
+            entry.output_tokens += output_tokens.unwrap_or(0);
+            entry.cache_read_tokens += cache_read_tokens.unwrap_or(0);
+        }
+    }
+
+    /// Remove and return a run's accumulated usage. Returns `None` when no
+    /// usage was recorded (e.g. tmux-backed runs that never stream in-process).
+    pub fn take_usage(&self, run_id: &str) -> Option<UsageTotals> {
+        self.usage
+            .lock()
+            .ok()
+            .and_then(|mut usage| usage.remove(run_id))
     }
 
     /// Append to log file, then broadcast. File write happens first so

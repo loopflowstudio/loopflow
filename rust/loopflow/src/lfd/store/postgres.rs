@@ -14,10 +14,12 @@ use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
     map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
-    map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::token_crypto;
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{
+    ForkRun, ForkRunStatus, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
+};
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
@@ -1966,6 +1968,43 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn record_run_usage(&self, usage: &RunTokenUsage) -> StoreResult<()> {
+        let usage = usage.clone();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::RecordRunTokenUsage),
+                    &[
+                        &usage.run_id,
+                        &usage.wave,
+                        &usage.provider,
+                        &usage.model,
+                        &(usage.input_tokens as i64),
+                        &(usage.output_tokens as i64),
+                        &(usage.cache_read_tokens as i64),
+                        &usage.recorded_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::AggregateTokenUsageByWaveProvider), &[])
+                .await?;
+            let by_wave_provider = rows
+                .iter()
+                .map(map_wave_provider_usage_row)
+                .collect::<StoreResult<Vec<_>>>()?;
+            Ok(TokenUsageReport::from_wave_provider(by_wave_provider))
         })
         .await
     }

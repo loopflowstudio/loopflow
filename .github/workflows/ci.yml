@@ -25,16 +25,32 @@ jobs:
             exit 1
           fi
 
+  # Lint and test are split so the clippy compile and the test compile run on
+  # separate runners in parallel instead of back-to-back on one critical path.
+  # Distinct cache keys keep the clippy-artifact and rustc-artifact caches apart.
+  rust-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+      - name: Run cargo fmt check
+        run: cargo fmt --all -- --check
+      - name: Run cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
   rust-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run cargo fmt check
-        run: cargo fmt --all -- --check
-      - name: Run cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        with:
+          key: test
       - name: Run Rust tests
         run: cargo test --all
 
@@ -85,6 +101,15 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            swift/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
       - name: Run Swift tests
         run: swift test --package-path swift
       - name: Check Swift multiplatform boundaries
@@ -99,6 +124,13 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
         working-directory: swift
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: swift/DerivedData
+          key: concerto-dd-${{ runner.os }}-${{ hashFiles('swift/Package.resolved', 'swift/project.yml') }}
+          restore-keys: |
+            concerto-dd-${{ runner.os }}-
       - name: Run Concerto UI tests
         run: |
           python3 -u - <<'PY'
@@ -120,6 +152,8 @@ jobs:
               "Concerto",
               "-destination",
               "platform=macOS",
+              "-derivedDataPath",
+              "DerivedData",
               "-skip-testing:ConcertoUITests",
               "-resultBundlePath",
               "ConcertoTests.xcresult",
@@ -308,6 +342,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - scratch-clear
+      - rust-lint
       - rust-test
       - python-test
       - website-test
@@ -319,6 +354,7 @@ jobs:
       - name: Aggregate test results
         env:
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
+          RUST_LINT: ${{ needs.rust-lint.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
           PYTHON_TEST: ${{ needs.python-test.result }}
           WEBSITE_TEST: ${{ needs.website-test.result }}
@@ -347,6 +383,7 @@ jobs:
           }
 
           check_result "scratch-clear" "$SCRATCH_CLEAR"
+          check_result "rust-lint" "$RUST_LINT"
           check_result "rust-test" "$RUST_TEST"
           check_result "python-test" "$PYTHON_TEST"
           check_result "website-test" "$WEBSITE_TEST"

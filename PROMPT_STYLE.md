@@ -66,6 +66,52 @@ Goals follow a consistent pattern:
 4. **Quality bar**: Standards for the output.
 5. **Anti-patterns**: Common failure modes to avoid. All goals should have these.
 
+### A wave's GOAL.md: five marks of a goal that loops well
+
+A wave's `GOAL.md` is a goal run in a loop. It has a body prompt and a `metrics`
+frontmatter list the loop judges itself against. The difference between one that
+compounds and one that produces rubber-stamp output comes down to five marks.
+Study `wave/systems/GOAL.md` and `wave/architecture/GOAL.md` — both hit all five.
+
+1. **Identity by contrast.** State what the wave is *and what it is not*, ideally
+   against a sibling. "Systems owns the machinery around the code; Architecture
+   owns the shape of the code." "Concerto frames the vendor's session; it
+   does not render chat." A named boundary is what stops a looping agent from
+   sprawling into every adjacent wave's work.
+
+2. **Metrics are readable signals, most-important-first.** Not "the feature
+   works" — numbers or checkable states the loop can actually read: `billing`,
+   `prod uptime`, `green on main`, `test time`; `net concept count flat-or-falling`.
+   Three to five, ranked. If a metric can't be observed, it can't steer a loop.
+
+3. **The body is a loop with concrete verbs.** Give the agent a menu of real
+   moves to choose among: "sand a sharp edge, automate a manual ritual, harden a
+   flaky pipeline, or turn a failure into a fix PR." "Pick the next useful move"
+   beats "make it better" — the second is unactionable at 2 a.m.
+
+4. **An honest-question north that resists gaming.** Name the one check that a
+   lazy loop can't fake. architecture's is sharp: "the honest question is never *how
+   much did you delete* — it is *did a design ship and is the tree lighter a
+   quarter later*." Without it, the loop optimizes the easy proxy.
+
+5. **A stop discipline.** Tell the loop when *not* to invent work: "if no safe
+   move remains, record the blocker instead of inventing work"; "done for now when
+   the next move costs more than the entropy it removes." A goal with no off-ramp
+   manufacts busywork forever.
+
+```markdown
+# Thin — technically valid, but it can't steer a loop
+Read the roadmap, pick the next useful move, dispatch the appropriate flow, and
+leave loopflow closer to done.
+
+# Makeover — identity, verbs, and a north the loop can be held to
+You keep the engineering outfit efficient — the machinery around the code, not
+its shape (that's Architecture's job). Pick the next move: sand a sharp edge,
+automate a manual ritual, harden a flaky pipeline, or turn a failure into a
+focused fix PR. Keep the machinery boring and self-healing. If no safe move
+remains, record the blocker instead of inventing work.
+```
+
 ### Two kinds of goals
 
 **Action goals** (adapt, wave-plan, ship): What mode to operate in. These can reference loopflow-specific process—reading `wave/`, updating frontmatter status, choosing between modes. They're about *using the system*.

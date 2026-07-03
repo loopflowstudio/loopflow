@@ -1,0 +1,30 @@
+name: Perf metrics (daily)
+
+# Systems north stars: track green-on-main and the CI critical-path bottleneck
+# over time. Measures the numbers; never publishes or deploys.
+
+on:
+  schedule:
+    # 05:30 UTC daily — before the release/regression hours.
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Measure north stars and rank the bottleneck
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/measure_perf.py --limit 20 --json perf-snapshot.json
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-snapshot
+          path: perf-snapshot.json
+          if-no-files-found: warn

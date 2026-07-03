@@ -1,5 +1,5 @@
 ---
-priority: high
+priority: low
 asana_id: '1214269992184208'
 ---
 # Conductor surfaces
@@ -8,7 +8,13 @@ asana_id: '1214269992184208'
 
 ## Context
 
-The Concerto Flows tab and repo-card portfolio shell exist. `AttentionQueueView` exists. The workspace multiplexer has a launcher pane. Runboard, portfolio-as-a-view, calibration UX, and beat composition don't yet exist as first-class surfaces. Three altitudes, one data model:
+Speculative: this predates the terminal-first trim, and the surfaces it once
+built on (the multiplexer launcher pane, `AttentionQueueView`, the native Flows
+tab) were deleted when the surface collapsed to `WavesView`. Any of these
+altitudes is now a *reshape of `WavesView` around the shared store*, not a new
+native dashboard — and each must honor "frame, don't render." Runboard, portfolio,
+calibration UX, and beat composition don't exist yet. Three altitudes, one data
+model:
 
 - **Runboard (cockpit, low)** — what's happening right now: wave mode, current step, agent health (idle / running / blocked / errored), beat history, drill-in to steer
 - **Portfolio (gallery, high)** — how's the whole system: wave cards with health / PR state / attention count, chord grouping, cross-wave indicators, single-repo + multi-repo scope, trend lines

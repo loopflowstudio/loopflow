@@ -11,6 +11,10 @@ a repeatable mechanism, not a one-off pass.
 
 `wave-surface-ux-exploration` runs this by hand, once. This item makes it a
 standing capability so the UX keeps improving without a bespoke effort each time.
+The scaffolding exists: the `lf ux-research` flow
+(`.lf/flows/ux-research.yaml`, steps `propose→generate→evaluate→learn`) ran
+loop-01. What's left is proving it improves a real Concerto screen end-to-end and
+documenting it as a reusable mechanism rather than a one-off.
 
 - **Generator** — produce N UX candidates for a given screen or interaction.
 - **Discriminator** — score them against explicit quality criteria (the metrics

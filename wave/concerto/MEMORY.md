@@ -20,12 +20,14 @@
 - **Then trim.** Actively delete every `Platform/macOS/Views/*.swift` not reachable
   from `WavesView` — delete-until-`xcodebuild`-green is the arbiter. The old
   wave-workspace / multiplexer / native-chat stack goes.
-- **A2 (Wave.repo → repos:[RepoWork])** — plan `scratch/a2-plan.md` (7 steps).
-  Steps 1–3 committed green: `RepoWork` type + `wave_repos` table + store methods
-  (mirror `wave_crons`), `Wave.repos` + `primary_repo()` bridge, repos stitched on
-  read/write, executor resolves worktrees/dispatch from `RepoWork` (`a42e437`).
-  Step 4 (status/iteration rollup) in flight. Ontology: `WaveRun`→`Run` (snapshot
-  flattened), `WaveRunStatus`→`RunStatus`.
+- **A2 (Wave.repo → repos:[RepoWork]) — shipped, all 7 steps.** `RepoWork` type +
+  `wave_repos` table + store methods (mirror `wave_crons`), repos stitched on
+  read/write, executor resolves worktrees/dispatch from `RepoWork`, status/
+  iteration rolled up over repos, nested in the DTO + mirrored to Python/Swift/
+  fixtures, and the flat `Wave.repo`/`status`/`iteration` columns dropped. The
+  single-repo bridge is now `Wave::repo()` (`repos.first()…`); repo-filters use
+  `repos.iter().any(...)`. Ontology: `WaveRun`→`Run` (snapshot flattened),
+  `WaveRunStatus`→`RunStatus`.
 - **UX research loop** — `lf ux-research` (`propose→generate→evaluate→learn`),
   `scratch/ux-research/`. Loop-01: candidates that beat the plain repo-list ranked
   by *attention* (`failed→waiting→running→idle`) and carried each wave's *reason*;

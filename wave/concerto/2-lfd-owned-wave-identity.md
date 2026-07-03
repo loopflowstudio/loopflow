@@ -11,10 +11,12 @@ the goal-loop harness and yazi root at.
 
 ## Context
 
-Today `Wave.repo` conflates identity with one repo's execution, and GOAL/MEMORY
-have lived per-repo-worktree. This wave splits identity (singular, lfd-owned)
-from execution (per-repo RepoWork) — see `scratch/waves-one-level-out.md`. The
-A+B slices prove the UI shape on the split model; this item makes identity
+The `Wave.repo → repos: [RepoWork]` split shipped: identity now lives at the
+wave level and execution state per repo, across Rust store/DTOs, Python, Swift,
+and fixtures. What's *not* done is making GOAL/MEMORY a single lfd-owned master —
+today they still live per-repo-worktree, which is the root of the "goal not
+found" gap in [[1-embedded-terminal-build-driver]] (launch resolves the goal from
+a main-derived sibling that may not carry the file). This item makes identity
 actually lfd-owned and syncable.
 
 - **Master store** — lfd persists GOAL + MEMORY per wave, keyed by wave id,

@@ -11,8 +11,13 @@ variants and converge from evidence.
 ## Context
 
 Agent-supervision-as-window-manager is a young genre; prior art is thin. The A+B
-slices ship the simplest possible UX to prove the architecture. This item is the
-deliberate UX pass on top.
+slices ship the simplest possible UX to prove the architecture; the current
+`WavesView` (repo rail + disk-authored wave list + tmux attach) is that baseline.
+This item is the deliberate UX pass on top. Loop-01 already ran via
+`lf ux-research` (`scratch/ux-research/`): candidates that beat the plain repo
+list ranked by *attention* (`failed→waiting→running→idle`) and carried each
+wave's *reason*; the live tension is glanceable dashboard vs. `⌘K`
+keyboard-first. Loop-02+ and convergence remain.
 
 - **Research first, documented in MEMORY** — how comparable tools (Warp, tmux
   managers, agent dashboards) handle multi-session supervision; the wave screen's

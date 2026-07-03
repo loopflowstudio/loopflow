@@ -19,8 +19,10 @@ struct WavesView: View {
     let portfolioService: PortfolioService
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
-    /// window). Read AS-IS — its real path, a worktree included — so waves are
-    /// enumerated from the checkout the user actually launched from.
+    /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
+    /// dir holds quick-launch templates that live on main by design, and lfd owns
+    /// the real waves. The `CONCERTO_DEV_WAVE_REPO` dev override reads the launched
+    /// checkout AS-IS instead (see `resolveLaunchRepo`).
     var initialRepoPath: String? = nil
 
     @Environment(\.palette) private var palette
@@ -445,25 +447,43 @@ struct WavesView: View {
         try await state.createWave(name: name)
     }
 
-    /// Register the launch-provided repo AS-IS (its real path, a worktree included)
-    /// so reads hit that checkout, and return that path for pre-selection. The rail
-    /// row displays the collapsed main-repo name — see `refreshRepos`.
+    /// Register the launch-provided repo so it shows in the rail, and return its
+    /// read path for pre-selection. Production collapses to the main worktree; the
+    /// `CONCERTO_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
         if RepoState.uiTestMode() != nil { return nil }
-        let launchedPath = URL(fileURLWithPath: initialRepoPath).normalizedFilePath
-        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == launchedPath }) {
-            portfolioService.addRepo(URL(fileURLWithPath: launchedPath))
+        let readPath = await Task.detached {
+            Self.resolveLaunchRepo(initialRepoPath).path
+        }.value
+        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == readPath }) {
+            portfolioService.addRepo(URL(fileURLWithPath: readPath))
         }
-        return launchedPath
+        return readPath
+    }
+
+    /// Resolve the launch-provided repo into its (read path, main path, rail label).
+    /// Production reads the collapsed main worktree — the on-disk `wave/` dir is
+    /// quick-launch templates that live on main by design, and lfd is the authority
+    /// for real waves. The `CONCERTO_DEV_WAVE_REPO` dev override (set by concerto-dev
+    /// on `run` / `run-debug`) instead reads the launched checkout AS-IS, so a dev
+    /// launch enumerates its own worktree's waves. The rail label is always the
+    /// collapsed main-repo name, so the rail stays clean and worktree-free.
+    private nonisolated static func resolveLaunchRepo(_ initialPath: String) -> (path: String, mainPath: String, displayName: String) {
+        let scanner = RepoScanner()
+        let dev = ProcessInfo.processInfo.environment["CONCERTO_DEV_WAVE_REPO"]
+        let devOverride = (dev?.isEmpty == false) ? dev : nil
+        let readURL = URL(fileURLWithPath: devOverride ?? initialPath)
+        let mainURL = scanner.resolveMainWorktree(readURL)
+        let readPath = devOverride != nil ? readURL.normalizedFilePath : mainURL.normalizedFilePath
+        return (readPath, mainURL.normalizedFilePath, mainURL.lastPathComponent)
     }
 
     /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
-    /// every time. The persisted registry is no longer the source; a launch-provided
-    /// `initialRepoPath` is merged in AS-IS — its real path (a worktree is fine) — so
-    /// authored-wave enumeration and lfd reads hit the checkout the user launched from.
-    /// The launched entry stands in for its main repo: the rail shows the collapsed
-    /// main-repo name, and the scanned main entry is dropped so there's a single row.
+    /// every time. A launch-provided `initialRepoPath` is merged in via
+    /// `resolveLaunchRepo`: production reads its collapsed main worktree; the
+    /// `CONCERTO_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
+    /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
         if RepoState.uiTestMode() != nil {
@@ -482,17 +502,28 @@ struct WavesView: View {
                 result.append(PortfolioRepo(path: path, lastOpened: Date()))
             }
             if let initialPath {
-                let launchedURL = URL(fileURLWithPath: initialPath)
-                let launchedPath = launchedURL.normalizedFilePath
-                let mainURL = scanner.resolveMainWorktree(launchedURL)
-                // Drop the scanned main entry (and any dup) so the launched worktree
-                // is the one row that represents this repo, reading its own wave/ dir.
-                result.removeAll { $0.path == mainURL.normalizedFilePath || $0.path == launchedPath }
-                result.append(PortfolioRepo(
-                    path: launchedPath,
-                    lastOpened: Date(),
-                    displayNameOverride: mainURL.lastPathComponent
-                ))
+                let launch = Self.resolveLaunchRepo(initialPath)
+                if launch.path == launch.mainPath {
+                    // Production (or a launched main repo): read main. Keep the
+                    // scanned row in place; add it only if the scan missed it.
+                    if seen.insert(launch.path).inserted {
+                        result.append(PortfolioRepo(
+                            path: launch.path,
+                            lastOpened: Date(),
+                            displayNameOverride: launch.displayName
+                        ))
+                    }
+                } else {
+                    // Dev override: the launched worktree stands in for its main
+                    // repo. Drop the scanned main row so the worktree is the sole
+                    // row (reads its own wave/ dir + lfd), labeled with the main name.
+                    result.removeAll { $0.path == launch.mainPath || $0.path == launch.path }
+                    result.append(PortfolioRepo(
+                        path: launch.path,
+                        lastOpened: Date(),
+                        displayNameOverride: launch.displayName
+                    ))
+                }
             }
             return result
         }.value

@@ -113,8 +113,17 @@ def stream_with_log(
         return process.wait()
 
 
-def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | None = None) -> int:
-    """Launch app bundle through LaunchServices and stream redirected stdout/stderr."""
+def run_app_bundle_with_log(
+    app_path: Path,
+    log_path: Path,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    """Launch app bundle through LaunchServices and stream redirected stdout/stderr.
+
+    `env` entries are passed to the launched app via `open --env` (LaunchServices
+    does not inherit this process's environment).
+    """
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     open_cmd = [
@@ -125,8 +134,10 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path, args: list[str] | No
         str(log_path),
         "--stderr",
         str(log_path),
-        str(app_path),
     ]
+    for key, value in (env or {}).items():
+        open_cmd.extend(["--env", f"{key}={value}"])
+    open_cmd.append(str(app_path))
     if args:
         open_cmd.extend(["--args", *args])
     with log_path.open("a", encoding="utf-8") as log_file:
@@ -320,7 +331,18 @@ def cmd_run() -> int:
         return result.returncode
 
     _install_dev_app()
-    run(["open", str(DEV_APP)])
+    # Dev launches read this checkout's wave/ dir + lfd AS-IS (CONCERTO_DEV_WAVE_REPO);
+    # a plain production launch leaves it unset and reads the main worktree.
+    run([
+        "open",
+        "-n",
+        "--env",
+        f"CONCERTO_DEV_WAVE_REPO={REPO_ROOT}",
+        str(DEV_APP),
+        "--args",
+        "--repo",
+        str(REPO_ROOT),
+    ])
     return 0
 
 
@@ -483,6 +505,9 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path =
         DEV_APP,
         CONCERTO_STREAM_LOG,
         args=["--repo", str(repo)],
+        # Dev launches read the launched checkout's wave/ dir + lfd AS-IS; a plain
+        # production launch leaves this unset and reads the main worktree.
+        env={"CONCERTO_DEV_WAVE_REPO": str(repo)},
     )
 
     if lfd_process is not None:

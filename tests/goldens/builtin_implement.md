@@ -54,11 +54,15 @@ only way to read or change it. There is no local roadmap file to edit and no
 sync step; Asana is the source of truth.
 
 ```bash
-lf op pm show                                  # the wave's live roadmap
-lf op pm update --title "..." --notes "..."    # file a new task
-lf op pm update --id <task-id> --status done   # close a shipped task
-lf op pm update --id <task-id> --title "..."   # edit an existing task
+lf op pm show                                          # the wave's live roadmap
+lf op pm update --title "..." --notes "..."            # file a new task
+lf op pm update --id <task-id> --status done --pr <url> # close a shipped task with its PR link
+lf op pm update --id <task-id> --title "..."           # edit an existing task
 ```
+
+Close a shipped task with `--status done --pr <url>` so the roadmap carries a
+pointer back to the work. The PR link posts as a comment; it never clobbers the
+task's description.
 
 Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
 roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.

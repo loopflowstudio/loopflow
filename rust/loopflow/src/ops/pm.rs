@@ -50,6 +50,8 @@ pub struct PmUpdateOptions {
     pub title: String,
     pub notes: Option<String>,
     pub status: Option<String>,
+    /// PR URL to attach as a comment on the task (the loop's write-back link).
+    pub pr: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +60,7 @@ pub struct PmUpdateResult {
     pub id: String,
     pub created: bool,
     pub completed: bool,
+    pub linked_pr: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -344,6 +347,27 @@ async fn apply_update(
         }
     };
 
+    // Attach the PR link as a comment before closing so the task carries a
+    // durable pointer to the work without clobbering its description.
+    let linked_pr = match options
+        .pr
+        .as_deref()
+        .map(str::trim)
+        .filter(|pr| !pr.is_empty())
+    {
+        Some(pr) => {
+            progress.status(&format!("commenting PR link on asana task {id}"));
+            let body = if mark_done {
+                format!("Shipped: {pr}")
+            } else {
+                format!("PR: {pr}")
+            };
+            ctx.client.comment(&id, &body).await.map_err(pm_to_ops)?;
+            Some(pr.to_string())
+        }
+        None => None,
+    };
+
     if mark_done {
         ctx.client.complete_item(&id).await.map_err(pm_to_ops)?;
     }
@@ -353,6 +377,7 @@ async fn apply_update(
         id,
         created,
         completed: mark_done,
+        linked_pr,
     })
 }
 
@@ -588,6 +613,7 @@ mod tests {
             title: "New task".to_string(),
             notes: Some("details".to_string()),
             status: None,
+            pr: None,
         };
 
         let result = apply_update("goals", &ctx, &options, &NullProgress)
@@ -596,6 +622,7 @@ mod tests {
         assert!(result.created);
         assert_eq!(result.id, "new-task");
         assert!(!result.completed);
+        assert!(result.linked_pr.is_none());
         assert_eq!(requests.lock().await.len(), 2);
     }
 
@@ -615,6 +642,7 @@ mod tests {
             title: "Existing".to_string(),
             notes: None,
             status: Some("done".to_string()),
+            pr: None,
         };
 
         let result = apply_update("goals", &ctx, &options, &NullProgress)
@@ -623,5 +651,44 @@ mod tests {
         assert!(!result.created);
         assert_eq!(result.id, "task-9");
         assert!(result.completed);
+    }
+
+    #[tokio::test]
+    async fn apply_update_comments_pr_link_then_closes() {
+        let (base_url, requests) = test_server::spawn(vec![
+            // update_item PUT
+            json_response(StatusCode::OK, json!({ "data": {} })),
+            // comment POST (PR link)
+            json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
+            // complete_item PUT
+            json_response(StatusCode::OK, json!({ "data": {} })),
+        ])
+        .await;
+        let ctx = test_ctx(base_url, "proj-1");
+        let options = PmUpdateOptions {
+            wave: None,
+            id: Some("task-9".to_string()),
+            title: "Existing".to_string(),
+            notes: None,
+            status: Some("done".to_string()),
+            pr: Some("https://github.com/acme/repo/pull/42".to_string()),
+        };
+
+        let result = apply_update("goals", &ctx, &options, &NullProgress)
+            .await
+            .expect("update succeeds");
+        assert!(result.completed);
+        assert_eq!(
+            result.linked_pr.as_deref(),
+            Some("https://github.com/acme/repo/pull/42")
+        );
+
+        let requests = requests.lock().await;
+        let comment = requests
+            .iter()
+            .find(|req| req.path.ends_with("/stories"))
+            .expect("PR link is posted as a comment");
+        assert!(comment.body.contains("Shipped:"));
+        assert!(comment.body.contains("pull/42"));
     }
 }

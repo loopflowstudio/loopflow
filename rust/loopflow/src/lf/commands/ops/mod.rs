@@ -407,6 +407,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             title,
             notes,
             status,
+            pr,
         } => {
             let result = crate::ops::pm::pm_update(
                 &repo_root,
@@ -416,12 +417,17 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     title: title.clone(),
                     notes: notes.clone(),
                     status: status.clone(),
+                    pr: pr.clone(),
                 },
                 progress,
             )?;
             let verb = if result.created { "created" } else { "updated" };
             let closed = if result.completed { ", closed" } else { "" };
-            println!("{}: {verb} task {}{closed}", result.wave, result.id);
+            let linked = match result.linked_pr {
+                Some(pr) => format!(", linked {pr}"),
+                None => String::new(),
+            };
+            println!("{}: {verb} task {}{closed}{linked}", result.wave, result.id);
         }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(

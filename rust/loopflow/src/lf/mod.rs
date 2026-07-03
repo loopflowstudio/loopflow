@@ -141,6 +141,11 @@ pub enum Commands {
         /// Cap the loop to a single iteration
         #[arg(long)]
         once: bool,
+        /// Spawn the loop in a detached tmux session and print its handle,
+        /// instead of running it in the foreground. Clients (e.g. Concerto)
+        /// attach to the printed session with `tmux attach`.
+        #[arg(long)]
+        tmux: bool,
     },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]

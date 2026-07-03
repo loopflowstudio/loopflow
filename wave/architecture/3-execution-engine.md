@@ -16,7 +16,7 @@ can reach `approved`. What's missing is the machinery that turns an approved
 design into shipped reductions without a human driving each step — the "hands"
 of the meta-wave profile. This is milestone 3 of the arc.
 
-The durable-state model already exists as directories under `wave/reduce/`:
+The durable-state model already exists as directories under `wave/architecture/`:
 
 ```
 analysis/    # study output; each file carries the HEAD it was computed against

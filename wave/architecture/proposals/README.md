@@ -8,7 +8,7 @@ Statuses:
 - `prototyped` - throwaway spike has tested the risky part.
 - `proposed` - ready for human design agreement.
 - `approved` - agreed and ready to decompose.
-- `queued` - execution items exist under `wave/reduce/queue/`.
+- `queued` - execution items exist under `wave/architecture/queue/`.
 - `done` - shipped.
 - `rejected` - closed with rationale.
 

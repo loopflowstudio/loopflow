@@ -80,5 +80,5 @@ The reduce-shaped outcome is a proposal to delete, rename, or promote concepts
 inside loopflow. "Codex does X" is not a proposal. "Loopflow carries two names
 for one concept because Codex/OpenCode show the stable boundary is Y" is.
 
-Status: first pass recorded in `wave/reduce/analysis/session-model-comparison.md`.
-Draft proposal: `wave/reduce/proposals/session-record-spine.md`.
+Status: first pass recorded in `wave/architecture/analysis/session-model-comparison.md`.
+Draft proposal: `wave/architecture/proposals/session-record-spine.md`.

@@ -1,4 +1,4 @@
-# Desktop
+# Concerto
 
 Concerto for macOS. The layer above the vendors' sessions.
 

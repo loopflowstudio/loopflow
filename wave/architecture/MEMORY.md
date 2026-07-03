@@ -53,7 +53,7 @@ reduce's first reduction, leaving a smaller live split — `Run`, `Session`,
 `ExecutionProcess`, and agent/output events.
 
 The arc now sits at the **proposal spine** (roadmap item 2). Live draft:
-`wave/reduce/proposals/session-record-spine.md` — one user-facing Session Record
+`wave/architecture/proposals/session-record-spine.md` — one user-facing Session Record
 read model over the live layers. It is not approved. The next move is to deepen
 the session-lifecycle continuity audit, prototype the aggregate in a throwaway
 worktree, then surface it at the design gate and park it there.

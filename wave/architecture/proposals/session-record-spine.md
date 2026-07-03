@@ -1,6 +1,6 @@
 ---
 status: draft
-source_analysis: wave/reduce/analysis/session-model-comparison.md
+source_analysis: wave/architecture/analysis/session-model-comparison.md
 ---
 
 # Session Record Spine

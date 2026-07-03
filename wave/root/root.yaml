@@ -5,10 +5,12 @@ crons:
 - flow: garden
   schedule: 0 0 * * *
 area:
-- wave/desktop/
-- wave/mobile/
+- wave/systems/
+- wave/architecture/
+- wave/concerto/
+- wave/website/
 - wave/workflows/
-- wave/release/
+- wave/goals/
 direction:
 - care
 - clarity

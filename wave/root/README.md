@@ -2,26 +2,30 @@
 
 Garden the active waves. Keep the whole system legible.
 
-Root is the conductor wave for this repo. It does not own a product surface of its own; it owns the rhythm between the other waves. The job is simple: keep `desktop`, `mobile`, `workflows`, and `release` moving in the right order, surface drift early, and make the morning status pass feel like one coherent ritual instead of disconnected dashboards.
+Root is the conductor wave for this repo. It does not own a product surface of its own; it owns the rhythm between the other waves. The job is simple: keep the active waves moving in the right order, surface drift early, and make the morning status pass feel like one coherent ritual instead of disconnected dashboards.
 
 ## Active waves
 
 ```
 wave: root
 │
-│  area: wave/desktop/, wave/mobile/, wave/workflows/, wave/release/
 │  flow: garden
 │
-├── wave: desktop      Concerto macOS — embedded terminal build driver, then native chat UX
-├── wave: mobile       iOS read surface for remote lfd — waves and roadmap
-└── wave: workflows    Engine, providers, flows, governance UX
+├── wave: systems      The operation around the code — CI, releases, automation, self-hosted spine
+├── wave: architecture Capability up, weight down; the shape of the code
+├── wave: concerto     Concerto macOS — framing the vendors' embedded sessions
+├── wave: website      Public site + single-source docs, deployed from this repo
+├── wave: workflows    The engine — scheduling, providers, flow execution, governance UX
+└── wave: goals        The Goal-driven wave framework itself
+
+(mobile is archived — loopflow ships no mobile surface)
 ```
 
 ## What root is for
 
 - **Garden the other waves** — scheduled `garden` and `govern-*` passes observe pressure, propose mutations, and keep the wave map honest
 - **Unify status language** — manual `review-open-work` and automated govern/garden passes should produce the same kinds of signals
-- **Keep scope clean** — desktop owns build-driving UX, mobile owns the read surface, workflows owns engine + governance machinery, release owns cadence + deploy spine
+- **Keep scope clean** — systems owns the operation (CI, releases, infra), architecture owns the shape of the code, concerto owns Concerto's framing UX, website owns the public story, workflows owns engine + governance machinery, goals owns the wave framework
 
 ## Current priorities
 
@@ -40,10 +44,10 @@ wave: root
 
 ### Root does not own
 
-- Embedded terminal and chat implementation details — `desktop`
-- Remote iOS read-surface work — `mobile`
+- Embedded terminal and chat implementation details — `concerto`
 - Flow engine, PM sync, and governance surfaces — `workflows`
-- Release cadence, local updater, and self-hosted cron deploy details — `release`
+- CI, release cadence, local updater, and self-hosted cron deploy details — `systems`
+- Code architecture and simplification — `architecture`
 
 ## What success looks like
 

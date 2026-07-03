@@ -49,7 +49,7 @@ WAVE_FULL = {
             "status": "running",
             "iteration": 0,
             "local_worktree": "/tmp/wt",
-            "remote_branch": "wave/reduce",
+            "remote_branch": "wave/architecture",
             "commits": [
                 {"sha": "a1b2c3d", "message": "implement: add retry logic"},
                 {"sha": "e4f5g6h", "message": "design: initial sketch"},
@@ -64,7 +64,7 @@ WAVE_FULL = {
                 "step_index": 0,
                 "status": "running",
                 "local_worktree": "/tmp/wt",
-                "remote_branch": "wave/reduce",
+                "remote_branch": "wave/architecture",
                 "pr": {
                     "url": "https://github.com/org/repo/pull/1",
                     "number": 1,
@@ -89,7 +89,7 @@ WAVE_RUN_MINIMAL = {
     "step_index": 0,
     "status": "completed",
     "local_worktree": "/tmp/wt",
-    "remote_branch": "wave/reduce",
+    "remote_branch": "wave/architecture",
 }
 
 REPO_MINIMAL = {

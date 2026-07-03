@@ -529,13 +529,13 @@ class TestClientResponses:
 
     def test_next_wave(self):
         def handler(request):
-            assert request.url.path == "/v0/waves/reduce/next"
+            assert request.url.path == "/v0/waves/architecture/next"
             assert request.method == "POST"
-            return httpx.Response(200, json={"new_branch": "wave/reduce.2"})
+            return httpx.Response(200, json={"new_branch": "wave/architecture.2"})
 
         client = _mock_client(handler)
-        result = client.next_wave("reduce")
-        assert result["new_branch"] == "wave/reduce.2"
+        result = client.next_wave("architecture")
+        assert result["new_branch"] == "wave/architecture.2"
         client.close()
 
     def test_repos_mutations_and_list(self):

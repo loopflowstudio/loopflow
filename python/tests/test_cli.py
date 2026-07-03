@@ -105,7 +105,7 @@ def test_wave_table_uses_active_run_paths_when_available() -> None:
     rendered = _render_table(wave)
 
     assert "/tmp/wt" in rendered
-    assert "wave/reduce" in rendered
+    assert "wave/architecture" in rendered
 
 
 def test_wave_table_falls_back_to_repo_branch() -> None:

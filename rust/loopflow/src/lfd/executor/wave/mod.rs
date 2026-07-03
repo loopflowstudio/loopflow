@@ -2312,8 +2312,7 @@ mod tests {
         let mut run = Run::new(LfdId::new(), wave.id().clone());
         run.worktree = repo.path().to_string_lossy().to_string();
 
-        let err =
-            build_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
+        let err = build_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
         assert!(err.to_string().contains("failed to read wave memory"));
     }
 

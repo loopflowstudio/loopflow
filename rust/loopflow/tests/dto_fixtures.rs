@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use loopflow::lfd::http::dto::{CreateTerminalSessionRequestDto, TerminalSessionDto};
+use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto};
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -19,46 +19,25 @@ fn load_fixture(name: &str) -> Value {
 }
 
 #[test]
-fn session_fixture_has_codex_input_supported_true() {
+fn session_fixture_pins_palette_shape() {
     let session = load_fixture("session.json");
     assert_eq!(session["object"], "session");
-    assert_eq!(session["harness"], "codex");
-    assert_eq!(session["status"], "active");
-    assert_eq!(session["input_supported"], true);
-    assert_eq!(session["wave_run_id"], "run-abc");
-    assert_eq!(session["provider_session_id"], "provider-xyz");
-    assert_eq!(session["config"]["step"], "design");
-    assert_eq!(session["config"]["repo_root"], "/tmp/repo");
-    assert_eq!(session["config"]["yolo_mode"], false);
+    let session: SessionDto =
+        serde_json::from_value(session).expect("session fixture should parse");
+    assert_eq!(session.step, "ship");
+    assert_eq!(session.agent, "codex");
+    assert_eq!(session.source, "palette");
+    assert_eq!(session.session_use, "palette");
+    assert_eq!(session.status, "running");
+    assert_eq!(session.run_id, None);
+    assert_eq!(session.parent_session_id, None);
+    assert!(session.argv.contains(&"-m".to_string()));
 }
 
 #[test]
-fn session_unsupported_input_fixture_has_input_supported_false() {
-    let session = load_fixture("session_unsupported_input.json");
-    assert_eq!(session["harness"], "claude");
-    assert_eq!(session["status"], "failed");
-    assert_eq!(session["input_supported"], false);
-    assert!(session["ended_at"].is_string());
-}
-
-#[test]
-fn terminal_session_fixture_pins_palette_shape() {
-    let terminal_session: TerminalSessionDto =
-        serde_json::from_value(load_fixture("terminal_session.json"))
-            .expect("terminal session fixture should parse");
-    assert_eq!(terminal_session.object, "terminal_session");
-    assert_eq!(terminal_session.step, "ship");
-    assert_eq!(terminal_session.agent, "codex");
-    assert_eq!(terminal_session.source, "palette");
-    assert_eq!(terminal_session.status, "running");
-    assert_eq!(terminal_session.wave_run_id, None);
-    assert!(terminal_session.argv.contains(&"-m".to_string()));
-}
-
-#[test]
-fn create_terminal_session_request_fixture_pins_required_fields() {
-    let request: CreateTerminalSessionRequestDto =
-        serde_json::from_value(load_fixture("create_terminal_session_request.json"))
+fn create_session_request_fixture_pins_required_fields() {
+    let request: CreateSessionRequestDto =
+        serde_json::from_value(load_fixture("create_session_request.json"))
             .expect("create request fixture should parse");
     assert_eq!(request.flow, "ship");
     assert_eq!(request.worktree, "/tmp/repo.Desktop");

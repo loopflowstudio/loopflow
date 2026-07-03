@@ -6,10 +6,10 @@ use crate::lfd::attention::create_step_failure_attention;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::wave::classify_repair_flow;
 use crate::lfd::executor::WaveExecutor;
-pub use crate::lfd::executor::{create_parallel_wave_run, create_wave_run_with_id};
+pub use crate::lfd::executor::{create_parallel_wave_run, create_run_with_id};
 use crate::lfd::scheduler::SchedulerSlotGuard;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{Event, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{Event, Run, RunStatus, WaveStatus};
 
 /// Fixed backoff delays between repair attempts, indexed by chain depth.
 /// The array length defines the maximum number of repair attempts before
@@ -25,13 +25,42 @@ pub fn spawn_run_task_with_slot(
     store: SharedStore,
     executor: WaveExecutor,
     event_hub: EventHub,
-    run: crate::lfd::types::WaveRun,
+    run: crate::lfd::types::Run,
     slot_guard: SchedulerSlotGuard,
+) {
+    spawn_run_task_with_optional_session(store, executor, event_hub, run, slot_guard, None);
+}
+
+pub fn spawn_run_task_with_session(
+    store: SharedStore,
+    executor: WaveExecutor,
+    event_hub: EventHub,
+    run: crate::lfd::types::Run,
+    slot_guard: SchedulerSlotGuard,
+    session_id: crate::lfd::id::LfdId,
+) {
+    spawn_run_task_with_optional_session(
+        store,
+        executor,
+        event_hub,
+        run,
+        slot_guard,
+        Some(session_id),
+    );
+}
+
+fn spawn_run_task_with_optional_session(
+    store: SharedStore,
+    executor: WaveExecutor,
+    event_hub: EventHub,
+    run: crate::lfd::types::Run,
+    slot_guard: SchedulerSlotGuard,
+    session_id: Option<crate::lfd::id::LfdId>,
 ) {
     event_hub.send(Event::wave_started(run.wave_id.clone(), run.id.clone()));
     tokio::spawn(async move {
         let _slot_guard = slot_guard;
-        execute_run_inner(&store, &executor, &event_hub, &run).await;
+        execute_run_inner(&store, &executor, &event_hub, &run, session_id).await;
     });
 }
 
@@ -39,15 +68,20 @@ async fn execute_run_inner(
     store: &SharedStore,
     executor: &WaveExecutor,
     event_hub: &EventHub,
-    run: &crate::lfd::types::WaveRun,
+    run: &crate::lfd::types::Run,
+    session_id: Option<crate::lfd::id::LfdId>,
 ) {
-    if let Err(err) = executor.execute(&run.id).await {
+    let result = match session_id.as_ref() {
+        Some(session_id) => executor.execute_with_session(&run.id, session_id).await,
+        None => executor.execute(&run.id).await,
+    };
+    if let Err(err) = result {
         tracing::error!(run_id = %run.id, error = %err, "run execution failed");
-        if let Ok(Some(mut run)) = store.get_wave_run(&run.id).await {
-            run.status = WaveRunStatus::Failed;
+        if let Ok(Some(mut run)) = store.get_run(&run.id).await {
+            run.status = RunStatus::Failed;
             run.error = Some(err.to_string());
             run.ended_at = Some(OffsetDateTime::now_utc());
-            if let Err(err) = store.update_wave_run(&run).await {
+            if let Err(err) = store.update_run(&run).await {
                 tracing::error!(run_id = %run.id, error = %err, "failed to update wave run status");
             }
             if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
@@ -64,11 +98,11 @@ async fn execute_run_inner(
     // executor.execute() returned Ok — check if the run ended in failure.
     // fail_run sets the status but defers repair dispatch to us (avoids
     // recursive-async Send issues with the sqlite mutex).
-    let run = match store.get_wave_run(&run.id).await {
+    let run = match store.get_run(&run.id).await {
         Ok(Some(r)) => r,
         _ => return,
     };
-    if run.status != WaveRunStatus::Failed {
+    if run.status != RunStatus::Failed {
         return;
     }
 
@@ -158,11 +192,11 @@ async fn execute_run_inner(
         }
 
         // Re-read the repair run to check its outcome.
-        let repair_run = match store.get_wave_run(&repair_run.id).await {
+        let repair_run = match store.get_run(&repair_run.id).await {
             Ok(Some(r)) => r,
             _ => return,
         };
-        if repair_run.status != WaveRunStatus::Failed {
+        if repair_run.status != RunStatus::Failed {
             return; // Repair succeeded (or is in a non-failed terminal state).
         }
 
@@ -174,12 +208,12 @@ async fn execute_run_inner(
 /// Walk the `repair_of` chain backwards to count how many repair attempts
 /// have been made for the original failure. Returns 0 for original runs,
 /// 1 for the first repair, etc.
-async fn count_repair_chain(store: &SharedStore, run: &WaveRun) -> usize {
+async fn count_repair_chain(store: &SharedStore, run: &Run) -> usize {
     let mut depth = 0usize;
     let mut current_repair_of = run.repair_of.clone();
     while let Some(parent_id) = current_repair_of {
         depth += 1;
-        match store.get_wave_run(&parent_id).await {
+        match store.get_run(&parent_id).await {
             Ok(Some(parent)) => current_repair_of = parent.repair_of.clone(),
             _ => break,
         }
@@ -197,9 +231,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{
-        Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveStatus,
-    };
+    use crate::lfd::types::{Run, RunStackStatus, Wave, WaveMode, WaveStatus};
 
     async fn test_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
@@ -231,20 +263,18 @@ mod tests {
         }
     }
 
-    fn make_run(wave: &Wave) -> WaveRun {
-        WaveRun {
+    fn make_run(wave: &Wave) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            snapshot: WaveRunSnapshot {
-                repo: ".".to_string(),
-                flow: "build".to_string(),
-                task: None,
-                direction: Vec::new(),
-                area: Vec::new(),
-            },
+            repo: ".".to_string(),
+            flow: "build".to_string(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
             iteration: 0,
             step_index: 0,
-            status: WaveRunStatus::Failed,
+            status: RunStatus::Failed,
             worktree: ".".to_string(),
             branch: "test".to_string(),
             started_at: Some(OffsetDateTime::now_utc()),
@@ -257,7 +287,7 @@ mod tests {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: wave.id().to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -271,7 +301,7 @@ mod tests {
         let wave = make_wave();
         store.create_wave(&wave).await.unwrap();
         let run = make_run(&wave);
-        store.create_wave_run(&run).await.unwrap();
+        store.create_run(&run).await.unwrap();
 
         assert_eq!(count_repair_chain(&store, &run).await, 0);
     }
@@ -284,22 +314,22 @@ mod tests {
 
         // Original run
         let original = make_run(&wave);
-        store.create_wave_run(&original).await.unwrap();
+        store.create_run(&original).await.unwrap();
 
         // Repair 1
         let mut repair1 = make_run(&wave);
         repair1.repair_of = Some(original.id.clone());
-        store.create_wave_run(&repair1).await.unwrap();
+        store.create_run(&repair1).await.unwrap();
 
         // Repair 2
         let mut repair2 = make_run(&wave);
         repair2.repair_of = Some(repair1.id.clone());
-        store.create_wave_run(&repair2).await.unwrap();
+        store.create_run(&repair2).await.unwrap();
 
         // Repair 3
         let mut repair3 = make_run(&wave);
         repair3.repair_of = Some(repair2.id.clone());
-        store.create_wave_run(&repair3).await.unwrap();
+        store.create_run(&repair3).await.unwrap();
 
         assert_eq!(count_repair_chain(&store, &original).await, 0);
         assert_eq!(count_repair_chain(&store, &repair1).await, 1);

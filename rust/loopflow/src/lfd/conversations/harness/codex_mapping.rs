@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use crate::lfd::sessions::types::{
-    FileEdit, ItemDelta, ItemStatus, SessionItem, TurnStatus, TurnUsage,
+use crate::lfd::conversations::types::{
+    ConversationItem, FileEdit, ItemDelta, ItemStatus, TurnStatus, TurnUsage,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub(super) fn map_item_id(params: &Value) -> String {
         .to_string()
 }
 
-pub(super) fn build_item(params: &Value, phase: ItemPhase) -> SessionItem {
+pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
     let id = map_item_id(params);
     let item_type = map_item_type(params);
     let item = item_payload(params);
@@ -74,7 +74,7 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> SessionItem {
     let completed = phase == ItemPhase::Completed;
 
     match item_type {
-        "commandExecution" => SessionItem::Command {
+        "commandExecution" => ConversationItem::Command {
             id,
             command: parse_command(item),
             cwd: required_text_field(item, "cwd"),
@@ -97,12 +97,12 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> SessionItem {
                 None
             },
         },
-        "fileChange" => SessionItem::File {
+        "fileChange" => ConversationItem::File {
             id,
             changes: parse_file_changes(item),
             status,
         },
-        "mcpToolCall" => SessionItem::Tool {
+        "mcpToolCall" => ConversationItem::Tool {
             id,
             name: mcp_tool_name(item),
             status,
@@ -113,16 +113,16 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> SessionItem {
                 None
             },
         },
-        "agentMessage" => SessionItem::Message {
+        "agentMessage" => ConversationItem::Message {
             id,
             text: required_text_field(item, "text"),
             phase: text_field(item, "phase"),
         },
-        "plan" => SessionItem::Thought {
+        "plan" => ConversationItem::Thought {
             id,
             text: required_text_field(item, "text"),
         },
-        _ => SessionItem::Tool {
+        _ => ConversationItem::Tool {
             id,
             name: item_type.to_string(),
             status,
@@ -265,7 +265,7 @@ mod tests {
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
-            SessionItem::File {
+            ConversationItem::File {
                 id,
                 changes,
                 status,
@@ -292,7 +292,7 @@ mod tests {
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
-            SessionItem::Message { id, text, phase } => {
+            ConversationItem::Message { id, text, phase } => {
                 assert_eq!(id, "item_2");
                 assert_eq!(text, "Done");
                 assert_eq!(phase.as_deref(), Some("final"));
@@ -313,7 +313,7 @@ mod tests {
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
-            SessionItem::Thought { id, text } => {
+            ConversationItem::Thought { id, text } => {
                 assert_eq!(id, "item_3");
                 assert_eq!(text, "Run tests first");
             }
@@ -337,7 +337,7 @@ mod tests {
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
-            SessionItem::Tool {
+            ConversationItem::Tool {
                 id,
                 name,
                 status,

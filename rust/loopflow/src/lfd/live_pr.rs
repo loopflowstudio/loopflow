@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::github;
 use crate::lfd::store::{SharedStore, StoreError};
-use crate::lfd::types::{LivePrState, LivePullRequestState, WaveRun};
+use crate::lfd::types::{LivePrState, LivePullRequestState, Run};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LivePrKey {
@@ -22,12 +22,12 @@ pub struct LivePrSnapshot {
 }
 
 impl LivePrSnapshot {
-    pub fn state_for_run(&self, run: &WaveRun) -> Option<&LivePullRequestState> {
+    pub fn state_for_run(&self, run: &Run) -> Option<&LivePullRequestState> {
         let key = run_live_pr_key(run)?;
         self.live_states.get(&key)
     }
 
-    pub fn stale_for_run(&self, run: &WaveRun) -> bool {
+    pub fn stale_for_run(&self, run: &Run) -> bool {
         let Some(key) = run_live_pr_key(run) else {
             return false;
         };
@@ -46,10 +46,10 @@ impl LivePrSnapshot {
     }
 }
 
-pub fn run_live_pr_key(run: &WaveRun) -> Option<LivePrKey> {
+pub fn run_live_pr_key(run: &Run) -> Option<LivePrKey> {
     let pr_number = run.pr.as_ref()?.number?;
     Some(LivePrKey {
-        repo_id: run.snapshot.repo.clone(),
+        repo_id: run.repo.clone(),
         pr_number,
     })
 }
@@ -57,7 +57,7 @@ pub fn run_live_pr_key(run: &WaveRun) -> Option<LivePrKey> {
 pub async fn build_live_pr_snapshot(
     store: &SharedStore,
     github_config: &GitHubConfig,
-    runs: &[WaveRun],
+    runs: &[Run],
 ) -> Result<LivePrSnapshot, StoreError> {
     let targets: HashSet<LivePrKey> = runs.iter().filter_map(run_live_pr_key).collect();
     let mut stale_keys: HashSet<LivePrKey> = HashSet::new();

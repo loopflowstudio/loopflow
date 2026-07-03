@@ -2,13 +2,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::lfd::conversations::types::{
+    Conversation, ConversationEvent, ConversationStatus, PersistedConversationEvent,
+};
 use crate::lfd::id::LfdId;
-use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock,
-    ChatMessage, LivePrState, LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent,
-    Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus, Trigger, Wave,
-    WaveCron, WaveRun, WaveRunStackStatus,
+    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
+    ExecutionProcess, LivePrState, LivePullRequestState, PendingActivation, QueueBlock,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session, SessionStatus, Summary,
+    Trigger, Wave, WaveCron,
 };
 
 pub mod catalog;
@@ -42,7 +44,7 @@ impl ForkRunStatus {
 #[derive(Debug, Clone)]
 pub struct ForkRun {
     pub id: LfdId,
-    pub wave_run_id: LfdId,
+    pub run_id: LfdId,
     pub step_index: u32,
     pub branch_index: u32,
     pub status: ForkRunStatus,
@@ -74,7 +76,7 @@ pub enum StorageConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionFilters {
+pub struct ConversationFilters {
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub step: Option<String>,
@@ -125,7 +127,7 @@ impl Store {
         self
     }
 
-    pub fn sessions(&self) -> &dyn SessionStore {
+    pub fn conversations(&self) -> &dyn ConversationStore {
         self
     }
 
@@ -201,47 +203,47 @@ impl Store {
         WaveStateStore::delete_wave(self, wave_id).await
     }
 
-    pub async fn list_wave_runs(
+    pub async fn list_runs(
         &self,
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<WaveRun>> {
-        WaveStateStore::list_wave_runs(self, wave_id, limit).await
+    ) -> StoreResult<Vec<Run>> {
+        WaveStateStore::list_runs(self, wave_id, limit).await
     }
 
-    pub async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        WaveStateStore::get_wave_run(self, wave_run_id).await
+    pub async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
+        WaveStateStore::get_run(self, run_id).await
     }
 
-    pub async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        WaveStateStore::get_active_wave_run(self, wave_id).await
+    pub async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
+        WaveStateStore::get_active_run(self, wave_id).await
     }
 
-    pub async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::count_active_wave_runs(self, wave_id).await
+    pub async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::count_active_runs(self, wave_id).await
     }
 
-    pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        WaveStateStore::get_latest_wave_run(self, wave_id).await
+    pub async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
+        WaveStateStore::get_latest_run(self, wave_id).await
     }
 
-    pub async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
-        WaveStateStore::create_wave_run(self, run).await
+    pub async fn create_run(&self, run: &Run) -> StoreResult<()> {
+        WaveStateStore::create_run(self, run).await
     }
 
-    pub async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
-        WaveStateStore::update_wave_run(self, run).await
+    pub async fn update_run(&self, run: &Run) -> StoreResult<()> {
+        WaveStateStore::update_run(self, run).await
     }
 
-    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
         WaveStateStore::list_stack_runs(self, wave_id).await
     }
 
-    pub async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         WaveStateStore::find_next_unmerged_run(self, wave_id).await
     }
 
-    pub async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+    pub async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>> {
         WaveStateStore::find_descendants(self, run_id).await
     }
 
@@ -453,21 +455,21 @@ impl Store {
 
     pub async fn list_fork_runs(
         &self,
-        wave_run_id: &LfdId,
+        run_id: &LfdId,
         step_index: u32,
     ) -> StoreResult<Vec<ForkRun>> {
-        ExecutionStore::list_fork_runs(self, wave_run_id, step_index).await
+        ExecutionStore::list_fork_runs(self, run_id, step_index).await
     }
 
     pub async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
         ExecutionStore::upsert_fork_run(self, fork_run).await
     }
 
-    pub async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        ExecutionStore::delete_fork_runs(self, wave_run_id, step_index).await
+    pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+        ExecutionStore::delete_fork_runs(self, run_id, step_index).await
     }
 
-    pub async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
+    pub async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
         ExecutionStore::list_agents(self).await
     }
 
@@ -476,23 +478,23 @@ impl Store {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<AgentRun>> {
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         ExecutionStore::list_agent_history(self, worktree, repo, limit).await
     }
 
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
+    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
         ExecutionStore::get_agent(self, agent_id).await
     }
 
     pub async fn get_waiting_agent_for_wave(
         &self,
         wave_id: &LfdId,
-    ) -> StoreResult<Option<AgentRun>> {
+    ) -> StoreResult<Option<ExecutionProcess>> {
         ExecutionStore::get_waiting_agent_for_wave(self, wave_id).await
     }
 
-    pub async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
-        ExecutionStore::start_agent(self, agent_run).await
+    pub async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
+        ExecutionStore::start_agent(self, execution_run).await
     }
 
     pub async fn update_agent_status(
@@ -509,7 +511,10 @@ impl Store {
         ExecutionStore::end_agent(self, agent_id, status, ended_at).await
     }
 
-    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
+    pub async fn get_active_agents_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         ExecutionStore::get_active_agents_for_wave(self, wave_id).await
     }
 
@@ -522,7 +527,10 @@ impl Store {
         ExecutionStore::end_active_agent_for_wave(self, wave_id, status, ended_at).await
     }
 
-    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
+    pub async fn get_stuck_agents(
+        &self,
+        older_than_secs: u64,
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         ExecutionStore::get_stuck_agents(self, older_than_secs).await
     }
 
@@ -530,98 +538,100 @@ impl Store {
         ExecutionStore::fail_orphaned_runs(self).await
     }
 
-    pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
-        SessionStore::create_session(self, session).await
+    pub async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
+        ConversationStore::create_conversation(self, conversation).await
     }
 
-    pub async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
-        SessionStore::get_session(self, session_id).await
-    }
-
-    pub async fn get_active_session_for_wave_run(
+    pub async fn get_conversation(
         &self,
-        wave_run_id: &str,
-    ) -> StoreResult<Option<Session>> {
-        SessionStore::get_active_session_for_wave_run(self, wave_run_id).await
+        conversation_id: &LfdId,
+    ) -> StoreResult<Option<Conversation>> {
+        ConversationStore::get_conversation(self, conversation_id).await
+    }
+
+    pub async fn get_active_conversation_for_run(
+        &self,
+        run_id: &str,
+    ) -> StoreResult<Option<Conversation>> {
+        ConversationStore::get_active_conversation_for_run(self, run_id).await
     }
 
     pub async fn update_provider_session_id(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         provider_session_id: &str,
     ) -> StoreResult<()> {
-        SessionStore::update_provider_session_id(self, session_id, provider_session_id).await
+        ConversationStore::update_provider_session_id(self, conversation_id, provider_session_id)
+            .await
     }
 
-    pub async fn update_session_status(
+    pub async fn update_conversation_status(
         &self,
-        session_id: &LfdId,
-        status: SessionStatus,
+        conversation_id: &LfdId,
+        status: ConversationStatus,
         ended_at: Option<i64>,
     ) -> StoreResult<()> {
-        SessionStore::update_session_status(self, session_id, status, ended_at).await
+        ConversationStore::update_conversation_status(self, conversation_id, status, ended_at).await
     }
 
-    pub async fn append_session_event(
+    pub async fn append_conversation_event(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         seq: i64,
-        event: &SessionEvent,
+        event: &ConversationEvent,
         created_at: i64,
     ) -> StoreResult<()> {
-        SessionStore::append_session_event(self, session_id, seq, event, created_at).await
+        ConversationStore::append_conversation_event(self, conversation_id, seq, event, created_at)
+            .await
     }
 
-    pub async fn list_sessions_by_statuses(
+    pub async fn list_conversations_by_statuses(
         &self,
-        statuses: &[SessionStatus],
-    ) -> StoreResult<Vec<Session>> {
-        SessionStore::list_sessions_by_statuses(self, statuses).await
+        statuses: &[ConversationStatus],
+    ) -> StoreResult<Vec<Conversation>> {
+        ConversationStore::list_conversations_by_statuses(self, statuses).await
     }
 
-    pub async fn list_session_events(
+    pub async fn list_conversation_events(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedSessionEvent>> {
-        SessionStore::list_session_events(self, session_id, after_seq).await
+    ) -> StoreResult<Vec<PersistedConversationEvent>> {
+        ConversationStore::list_conversation_events(self, conversation_id, after_seq).await
     }
 
-    pub async fn list_events_for_sessions(
+    pub async fn list_events_for_conversations(
         &self,
-        session_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
-        SessionStore::list_events_for_sessions(self, session_ids).await
+        conversation_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
+        ConversationStore::list_events_for_conversations(self, conversation_ids).await
     }
 
-    pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
-        TerminalSessionStore::create_terminal_session(self, session).await
+    pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
+        ControlSessionStore::create_session(self, session).await
     }
 
-    pub async fn get_terminal_session(
-        &self,
-        session_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
-        TerminalSessionStore::get_terminal_session(self, session_id).await
+    pub async fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        ControlSessionStore::get_session(self, session_id).await
     }
 
-    pub async fn list_terminal_sessions(
+    pub async fn list_control_sessions(
         &self,
         wave_id: Option<&LfdId>,
-        statuses: Option<&[TerminalSessionStatus]>,
-    ) -> StoreResult<Vec<TerminalSession>> {
-        TerminalSessionStore::list_terminal_sessions(self, wave_id, statuses).await
+        statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>> {
+        ControlSessionStore::list_sessions(self, wave_id, statuses).await
     }
 
-    pub async fn get_active_terminal_session_for_wave_run(
+    pub async fn get_active_control_session_for_run(
         &self,
-        wave_run_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
-        TerminalSessionStore::get_active_terminal_session_for_wave_run(self, wave_run_id).await
+        run_id: &LfdId,
+    ) -> StoreResult<Option<Session>> {
+        ControlSessionStore::get_active_session_for_run(self, run_id).await
     }
 
-    pub async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
-        TerminalSessionStore::update_terminal_session(self, session).await
+    pub async fn update_control_session(&self, session: &Session) -> StoreResult<()> {
+        ControlSessionStore::update_session(self, session).await
     }
 
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
@@ -655,15 +665,18 @@ impl Store {
         SecretsProviderStore::list_secrets_provider_configs(self).await
     }
 
-    pub async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
-        SessionStore::list_sessions_for_wave(self, wave_id).await
+    pub async fn list_conversations_for_wave(
+        &self,
+        wave_id: &str,
+    ) -> StoreResult<Vec<Conversation>> {
+        ConversationStore::list_conversations_for_wave(self, wave_id).await
     }
 
-    pub async fn list_sessions_filtered(
+    pub async fn list_conversations_filtered(
         &self,
-        filters: &SessionFilters,
-    ) -> StoreResult<Vec<Session>> {
-        SessionStore::list_sessions_filtered(self, filters).await
+        filters: &ConversationFilters,
+    ) -> StoreResult<Vec<Conversation>> {
+        ConversationStore::list_conversations_filtered(self, filters).await
     }
 
     pub async fn health_check(&self) -> StoreResult<()> {
@@ -694,20 +707,17 @@ pub trait WaveStateStore: Send + Sync {
     ) -> StoreResult<()>;
     async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()>;
 
-    async fn list_wave_runs(
-        &self,
-        wave_id: Option<&LfdId>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<WaveRun>>;
-    async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32>;
-    async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
-    async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
-    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>>;
-    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>>;
+    async fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>)
+        -> StoreResult<Vec<Run>>;
+    async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>>;
+    async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
+    async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32>;
+    async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
+    async fn create_run(&self, run: &Run) -> StoreResult<()>;
+    async fn update_run(&self, run: &Run) -> StoreResult<()>;
+    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>>;
+    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
+    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>>;
     async fn get_live_pr_state(
         &self,
         repo_id: &str,
@@ -788,25 +798,24 @@ pub trait RepoStore: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait ExecutionStore: Send + Sync {
-    async fn list_fork_runs(
-        &self,
-        wave_run_id: &LfdId,
-        step_index: u32,
-    ) -> StoreResult<Vec<ForkRun>>;
+    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>>;
     async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>>;
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
-    async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
+    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
-    async fn list_agents(&self) -> StoreResult<Vec<AgentRun>>;
+    async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>>;
     async fn list_agent_history(
         &self,
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<AgentRun>>;
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>>;
-    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>>;
-    async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()>;
+    ) -> StoreResult<Vec<ExecutionProcess>>;
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>>;
+    async fn get_waiting_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Option<ExecutionProcess>>;
+    async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()>;
     async fn update_agent_status(
         &self,
         agent_id: &LfdId,
@@ -815,78 +824,78 @@ pub trait ExecutionStore: Send + Sync {
         container_id: Option<&str>,
     ) -> StoreResult<()>;
     async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
-    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>>;
+    async fn get_active_agents_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ExecutionProcess>>;
     async fn end_active_agent_for_wave(
         &self,
         wave_id: &LfdId,
         status: i32,
         ended_at: i64,
     ) -> StoreResult<()>;
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>>;
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<ExecutionProcess>>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
 }
 
 #[async_trait::async_trait]
-pub trait SessionStore: Send + Sync {
-    async fn create_session(&self, session: &Session) -> StoreResult<()>;
-    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>>;
-    async fn get_active_session_for_wave_run(
+pub trait ConversationStore: Send + Sync {
+    async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()>;
+    async fn get_conversation(&self, conversation_id: &LfdId) -> StoreResult<Option<Conversation>>;
+    async fn get_active_conversation_for_run(
         &self,
-        wave_run_id: &str,
-    ) -> StoreResult<Option<Session>>;
+        run_id: &str,
+    ) -> StoreResult<Option<Conversation>>;
     async fn update_provider_session_id(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         provider_session_id: &str,
     ) -> StoreResult<()>;
-    async fn update_session_status(
+    async fn update_conversation_status(
         &self,
-        session_id: &LfdId,
-        status: SessionStatus,
+        conversation_id: &LfdId,
+        status: ConversationStatus,
         ended_at: Option<i64>,
     ) -> StoreResult<()>;
-    async fn append_session_event(
+    async fn append_conversation_event(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         seq: i64,
-        event: &SessionEvent,
+        event: &ConversationEvent,
         created_at: i64,
     ) -> StoreResult<()>;
-    async fn list_sessions_by_statuses(
+    async fn list_conversations_by_statuses(
         &self,
-        statuses: &[SessionStatus],
-    ) -> StoreResult<Vec<Session>>;
-    async fn list_session_events(
+        statuses: &[ConversationStatus],
+    ) -> StoreResult<Vec<Conversation>>;
+    async fn list_conversation_events(
         &self,
-        session_id: &LfdId,
+        conversation_id: &LfdId,
         after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedSessionEvent>>;
-    async fn list_events_for_sessions(
+    ) -> StoreResult<Vec<PersistedConversationEvent>>;
+    async fn list_events_for_conversations(
         &self,
-        session_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>>;
-    async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>>;
-    async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>>;
+        conversation_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>>;
+    async fn list_conversations_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Conversation>>;
+    async fn list_conversations_filtered(
+        &self,
+        filters: &ConversationFilters,
+    ) -> StoreResult<Vec<Conversation>>;
 }
 
 #[async_trait::async_trait]
-pub trait TerminalSessionStore: Send + Sync {
-    async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()>;
-    async fn get_terminal_session(
-        &self,
-        session_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>>;
-    async fn list_terminal_sessions(
+pub trait ControlSessionStore: Send + Sync {
+    async fn create_session(&self, session: &Session) -> StoreResult<()>;
+    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>>;
+    async fn list_sessions(
         &self,
         wave_id: Option<&LfdId>,
-        statuses: Option<&[TerminalSessionStatus]>,
-    ) -> StoreResult<Vec<TerminalSession>>;
-    async fn get_active_terminal_session_for_wave_run(
-        &self,
-        wave_run_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>>;
-    async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()>;
+        statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>>;
+    async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>>;
+    async fn update_session(&self, session: &Session) -> StoreResult<()>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1094,84 +1103,81 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_wave_runs(
+    async fn list_runs(
         &self,
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<WaveRun>> {
+    ) -> StoreResult<Vec<Run>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.cloned();
-                run_sqlite(store, move |store| {
-                    store.list_wave_runs(wave_id.as_ref(), limit)
-                })
-                .await
+                run_sqlite(store, move |store| store.list_runs(wave_id.as_ref(), limit)).await
             }
-            StoreBackend::Postgres(store) => store.list_wave_runs(wave_id, limit).await,
+            StoreBackend::Postgres(store) => store.list_runs(wave_id, limit).await,
         }
     }
 
-    async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.clone();
-                run_sqlite(store, move |store| store.get_wave_run(&wave_run_id)).await
+                let run_id = run_id.clone();
+                run_sqlite(store, move |store| store.get_run(&run_id)).await
             }
-            StoreBackend::Postgres(store) => store.get_wave_run(wave_run_id).await,
+            StoreBackend::Postgres(store) => store.get_run(run_id).await,
         }
     }
 
-    async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_active_wave_run(&wave_id)).await
+                run_sqlite(store, move |store| store.get_active_run(&wave_id)).await
             }
-            StoreBackend::Postgres(store) => store.get_active_wave_run(wave_id).await,
+            StoreBackend::Postgres(store) => store.get_active_run(wave_id).await,
         }
     }
 
-    async fn count_active_wave_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+    async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.count_active_wave_runs(&wave_id)).await
+                run_sqlite(store, move |store| store.count_active_runs(&wave_id)).await
             }
-            StoreBackend::Postgres(store) => store.count_active_wave_runs(wave_id).await,
+            StoreBackend::Postgres(store) => store.count_active_runs(wave_id).await,
         }
     }
 
-    async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_latest_wave_run(&wave_id)).await
+                run_sqlite(store, move |store| store.get_latest_run(&wave_id)).await
             }
-            StoreBackend::Postgres(store) => store.get_latest_wave_run(wave_id).await,
+            StoreBackend::Postgres(store) => store.get_latest_run(wave_id).await,
         }
     }
 
-    async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    async fn create_run(&self, run: &Run) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let run = run.clone();
-                run_sqlite(store, move |store| store.create_wave_run(&run)).await
+                run_sqlite(store, move |store| store.create_run(&run)).await
             }
-            StoreBackend::Postgres(store) => store.create_wave_run(run).await,
+            StoreBackend::Postgres(store) => store.create_run(run).await,
         }
     }
 
-    async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    async fn update_run(&self, run: &Run) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let run = run.clone();
-                run_sqlite(store, move |store| store.update_wave_run(&run)).await
+                run_sqlite(store, move |store| store.update_run(&run)).await
             }
-            StoreBackend::Postgres(store) => store.update_wave_run(run).await,
+            StoreBackend::Postgres(store) => store.update_run(run).await,
         }
     }
 
-    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1181,12 +1187,12 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         let runs = self.list_stack_runs(wave_id).await?;
         for run in runs {
             if matches!(
                 run.stack_status,
-                WaveRunStackStatus::Merged | WaveRunStackStatus::Superseded
+                RunStackStatus::Merged | RunStackStatus::Superseded
             ) {
                 continue;
             }
@@ -1195,10 +1201,7 @@ impl WaveStateStore for Store {
                 return Ok(Some(run));
             };
 
-            let Some(live_state) = self
-                .get_live_pr_state(&run.snapshot.repo, pr_number)
-                .await?
-            else {
+            let Some(live_state) = self.get_live_pr_state(&run.repo, pr_number).await? else {
                 return Ok(Some(run));
             };
             if live_state.state != LivePrState::Merged {
@@ -1208,8 +1211,8 @@ impl WaveStateStore for Store {
         Ok(None)
     }
 
-    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
-        let Some(parent) = self.get_wave_run(run_id).await? else {
+    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>> {
+        let Some(parent) = self.get_run(run_id).await? else {
             return Ok(Vec::new());
         };
         let descendants = self
@@ -1709,20 +1712,16 @@ impl RepoStore for Store {
 
 #[async_trait::async_trait]
 impl ExecutionStore for Store {
-    async fn list_fork_runs(
-        &self,
-        wave_run_id: &LfdId,
-        step_index: u32,
-    ) -> StoreResult<Vec<ForkRun>> {
+    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.clone();
+                let run_id = run_id.clone();
                 run_sqlite(store, move |store| {
-                    store.list_fork_runs(&wave_run_id, step_index)
+                    store.list_fork_runs(&run_id, step_index)
                 })
                 .await
             }
-            StoreBackend::Postgres(store) => store.list_fork_runs(wave_run_id, step_index).await,
+            StoreBackend::Postgres(store) => store.list_fork_runs(run_id, step_index).await,
         }
     }
 
@@ -1745,20 +1744,20 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.clone();
+                let run_id = run_id.clone();
                 run_sqlite(store, move |store| {
-                    store.delete_fork_runs(&wave_run_id, step_index)
+                    store.delete_fork_runs(&run_id, step_index)
                 })
                 .await
             }
-            StoreBackend::Postgres(store) => store.delete_fork_runs(wave_run_id, step_index).await,
+            StoreBackend::Postgres(store) => store.delete_fork_runs(run_id, step_index).await,
         }
     }
 
-    async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
+    async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_agents()).await,
             StoreBackend::Postgres(store) => store.list_agents().await,
@@ -1770,7 +1769,7 @@ impl ExecutionStore for Store {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<AgentRun>> {
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let worktree = worktree.map(str::to_string);
@@ -1784,7 +1783,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let agent_id = agent_id.clone();
@@ -1794,7 +1793,10 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>> {
+    async fn get_waiting_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Option<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1807,13 +1809,13 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
+    async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let agent_run = agent_run.clone();
-                run_sqlite(store, move |store| store.start_agent(&agent_run)).await
+                let execution_run = execution_run.clone();
+                run_sqlite(store, move |store| store.start_agent(&execution_run)).await
             }
-            StoreBackend::Postgres(store) => store.start_agent(agent_run).await,
+            StoreBackend::Postgres(store) => store.start_agent(execution_run).await,
         }
     }
 
@@ -1854,7 +1856,10 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
+    async fn get_active_agents_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1889,7 +1894,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<ExecutionProcess>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 run_sqlite(store, move |store| store.get_stuck_agents(older_than_secs)).await
@@ -1909,14 +1914,205 @@ impl ExecutionStore for Store {
 }
 
 #[async_trait::async_trait]
-impl SessionStore for Store {
+impl ConversationStore for Store {
+    async fn create_conversation(&self, conversation: &Conversation) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation = conversation.clone();
+                run_sqlite(store, move |store| store.create_conversation(&conversation)).await
+            }
+            StoreBackend::Postgres(store) => store.create_conversation(conversation).await,
+        }
+    }
+
+    async fn get_conversation(&self, conversation_id: &LfdId) -> StoreResult<Option<Conversation>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_id = conversation_id.clone();
+                run_sqlite(store, move |store| store.get_conversation(&conversation_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_conversation(conversation_id).await,
+        }
+    }
+
+    async fn get_active_conversation_for_run(
+        &self,
+        run_id: &str,
+    ) -> StoreResult<Option<Conversation>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let run_id = run_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.get_active_conversation_for_run(&run_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.get_active_conversation_for_run(run_id).await,
+        }
+    }
+
+    async fn update_provider_session_id(
+        &self,
+        conversation_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_id = conversation_id.clone();
+                let provider_session_id = provider_session_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.update_provider_session_id(&conversation_id, &provider_session_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_provider_session_id(conversation_id, provider_session_id)
+                    .await
+            }
+        }
+    }
+
+    async fn update_conversation_status(
+        &self,
+        conversation_id: &LfdId,
+        status: ConversationStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_id = conversation_id.clone();
+                run_sqlite(store, move |store| {
+                    store.update_conversation_status(&conversation_id, status, ended_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_conversation_status(conversation_id, status, ended_at)
+                    .await
+            }
+        }
+    }
+
+    async fn append_conversation_event(
+        &self,
+        conversation_id: &LfdId,
+        seq: i64,
+        event: &ConversationEvent,
+        created_at: i64,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_id = conversation_id.clone();
+                let event = event.clone();
+                run_sqlite(store, move |store| {
+                    store.append_conversation_event(&conversation_id, seq, &event, created_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .append_conversation_event(conversation_id, seq, event, created_at)
+                    .await
+            }
+        }
+    }
+
+    async fn list_conversations_by_statuses(
+        &self,
+        statuses: &[ConversationStatus],
+    ) -> StoreResult<Vec<Conversation>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let statuses = statuses.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_conversations_by_statuses(&statuses)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_conversations_by_statuses(statuses).await,
+        }
+    }
+
+    async fn list_conversation_events(
+        &self,
+        conversation_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedConversationEvent>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_id = conversation_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_conversation_events(&conversation_id, after_seq)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .list_conversation_events(conversation_id, after_seq)
+                    .await
+            }
+        }
+    }
+
+    async fn list_events_for_conversations(
+        &self,
+        conversation_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedConversationEvent>>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let conversation_ids = conversation_ids.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_events_for_conversations(&conversation_ids)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.list_events_for_conversations(conversation_ids).await
+            }
+        }
+    }
+
+    async fn list_conversations_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Conversation>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.list_conversations_for_wave(&wave_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_conversations_for_wave(wave_id).await,
+        }
+    }
+
+    async fn list_conversations_filtered(
+        &self,
+        filters: &ConversationFilters,
+    ) -> StoreResult<Vec<Conversation>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let filters = filters.clone();
+                run_sqlite(store, move |store| {
+                    store.list_conversations_filtered(&filters)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_conversations_filtered(filters).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ControlSessionStore for Store {
     async fn create_session(&self, session: &Session) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let session = session.clone();
-                run_sqlite(store, move |store| store.create_session(&session)).await
+                run_sqlite(store, move |store| store.create_control_session(&session)).await
             }
-            StoreBackend::Postgres(store) => store.create_session(session).await,
+            StoreBackend::Postgres(store) => store.create_control_session(session).await,
         }
     }
 
@@ -1924,238 +2120,50 @@ impl SessionStore for Store {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let session_id = session_id.clone();
-                run_sqlite(store, move |store| store.get_session(&session_id)).await
+                run_sqlite(store, move |store| store.get_control_session(&session_id)).await
             }
-            StoreBackend::Postgres(store) => store.get_session(session_id).await,
+            StoreBackend::Postgres(store) => store.get_control_session(session_id).await,
         }
     }
 
-    async fn get_active_session_for_wave_run(
-        &self,
-        wave_run_id: &str,
-    ) -> StoreResult<Option<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.get_active_session_for_wave_run(&wave_run_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.get_active_session_for_wave_run(wave_run_id).await
-            }
-        }
-    }
-
-    async fn update_provider_session_id(
-        &self,
-        session_id: &LfdId,
-        provider_session_id: &str,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                let provider_session_id = provider_session_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.update_provider_session_id(&session_id, &provider_session_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_provider_session_id(session_id, provider_session_id)
-                    .await
-            }
-        }
-    }
-
-    async fn update_session_status(
-        &self,
-        session_id: &LfdId,
-        status: SessionStatus,
-        ended_at: Option<i64>,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| {
-                    store.update_session_status(&session_id, status, ended_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_session_status(session_id, status, ended_at)
-                    .await
-            }
-        }
-    }
-
-    async fn append_session_event(
-        &self,
-        session_id: &LfdId,
-        seq: i64,
-        event: &SessionEvent,
-        created_at: i64,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                let event = event.clone();
-                run_sqlite(store, move |store| {
-                    store.append_session_event(&session_id, seq, &event, created_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .append_session_event(session_id, seq, event, created_at)
-                    .await
-            }
-        }
-    }
-
-    async fn list_sessions_by_statuses(
-        &self,
-        statuses: &[SessionStatus],
-    ) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let statuses = statuses.to_vec();
-                run_sqlite(store, move |store| {
-                    store.list_sessions_by_statuses(&statuses)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_sessions_by_statuses(statuses).await,
-        }
-    }
-
-    async fn list_session_events(
-        &self,
-        session_id: &LfdId,
-        after_seq: Option<i64>,
-    ) -> StoreResult<Vec<PersistedSessionEvent>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_session_events(&session_id, after_seq)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
-        }
-    }
-
-    async fn list_events_for_sessions(
-        &self,
-        session_ids: &[LfdId],
-    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_ids = session_ids.to_vec();
-                run_sqlite(store, move |store| {
-                    store.list_events_for_sessions(&session_ids)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_events_for_sessions(session_ids).await,
-        }
-    }
-
-    async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.to_string();
-                run_sqlite(store, move |store| store.list_sessions_for_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_sessions_for_wave(wave_id).await,
-        }
-    }
-
-    async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let filters = filters.clone();
-                run_sqlite(store, move |store| store.list_sessions_filtered(&filters)).await
-            }
-            StoreBackend::Postgres(store) => store.list_sessions_filtered(filters).await,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl TerminalSessionStore for Store {
-    async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session = session.clone();
-                run_sqlite(store, move |store| store.create_terminal_session(&session)).await
-            }
-            StoreBackend::Postgres(store) => store.create_terminal_session(session).await,
-        }
-    }
-
-    async fn get_terminal_session(
-        &self,
-        session_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| store.get_terminal_session(&session_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_terminal_session(session_id).await,
-        }
-    }
-
-    async fn list_terminal_sessions(
+    async fn list_sessions(
         &self,
         wave_id: Option<&LfdId>,
-        statuses: Option<&[TerminalSessionStatus]>,
-    ) -> StoreResult<Vec<TerminalSession>> {
+        statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.cloned();
                 let statuses = statuses.map(|values| values.to_vec());
                 run_sqlite(store, move |store| {
-                    store.list_terminal_sessions(wave_id.as_ref(), statuses.as_deref())
+                    store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
                 })
                 .await
             }
-            StoreBackend::Postgres(store) => store.list_terminal_sessions(wave_id, statuses).await,
+            StoreBackend::Postgres(store) => store.list_control_sessions(wave_id, statuses).await,
         }
     }
 
-    async fn get_active_terminal_session_for_wave_run(
-        &self,
-        wave_run_id: &LfdId,
-    ) -> StoreResult<Option<TerminalSession>> {
+    async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.clone();
+                let run_id = run_id.clone();
                 run_sqlite(store, move |store| {
-                    store.get_active_terminal_session_for_wave_run(&wave_run_id)
+                    store.get_active_control_session_for_run(&run_id)
                 })
                 .await
             }
-            StoreBackend::Postgres(store) => {
-                store
-                    .get_active_terminal_session_for_wave_run(wave_run_id)
-                    .await
-            }
+            StoreBackend::Postgres(store) => store.get_active_control_session_for_run(run_id).await,
         }
     }
 
-    async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+    async fn update_session(&self, session: &Session) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let session = session.clone();
-                run_sqlite(store, move |store| store.update_terminal_session(&session)).await
+                run_sqlite(store, move |store| store.update_control_session(&session)).await
             }
-            StoreBackend::Postgres(store) => store.update_terminal_session(session).await,
+            StoreBackend::Postgres(store) => store.update_control_session(session).await,
         }
     }
 }
@@ -2301,15 +2309,13 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
+    use crate::lfd::conversations::types::{Conversation, ConversationConfig, ConversationStatus};
     use crate::lfd::id::LfdId;
-    use crate::lfd::sessions::types::{
-        Session as SessionRecord, SessionConfig as SessionRecordConfig, SessionStatus,
-    };
     use crate::lfd::types::{
-        AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Summary,
-        Trigger, Wave, WaveCron, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus,
-        WaveRunStatus, WaveStatus,
+        ChatMemoryBlock, ExecutionProcess, ExecutionProcessStatus, LivePrState,
+        LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
+        RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave, WaveCron,
+        WaveMode, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -2335,17 +2341,15 @@ mod tests {
         }
     }
 
-    fn make_run(wave: &Wave, status: WaveRunStatus) -> WaveRun {
-        WaveRun {
+    fn make_run(wave: &Wave, status: RunStatus) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo().clone(),
-                flow: wave.primary_flow().clone(),
-                task: None,
-                direction: wave.direction().clone(),
-                area: wave.area().clone(),
-            },
+            repo: wave.repo().clone(),
+            flow: wave.primary_flow().clone(),
+            task: None,
+            direction: wave.direction().clone(),
+            area: wave.area().clone(),
             iteration: 0,
             step_index: 0,
             status,
@@ -2361,7 +2365,7 @@ mod tests {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: wave.id().to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -2532,17 +2536,17 @@ mod tests {
         assert_eq!(triggers.len(), 1);
         assert_eq!(triggers[0].source_wave_id.as_ref(), Some(source_wave.id()));
 
-        let run = make_run(&wave, WaveRunStatus::Running);
-        store.create_wave_run(&run).await.expect("create wave run");
+        let run = make_run(&wave, RunStatus::Running);
+        store.create_run(&run).await.expect("create wave run");
         assert!(store
-            .get_active_wave_run(wave.id())
+            .get_active_run(wave.id())
             .await
             .expect("get active")
             .is_some());
 
         let fork_run = ForkRun {
             id: LfdId::new(),
-            wave_run_id: run.id.clone(),
+            run_id: run.id.clone(),
             step_index: 0,
             branch_index: 0,
             status: ForkRunStatus::Pending,
@@ -2561,9 +2565,9 @@ mod tests {
             1
         );
         let mut failed_run = run.clone();
-        failed_run.status = WaveRunStatus::Failed;
+        failed_run.status = RunStatus::Failed;
         store
-            .update_wave_run(&failed_run)
+            .update_run(&failed_run)
             .await
             .expect("update run to failed");
         let orphaned = store
@@ -2571,23 +2575,20 @@ mod tests {
             .await
             .expect("list orphaned fork runs");
         assert_eq!(orphaned.len(), 1);
-        store
-            .update_wave_run(&run)
-            .await
-            .expect("restore run status");
+        store.update_run(&run).await.expect("restore run status");
         let deleted_forks = store
             .delete_fork_runs(&run.id, 0)
             .await
             .expect("delete fork runs");
         assert_eq!(deleted_forks, 1);
 
-        let agent_run = AgentRun {
+        let execution_run = ExecutionProcess {
             id: LfdId::new(),
             step: "plan".to_string(),
             repo: "/repo".to_string(),
             worktree: "/repo".to_string(),
-            wave_run_id: Some(run.id.clone()),
-            status: AgentStatus::Waiting,
+            run_id: Some(run.id.clone()),
+            status: ExecutionProcessStatus::Waiting,
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: None,
             pid: None,
@@ -2595,7 +2596,10 @@ mod tests {
             agent: "claude-code".to_string(),
             run_mode: "auto".to_string(),
         };
-        store.start_agent(&agent_run).await.expect("start agent");
+        store
+            .start_agent(&execution_run)
+            .await
+            .expect("start agent");
         assert!(store
             .get_waiting_agent_for_wave(wave.id())
             .await
@@ -2712,14 +2716,14 @@ mod tests {
             .expect("get deleted wave")
             .is_none());
 
-        // Session CRUD
-        let session = SessionRecord {
+        // Conversation CRUD
+        let conversation = Conversation {
             id: LfdId::new(),
             harness: "claude".to_string(),
-            status: SessionStatus::Active,
-            wave_run_id: None,
+            status: ConversationStatus::Active,
+            run_id: None,
             provider_session_id: None,
-            config: SessionRecordConfig {
+            config: ConversationConfig {
                 step: "design".to_string(),
                 repo_root: "/tmp/repo".to_string(),
                 ..Default::default()
@@ -2728,43 +2732,43 @@ mod tests {
             ended_at: None,
         };
         store
-            .create_session(&session)
+            .create_conversation(&conversation)
             .await
-            .expect("create session");
-        let loaded_session = store
-            .get_session(&session.id)
+            .expect("create conversation");
+        let loaded = store
+            .get_conversation(&conversation.id)
             .await
-            .expect("get session")
-            .expect("session exists");
-        assert_eq!(loaded_session.harness, "claude");
-        assert_eq!(loaded_session.status, SessionStatus::Active);
+            .expect("get conversation")
+            .expect("conversation exists");
+        assert_eq!(loaded.harness, "claude");
+        assert_eq!(loaded.status, ConversationStatus::Active);
 
         store
-            .update_session_status(
-                &session.id,
-                SessionStatus::Ended,
+            .update_conversation_status(
+                &conversation.id,
+                ConversationStatus::Ended,
                 Some(OffsetDateTime::now_utc().unix_timestamp()),
             )
             .await
-            .expect("update session status");
-        let ended_session = store
-            .get_session(&session.id)
+            .expect("update conversation status");
+        let ended = store
+            .get_conversation(&conversation.id)
             .await
-            .expect("get ended session")
-            .expect("session exists");
-        assert_eq!(ended_session.status, SessionStatus::Ended);
-        assert!(ended_session.ended_at.is_some());
+            .expect("get ended conversation")
+            .expect("conversation exists");
+        assert_eq!(ended.status, ConversationStatus::Ended);
+        assert!(ended.ended_at.is_some());
 
-        let active_sessions = store
-            .list_sessions_by_statuses(&[SessionStatus::Active])
+        let active = store
+            .list_conversations_by_statuses(&[ConversationStatus::Active])
             .await
-            .expect("list active sessions");
-        assert!(active_sessions.is_empty());
-        let ended_sessions = store
-            .list_sessions_by_statuses(&[SessionStatus::Ended])
+            .expect("list active conversations");
+        assert!(active.is_empty());
+        let ended = store
+            .list_conversations_by_statuses(&[ConversationStatus::Ended])
             .await
-            .expect("list ended sessions");
-        assert_eq!(ended_sessions.len(), 1);
+            .expect("list ended conversations");
+        assert_eq!(ended.len(), 1);
     }
 
     #[tokio::test]
@@ -2798,11 +2802,8 @@ mod tests {
         let mut running_wave = make_wave("/repo-stuck-running");
         running_wave.status = WaveStatus::Running;
         store.create_wave(&running_wave).await.expect("create wave");
-        let mut running_run = make_run(&running_wave, WaveRunStatus::Running);
-        store
-            .create_wave_run(&running_run)
-            .await
-            .expect("create run");
+        let mut running_run = make_run(&running_wave, RunStatus::Running);
+        store.create_run(&running_run).await.expect("create run");
 
         // Wave that was at an interactive waitpoint.
         let mut waiting_wave = make_wave("/repo-stuck-waiting");
@@ -2811,9 +2812,9 @@ mod tests {
             .create_wave(&waiting_wave)
             .await
             .expect("create waiting wave");
-        let mut waiting_run = make_run(&waiting_wave, WaveRunStatus::Waiting);
+        let mut waiting_run = make_run(&waiting_wave, RunStatus::Waiting);
         store
-            .create_wave_run(&waiting_run)
+            .create_run(&waiting_run)
             .await
             .expect("create waiting run");
 
@@ -2828,17 +2829,17 @@ mod tests {
         let _ = store.fail_orphaned_runs().await.expect("fail orphans");
 
         running_run = store
-            .get_wave_run(&running_run.id)
+            .get_run(&running_run.id)
             .await
             .expect("get run")
             .expect("run exists");
-        assert_eq!(running_run.status, WaveRunStatus::Failed);
+        assert_eq!(running_run.status, RunStatus::Failed);
         waiting_run = store
-            .get_wave_run(&waiting_run.id)
+            .get_run(&waiting_run.id)
             .await
             .expect("get waiting run")
             .expect("run exists");
-        assert_eq!(waiting_run.status, WaveRunStatus::Failed);
+        assert_eq!(waiting_run.status, RunStatus::Failed);
 
         let running_after = store
             .get_wave(running_wave.id())
@@ -3080,44 +3081,38 @@ mod tests {
         let wave = make_wave("/repo-active");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Running);
-        store
-            .create_wave_run(&run)
-            .await
-            .expect("create running run");
+        let mut run = make_run(&wave, RunStatus::Running);
+        store.create_run(&run).await.expect("create running run");
         assert!(store
-            .get_active_wave_run(wave.id())
+            .get_active_run(wave.id())
             .await
             .expect("active run")
             .is_some());
 
-        run.status = WaveRunStatus::Failed;
+        run.status = RunStatus::Failed;
         run.error = Some("failed".to_string());
         run.ended_at = Some(OffsetDateTime::now_utc());
-        store.update_wave_run(&run).await.expect("update run");
+        store.update_run(&run).await.expect("update run");
         assert!(store
-            .get_active_wave_run(wave.id())
+            .get_active_run(wave.id())
             .await
             .expect("active after fail")
             .is_none());
         assert_eq!(
             store
-                .get_latest_wave_run(wave.id())
+                .get_latest_run(wave.id())
                 .await
                 .expect("latest run")
                 .expect("run exists")
                 .status,
-            WaveRunStatus::Failed
+            RunStatus::Failed
         );
 
-        let mut ci_fix = make_run(&wave, WaveRunStatus::Running);
-        ci_fix.snapshot.flow = "ci-fix".to_string();
-        store
-            .create_wave_run(&ci_fix)
-            .await
-            .expect("create ci-fix run");
+        let mut ci_fix = make_run(&wave, RunStatus::Running);
+        ci_fix.flow = "ci-fix".to_string();
+        store.create_run(&ci_fix).await.expect("create ci-fix run");
         assert!(store
-            .get_active_wave_run(wave.id())
+            .get_active_run(wave.id())
             .await
             .expect("active with ci-fix")
             .is_some());
@@ -3137,19 +3132,17 @@ mod tests {
         let make_run =
             |iteration: u32, parent_run_id: Option<LfdId>, parent_pr_number: Option<u32>| {
                 let pr_number = 100 + iteration;
-                WaveRun {
+                Run {
                     id: LfdId::new(),
                     wave_id: wave.id().clone(),
-                    snapshot: WaveRunSnapshot {
-                        repo: wave.repo().clone(),
-                        flow: wave.primary_flow().clone(),
-                        task: None,
-                        direction: wave.direction().clone(),
-                        area: wave.area().clone(),
-                    },
+                    repo: wave.repo().clone(),
+                    flow: wave.primary_flow().clone(),
+                    task: None,
+                    direction: wave.direction().clone(),
+                    area: wave.area().clone(),
                     iteration,
                     step_index: 0,
-                    status: WaveRunStatus::Completed,
+                    status: RunStatus::Completed,
                     worktree: format!("/repo/live-pr/{iteration}"),
                     branch: format!("feature-{pr_number}"),
                     started_at: Some(OffsetDateTime::now_utc()),
@@ -3162,7 +3155,7 @@ mod tests {
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),
                     stack_group_id: wave.id().to_string(),
-                    stack_status: WaveRunStackStatus::Active,
+                    stack_status: RunStackStatus::Active,
                     lineage_inferred: false,
                     target_branch: "main".to_string(),
                     repair_of: None,
@@ -3191,10 +3184,10 @@ mod tests {
             };
 
         let run1 = make_run(1, None, None);
-        store.create_wave_run(&run1).await.expect("create run1");
+        store.create_run(&run1).await.expect("create run1");
 
         let run2 = make_run(2, Some(run1.id.clone()), Some(101));
-        store.create_wave_run(&run2).await.expect("create run2");
+        store.create_run(&run2).await.expect("create run2");
 
         let first_pending = store
             .find_next_unmerged_run(wave.id())
@@ -3240,7 +3233,7 @@ mod tests {
         let wave = make_wave("/repo-queue");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Completed);
+        let mut run = make_run(&wave, RunStatus::Completed);
         run.pr = Some(PullRequest {
             url: "https://example.test/pr/42".to_string(),
             number: Some(42),
@@ -3249,7 +3242,7 @@ mod tests {
             branch: Some("feature-42".to_string()),
         });
         run.parent_pr_number = Some(42);
-        store.create_wave_run(&run).await.expect("create run");
+        store.create_run(&run).await.expect("create run");
 
         let block = QueueBlock {
             wave_id: wave.id().clone(),

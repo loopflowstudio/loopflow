@@ -272,15 +272,6 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
-    /// Spawn a monitorable subagent as its own attachable tmux session
-    Dispatch {
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-        #[arg(short = 'f', long = "flow")]
-        flow: String,
-        #[arg(short = 't', long = "task")]
-        task: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]

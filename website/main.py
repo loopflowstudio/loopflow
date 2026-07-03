@@ -308,19 +308,27 @@ curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 ## Commands
 lf <step>           Run a step (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
-lf ops pr           Create PR from current branch
-lf ops wt create X  Create worktree for feature X
+lf op pr            Create PR from current branch
+lf op wt create X   Create worktree for feature X
+lfq wave run X      Start (or attach to) wave X's agent
+lfq worker run X --flow build --task "..."   Dispatch a PR-producing worker
+lfq sessions        List live sessions (lfq attach <id> to jump in)
 lfq list            List waves
 
 ## Core Concepts
-Wave: area × direction × flow × stimulus. The persistent unit of work.
-Memory: wave/*/MEMORY.md — observations that persist across runs.
-Stimulus: once, loop, watch, cron, or listen (chords).
+Wave: a named agent with a goal. Authored as wave/<name>/GOAL.md (intent + loop
+  prompt) and wave/<name>/MEMORY.md (durable memory the agent writes).
+Wave agent: coordinates — reads roadmap and memory, decides the next move,
+  dispatches workers, folds results back into memory. Rarely writes code itself.
+Worker: a scoped agent a wave dispatches to run a flow and open a PR; inherits
+  the wave's GOAL.md and MEMORY.md.
+Step: a prompt that runs a coding agent. Flow: a sequence of steps.
 Direction: composable quality definitions that shape agent judgment.
+Roadmap: the wave's work queue, provider-backed (e.g. Asana).
 
 ## Docs
 /docs              Overview and quick start
-/docs/waves        Waves (autonomous work, memory, stimuli)
+/docs/waves        Waves (goal agents, memory, workers)
 /docs/lf           lf command reference
 /docs/lfop         lf op command reference
 /docs/lfd          lfd (daemon) reference

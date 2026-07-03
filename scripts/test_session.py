@@ -20,7 +20,7 @@ from pathlib import Path
 
 from loopflow.client import Client
 from loopflow.errors import LoopflowError
-from loopflow.models import SessionEventEnvelope
+from loopflow.models import ConversationEventEnvelope
 
 REPO_ROOT = Path(__file__).parent.parent
 LFD_BIN = REPO_ROOT / "target" / "debug" / "lfd"
@@ -156,10 +156,10 @@ def read_session_events(
     timeout_s: float = 30,
     max_events: int = 100,
     stop_on_turn_completed: bool = False,
-) -> list[SessionEventEnvelope]:
-    events: list[SessionEventEnvelope] = []
+) -> list[ConversationEventEnvelope]:
+    events: list[ConversationEventEnvelope] = []
     try:
-        for event in client.stream_session_events(
+        for event in client.stream_conversation_events(
             session_id,
             after_seq=after_seq,
             timeout=timeout_s,
@@ -219,7 +219,7 @@ def test_session_lifecycle(client: Client) -> bool:
     # Send input
     log("  send input...")
     try:
-        client.send_session_input(session.id, "Say hello in exactly one sentence.")
+        client.send_conversation_input(session.id, "Say hello in exactly one sentence.")
         log("    ok")
     except LoopflowError as err:
         log(f"    FAIL: {err}")
@@ -278,7 +278,7 @@ def test_reconnect_replay(client: Client) -> bool:
         return False
 
     try:
-        client.send_session_input(session.id, "Say exactly: pong")
+        client.send_conversation_input(session.id, "Say exactly: pong")
     except LoopflowError as err:
         log(f"    FAIL send: {err}")
         return False

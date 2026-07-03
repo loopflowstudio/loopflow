@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
-use crate::lfd::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
+use crate::lfd::http::dto::{run_dto, ListResponse, RunDto};
 use crate::lfd::http::routes::{build_wave_queue_views, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, ApiResult};
@@ -17,7 +17,7 @@ use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key};
 use crate::lfd::output::OutputEvent;
 
 #[derive(Deserialize, Default)]
-pub struct ListWaveRunsQuery {
+pub struct ListRunsQuery {
     wave_id: Option<String>,
     repo: Option<String>,
     limit: Option<u32>,
@@ -33,20 +33,20 @@ enum RunOrder {
     OldestFirst,
 }
 
-pub async fn list_wave_runs_handler(
+pub async fn list_runs_handler(
     State(state): State<HttpState>,
-    Query(query): Query<ListWaveRunsQuery>,
-) -> ApiResult<ListResponse<WaveRunDto>> {
-    list_wave_runs(&state, None, query).await
+    Query(query): Query<ListRunsQuery>,
+) -> ApiResult<ListResponse<RunDto>> {
+    list_runs(&state, None, query).await
 }
 
-pub async fn list_wave_runs_for_wave_handler(
+pub async fn list_runs_for_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-    Query(query): Query<ListWaveRunsQuery>,
-) -> ApiResult<ListResponse<WaveRunDto>> {
+    Query(query): Query<ListRunsQuery>,
+) -> ApiResult<ListResponse<RunDto>> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    list_wave_runs(&state, Some(wave_id), query).await
+    list_runs(&state, Some(wave_id), query).await
 }
 
 /// Replay + follow: sends persisted output from the log file, then
@@ -67,7 +67,7 @@ pub async fn wave_logs_handler(
     // Find the most recent run for this wave (active or completed).
     let store = state.store.clone();
     let latest_run = store
-        .list_wave_runs(Some(&wave_id), Some(1))
+        .list_runs(Some(&wave_id), Some(1))
         .await
         .map_err(map_store_error)?
         .into_iter()
@@ -104,7 +104,7 @@ pub async fn wave_logs_handler(
 
         while let Some(event) = stream.next().await {
             let Ok(OutputEvent {
-                wave_run_id,
+                run_id,
                 agent_id: _,
                 wave_id: event_wave_id,
                 text,
@@ -116,16 +116,16 @@ pub async fn wave_logs_handler(
             // Filter: only include output for runs belonging to this wave.
             let include = if event_wave_id == wave_id_str {
                 true
-            } else if let Some(hit) = cache.get(&wave_run_id) {
+            } else if let Some(hit) = cache.get(&run_id) {
                 *hit
             } else {
-                let run_id = LfdId::from_raw(wave_run_id.clone());
-                let result = store.get_wave_run(&run_id).await;
+                let run_id = LfdId::from_raw(run_id.clone());
+                let result = store.get_run(&run_id).await;
                 let matches = match result {
                     Ok(Some(run)) => run.wave_id == wave_id,
                     _ => false,
                 };
-                cache.insert(wave_run_id.clone(), matches);
+                cache.insert(run_id.to_string(), matches);
                 matches
             };
 
@@ -155,11 +155,11 @@ pub async fn wave_logs_handler(
     Ok(response)
 }
 
-async fn list_wave_runs(
+async fn list_runs(
     state: &HttpState,
     path_wave_id: Option<LfdId>,
-    query: ListWaveRunsQuery,
-) -> ApiResult<ListResponse<WaveRunDto>> {
+    query: ListRunsQuery,
+) -> ApiResult<ListResponse<RunDto>> {
     let query_wave_id = match query.wave_id.as_deref() {
         Some(id) => Some(resolve_wave_id(state, id).await?),
         None => None,
@@ -184,14 +184,14 @@ async fn list_wave_runs(
         } else {
             state
                 .store
-                .list_wave_runs(Some(wave_id), None)
+                .list_runs(Some(wave_id), None)
                 .await
                 .map_err(map_store_error)?
         }
     } else {
         state
             .store
-            .list_wave_runs(None, None)
+            .list_runs(None, None)
             .await
             .map_err(map_store_error)?
     };
@@ -202,7 +202,7 @@ async fn list_wave_runs(
     }
 
     if let Some(repo) = query.repo.as_deref() {
-        filtered.retain(|run| run.snapshot.repo == repo);
+        filtered.retain(|run| run.repo == repo);
     }
 
     let (runs, has_more) = super::paginate(
@@ -241,7 +241,7 @@ async fn list_wave_runs(
             let live_pr_state = snapshot.state_for_run(&run);
             let pr_state_stale = snapshot.stale_for_run(&run);
             let queue_view = queue_views.as_ref().and_then(|views| views.get(&run.id));
-            data.push(wave_run_dto(run, live_pr_state, pr_state_stale, queue_view));
+            data.push(run_dto(run, live_pr_state, pr_state_stale, queue_view));
             continue;
         }
 
@@ -256,12 +256,7 @@ async fn list_wave_runs(
             pr_state_stale = live_pr_state.is_none();
         }
 
-        data.push(wave_run_dto(
-            run,
-            live_pr_state.as_ref(),
-            pr_state_stale,
-            None,
-        ));
+        data.push(run_dto(run, live_pr_state.as_ref(), pr_state_stale, None));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))

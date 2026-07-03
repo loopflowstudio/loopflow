@@ -16,19 +16,23 @@ form: a prompt run in a loop. It becomes the third prompt primitive — step (ru
 once), flow (composed), **goal (looped)** — and the product developer's primary
 authoring surface. Everything else in this wave speaks it, so it's first.
 
+**Partial progress:** the durable `Wave` type now carries a required
+`goal: String` field defaulting to `ship-roadmap` (alongside `primary_flow`).
+The field is in place; what's missing is the *resolver* and the *loop body*.
+
 ## What to shape
 
 - A goal primitive resolved from `<repo>/.lf/goals/`, `~/.lf/goals/`, then
-  builtins. Singular `.lf/goal/` and repo-root `goal/` are not accepted.
-- A required `goal: String` reference on the wave, defaulting to
-  `ship-roadmap`; patch/update payloads may still use optional `goal` to mean
-  "leave unchanged."
+  builtins. Singular `.lf/goal/` and repo-root `goal/` are not accepted. No
+  `.lf/goals/` resolver exists yet.
+- Keep the `goal: String` field on the wave (done); patch/update payloads may
+  still use optional `goal` to mean "leave unchanged."
 - The loop body reads `wave.goal`, renders it, and runs it — replacing the
   hard-wired `ship-roadmap`. The render context must expose available flows and
   a roadmap handle (the seam Asana plugs into later), so the goal prompt can
-  "decide next move → dispatch a flow as inner work."
-
-Full design doc for this item: `scratch/jack-heart.wave-looping-agents.md`.
+  "decide next move → dispatch a flow as inner work." With the Wave/Run/Session
+  reduction landed, "dispatch a flow as inner work" now means `lfq worker run`
+  (a worker `Session` + linked `Run`), not the old `/dispatch` route.
 
 ## Done when
 

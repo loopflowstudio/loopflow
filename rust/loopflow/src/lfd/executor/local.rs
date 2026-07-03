@@ -12,9 +12,9 @@ use crate::engine::platform::kill_process;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{AgentStatus, Wave};
+use crate::lfd::types::{ExecutionProcessStatus, Wave};
 
-use super::{read_stream, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
+use super::{read_stream, AgentExecutor, ExecutionContext, OutputContext, StartupRecovery};
 
 pub struct LocalProcessExecutor {
     store: SharedStore,
@@ -40,7 +40,7 @@ impl LocalProcessExecutor {
 
 #[async_trait]
 impl AgentExecutor for LocalProcessExecutor {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: ExecutionContext) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
@@ -80,7 +80,7 @@ impl AgentExecutor for LocalProcessExecutor {
                 .store
                 .update_agent_status(
                     &agent_lfd_id,
-                    AgentStatus::Running.as_i32(),
+                    ExecutionProcessStatus::Running.as_i32(),
                     Some(pid),
                     None,
                 )
@@ -175,10 +175,10 @@ mod tests {
             .run(
                 vec!["sh".to_string(), "-c".to_string(), "sleep 1".to_string()],
                 tmp.path(),
-                AgentRunContext {
+                ExecutionContext {
                     wave_id: "wave-timeout".to_string(),
                     agent_id: "agent-timeout".to_string(),
-                    wave_run_id: "run-timeout".to_string(),
+                    run_id: "run-timeout".to_string(),
                     branch: None,
                     output,
                     output_prefix: None,

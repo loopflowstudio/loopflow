@@ -52,8 +52,8 @@ const ALL_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/009_wave_queue_state.sql"),
     },
     Migration {
-        version: "010_sessions",
-        sql: include_str!("migrations/010_sessions.sql"),
+        version: "010_conversations",
+        sql: include_str!("migrations/010_conversations.sql"),
     },
     Migration {
         version: "011_chords_data_model",
@@ -66,10 +66,6 @@ const ALL_MIGRATIONS: &[Migration] = &[
     Migration {
         version: "013_remove_chord_tree",
         sql: include_str!("migrations/013_remove_chord_tree.sql"),
-    },
-    Migration {
-        version: "014_rename_provider_to_harness",
-        sql: include_str!("migrations/014_rename_provider_to_harness.sql"),
     },
     Migration {
         version: "015_activation_orchestration",
@@ -147,7 +143,7 @@ const ALL_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/031_secrets_provider.sql"),
     },
     Migration {
-        version: "032_terminal_sessions",
+        version: "032_sessions",
         sql: include_str!("migrations/032_terminal_sessions.sql"),
     },
     Migration {
@@ -159,7 +155,7 @@ const ALL_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/034_wave_run_execution_cursor.sql"),
     },
     Migration {
-        version: "035_terminal_session_tmux_name",
+        version: "035_session_tmux_name",
         sql: include_str!("migrations/035_terminal_session_tmux_name.sql"),
     },
     Migration {
@@ -177,6 +173,14 @@ const ALL_MIGRATIONS: &[Migration] = &[
     Migration {
         version: "039_wave_run_snapshot_task",
         sql: include_str!("migrations/039_wave_run_snapshot_task.sql"),
+    },
+    Migration {
+        version: "040_session_use",
+        sql: include_str!("migrations/040_terminal_session_use.sql"),
+    },
+    Migration {
+        version: "041_session_parent",
+        sql: include_str!("migrations/041_terminal_session_parent.sql"),
     },
 ];
 
@@ -386,7 +390,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for expected in ["waves", "sessions", "repos", "triggers", "wave_runs"] {
+        for expected in ["waves", "conversations", "repos", "triggers", "runs"] {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"

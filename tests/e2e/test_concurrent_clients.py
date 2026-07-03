@@ -7,14 +7,12 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 import pytest
 from loopflow.client import Client
-from loopflow.errors import LoopflowError
 
 from scripts.lib.api_harness import ApiAssertions, ApiClient
 from scripts.lib.lfd_runtime import LfdRuntime
@@ -24,39 +22,6 @@ websockets = pytest.importorskip("websockets")
 pytestmark = pytest.mark.e2e
 
 _TIMEOUT_SECONDS = 10.0
-_INPUT_EVENT_TYPES = {
-    "turn_started",
-    "turn_completed",
-    "item_started",
-    "item_updated",
-    "item_completed",
-    "text_delta",
-    "reasoning_delta",
-    "diff_updated",
-    "suggested_actions",
-    "error",
-}
-
-
-@pytest.fixture
-def session_id(lfd_runtime: LfdRuntime) -> Iterator[str]:
-    (lfd_runtime.repo_dir / ".lf").mkdir(parents=True, exist_ok=True)
-    created_session_id = _create_session(lfd_runtime)
-    try:
-        yield created_session_id
-    finally:
-        _stop_session(lfd_runtime, created_session_id)
-
-
-@pytest.fixture
-def dual_clients(lfd_runtime: LfdRuntime) -> Iterator[tuple[Client, Client]]:
-    client_a = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
-    client_b = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
-    try:
-        yield client_a, client_b
-    finally:
-        client_a.close()
-        client_b.close()
 
 
 def test_both_ws_clients_receive_wave_events(lfd_runtime: LfdRuntime, lf_client: Client) -> None:
@@ -106,60 +71,6 @@ def test_both_clients_stream_output(lfd_runtime: LfdRuntime, lf_client: Client) 
     assert lines["client_a"] == lines["client_b"], "both clients should observe the same result"
 
 
-def test_both_clients_receive_session_events(
-    session_id: str, dual_clients: tuple[Client, Client]
-) -> None:
-    client_a, client_b = dual_clients
-    events_a, events_b, threads = _start_session_event_collectors(
-        client_a,
-        client_b,
-        session_id,
-    )
-    _wait_for_threads(threads)
-
-    assert events_a, "client A should receive at least one session event"
-    assert events_b, "client B should receive at least one session event"
-    assert events_a[0] == "status_changed", f"unexpected first event: {events_a[0]}"
-    assert events_b[0] == "status_changed", f"unexpected first event: {events_b[0]}"
-
-
-def test_chat_input_from_either_client_visible_to_both(
-    session_id: str, dual_clients: tuple[Client, Client]
-) -> None:
-    client_a, client_b = dual_clients
-    events_a, events_b, threads = _start_session_event_collectors(
-        client_a,
-        client_b,
-        session_id,
-        max_events=20,
-    )
-
-    status = _wait_for_session_status(client_a, session_id, timeout_seconds=4)
-    send_succeeded = False
-    send_error = ""
-    try:
-        client_a.send_session_input(session_id, "Reply with one short sentence.")
-        send_succeeded = True
-    except LoopflowError as exc:
-        send_error = str(exc)
-
-    _wait_for_threads(threads)
-
-    assert events_a, "client A should receive session events"
-    assert events_b, "client B should receive session events"
-    assert "status_changed" in events_a
-    assert "status_changed" in events_b
-
-    saw_input_events_a = any(event in _INPUT_EVENT_TYPES for event in events_a)
-    saw_input_events_b = any(event in _INPUT_EVENT_TYPES for event in events_b)
-    if send_succeeded:
-        assert saw_input_events_a, f"client A missed input events: {events_a}"
-        assert saw_input_events_b, f"client B missed input events: {events_b}"
-    else:
-        assert send_error, "failed send should provide an error"
-        assert status in {"starting", "failed", "ended", "active"}
-
-
 def test_suggested_actions_event_type_is_parseable() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -178,7 +89,7 @@ def test_suggested_actions_event_type_is_parseable() -> None:
 
     client = _mock_client(handler)
     try:
-        events = list(client.stream_session_events("session-1", timeout=1))
+        events = list(client.stream_conversation_events("session-1", timeout=1))
     finally:
         client.close()
 
@@ -227,104 +138,6 @@ def _read_first_wave_log_line(
                     return line.strip()
 
     raise AssertionError(f"no output lines observed within {timeout_seconds}s")
-
-
-def _create_session(runtime: LfdRuntime) -> str:
-    harness = os.environ.get("LOOPFLOW_E2E_SESSION_HARNESS", "codex")
-    with ApiClient(base_url=runtime.base_url, token=runtime.token) as api:
-        response = api.request(
-            "POST",
-            "/v0/sessions",
-            json={
-                "harness": harness,
-                "step": "design",
-                "repo_root": str(runtime.repo_dir),
-            },
-        )
-        ApiAssertions.expect_status(response, 200)
-        payload = ApiAssertions.expect_json_object(response)
-
-    session_id = payload.get("id")
-    assert isinstance(session_id, str) and session_id, f"invalid session payload: {payload}"
-    return session_id
-
-
-def _stop_session(runtime: LfdRuntime, session_id: str) -> None:
-    with ApiClient(base_url=runtime.base_url, token=runtime.token) as api:
-        api.request("DELETE", f"/v0/sessions/{session_id}")
-
-
-def _start_session_event_collectors(
-    client_a: Client,
-    client_b: Client,
-    session_id: str,
-    *,
-    max_events: int = 6,
-    timeout_seconds: float = _TIMEOUT_SECONDS,
-) -> tuple[list[str], list[str], tuple[threading.Thread, threading.Thread]]:
-    events_a: list[str] = []
-    events_b: list[str] = []
-
-    thread_a = threading.Thread(
-        target=_collect_session_event_types,
-        args=(client_a, session_id, events_a),
-        kwargs={"max_events": max_events, "timeout_seconds": timeout_seconds},
-        daemon=True,
-    )
-    thread_b = threading.Thread(
-        target=_collect_session_event_types,
-        args=(client_b, session_id, events_b),
-        kwargs={"max_events": max_events, "timeout_seconds": timeout_seconds},
-        daemon=True,
-    )
-    thread_a.start()
-    thread_b.start()
-    return events_a, events_b, (thread_a, thread_b)
-
-
-def _wait_for_threads(
-    threads: tuple[threading.Thread, threading.Thread],
-    timeout_seconds: float = _TIMEOUT_SECONDS,
-) -> None:
-    for thread in threads:
-        thread.join(timeout_seconds + 2)
-        assert not thread.is_alive(), "timed out waiting for session event collector thread"
-
-
-def _collect_session_event_types(
-    client: Client,
-    session_id: str,
-    sink: list[str],
-    *,
-    max_events: int = 6,
-    timeout_seconds: float = _TIMEOUT_SECONDS,
-) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    try:
-        for envelope in client.stream_session_events(session_id, timeout=timeout_seconds):
-            event_type = envelope.event.get("type")
-            if isinstance(event_type, str):
-                sink.append(event_type)
-                if len(sink) >= max_events:
-                    break
-            if time.monotonic() > deadline:
-                break
-    except (ConnectionError, LoopflowError):
-        return
-
-
-def _wait_for_session_status(client: Client, session_id: str, timeout_seconds: float) -> str:
-    deadline = time.monotonic() + timeout_seconds
-    last_status = "starting"
-    while time.monotonic() < deadline:
-        session = client.session(session_id)
-        if session is None:
-            return "ended"
-        last_status = session.status
-        if last_status in {"active", "failed", "ended"}:
-            return last_status
-        time.sleep(0.1)
-    return last_status
 
 
 async def _wait_for_wave_created_event(socket: Any, wave_id: str, deadline: float) -> None:

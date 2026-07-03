@@ -1,38 +1,6 @@
 # Loopflow Website Content
 # Edit copy here—no need to touch main.py
 
-vocab:
-  essences:
-    Area: "Context and scope"
-    Direction: "Definition of success and quality"
-    Flow: "Sequence of steps"
-    Stimulus: "Loop, watch, listen, or schedule"
-
-  details:
-    Area:
-      - label: "Pathset"
-        value: "Focuses the wave on part of the codebase"
-      - label: "Auto-includes"
-        value: "README, STYLE, CLAUDE.md, scratch/, roadmap/"
-
-    Direction:
-      - label: "Shapes judgment"
-        value: "Defines intent, aesthetics, and what done looks like"
-      - label: "Composable"
-        value: "Stack multiple: product-engineer + designer"
-
-    Flow:
-      - label: "Pipelines"
-        value: "design → implement → test → polish"
-      - label: "Forks"
-        value: "Run a step in parallel with different directions, then synthesize"
-
-    Stimulus:
-      - label: "Modes"
-        value: "Once, loop, watch, cron, or listen"
-      - label: "Progression"
-        value: "Start manual, graduate to autonomous"
-
 homepage:
   hero:
     tagline: "Coding agents that work in a team and build over time."
@@ -51,36 +19,35 @@ homepage:
   capabilities:
     heading: "Built for teams of agents, not one-shot chats."
     items:
-      - title: "Persistent context across runs"
-        description: "Waves carry memory, repo docs, and prior decisions forward — agents build on what came before."
+      - title: "Persistent memory across runs"
+        description: "Each wave keeps a memory its agent writes as it works — so it builds on what it learned, not just what you typed."
       - title: "Prompt files you can diff"
-        description: "Steps, directions, and wave docs live in your repo, so prompt changes get reviewed like code."
-      - title: "Composable execution model"
-        description: "Mix area, direction, flow, and stimulus to shape behavior without rewriting everything."
-      - title: "Stimulus-driven automation"
-        description: "Run once, loop continuously, react to file changes, or trigger from schedules and events."
+        description: "Steps, directions, and goals live in your repo, so prompt changes get reviewed like code."
+      - title: "Delegation you can watch"
+        description: "A wave agent coordinates; it dispatches workers that each open a PR you can attach to, steer, or ship."
+      - title: "From manual to autonomous"
+        description: "Run a wave by hand, or let it loop — picking work, reacting to merges, firing on a schedule."
       - title: "Human control at shipping time"
         description: "Agents do the work; you decide whether to ship, iterate, or branch."
       - title: "Works across surfaces"
-        description: "Same wave can run in terminal, headless automation, and Concerto with context intact."
+        description: "The same wave runs in the terminal, headless automation, and Concerto with context intact."
 
   building_blocks:
     heading: "Building blocks"
     items:
       - label: "A wave"
-        filename: "wave/auth/README.md"
+        filename: "wave/auth/GOAL.md"
         content: |
-          ## Vision
-          Unify auth flows across web and desktop.
+          ---
+          primary_flow: build
+          metrics:
+            - one auth path across web and desktop
+            - auth startup under 200ms
+          ---
 
-          ## Goals
-          - Eliminate duplicate token validation
-          - Share session refresh logic
-          - Keep auth startup under 200ms
-
-          ## Risks
-          - Breaking daemon discovery
-          - Regressions in JWT expiry handling
+          Unify authentication. Each loop, pick the next gap — duplicate token
+          validation, session refresh, a slow startup path — dispatch a worker
+          to close it, and record what shipped in memory.
       - label: "A step"
         filename: ".lf/steps/implement.md"
         content: |
@@ -129,12 +96,10 @@ homepage:
         - "Authentication built in — WorkOS OAuth via Loopflow Studio"
       terminal_lines:
         - type: "command"
-          content: "lf design"
+          content: "lfq wave run billing"
         - type: "output"
-          content: "wave: billing"
+          content: "wave agent · reading GOAL.md + MEMORY.md"
         - type: "output"
-          content: "area: cadenza/server/"
+          content: "dispatch · worker: build \"generate invoices\""
         - type: "output"
-          content: "direction: craft"
-        - type: "output"
-          content: "writing scratch/billing.md"
+          content: "session billing-w3 · lfq attach billing-w3"

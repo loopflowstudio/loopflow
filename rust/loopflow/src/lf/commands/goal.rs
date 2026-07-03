@@ -13,14 +13,14 @@ use crate::engine::{
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::Cli;
 use crate::lfd::client::{authorize, blocking_client, resolve_base_url};
-use crate::lfd::http::dto::WaveRunDto;
+use crate::lfd::http::dto::RunDto;
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::ops::util::resolve_wave_name;
 
 const IN_FLIGHT_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Launch a wave's goal as a looping top-level agent (`operate` on, interactive
-/// surface). The agent dispatches real work via `lf op dispatch`.
+/// surface). The agent dispatches real work via `lfq worker run`.
 pub fn run(name: &str, once: bool, cli: &Cli) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or(repo_root);
@@ -123,7 +123,7 @@ fn fetch_in_flight_dispatches(wave: &str) -> Vec<InFlightDispatch> {
 
 #[derive(Debug, Deserialize)]
 struct RunsListResponse {
-    data: Vec<WaveRunDto>,
+    data: Vec<RunDto>,
 }
 
 fn is_active_run_status(status: &str) -> bool {

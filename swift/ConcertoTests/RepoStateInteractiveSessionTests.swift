@@ -58,28 +58,28 @@ struct RepoStateInteractiveSessionTests {
     }
 
     @Test("opening a terminal session focuses its wave and arms auto-present")
-    func openTerminalSessionFocusesWave() {
+    func openSessionFocusesWave() {
         let state = RepoState()
         state.waveStore.onStatusChange = nil
         let wave = makeWave(id: "wave-1", status: .running)
         state.waveStore.set(wave)
         state.terminalWorkspaceStore.upsert(makeSession(id: "session-1", waveId: wave.id))
 
-        state.openTerminalSession("session-1")
+        state.openSession("session-1")
 
         #expect(state.selectedWaveId == wave.id)
         #expect(state.consumeAutoPresentTerminal(for: wave.id))
     }
 
     @Test("selecting a terminal session focuses its wave without auto-present")
-    func selectTerminalSessionFocusesWaveWithoutAutoPresent() {
+    func selectSessionFocusesWaveWithoutAutoPresent() {
         let state = RepoState()
         state.waveStore.onStatusChange = nil
         let wave = makeWave(id: "wave-1", status: .running)
         state.waveStore.set(wave)
         state.terminalWorkspaceStore.upsert(makeSession(id: "session-1", waveId: wave.id))
 
-        state.selectTerminalSession("session-1")
+        state.selectSession("session-1")
 
         #expect(state.selectedWaveId == wave.id)
         #expect(state.consumeAutoPresentTerminal(for: wave.id) == false)
@@ -101,26 +101,35 @@ struct RepoStateInteractiveSessionTests {
         )
     }
 
-    private func makeSession(id: String, waveId: String) -> TerminalSession {
-        TerminalSession(
+    private func makeSession(id: String, waveId: String) -> Session {
+        Session(
             id: id,
             waveId: waveId,
+            runId: nil,
+            parentSessionId: nil,
+            sessionUse: .worker,
             step: "implement",
             agent: "claude",
             cwd: "/tmp/repo",
+            argv: [],
+            env: [:],
+            source: "wave_step",
             tmuxName: "lf-test-\(id)",
             status: .pending,
-            createdAt: .now
+            createdAt: .now,
+            attachedAt: nil,
+            startedAt: nil,
+            completedAt: nil
         )
     }
 
     // Covers the "click Ingest & build → terminal pane shows the live run"
-    // path: when lfd emits a TerminalSession for a new wave run, the wave's
+    // path: when lfd emits a Session for a new wave run, the wave's
     // terminal pane must be repointed at that session's tmux name and armed
     // for auto-present, so the user lands on the running flow instead of the
     // empty default `lf-<waveId>-<paneId>` pane.
     @Test("new run terminal session repoints the wave's terminal pane and arms auto-present")
-    func runTerminalSessionRepointsPaneAndArmsAutoPresent() {
+    func runSessionRepointsPaneAndArmsAutoPresent() {
         let state = RepoState()
         state.waveStore.onStatusChange = nil
         let wave = makeWave(id: "wave-for-run", status: .idle)
@@ -136,16 +145,24 @@ struct RepoStateInteractiveSessionTests {
         let paneId = seededPane?.id ?? ""
         #expect(seededPane?.config.terminalSessionId == nil)
 
-        let runSession = TerminalSession(
+        let runSession = Session(
             id: "ts-run-1",
             waveId: wave.id,
-            waveRunId: "run-1",
+            runId: "run-1",
+            parentSessionId: nil,
+            sessionUse: .worker,
             step: "build",
             agent: "lf",
             cwd: "/tmp/repo",
+            argv: [],
+            env: [:],
+            source: "wave_step",
             tmuxName: "lf-jack-heart-model-20260423_1303",
             status: .running,
-            createdAt: .now
+            createdAt: .now,
+            attachedAt: nil,
+            startedAt: nil,
+            completedAt: nil
         )
 
         #expect(state.consumeAutoPresentTerminal(for: wave.id) == false)

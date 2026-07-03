@@ -14,13 +14,12 @@ from conftest import (
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
-    SESSION_MINIMAL,
+    CONVERSATION_MINIMAL,
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
 )
 from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
-from loopflow.models import SessionConfig
 
 
 class TestUrlResolution:
@@ -90,6 +89,31 @@ def _mock_client(handler):
     c._base_url = "http://test"
     c._client = httpx.Client(base_url="http://test", transport=transport)
     return c
+
+
+def _session_payload(**overrides):
+    payload = {
+        "id": "terminal-1",
+        "object": "session",
+        "wave_id": "abc-123",
+        "run_id": None,
+        "parent_session_id": None,
+        "use": "wave_agent",
+        "step": "goal",
+        "agent": "lf",
+        "cwd": "/tmp/repo",
+        "argv": [],
+        "env": {},
+        "source": "wave_agent",
+        "tmux_name": "lf-wave-agent",
+        "status": "running",
+        "created_at": "2026-07-02T00:00:00Z",
+        "attached_at": None,
+        "started_at": None,
+        "completed_at": None,
+    }
+    payload.update(overrides)
+    return payload
 
 
 class TestClientErrors:
@@ -238,47 +262,160 @@ class TestClientResponses:
         assert waves[0].name == "reduce"
         client.close()
 
-    def test_wave_runs_parses_list(self):
+    def test_runs_parses_list(self):
         def handler(request):
             return httpx.Response(200, json={"object": "list", "data": [WAVE_RUN_MINIMAL]})
 
         client = _mock_client(handler)
-        runs = client.wave_runs()
+        runs = client.runs()
         assert len(runs) == 1
         assert runs[0].status == "completed"
         client.close()
 
-    def test_list_terminal_sessions_filters_statuses(self):
+    def test_list_sessions_requests_active_sessions(self):
         def handler(request):
-            assert request.url.path == "/v0/terminal-sessions"
+            assert request.url.path == "/v0/sessions"
             assert request.url.params.get("wave_id") == "abc-123"
+            assert request.url.params.get("parent_session_id") == "terminal-parent"
+            assert request.url.params.get("use") == "worker"
             assert request.url.params.get("active_only") == "true"
             return httpx.Response(
                 200,
                 json={
                     "object": "list",
                     "data": [
-                        {"id": "terminal-1", "status": "running"},
-                        {"id": "terminal-2", "status": "completed"},
+                        _session_payload(id="terminal-1", status="running"),
                     ],
                 },
             )
 
         client = _mock_client(handler)
-        sessions = client.list_terminal_sessions(
+        sessions = client.list_sessions(
             wave_id="abc-123",
-            statuses=["pending", "attached", "running"],
+            parent_session_id="terminal-parent",
+            use="worker",
         )
-        assert sessions == [{"id": "terminal-1", "status": "running"}]
+        assert [session.id for session in sessions] == ["terminal-1"]
         client.close()
 
-    def test_attach_terminal_session_returns_connection_info(self):
+    def test_get_wave_agent_tree_parses_sessions_and_connection(self):
         def handler(request):
-            assert request.url.path == "/v0/terminal-sessions/terminal-1/attach"
+            assert request.url.path == "/v0/waves/reduce/agent-tree"
+            assert request.url.params.get("active_only") == "true"
+            return httpx.Response(
+                200,
+                json={
+                    "object": "wave_agent_tree",
+                    "id": "tree-abc-123",
+                    "wave": WAVE_MINIMAL,
+                    "child_waves": [],
+                    "sessions": [
+                        {
+                            "session": _session_payload(
+                                id="terminal-worker",
+                                use="worker",
+                                parent_session_id="terminal-1",
+                            ),
+                            "connection": {
+                                "kind": "tmux",
+                                "session_name": "lf-worker",
+                                "host": "localhost",
+                                "cwd": "/tmp/repo",
+                                "status": "running",
+                            },
+                        }
+                    ],
+                },
+            )
+
+        client = _mock_client(handler)
+        tree = client.get_wave_agent_tree("reduce")
+        assert tree.object == "wave_agent_tree"
+        assert tree.wave.name == "reduce"
+        assert tree.sessions[0].session.parent_session_id == "terminal-1"
+        assert tree.sessions[0].connection is not None
+        assert tree.sessions[0].connection.session_name == "lf-worker"
+        client.close()
+
+    def test_run_worker_posts_launch_request(self):
+        received = {}
+
+        def handler(request):
+            assert request.url.path == "/v0/waves/reduce/workers"
+            assert request.method == "POST"
+            received.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json=_session_payload(
+                    run_id="run-1",
+                    use="worker",
+                    source="wave_step_tmux",
+                    step="implement",
+                    tmux_name="lf-worker",
+                ),
+            )
+
+        client = _mock_client(handler)
+        response = client.run_worker(
+            "reduce",
+            "implement",
+            "Add the endpoint",
+            parent_session_id="terminal-parent",
+        )
+        assert received == {
+            "flow": "implement",
+            "task": "Add the endpoint",
+            "parent_session_id": "terminal-parent",
+        }
+        assert response.id == "terminal-1"
+        assert response.session_use == "worker"
+        client.close()
+
+    def test_get_session_returns_dict(self):
+        def handler(request):
+            assert request.url.path == "/v0/sessions/terminal-1"
+            return httpx.Response(
+                200,
+                json=_session_payload(use="worker"),
+            )
+
+        client = _mock_client(handler)
+        session = client.get_session("terminal-1")
+        assert session.session_use == "worker"
+        client.close()
+
+    def test_current_session_uses_cwd_lookup(self):
+        def handler(request):
+            assert request.url.path == "/v0/sessions/current"
+            assert request.url.params.get("cwd") == "/tmp/repo/child"
+            return httpx.Response(
+                200,
+                json=_session_payload(),
+            )
+
+        client = _mock_client(handler)
+        session = client.current_session("/tmp/repo/child")
+        assert session is not None
+        assert session.id == "terminal-1"
+        client.close()
+
+    def test_current_session_returns_none_for_not_found(self):
+        def handler(request):
+            assert request.url.path == "/v0/sessions/current"
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        client = _mock_client(handler)
+        assert client.current_session("/tmp/repo") is None
+        client.close()
+
+    def test_attach_session_returns_connection_info(self):
+        def handler(request):
+            assert request.url.path == "/v0/sessions/terminal-1/attach"
             assert request.method == "POST"
             return httpx.Response(
                 200,
                 json={
+                    "kind": "tmux",
                     "session_name": "lfq-terminal-1",
                     "host": "localhost",
                     "cwd": "/tmp/repo",
@@ -287,8 +424,8 @@ class TestClientResponses:
             )
 
         client = _mock_client(handler)
-        connection = client.attach_terminal_session("terminal-1")
-        assert connection["session_name"] == "lfq-terminal-1"
+        connection = client.attach_session("terminal-1")
+        assert connection.session_name == "lfq-terminal-1"
         client.close()
 
     def test_list_attention_returns_dicts(self):
@@ -304,7 +441,7 @@ class TestClientResponses:
                             "id": "attention-1",
                             "kind": "interactive",
                             "status": "surfaced",
-                            "context": {"terminal_session_id": "terminal-1"},
+                            "context": {"session_id": "terminal-1"},
                         }
                     ],
                 },
@@ -312,7 +449,7 @@ class TestClientResponses:
 
         client = _mock_client(handler)
         items = client.list_attention(status="unresolved")
-        assert items[0]["context"]["terminal_session_id"] == "terminal-1"
+        assert items[0]["context"]["session_id"] == "terminal-1"
         client.close()
 
     def test_waves_invalid_list_payload_raises_error(self):
@@ -452,45 +589,19 @@ class TestClientResponses:
         ]
         client.close()
 
-    def test_create_session_sends_correct_body(self):
+    def test_send_conversation_input_sends_correct_body(self):
         received = {}
 
         def handler(request):
             received.update(json.loads(request.content))
-            return httpx.Response(200, json=SESSION_MINIMAL)
+            return httpx.Response(200, json=CONVERSATION_MINIMAL)
 
         client = _mock_client(handler)
-        config = SessionConfig(agent="claude-sonnet", yolo_mode=True)
-        session = client.create_session("claude", wave_run_id="run-1", config=config)
-
-        assert received["harness"] == "claude"
-        assert received["wave_run_id"] == "run-1"
-        assert received["config"]["agent"] == "claude-sonnet"
-        assert received["config"]["yolo_mode"] is True
-        assert session.id == "session-1"
-        client.close()
-
-    def test_session_404_returns_none(self):
-        def handler(request):
-            return httpx.Response(404, json={"error": "not found"})
-
-        client = _mock_client(handler)
-        assert client.session("missing") is None
-        client.close()
-
-    def test_send_session_input_sends_correct_body(self):
-        received = {}
-
-        def handler(request):
-            received.update(json.loads(request.content))
-            return httpx.Response(200, json=SESSION_MINIMAL)
-
-        client = _mock_client(handler)
-        client.send_session_input("session-1", "hello")
+        client.send_conversation_input("session-1", "hello")
         assert received["text"] == "hello"
         client.close()
 
-    def test_stream_session_events_parses_sse(self):
+    def test_stream_conversation_events_parses_sse(self):
         def handler(request):
             return httpx.Response(
                 200,
@@ -507,7 +618,7 @@ class TestClientResponses:
             )
 
         client = _mock_client(handler)
-        events = list(client.stream_session_events("session-1", timeout=1))
+        events = list(client.stream_conversation_events("session-1", timeout=1))
 
         assert len(events) == 2
         assert events[0].seq == 0
@@ -516,23 +627,23 @@ class TestClientResponses:
         assert events[1].event["type"] == "turn_completed"
         client.close()
 
-    def test_stream_session_events_sends_after_seq(self):
+    def test_stream_conversation_events_sends_after_seq(self):
         def handler(request):
             assert request.url.params.get("after_seq") == "10"
             return httpx.Response(200, text='data: {"type":"turn_completed"}\n')
 
         client = _mock_client(handler)
-        events = list(client.stream_session_events("session-1", after_seq=10, timeout=1))
+        events = list(client.stream_conversation_events("session-1", after_seq=10, timeout=1))
         assert len(events) == 1
         client.close()
 
-    def test_stream_session_events_errors(self):
+    def test_stream_conversation_events_errors(self):
         def handler(request):
             return httpx.Response(500, json={"error": "boom"})
 
         client = _mock_client(handler)
         with pytest.raises(LoopflowError, match="boom"):
-            list(client.stream_session_events("session-1", timeout=1))
+            list(client.stream_conversation_events("session-1", timeout=1))
         client.close()
 
 

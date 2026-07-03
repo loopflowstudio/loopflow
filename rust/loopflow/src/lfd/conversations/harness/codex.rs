@@ -13,11 +13,11 @@ use tokio::task::JoinHandle;
 use crate::engine::agent::{
     build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
 };
-use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
-use crate::lfd::sessions::harness::common::spawn_stderr_logger;
-use crate::lfd::sessions::harness::lf_tag::LfTagParser;
-use crate::lfd::sessions::harness::{codex_mapping, Harness};
-use crate::lfd::sessions::types::SessionEvent;
+use crate::lfd::conversations::harness::codex_mapping::ItemPhase;
+use crate::lfd::conversations::harness::common::spawn_stderr_logger;
+use crate::lfd::conversations::harness::lf_tag::LfTagParser;
+use crate::lfd::conversations::harness::{codex_mapping, Harness};
+use crate::lfd::conversations::types::ConversationEvent;
 
 async fn resolve_turn_id(
     turn_id_from_params: Option<&str>,
@@ -47,7 +47,7 @@ enum OutboundRpc {
 }
 
 pub struct CodexHarness {
-    events: mpsc::UnboundedSender<SessionEvent>,
+    events: mpsc::UnboundedSender<ConversationEvent>,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
     writer_task: Option<JoinHandle<()>>,
@@ -68,7 +68,7 @@ impl std::fmt::Debug for CodexHarness {
 }
 
 impl CodexHarness {
-    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
             child: None,
@@ -295,7 +295,7 @@ impl CodexHarness {
                             .unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
                         turn_in_progress.store(true, Ordering::Relaxed);
                         *current_turn_id.lock().await = Some(tid.clone());
-                        let _ = event_tx.send(SessionEvent::TurnStarted { turn_id: tid });
+                        let _ = event_tx.send(ConversationEvent::TurnStarted { turn_id: tid });
                     }
                     "turn/completed" => {
                         let tid =
@@ -306,11 +306,11 @@ impl CodexHarness {
                         turn_in_progress.store(false, Ordering::Relaxed);
                         *current_turn_id.lock().await = None;
                         let status = codex_mapping::map_turn_status(&params);
-                        let _ = event_tx.send(SessionEvent::TurnCompleted {
+                        let _ = event_tx.send(ConversationEvent::TurnCompleted {
                             turn_id: tid.clone(),
                             status,
                         });
-                        let _ = event_tx.send(SessionEvent::TurnUsage {
+                        let _ = event_tx.send(ConversationEvent::TurnUsage {
                             turn_id: tid,
                             usage: codex_mapping::map_turn_usage(&params),
                         });
@@ -319,13 +319,15 @@ impl CodexHarness {
                         let tid =
                             resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Started);
-                        let _ = event_tx.send(SessionEvent::ItemStarted { turn_id: tid, item });
+                        let _ =
+                            event_tx.send(ConversationEvent::ItemStarted { turn_id: tid, item });
                     }
                     "item/completed" => {
                         let tid =
                             resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Completed);
-                        let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id: tid, item });
+                        let _ =
+                            event_tx.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
                     }
                     "item/agentMessage/delta" => {
                         if let Some(content) = codex_mapping::text_content(&params) {
@@ -345,7 +347,7 @@ impl CodexHarness {
                             let tid =
                                 resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
                                     .await;
-                            let _ = event_tx.send(SessionEvent::ReasoningDelta {
+                            let _ = event_tx.send(ConversationEvent::ReasoningDelta {
                                 turn_id: tid,
                                 content,
                             });
@@ -359,7 +361,7 @@ impl CodexHarness {
                                 resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
                                     .await;
                             let item_id = codex_mapping::map_item_id(&params);
-                            let _ = event_tx.send(SessionEvent::ItemUpdated {
+                            let _ = event_tx.send(ConversationEvent::ItemUpdated {
                                 turn_id: tid,
                                 item_id,
                                 data,
@@ -375,11 +377,12 @@ impl CodexHarness {
                             let tid =
                                 resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
                                     .await;
-                            let _ = event_tx.send(SessionEvent::DiffUpdated { turn_id: tid, diff });
+                            let _ = event_tx
+                                .send(ConversationEvent::DiffUpdated { turn_id: tid, diff });
                         }
                     }
                     "error" => {
-                        let _ = event_tx.send(SessionEvent::Error {
+                        let _ = event_tx.send(ConversationEvent::Error {
                             code: params
                                 .get("code")
                                 .and_then(Value::as_str)
@@ -400,14 +403,14 @@ impl CodexHarness {
 
             turn_in_progress.store(false, Ordering::Relaxed);
             if !shutdown_requested.load(Ordering::Relaxed) {
-                let _ = event_tx.send(SessionEvent::Error {
+                let _ = event_tx.send(ConversationEvent::Error {
                     code: "codex_disconnected".to_string(),
                     message: "codex app-server disconnected".to_string(),
                 });
             }
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::codex");
+        let stderr_task = spawn_stderr_logger(stderr, "lfd::conversations::codex");
 
         self.child = Some(child);
         self.outbound_tx = Some(outbound_tx);

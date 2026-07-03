@@ -1,8 +1,8 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Wave, WaveRun,
-    WaveRunStatus,
+    AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Run, RunStatus,
+    Wave,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -16,7 +16,7 @@ pub fn attention_id_for_queue_block(run_id: &LfdId) -> LfdId {
 pub async fn create_step_failure_attention(
     store: &SharedStore,
     wave: &Wave,
-    run: &WaveRun,
+    run: &Run,
     step_name: &str,
     error: &str,
 ) -> Result<AttentionItem, String> {
@@ -152,17 +152,17 @@ async fn should_resolve_step_failure(
         return Ok(true);
     };
     let Some(run) = store
-        .get_wave_run(run_id)
+        .get_run(run_id)
         .await
         .map_err(|err| format!("get wave run failed: {err}"))?
     else {
         return Ok(true);
     };
-    if run.status != WaveRunStatus::Failed {
+    if run.status != RunStatus::Failed {
         return Ok(true);
     }
     let latest = store
-        .get_latest_wave_run(&item.wave_id)
+        .get_latest_run(&item.wave_id)
         .await
         .map_err(|err| format!("get latest wave run failed: {err}"))?;
     Ok(latest.is_some_and(|latest| latest.id != run.id))
@@ -173,7 +173,7 @@ async fn should_resolve_when_wave_restarted(
     item: &AttentionItem,
 ) -> Result<bool, String> {
     let latest = store
-        .get_latest_wave_run(&item.wave_id)
+        .get_latest_run(&item.wave_id)
         .await
         .map_err(|err| format!("get latest wave run failed: {err}"))?;
     Ok(latest.is_some_and(|run| {

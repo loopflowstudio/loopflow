@@ -11,10 +11,10 @@ struct RunStoreTests {
     private func makeRun(
         id: String = "run-1",
         waveId: String = "wave-1",
-        status: WaveRunStatus = .completed,
+        status: RunStatus = .completed,
         iteration: Int = 1
-    ) -> WaveRun {
-        WaveRun(
+    ) -> Run {
+        Run(
             id: id,
             waveId: waveId,
             flow: "build",

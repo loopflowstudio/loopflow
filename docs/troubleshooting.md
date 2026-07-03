@@ -96,12 +96,14 @@ The loop hit its PR limit. Options:
 
 **Symptom:** Task fails with context/token limit errors.
 
-Reduce context:
+The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
-lf qa --docs README.md      # include only the docs you need
-lf qa                       # omit --diff-files unless full changed file bodies are needed
+lf qa --no-loopflow         # skip LOOPFLOW.md
+lf qa --docs src/small/     # limit --docs to a narrower path or glob
 ```
+
+`--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
 
 For persistent docs, set `docs:` in `.lf/config.yaml`.
 

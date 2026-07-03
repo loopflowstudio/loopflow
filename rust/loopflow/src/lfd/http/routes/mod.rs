@@ -1,17 +1,17 @@
 pub mod attention;
 pub mod auth;
 pub mod catalog;
+pub mod conversations;
 pub mod flows;
 pub mod hooks;
 pub mod providers;
 pub mod repos;
+pub mod runs;
 pub mod secrets;
-pub mod sessions;
+pub mod session_controls;
 pub mod system;
-pub mod terminal_sessions;
 pub mod usage;
 pub mod wave_config;
-pub mod wave_runs;
 pub mod waves;
 pub mod worktrees;
 pub mod ws;
@@ -21,8 +21,7 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, trigger_dto, wave_cron_dto, wave_run_dto, CommitEntryDto, ErrorResponse,
-    WaveDto,
+    format_datetime, run_dto, trigger_dto, wave_cron_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -78,7 +77,7 @@ pub async fn build_wave_dto(
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
-    let latest = store.get_latest_wave_run(wave.id()).await?;
+    let latest = store.get_latest_run(wave.id()).await?;
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let live_snapshot = build_live_pr_snapshot(store, github_config, &stack_runs).await?;
     let queue_views = build_wave_queue_views(store, wave.id(), &live_snapshot).await?;
@@ -117,7 +116,7 @@ pub async fn build_wave_dto(
             let live_pr_state = live_snapshot.state_for_run(&run);
             let pr_state_stale = live_snapshot.stale_for_run(&run);
             let queue_view = queue_views.get(&run.id);
-            wave_run_dto(run, live_pr_state, pr_state_stale, queue_view)
+            run_dto(run, live_pr_state, pr_state_stale, queue_view)
         })
     } else {
         None
@@ -412,27 +411,25 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveMode, WaveRun, WaveRunSnapshot,
-        WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, Run, RunStackStatus, RunStatus, Wave,
+        WaveMode, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use time::OffsetDateTime;
 
-    fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> WaveRun {
-        WaveRun {
+    fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: LfdId::new(),
-            snapshot: WaveRunSnapshot {
-                repo: ".".to_string(),
-                flow: "build".to_string(),
-                task: None,
-                direction: Vec::new(),
-                area: Vec::new(),
-            },
+            repo: ".".to_string(),
+            flow: "build".to_string(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
             iteration: 0,
             step_index: 0,
-            status: WaveRunStatus::Running,
+            status: RunStatus::Running,
             worktree: "/tmp/worktree".to_string(),
             branch: "feature".to_string(),
             started_at: None,
@@ -445,7 +442,7 @@ mod tests {
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: "wave-group".to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -489,20 +486,18 @@ mod tests {
         }
     }
 
-    fn make_wave_run(wave: &Wave, pr_number: u32) -> WaveRun {
-        WaveRun {
+    fn make_wave_run(wave: &Wave, pr_number: u32) -> Run {
+        Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo().clone(),
-                flow: wave.primary_flow().clone(),
-                task: None,
-                direction: wave.direction().clone(),
-                area: wave.area().clone(),
-            },
+            repo: wave.repo().clone(),
+            flow: wave.primary_flow().clone(),
+            task: None,
+            direction: wave.direction().clone(),
+            area: wave.area().clone(),
             iteration: pr_number,
             step_index: 0,
-            status: WaveRunStatus::Completed,
+            status: RunStatus::Completed,
             worktree: "/tmp/worktree".to_string(),
             branch: format!("feature-{pr_number}"),
             started_at: Some(OffsetDateTime::now_utc()),
@@ -515,7 +510,7 @@ mod tests {
             parent_pr_number: None,
             stack_position: pr_number,
             stack_group_id: wave.id().to_string(),
-            stack_status: WaveRunStackStatus::Active,
+            stack_status: RunStackStatus::Active,
             lineage_inferred: false,
             target_branch: "main".to_string(),
             repair_of: None,
@@ -529,9 +524,7 @@ mod tests {
         }
     }
 
-    async fn setup_wave_with_run(
-        pr_number: u32,
-    ) -> (SharedStore, tempfile::TempDir, Wave, WaveRun) {
+    async fn setup_wave_with_run(pr_number: u32) -> (SharedStore, tempfile::TempDir, Wave, Run) {
         let store = sqlite_store().await;
         let repo_dir = tempfile::tempdir().expect("tempdir should be created");
         let wave = make_wave(
@@ -546,7 +539,7 @@ mod tests {
             .expect("wave should be created in store");
         let run = make_wave_run(&wave, pr_number);
         store
-            .create_wave_run(&run)
+            .create_run(&run)
             .await
             .expect("wave run should be created in store");
         (store, repo_dir, wave, run)

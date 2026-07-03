@@ -53,6 +53,8 @@ clipboard        634 ▏
 
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance, scratch notes, and clipboard—and passes it to the coding agent. Add repo docs explicitly with `--docs` and changed file bodies with `--diff-files`.
 
+`LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
+
 Or try the demo repo:
 
 ```bash
@@ -75,7 +77,7 @@ lf : "add type hints to utils.py"
 | Flag | What it adds |
 |------|--------------|
 | `-c` | Clipboard content |
-| `--docs PATH` | Include docs files, globs, or directories |
+| `--docs PATH,PATH` | Add specific files, globs, or directories to context |
 | `--diff-files` | Full content of files changed on the branch |
 | `--diff` | Raw `git diff` output |
 | `-i` | Interactive mode |
@@ -152,20 +154,22 @@ lf op land    # submit to merge queue
 
 Ready to automate? Waves run your workflows continuously.
 
-`lf` steps are manual building blocks. Waves automate them — picking tasks from a backlog, running flows, creating PRs, and looping until the work is done.
+`lf` steps are manual building blocks. A wave is a named agent that runs them for you — reading a roadmap, dispatching workers to build each item, watching their PRs, and looping.
+
+Author `wave/shipper/GOAL.md`, then run the agent:
 
 ```bash
-lfq create shipper .
+lfq wave run shipper
 ```
 
 ```python
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="build", goal="ship-roadmap")
+loopflow.create_wave("shipper", repo=".", flow="build")
 loopflow.run_wave("shipper")
 ```
 
-A wave is **goal × flow × runtime state**. The wave picks a task, dispatches the flow, opens a PR, and loops. Triggers fire flows in response to signals (repo changes, other waves completing, CI failures).
+The wave agent coordinates; it dispatches a **worker** per task (`lfq worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. Triggers fire flows in response to signals — repo changes, other waves completing, CI failures.
 
 **Concerto** (macOS) is the native wave experience — create waves, monitor progress, browse flows, review PRs. Requires `lfd`.
 

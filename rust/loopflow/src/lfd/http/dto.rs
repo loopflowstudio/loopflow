@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
-use crate::lfd::queue::QueueRunView;
-use crate::lfd::sessions::types::ContextSnapshot;
-use crate::lfd::sessions::usage::{
+use crate::lfd::conversations::types::ContextSnapshot;
+use crate::lfd::conversations::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
+use crate::lfd::queue::QueueRunView;
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState,
-    TerminalSession, Trigger, WaveCron, WaveRun, WaveRunStatus,
+    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run,
+    RunStatus, Session, Trigger, WaveCron,
 };
 
 #[derive(Debug, Serialize)]
@@ -111,11 +111,11 @@ pub struct WaveDto {
     pub triggers: Vec<TriggerDto>,
     pub crons: Vec<WaveCronDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_run: Option<WaveRunDto>,
+    pub active_run: Option<RunDto>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WaveRunDto {
+pub struct RunDto {
     pub id: String,
     pub object: String,
     pub wave_id: String,
@@ -168,13 +168,6 @@ pub struct PullRequestDto {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RunWaveResponse {
-    pub started: bool,
-    pub wave_id: String,
-    pub wave_run_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -240,12 +233,14 @@ pub fn attention_item_dto(item: AttentionItem) -> AttentionItemDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TerminalSessionDto {
+pub struct SessionDto {
     pub id: String,
     pub object: String,
     pub wave_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wave_run_id: Option<String>,
+    pub run_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    #[serde(rename = "use")]
+    pub session_use: String,
     pub step: String,
     pub agent: String,
     pub cwd: String,
@@ -255,20 +250,19 @@ pub struct TerminalSessionDto {
     pub tmux_name: String,
     pub status: String,
     pub created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub attached_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
 }
 
-pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
-    TerminalSessionDto {
+pub fn session_dto(session: Session) -> SessionDto {
+    SessionDto {
         id: session.id.to_string(),
-        object: "terminal_session".to_string(),
+        object: "session".to_string(),
         wave_id: session.wave_id.to_string(),
-        wave_run_id: session.wave_run_id.map(|value| value.to_string()),
+        run_id: session.run_id.map(|value| value.to_string()),
+        parent_session_id: session.parent_session_id.map(|value| value.to_string()),
+        session_use: session.session_use.as_str().to_string(),
         step: session.step,
         agent: session.agent,
         cwd: session.cwd,
@@ -285,7 +279,7 @@ pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateTerminalSessionRequestDto {
+pub struct CreateSessionRequestDto {
     pub wave_id: String,
     pub flow: String,
     pub worktree: String,
@@ -293,29 +287,43 @@ pub struct CreateTerminalSessionRequestDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateTerminalSessionResponseDto {
-    pub session: TerminalSessionDto,
-    pub connection: TerminalConnectionInfoDto,
+pub struct CreateSessionResponseDto {
+    pub session: SessionDto,
+    pub connection: SessionConnectionInfoDto,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TerminalConnectionInfoDto {
+pub struct SessionConnectionInfoDto {
+    pub kind: String,
     pub session_name: String,
     pub host: String,
     pub cwd: String,
     pub status: String,
 }
 
-pub fn terminal_connection_info_dto(
-    session: &TerminalSession,
-    host: String,
-) -> TerminalConnectionInfoDto {
-    TerminalConnectionInfoDto {
+pub fn session_connection_info_dto(session: &Session, host: String) -> SessionConnectionInfoDto {
+    SessionConnectionInfoDto {
+        kind: "tmux".to_string(),
         session_name: session.tmux_name.clone(),
         host,
         cwd: session.cwd.clone(),
         status: session.status.as_str().to_string(),
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaveAgentTreeSessionDto {
+    pub session: SessionDto,
+    pub connection: Option<SessionConnectionInfoDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaveAgentTreeDto {
+    pub object: String,
+    pub id: String,
+    pub wave: WaveDto,
+    pub child_waves: Vec<WaveDto>,
+    pub sessions: Vec<WaveAgentTreeSessionDto>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -364,7 +372,7 @@ pub struct StopWaveResponse {
 pub struct RestartStepResponse {
     pub restarted: bool,
     pub wave_id: String,
-    pub wave_run_id: String,
+    pub run_id: String,
     pub step_index: u32,
 }
 
@@ -372,7 +380,7 @@ pub struct RestartStepResponse {
 pub struct ContinueWaveResponse {
     pub continued: bool,
     pub wave_id: String,
-    pub wave_run_id: String,
+    pub run_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -405,7 +413,7 @@ pub struct DeletedResourceResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SessionUsageSessionDto {
+pub struct ConversationUsageSessionDto {
     pub step: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wave: Option<String>,
@@ -416,15 +424,15 @@ pub struct SessionUsageSessionDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SessionUsageDto {
+pub struct ConversationUsageDto {
     pub object: String,
-    pub session_id: String,
+    pub conversation_id: String,
     pub tokens: TokenTotals,
     pub turns: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextSnapshot>,
     pub models: BTreeMap<String, u64>,
-    pub session: SessionUsageSessionDto,
+    pub conversation: ConversationUsageSessionDto,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,7 +440,7 @@ pub struct WaveUsageDto {
     pub object: String,
     pub wave_id: String,
     pub tokens: TokenTotals,
-    pub sessions: u64,
+    pub conversations: u64,
     pub turns: u64,
     pub models: BTreeMap<String, u64>,
     pub by_step: BTreeMap<String, StepUsageAggregate>,
@@ -467,24 +475,24 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn wave_run_dto(
-    run: WaveRun,
+pub fn run_dto(
+    run: Run,
     live_pr_state: Option<&LivePullRequestState>,
     pr_state_stale: bool,
     queue_view: Option<&QueueRunView>,
-) -> WaveRunDto {
-    WaveRunDto {
+) -> RunDto {
+    RunDto {
         id: run.id.to_string(),
-        object: "wave_run".to_string(),
+        object: "run".to_string(),
         wave_id: run.wave_id.to_string(),
-        flow: run.snapshot.flow.clone(),
-        task: run.snapshot.task.clone(),
-        repo: run.snapshot.repo.clone(),
-        direction: run.snapshot.direction.clone(),
-        area: run.snapshot.area.clone(),
+        flow: run.flow.clone(),
+        task: run.task.clone(),
+        repo: run.repo.clone(),
+        direction: run.direction.clone(),
+        area: run.area.clone(),
         iteration: run.iteration,
         step_index: run.step_index,
-        status: wave_run_status_str(run.status),
+        status: run_status_str(run.status),
         local_worktree: run.worktree,
         remote_branch: run.branch,
         target_branch: run.target_branch,
@@ -593,14 +601,14 @@ pub struct RepoDto {
     pub added_at: Option<String>,
 }
 
-pub fn wave_run_status_str(status: WaveRunStatus) -> String {
+pub fn run_status_str(status: RunStatus) -> String {
     match status {
-        WaveRunStatus::Pending => "pending",
-        WaveRunStatus::Running => "running",
-        WaveRunStatus::Waiting => "waiting",
-        WaveRunStatus::Completed => "completed",
-        WaveRunStatus::Failed => "failed",
-        WaveRunStatus::Unspecified => "unknown",
+        RunStatus::Pending => "pending",
+        RunStatus::Running => "running",
+        RunStatus::Waiting => "waiting",
+        RunStatus::Completed => "completed",
+        RunStatus::Failed => "failed",
+        RunStatus::Unspecified => "unknown",
     }
     .to_string()
 }

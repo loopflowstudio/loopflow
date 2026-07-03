@@ -214,7 +214,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var diffStat: String?
     public var flowSteps: [String]
     public var openPRCount: Int
-    public var activeRun: WaveRun?
+    public var activeRun: Run?
     public var createdAt: Date?
 
     public init(
@@ -238,7 +238,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         diffStat: String? = nil,
         flowSteps: [String] = [],
         openPRCount: Int = 0,
-        activeRun: WaveRun? = nil,
+        activeRun: Run? = nil,
         createdAt: Date? = nil
     ) {
         self.id = id

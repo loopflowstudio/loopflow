@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use crate::journal::{LfEvent, LfEventType, LfNode};
 use crate::lfd::id::LfdId;
 use crate::lfd::provider_auth::Provider;
-use crate::lfd::types::{agent::AgentStatus, AttentionItem, TerminalSession};
+use crate::lfd::types::{AttentionItem, ExecutionProcessStatus, Session};
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub enum Event {
     },
     WaveStarted {
         wave_id: LfdId,
-        wave_run_id: LfdId,
+        run_id: LfdId,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -122,12 +122,10 @@ pub enum Event {
     },
     WaveWaiting {
         wave_id: LfdId,
-        wave_run_id: LfdId,
+        run_id: LfdId,
         step: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<LfdId>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        terminal_session_id: Option<LfdId>,
         #[serde(skip_serializing_if = "Option::is_none")]
         initial_user_message: Option<String>,
         #[serde(with = "time::serde::rfc3339")]
@@ -135,7 +133,7 @@ pub enum Event {
     },
     CiFailure {
         wave_id: LfdId,
-        wave_run_id: LfdId,
+        run_id: LfdId,
         pr_number: u32,
         branch: String,
         commit_sha: String,
@@ -302,14 +300,14 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
-    // Terminal sessions
-    TerminalSessionCreated {
-        session: TerminalSession,
+    // Sessions
+    SessionCreated {
+        session: Session,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    TerminalSessionUpdated {
-        session: TerminalSession,
+    SessionUpdated {
+        session: Session,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -370,15 +368,15 @@ impl Event {
         }
     }
 
-    pub fn terminal_session_created(session: TerminalSession) -> Self {
-        Self::TerminalSessionCreated {
+    pub fn session_created(session: Session) -> Self {
+        Self::SessionCreated {
             session,
             timestamp: Self::now(),
         }
     }
 
-    pub fn terminal_session_updated(session: TerminalSession) -> Self {
-        Self::TerminalSessionUpdated {
+    pub fn session_updated(session: Session) -> Self {
+        Self::SessionUpdated {
             session,
             timestamp: Self::now(),
         }
@@ -466,10 +464,10 @@ impl Event {
         }
     }
 
-    pub fn wave_started(wave_id: LfdId, wave_run_id: LfdId) -> Self {
+    pub fn wave_started(wave_id: LfdId, run_id: LfdId) -> Self {
         Self::WaveStarted {
             wave_id,
-            wave_run_id,
+            run_id,
             timestamp: Self::now(),
         }
     }
@@ -492,18 +490,16 @@ impl Event {
 
     pub fn wave_waiting(
         wave_id: LfdId,
-        wave_run_id: LfdId,
+        run_id: LfdId,
         step: String,
         session_id: Option<LfdId>,
-        terminal_session_id: Option<LfdId>,
         initial_user_message: Option<String>,
     ) -> Self {
         Self::WaveWaiting {
             wave_id,
-            wave_run_id,
+            run_id,
             step,
             session_id,
-            terminal_session_id,
             initial_user_message,
             timestamp: Self::now(),
         }
@@ -511,7 +507,7 @@ impl Event {
 
     pub fn ci_failure(
         wave_id: LfdId,
-        wave_run_id: LfdId,
+        run_id: LfdId,
         pr_number: u32,
         branch: String,
         commit_sha: String,
@@ -520,7 +516,7 @@ impl Event {
     ) -> Self {
         Self::CiFailure {
             wave_id,
-            wave_run_id,
+            run_id,
             pr_number,
             branch,
             commit_sha,
@@ -584,7 +580,7 @@ impl Event {
         }
     }
 
-    pub fn agent_ended(agent_id: LfdId, status: AgentStatus) -> Self {
+    pub fn agent_ended(agent_id: LfdId, status: ExecutionProcessStatus) -> Self {
         Self::AgentEnded {
             agent_id,
             status: status.as_str().to_string(),
@@ -717,16 +713,14 @@ mod tests {
             test_id("run-1"),
             "implement".to_string(),
             Some(test_id("session-1")),
-            Some(test_id("terminal-1")),
             Some("Start with user prompt".to_string()),
         );
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "wave_waiting");
         assert_eq!(json["wave_id"], "wave-1");
-        assert_eq!(json["wave_run_id"], "run-1");
+        assert_eq!(json["run_id"], "run-1");
         assert_eq!(json["step"], "implement");
         assert_eq!(json["session_id"], "session-1");
-        assert_eq!(json["terminal_session_id"], "terminal-1");
         assert_eq!(json["initial_user_message"], "Start with user prompt");
         assert!(json["timestamp"].is_string());
     }
@@ -739,11 +733,9 @@ mod tests {
             "implement".to_string(),
             None,
             None,
-            None,
         );
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("session_id").is_none());
-        assert!(json.get("terminal_session_id").is_none());
         assert!(json.get("initial_user_message").is_none());
     }
 
@@ -763,7 +755,7 @@ mod tests {
 
     #[test]
     fn agent_ended_serializes_correctly() {
-        let event = Event::agent_ended(test_id("agent-1"), AgentStatus::Completed);
+        let event = Event::agent_ended(test_id("agent-1"), ExecutionProcessStatus::Completed);
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "agent_ended");
         assert_eq!(json["agent_id"], "agent-1");
@@ -775,7 +767,7 @@ mod tests {
         let id = || LfdId::new();
         let timestamp = Event::now();
         let events = vec![
-            Event::wave_waiting(id(), id(), "step".to_string(), None, None, None),
+            Event::wave_waiting(id(), id(), "step".to_string(), None, None),
             Event::RunStarted {
                 run_id: id(),
                 wave_name: "wave".to_string(),
@@ -821,7 +813,7 @@ mod tests {
                 timestamp,
             },
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
-            Event::agent_ended(id(), AgentStatus::Failed),
+            Event::agent_ended(id(), ExecutionProcessStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_token_refreshed(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_refresh_failed(Provider::GitHub, "refresh failed".to_string()),

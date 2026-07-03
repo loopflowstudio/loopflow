@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::engine::agent::AgentConfig;
-use crate::lfd::sessions::types::SessionEvent;
+use crate::lfd::conversations::types::ConversationEvent;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
@@ -46,7 +46,7 @@ pub trait Harness: Send + Sync {
 
 /// Constructor fn: `(harness_kind, event_tx) -> harness`.
 pub type CreateHarnessFn =
-    fn(&str, mpsc::UnboundedSender<SessionEvent>) -> Result<Box<dyn Harness>>;
+    fn(&str, mpsc::UnboundedSender<ConversationEvent>) -> Result<Box<dyn Harness>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HarnessKind {
@@ -81,7 +81,7 @@ impl HarnessKind {
         }
     }
 
-    fn create(self, event_tx: mpsc::UnboundedSender<SessionEvent>) -> Box<dyn Harness> {
+    fn create(self, event_tx: mpsc::UnboundedSender<ConversationEvent>) -> Box<dyn Harness> {
         match self {
             Self::Codex => Box::new(codex::CodexHarness::new(event_tx)),
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
@@ -96,7 +96,7 @@ pub fn canonical_harness(name: &str) -> Option<&'static str> {
 
 pub fn default_create_harness(
     name: &str,
-    event_tx: mpsc::UnboundedSender<SessionEvent>,
+    event_tx: mpsc::UnboundedSender<ConversationEvent>,
 ) -> Result<Box<dyn Harness>> {
     if let Some(kind) = HarnessKind::parse(name) {
         return Ok(kind.create(event_tx));

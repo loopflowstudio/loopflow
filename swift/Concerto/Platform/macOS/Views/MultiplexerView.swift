@@ -206,7 +206,7 @@ private struct TerminalPaneView: View {
 
     @Environment(RepoState.self) private var repoState
     @ObservedObject private var ghosttyManager = GhosttyManager.shared
-    @State private var connectionInfo: TerminalConnectionInfo?
+    @State private var connectionInfo: SessionConnectionInfo?
     @State private var errorMessage: String?
     @State private var isAttaching = false
 
@@ -214,7 +214,7 @@ private struct TerminalPaneView: View {
         pane.config.terminalSessionId
     }
 
-    private var session: TerminalSession? {
+    private var session: Session? {
         terminalSessionId.flatMap { repoState.terminalWorkspaceStore.sessionsById[$0] }
     }
 
@@ -273,9 +273,9 @@ private struct TerminalPaneView: View {
         isAttaching = true
         do {
             if session == nil {
-                await repoState.loadTerminalSession(id: terminalSessionId, select: false)
+                await repoState.loadSession(id: terminalSessionId, select: false)
             }
-            connectionInfo = try await repoState.attachTerminalSession(terminalSessionId)
+            connectionInfo = try await repoState.attachSession(terminalSessionId)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -908,7 +908,7 @@ private struct RunsPaneView: View {
         repoState.waveStore.wave(for: waveId)
     }
 
-    private var runs: [WaveRun] {
+    private var runs: [Run] {
         repoState.runStore.runs(for: waveId)
     }
 
@@ -930,7 +930,7 @@ private struct RunsPaneView: View {
                     }
                 }
 
-                WaveRunsTab(runs: runs) {
+                RunsTab(runs: runs) {
                     try await repoState.combinePRs(waveId)
                 }
             }
@@ -1209,7 +1209,7 @@ private struct LaunchpadPaneView: View {
     private func launchPaletteSession(flow: String, worktreePath: String) {
         Task {
             do {
-                let response = try await repoState.createTerminalSession(
+                let response = try await repoState.createSession(
                     waveId: waveId,
                     flow: flow,
                     worktree: worktreePath,

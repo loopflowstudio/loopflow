@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Serialize;
 use time::{Date, Duration};
 
-use crate::lfd::sessions::types::{
-    ContextSnapshot, PersistedSessionEvent, Session, SessionEvent, TurnUsage,
+use crate::lfd::conversations::types::{
+    ContextSnapshot, Conversation, ConversationEvent, PersistedConversationEvent, TurnUsage,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -35,7 +35,7 @@ impl TokenTotals {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionUsageAggregate {
+pub struct ConversationUsageAggregate {
     pub tokens: TokenTotals,
     pub turns: u64,
     pub context: Option<ContextSnapshot>,
@@ -60,9 +60,9 @@ pub struct WaveUsageAggregate {
 }
 
 #[derive(Debug, Clone)]
-pub struct UsageSessionData {
-    pub session: Session,
-    pub events: Vec<PersistedSessionEvent>,
+pub struct UsageConversationData {
+    pub session: Conversation,
+    pub events: Vec<PersistedConversationEvent>,
     pub wave_id: Option<String>,
     pub flow: Option<String>,
 }
@@ -174,7 +174,7 @@ pub struct UsageTimeseriesBucketAggregate {
 }
 
 pub fn aggregate_wave_usage(
-    sessions: &[(Session, Vec<PersistedSessionEvent>)],
+    sessions: &[(Conversation, Vec<PersistedConversationEvent>)],
 ) -> WaveUsageAggregate {
     let mut aggregate = WaveUsageAggregate::default();
 
@@ -198,7 +198,7 @@ pub fn aggregate_wave_usage(
 
 pub fn aggregate_summary(
     group_by: GroupBy,
-    sessions: &[UsageSessionData],
+    sessions: &[UsageConversationData],
     model_filter: Option<&str>,
 ) -> Vec<UsageSummaryGroupAggregate> {
     match group_by {
@@ -222,10 +222,10 @@ pub fn aggregate_summary(
 pub fn aggregate_timeseries(
     bucket: TimeBucket,
     group_by: GroupBy,
-    sessions: Vec<UsageSessionData>,
+    sessions: Vec<UsageConversationData>,
     model_filter: Option<&str>,
 ) -> Vec<UsageTimeseriesBucketAggregate> {
-    let mut sessions_by_period: BTreeMap<Date, Vec<UsageSessionData>> = BTreeMap::new();
+    let mut sessions_by_period: BTreeMap<Date, Vec<UsageConversationData>> = BTreeMap::new();
     for data in sessions {
         let period_start = bucket.start_date(data.session.created_at);
         sessions_by_period
@@ -246,14 +246,14 @@ pub fn aggregate_timeseries(
 }
 
 pub fn aggregate_session_events(
-    events: &[PersistedSessionEvent],
+    events: &[PersistedConversationEvent],
     model_filter: Option<&str>,
-) -> SessionUsageAggregate {
-    let mut aggregate = SessionUsageAggregate::default();
+) -> ConversationUsageAggregate {
+    let mut aggregate = ConversationUsageAggregate::default();
 
     for event in events {
         match &event.event {
-            SessionEvent::TurnUsage { usage, .. } => {
+            ConversationEvent::TurnUsage { usage, .. } => {
                 if let Some(filter) = model_filter {
                     if usage.model.as_deref() != Some(filter) {
                         continue;
@@ -266,7 +266,7 @@ pub fn aggregate_session_events(
                     *aggregate.models.entry(model.clone()).or_insert(0) += 1;
                 }
             }
-            SessionEvent::ContextSnapshot { snapshot } if aggregate.context.is_none() => {
+            ConversationEvent::ContextSnapshot { snapshot } if aggregate.context.is_none() => {
                 aggregate.context = Some(snapshot.clone());
             }
             _ => {}
@@ -277,9 +277,9 @@ pub fn aggregate_session_events(
 }
 
 fn aggregate_summary_by_key(
-    sessions: &[UsageSessionData],
+    sessions: &[UsageConversationData],
     model_filter: Option<&str>,
-    key_fn: impl Fn(&UsageSessionData) -> String,
+    key_fn: impl Fn(&UsageConversationData) -> String,
 ) -> Vec<UsageSummaryGroupAggregate> {
     let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
 
@@ -307,7 +307,7 @@ fn aggregate_summary_by_key(
 }
 
 fn aggregate_summary_by_model(
-    sessions: &[UsageSessionData],
+    sessions: &[UsageConversationData],
     model_filter: Option<&str>,
 ) -> Vec<UsageSummaryGroupAggregate> {
     let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
@@ -316,7 +316,7 @@ fn aggregate_summary_by_model(
         let mut models_seen = HashSet::new();
 
         for event in &data.events {
-            let SessionEvent::TurnUsage { usage, .. } = &event.event else {
+            let ConversationEvent::TurnUsage { usage, .. } = &event.event else {
                 continue;
             };
             let Some(model) = usage.model.as_deref() else {
@@ -347,7 +347,9 @@ fn aggregate_summary_by_model(
     groups.into_values().collect()
 }
 
-fn aggregate_summary_by_source(sessions: &[UsageSessionData]) -> Vec<UsageSummaryGroupAggregate> {
+fn aggregate_summary_by_source(
+    sessions: &[UsageConversationData],
+) -> Vec<UsageSummaryGroupAggregate> {
     let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
 
     for data in sessions {
@@ -373,7 +375,7 @@ fn aggregate_summary_by_source(sessions: &[UsageSessionData]) -> Vec<UsageSummar
     groups.into_values().collect()
 }
 
-fn step_key(session: &Session) -> String {
+fn step_key(session: &Conversation) -> String {
     let step = session.config.step.trim();
     if step.is_empty() {
         return "unknown".to_string();
@@ -392,8 +394,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::lfd::conversations::types::{ConversationConfig, ConversationStatus};
     use crate::lfd::id::LfdId;
-    use crate::lfd::sessions::types::{SessionConfig, SessionStatus};
     use time::format_description::well_known::Rfc3339;
     use time::OffsetDateTime;
 
@@ -490,7 +492,7 @@ mod tests {
 
     #[test]
     fn aggregate_summary_by_model_honors_model_filter() {
-        let records = vec![UsageSessionData {
+        let records = vec![UsageConversationData {
             session: test_session("implement"),
             events: vec![
                 turn_usage_event(TurnUsage {
@@ -526,7 +528,7 @@ mod tests {
 
     #[test]
     fn aggregate_summary_by_source_uses_context_snapshot() {
-        let records = vec![UsageSessionData {
+        let records = vec![UsageConversationData {
             session: test_session("implement"),
             events: vec![
                 context_event(HashMap::from([
@@ -562,7 +564,7 @@ mod tests {
         let created_a = parse_rfc3339("2026-02-01T09:00:00Z");
         let created_b = parse_rfc3339("2026-02-02T11:00:00Z");
         let records = vec![
-            UsageSessionData {
+            UsageConversationData {
                 session: test_session_at("implement", created_a),
                 events: vec![turn_usage_event(TurnUsage {
                     input_tokens: 100,
@@ -576,7 +578,7 @@ mod tests {
                 wave_id: Some("wave-alpha".to_string()),
                 flow: Some("build".to_string()),
             },
-            UsageSessionData {
+            UsageConversationData {
                 session: test_session_at("implement", created_b),
                 events: vec![turn_usage_event(TurnUsage {
                     input_tokens: 40,
@@ -606,7 +608,7 @@ mod tests {
         let monday = parse_rfc3339("2026-02-02T08:00:00Z");
         let wednesday = parse_rfc3339("2026-02-04T12:00:00Z");
         let records = vec![
-            UsageSessionData {
+            UsageConversationData {
                 session: test_session_at("implement", monday),
                 events: vec![turn_usage_event(TurnUsage {
                     input_tokens: 60,
@@ -620,7 +622,7 @@ mod tests {
                 wave_id: Some("wave-alpha".to_string()),
                 flow: Some("build".to_string()),
             },
-            UsageSessionData {
+            UsageConversationData {
                 session: test_session_at("implement", wednesday),
                 events: vec![turn_usage_event(TurnUsage {
                     input_tokens: 90,
@@ -643,18 +645,18 @@ mod tests {
         assert_eq!(buckets[0].groups[0].turns, 2);
     }
 
-    fn test_session(step: &str) -> Session {
+    fn test_session(step: &str) -> Conversation {
         test_session_at(step, OffsetDateTime::now_utc())
     }
 
-    fn test_session_at(step: &str, created_at: OffsetDateTime) -> Session {
-        Session {
+    fn test_session_at(step: &str, created_at: OffsetDateTime) -> Conversation {
+        Conversation {
             id: LfdId::new(),
             harness: "claude".to_string(),
-            status: SessionStatus::Ended,
-            wave_run_id: None,
+            status: ConversationStatus::Ended,
+            run_id: None,
             provider_session_id: None,
-            config: SessionConfig {
+            config: ConversationConfig {
                 step: step.to_string(),
                 repo_root: "/tmp/repo".to_string(),
                 ..Default::default()
@@ -668,11 +670,11 @@ mod tests {
         OffsetDateTime::parse(value, &Rfc3339).expect("parse timestamp")
     }
 
-    fn context_event(sources: HashMap<String, u64>) -> PersistedSessionEvent {
-        PersistedSessionEvent {
-            session_id: LfdId::new(),
+    fn context_event(sources: HashMap<String, u64>) -> PersistedConversationEvent {
+        PersistedConversationEvent {
+            conversation_id: LfdId::new(),
             seq: 0,
-            event: SessionEvent::ContextSnapshot {
+            event: ConversationEvent::ContextSnapshot {
                 snapshot: ContextSnapshot {
                     sources,
                     source_counts: HashMap::new(),
@@ -689,11 +691,11 @@ mod tests {
         }
     }
 
-    fn turn_usage_event(usage: TurnUsage) -> PersistedSessionEvent {
-        PersistedSessionEvent {
-            session_id: LfdId::new(),
+    fn turn_usage_event(usage: TurnUsage) -> PersistedConversationEvent {
+        PersistedConversationEvent {
+            conversation_id: LfdId::new(),
             seq: 1,
-            event: SessionEvent::TurnUsage {
+            event: ConversationEvent::TurnUsage {
                 turn_id: "turn_1".to_string(),
                 usage,
             },

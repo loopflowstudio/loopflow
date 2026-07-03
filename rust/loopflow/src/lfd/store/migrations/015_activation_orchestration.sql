@@ -13,4 +13,4 @@ CREATE TABLE activation_log (
 
 CREATE INDEX idx_activation_log_wave ON activation_log(wave_id, created_at DESC);
 
-ALTER TABLE wave_runs ADD COLUMN activation_log_id TEXT REFERENCES activation_log(id);
+ALTER TABLE runs ADD COLUMN activation_log_id TEXT REFERENCES activation_log(id);

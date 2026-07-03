@@ -2,7 +2,7 @@ import SwiftUI
 import LoopflowCore
 
 struct IterationTimeline: View {
-    let runs: [WaveRun]
+    let runs: [Run]
 
     @Environment(\.palette) private var palette
 
@@ -26,11 +26,11 @@ struct IterationTimeline: View {
         }
     }
 
-    private var displayRuns: [WaveRun] {
+    private var displayRuns: [Run] {
         runs.sorted { $0.iteration < $1.iteration }
     }
 
-    private func dotColor(for run: WaveRun) -> Color {
+    private func dotColor(for run: Run) -> Color {
         if let pr = run.pr {
             switch pr.state {
             case .merged:

@@ -106,15 +106,15 @@ public enum TranscriptGroup: Identifiable, Equatable {
 public protocol SessionService: Sendable {
     func createSession(
         harness: String,
-        waveRunId: String?,
+        runId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession
-    func streamSessionEvents(
-        sessionId: String,
+    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession
+    func streamConversationEvents(
+        conversationId: String,
         afterSeq: Int?
-    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error>
+    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error>
     func stopSession(_ id: String) async throws -> AgentSession
 }
 
@@ -153,7 +153,7 @@ public final class SessionState {
     public private(set) var itemsById: [String: SessionItem] = [:]
 
     private let sessionHarness: String
-    private let sessionWaveRunId: String?
+    private let sessionRunId: String?
     private var sessionConfig: AgentSessionConfig
     private let waveService: any SessionService
     private let userDefaults: UserDefaults
@@ -175,14 +175,14 @@ public final class SessionState {
     public init(
         waveId: String,
         sessionHarness: String = "claude",
-        sessionWaveRunId: String? = nil,
+        sessionRunId: String? = nil,
         sessionConfig: AgentSessionConfig,
         waveService: any SessionService = LocalWaveService(),
         userDefaults: UserDefaults = .standard
     ) {
         self.waveId = waveId
         self.sessionHarness = sessionHarness
-        self.sessionWaveRunId = sessionWaveRunId
+        self.sessionRunId = sessionRunId
         self.sessionConfig = sessionConfig
         self.inputSupported = false
         self.waveService = waveService
@@ -284,7 +284,7 @@ public final class SessionState {
             if streamTask == nil {
                 startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
             }
-            _ = try await waveService.sendSessionInput(sessionId: sessionId, content: text)
+            _ = try await waveService.sendConversationInput(conversationId: sessionId, content: text)
         } catch {
             appendMessage(role: .error, content: error.localizedDescription)
             turnState = .failed
@@ -370,7 +370,7 @@ public final class SessionState {
         resetSessionCaches()
         let session = try await waveService.createSession(
             harness: sessionHarness,
-            waveRunId: sessionWaveRunId,
+            runId: sessionRunId,
             config: sessionConfig
         )
         sessionId = session.id
@@ -449,7 +449,7 @@ public final class SessionState {
         reconnecting: Bool
     ) async {
         do {
-            for try await envelope in waveService.streamSessionEvents(sessionId: sessionId, afterSeq: afterSeq) {
+            for try await envelope in waveService.streamConversationEvents(conversationId: sessionId, afterSeq: afterSeq) {
                 if envelope.replayCompletedLastSeq != nil {
                     promoteToLiveIfCurrent(generation: generation)
                     continue
@@ -563,7 +563,7 @@ public final class SessionState {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func applyEnvelope(_ envelope: AgentSessionEventEnvelope) {
+    private func applyEnvelope(_ envelope: ConversationEventEnvelope) {
         guard let event = envelope.event else { return }
 
         if let seq = envelope.seq {

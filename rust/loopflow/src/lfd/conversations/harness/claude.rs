@@ -10,13 +10,13 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
-use crate::lfd::sessions::harness::claude_mapping::ReaderState;
-use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
-use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
+use crate::lfd::conversations::harness::claude_mapping::ReaderState;
+use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::lfd::conversations::harness::{claude_mapping, Harness, HarnessError};
+use crate::lfd::conversations::types::{ConversationEvent, TurnStatus};
 
 pub struct ClaudeHarness {
-    events: mpsc::UnboundedSender<SessionEvent>,
+    events: mpsc::UnboundedSender<ConversationEvent>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
@@ -34,7 +34,7 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 impl ClaudeHarness {
-    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
             config: None,
@@ -102,7 +102,7 @@ impl Harness for ClaudeHarness {
 
         let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
 
-        let _ = self.events.send(SessionEvent::TurnStarted {
+        let _ = self.events.send(ConversationEvent::TurnStarted {
             turn_id: turn_id.clone(),
         });
 
@@ -177,12 +177,12 @@ impl Harness for ClaudeHarness {
                     "claude turn ended without result event"
                 );
                 for item in state.drain_failed_items() {
-                    let _ = events.send(SessionEvent::ItemCompleted {
+                    let _ = events.send(ConversationEvent::ItemCompleted {
                         turn_id: reader_turn_id.clone(),
                         item,
                     });
                 }
-                let _ = events.send(SessionEvent::TurnCompleted {
+                let _ = events.send(ConversationEvent::TurnCompleted {
                     turn_id: reader_turn_id,
                     status: TurnStatus::Failed,
                 });

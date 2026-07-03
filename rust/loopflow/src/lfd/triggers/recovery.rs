@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::platform::kill_process;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{AgentStatus, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{ExecutionProcessStatus, RunStatus, WaveStatus};
 
 pub fn spawn_recovery_loop(
     store: SharedStore,
@@ -53,15 +53,15 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let _ = store
-            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), now)
+            .end_agent(&agent.id, ExecutionProcessStatus::Failed.as_i32(), now)
             .await;
 
-        if let Some(ref run_id) = agent.wave_run_id {
-            if let Ok(Some(mut run)) = store.get_wave_run(run_id).await {
-                run.status = WaveRunStatus::Failed;
+        if let Some(ref run_id) = agent.run_id {
+            if let Ok(Some(mut run)) = store.get_run(run_id).await {
+                run.status = RunStatus::Failed;
                 run.error = Some("agent stuck >4h".to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
-                if let Err(err) = store.update_wave_run(&run).await {
+                if let Err(err) = store.update_run(&run).await {
                     tracing::error!(run_id = %run.id, error = %err, "failed to update stuck run status");
                 }
                 if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
@@ -79,19 +79,19 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
 mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{AgentRun, AgentStatus};
+    use crate::lfd::types::{ExecutionProcess, ExecutionProcessStatus};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::{Duration, OffsetDateTime};
 
-    fn make_agent(hours_ago: i64) -> AgentRun {
-        AgentRun {
+    fn make_agent(hours_ago: i64) -> ExecutionProcess {
+        ExecutionProcess {
             id: LfdId::new(),
             step: "implement".to_string(),
             repo: "/tmp/repo".to_string(),
             worktree: "/tmp/worktree".to_string(),
-            wave_run_id: None,
-            status: AgentStatus::Running,
+            run_id: None,
+            status: ExecutionProcessStatus::Running,
             started_at: Some(OffsetDateTime::now_utc() - Duration::hours(hours_ago)),
             ended_at: None,
             pid: None,

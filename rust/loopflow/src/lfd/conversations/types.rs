@@ -10,7 +10,7 @@ use crate::lfd::id::LfdId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
-pub enum SessionStatus {
+pub enum ConversationStatus {
     Starting,
     Active,
     Ending,
@@ -18,7 +18,7 @@ pub enum SessionStatus {
     Failed,
 }
 
-impl SessionStatus {
+impl ConversationStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Starting => "starting",
@@ -88,7 +88,7 @@ pub struct FileEdit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum SessionItem {
+pub enum ConversationItem {
     Command {
         id: String,
         #[serde(default)]
@@ -261,7 +261,7 @@ fn diff_tier_key(diff_tier: &DiffTier) -> &'static str {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum SessionEvent {
+pub enum ConversationEvent {
     // Turn boundaries
     TurnStarted {
         turn_id: String,
@@ -283,7 +283,7 @@ pub enum SessionEvent {
     // Item lifecycle
     ItemStarted {
         turn_id: String,
-        item: SessionItem,
+        item: ConversationItem,
     },
     ItemUpdated {
         turn_id: String,
@@ -292,7 +292,7 @@ pub enum SessionEvent {
     },
     ItemCompleted {
         turn_id: String,
-        item: SessionItem,
+        item: ConversationItem,
     },
 
     // High-frequency streaming
@@ -315,9 +315,9 @@ pub enum SessionEvent {
         actions: Vec<SuggestedActionPayload>,
     },
 
-    // Session-level
+    // Conversation-level
     StatusChanged {
-        status: SessionStatus,
+        status: ConversationStatus,
     },
     Error {
         code: String,
@@ -330,7 +330,7 @@ pub enum SessionEvent {
     },
 }
 
-impl SessionEvent {
+impl ConversationEvent {
     pub fn event_type(&self) -> &'static str {
         match self {
             Self::TurnStarted { .. } => "turn_started",
@@ -351,10 +351,10 @@ impl SessionEvent {
     }
 }
 
-// -- Session config and record --
+// -- Conversation config and record --
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct SessionConfig {
+pub struct ConversationConfig {
     #[serde(default)]
     pub step: String,
     #[serde(default)]
@@ -385,38 +385,38 @@ pub struct SessionConfig {
 
 /// Conversation and usage record for a single interactive agent session.
 ///
-/// `Session` stores persisted chat/session lifecycle and token usage events.
-/// For process-level lifecycle (PID/container/run status), see `AgentRun`.
-/// When present, `wave_run_id` links this session back to the corresponding
+/// `Conversation` stores persisted chat/session lifecycle and token usage events.
+/// For process-level lifecycle (PID/container/run status), see `ExecutionProcess`.
+/// When present, `run_id` links this session back to the corresponding
 /// wave execution lineage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
+pub struct Conversation {
     pub id: LfdId,
     pub harness: String,
-    pub status: SessionStatus,
+    pub status: ConversationStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub wave_run_id: Option<String>,
+    pub run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_session_id: Option<String>,
-    pub config: SessionConfig,
+    pub config: ConversationConfig,
     pub created_at: OffsetDateTime,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone)]
-pub struct PersistedSessionEvent {
-    pub session_id: LfdId,
+pub struct PersistedConversationEvent {
+    pub conversation_id: LfdId,
     pub seq: i64,
-    pub event: SessionEvent,
+    pub event: ConversationEvent,
     pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone)]
-pub struct CreateSessionParams {
+pub struct CreateConversationParams {
     pub harness: String,
-    pub wave_run_id: Option<String>,
-    pub config: SessionConfig,
+    pub run_id: Option<String>,
+    pub config: ConversationConfig,
 }
 
 #[cfg(test)]

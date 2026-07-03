@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::types::{AgentStatus, WaveRunStatus};
+use crate::lfd::types::{ExecutionProcessStatus, RunStatus};
 
 pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
@@ -50,29 +50,33 @@ struct Counts {
 async fn counts(state: &HttpState) -> Counts {
     let waves_fut = state.store.list_waves(None);
     let agents_fut = state.store.list_agents();
-    let wave_runs_fut = state.store.list_wave_runs(None, None);
+    let runs_fut = state.store.list_runs(None, None);
     let health_fut = state.store.health_check();
-    let (waves, agents, wave_runs, health) =
-        tokio::join!(waves_fut, agents_fut, wave_runs_fut, health_fut);
+    let (waves, agents, runs, health) = tokio::join!(waves_fut, agents_fut, runs_fut, health_fut);
 
     let waves = waves.unwrap_or_default();
     let agents = agents.unwrap_or_default();
-    let wave_runs = wave_runs.unwrap_or_default();
+    let runs = runs.unwrap_or_default();
     let database_ok = health.is_ok();
 
     let waves_defined = waves.len() as u32;
-    let waves_running = wave_runs
+    let waves_running = runs
         .iter()
         .filter(|run| {
             matches!(
                 run.status,
-                WaveRunStatus::Running | WaveRunStatus::Waiting | WaveRunStatus::Pending
+                RunStatus::Running | RunStatus::Waiting | RunStatus::Pending
             )
         })
         .count() as u32;
     let agents_active = agents
         .iter()
-        .filter(|agent| matches!(agent.status, AgentStatus::Running | AgentStatus::Waiting))
+        .filter(|agent| {
+            matches!(
+                agent.status,
+                ExecutionProcessStatus::Running | ExecutionProcessStatus::Waiting
+            )
+        })
         .count() as u32;
 
     Counts {
@@ -88,12 +92,12 @@ mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+    use crate::lfd::conversations::ConversationManager;
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -110,7 +114,7 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(1));
         let output_hub = OutputHub::new(128, tmp.path().join("output"));
         let event_hub = EventHub::new(128);
-        let sessions = SessionManager::new(store.clone());
+        let sessions = ConversationManager::new(store.clone());
         let executor = Arc::new(
             WaveExecutor::new(
                 store.clone(),
@@ -138,7 +142,7 @@ mod tests {
             http_security: HttpSecurityConfig::default(),
             auth_failure_throttle: AuthFailureThrottle::new(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            sessions,
+            conversations: sessions,
         }
     }
 

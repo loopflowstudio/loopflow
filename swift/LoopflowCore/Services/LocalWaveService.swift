@@ -1,4 +1,4 @@
-// Service for loading Wave and WaveRun data from lfd daemon (HTTP).
+// Service for loading Wave and Run data from lfd daemon (HTTP).
 
 import Foundation
 
@@ -60,7 +60,7 @@ public struct ConnectionInfo: Sendable {
     public let step: String
     public let agentId: String
     public let promptFile: String
-    public let waveRunId: String?
+    public let runId: String?
     public let stepIndex: Int
 
     public init(
@@ -68,14 +68,14 @@ public struct ConnectionInfo: Sendable {
         step: String,
         agentId: String,
         promptFile: String,
-        waveRunId: String?,
+        runId: String?,
         stepIndex: Int
     ) {
         self.worktree = worktree
         self.step = step
         self.agentId = agentId
         self.promptFile = promptFile
-        self.waveRunId = waveRunId
+        self.runId = runId
         self.stepIndex = stepIndex
     }
 }
@@ -310,6 +310,15 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let sessionId {
             url = url.appendingPathComponent(sessionId)
         }
+        return components.reduce(url) { current, component in
+            current.appendingPathComponent(component)
+        }
+    }
+
+    private func conversationURL(_ conversationId: String, components: String...) -> URL {
+        let url = apiBaseURL
+            .appendingPathComponent("conversations")
+            .appendingPathComponent(conversationId)
         return components.reduce(url) { current, component in
             current.appendingPathComponent(component)
         }
@@ -571,10 +580,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    // MARK: - WaveRuns
+    // MARK: - Runs
 
-    public func listWaveRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [WaveRun] {
-        var components = URLComponents(url: apiBaseURL.appendingPathComponent("wave_runs"), resolvingAgainstBaseURL: false)!
+    public func listRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [Run] {
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("runs"), resolvingAgainstBaseURL: false)!
         var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
         if let waveId {
             queryItems.append(URLQueryItem(name: "wave_id", value: waveId))
@@ -585,11 +594,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         components.queryItems = queryItems
 
         guard let url = components.url else {
-            LoggingService.lfd("listWaveRuns: invalid URL")
+            LoggingService.lfd("listRuns: invalid URL")
             return []
         }
 
-        LoggingService.lfd("listWaveRuns: GET \(url)")
+        LoggingService.lfd("listRuns: GET \(url)")
 
         do {
             let (data, response) = try await performGet(url)
@@ -600,13 +609,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let runsData = json["data"] as? [[String: Any]] else {
-                LoggingService.lfd("listWaveRuns: invalid JSON response")
+                LoggingService.lfd("listRuns: invalid JSON response")
                 return []
             }
 
-            return runsData.compactMap { Self.parseWaveRunFromJSON($0) }
+            return runsData.compactMap { Self.parseRunFromJSON($0) }
         } catch {
-            LoggingService.lfd("listWaveRuns: error=\(error.localizedDescription)")
+            LoggingService.lfd("listRuns: error=\(error.localizedDescription)")
             throw error
         }
     }
@@ -640,11 +649,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parsedObject(from: data, parse: Self.parseAttentionFromJSON)
     }
 
-    public func listTerminalSessions(
+    public func listSessions(
         repo: RepoTarget,
         activeOnly: Bool = true
-    ) async throws -> [TerminalSession] {
-        var components = URLComponents(url: terminalSessionURL(), resolvingAgainstBaseURL: false)!
+    ) async throws -> [Session] {
+        var components = URLComponents(url: sessionURL(), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "repo", value: repo.path),
             URLQueryItem(name: "active_only", value: activeOnly ? "true" : "false"),
@@ -654,17 +663,17 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
         let (data, response) = try await performGet(url)
         try requireOKStatus(response, data: data)
-        return try parsedList(from: data, parse: Self.parseTerminalSessionFromJSON)
+        return try parsedList(from: data, parse: Self.parseSessionFromJSON)
     }
 
-    public func createTerminalSession(
+    public func createSession(
         waveId: String,
         flow: String,
         worktree: String,
         agent: String
-    ) async throws -> TerminalSessionLaunchResponse {
+    ) async throws -> SessionLaunchResponse {
         let request = try makeRequest(
-            terminalSessionURL(),
+            sessionURL(),
             method: "POST",
             body: [
                 "wave_id": waveId,
@@ -676,56 +685,46 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
         let (data, response) = try await performRequest(request)
         try requireOKStatus(response, data: data)
-        return try parsedObject(from: data, parse: Self.parseTerminalSessionLaunchResponseFromJSON)
+        return try parsedObject(from: data, parse: Self.parseSessionLaunchResponseFromJSON)
     }
 
-    public func getTerminalSession(_ id: String) async throws -> TerminalSession {
-        let (data, response) = try await performGet(terminalSessionURL(id))
+    public func getSession(_ id: String) async throws -> Session {
+        let (data, response) = try await performGet(sessionURL(id))
         try requireOKStatus(response, data: data)
-        return try parsedObject(from: data, parse: Self.parseTerminalSessionFromJSON)
+        return try parsedObject(from: data, parse: Self.parseSessionFromJSON)
     }
 
-    public func attachTerminalSession(_ id: String) async throws -> TerminalConnectionInfo {
-        try await performTerminalSessionAction(
+    public func attachSession(_ id: String) async throws -> SessionConnectionInfo {
+        try await performSessionAction(
             id,
             action: "attach",
-            parse: Self.parseTerminalConnectionInfoFromJSON
+            parse: Self.parseSessionConnectionInfoFromJSON
         )
     }
 
-    public func startTerminalSession(_ id: String) async throws -> TerminalSession {
-        try await performTerminalSessionAction(
+    public func startSession(_ id: String) async throws -> Session {
+        try await performSessionAction(
             id,
             action: "start",
-            parse: Self.parseTerminalSessionFromJSON
+            parse: Self.parseSessionFromJSON
         )
     }
 
-    public func cancelTerminalSession(_ id: String) async throws -> TerminalSession {
-        try await performTerminalSessionAction(
+    public func cancelSession(_ id: String) async throws -> Session {
+        try await performSessionAction(
             id,
             action: "cancel",
-            parse: Self.parseTerminalSessionFromJSON
+            parse: Self.parseSessionFromJSON
         )
     }
 
-    private func terminalSessionURL(_ id: String? = nil, components: String...) -> URL {
-        var url = apiBaseURL.appendingPathComponent("terminal-sessions")
-        if let id {
-            url = url.appendingPathComponent(id)
-        }
-        return components.reduce(url) { current, component in
-            current.appendingPathComponent(component)
-        }
-    }
-
-    private func performTerminalSessionAction<T>(
+    private func performSessionAction<T>(
         _ id: String,
         action: String,
         parse: ([String: Any]) -> T?
     ) async throws -> T {
         let request = try makeRequest(
-            terminalSessionURL(id, components: action),
+            sessionURL(id, components: action),
             method: "POST",
             body: [:],
             contentType: "application/json"
@@ -1030,7 +1029,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         default: normalizedStatus = statusValue
         }
         let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
-        let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseWaveRunFromJSON)
+        let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseRunFromJSON)
 
         let commits: [CommitEntry]
         if let commitsData = json["commits"] as? [[String: Any]] {
@@ -1111,8 +1110,23 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return Self.parseWaveFromJSON(json)
     }
 
-    /// Run wave, optionally with one-time overrides.
-    public func run(_ id: String, overrides: RunOverrides?) async throws {
+    public func getWaveAgentTree(waveId: String, activeOnly: Bool = true) async throws -> WaveAgentTree {
+        var components = URLComponents(
+            url: apiBaseURL.appendingPathComponent("waves/\(waveId)/agent-tree"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "active_only", value: activeOnly ? "true" : "false"),
+        ]
+        guard let url = components.url else {
+            throw WaveServiceError.commandFailed("Invalid wave agent tree URL")
+        }
+        let (data, response) = try await performGet(url)
+        try requireOKStatus(response, data: data)
+        return try parsedObject(from: data, parse: Self.parseWaveAgentTreeFromJSON)
+    }
+
+    public func ensureWaveAgent(waveId id: String, overrides: RunOverrides? = nil) async throws -> Session {
         // Build body with any overrides
         var body: [String: Any] = [:]
         if let overrides {
@@ -1137,10 +1151,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
-        guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
-        }
+        return try parsedObject(from: data, parse: Self.parseSessionFromJSON)
     }
 
     // MARK: - Triggers
@@ -1186,14 +1197,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func createSession(
         harness: String,
-        waveRunId: String?,
+        runId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let url = sessionURL()
         var payload = Self.sessionConfigJSON(config)
         payload["harness"] = harness
-        if let waveRunId {
-            payload["wave_run_id"] = waveRunId
+        if let runId {
+            payload["run_id"] = runId
         }
 
         let request = try makeRequest(
@@ -1212,9 +1223,9 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parseSessionResponse(data: data, response: response)
     }
 
-    public func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
+    public func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession {
         let request = try makeRequest(
-            sessionURL(sessionId, components: "input"),
+            conversationURL(conversationId, components: "input"),
             method: "POST",
             body: ["text": content],
             contentType: "application/json"
@@ -1223,16 +1234,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parseSessionResponse(data: data, response: response)
     }
 
-    public func streamSessionEvents(
-        sessionId: String,
+    public func streamConversationEvents(
+        conversationId: String,
         afterSeq: Int?
-    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error> {
+    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 let activeSession = longSession()
                 do {
                     var components = URLComponents(
-                        url: sessionURL(sessionId, components: "events"),
+                        url: conversationURL(conversationId, components: "events"),
                         resolvingAgainstBaseURL: false
                     )!
                     if let afterSeq {
@@ -1276,16 +1287,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                         let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                         guard !payload.isEmpty else { continue }
 
-                        if pendingEventType == "session.replay_completed" {
+                        if pendingEventType == "conversation.replay_completed" {
                             let lastSeq = Self.parseReplayCompletedLastSeq(payload)
-                            continuation.yield(AgentSessionEventEnvelope(replayCompletedLastSeq: lastSeq))
+                            continuation.yield(ConversationEventEnvelope(replayCompletedLastSeq: lastSeq))
                             pendingSeq = nil
                             pendingEventType = nil
                             continue
                         }
 
                         let event = try Self.parseSessionEvent(payload)
-                        continuation.yield(AgentSessionEventEnvelope(seq: pendingSeq, event: event))
+                        continuation.yield(ConversationEventEnvelope(seq: pendingSeq, event: event))
                         pendingSeq = nil
                         pendingEventType = nil
                     }
@@ -1325,7 +1336,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw WaveServiceError.commandFailed("Invalid response")
         }
 
-        let waveRunId = json["wave_run_id"] as? String
+        let runId = json["run_id"] as? String
         let stepIndex = json["step_index"] as? Int ?? 0
 
         return ConnectionInfo(
@@ -1333,7 +1344,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             step: step,
             agentId: agentId,
             promptFile: promptFile,
-            waveRunId: waveRunId,
+            runId: runId,
             stepIndex: stepIndex
         )
     }
@@ -1550,7 +1561,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
+              let session = Self.parseAgentSessionFromJSON(json) else {
             throw WaveServiceError.commandFailed("Invalid response")
         }
         return session
@@ -1568,7 +1579,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
+    static func parseAgentSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
         guard let id = json["id"] as? String,
               let harness = json["harness"] as? String,
               let status = json["status"] as? String else {
@@ -1595,7 +1606,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: id,
             harness: harness,
             status: status,
-            waveRunId: json["wave_run_id"] as? String,
+            runId: json["run_id"] as? String,
             providerSessionId: json["provider_session_id"] as? String,
             inputSupported: json["input_supported"] as? Bool ?? false,
             config: config,
@@ -1604,29 +1615,35 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    static func parseTerminalSessionFromJSON(_ json: [String: Any]) -> TerminalSession? {
+    static func parseSessionFromJSON(_ json: [String: Any]) -> Session? {
         guard let id = json["id"] as? String,
               let waveId = json["wave_id"] as? String,
               let step = json["step"] as? String,
+              let sessionUseRaw = json["use"] as? String,
+              let sessionUse = SessionUse(rawValue: sessionUseRaw),
               let agent = json["agent"] as? String,
               let cwd = json["cwd"] as? String,
+              let argv = json["argv"] as? [String],
+              let env = json["env"] as? [String: String],
               let source = json["source"] as? String,
               let tmuxName = json["tmux_name"] as? String,
               let statusRaw = json["status"] as? String,
-              let status = TerminalSessionStatus(rawValue: statusRaw),
+              let status = SessionStatus(rawValue: statusRaw),
               let createdAt = parseDate(json["created_at"]) else {
             return nil
         }
 
-        return TerminalSession(
+        return Session(
             id: id,
             waveId: waveId,
-            waveRunId: json["wave_run_id"] as? String,
+            runId: json["run_id"] as? String,
+            parentSessionId: json["parent_session_id"] as? String,
+            sessionUse: sessionUse,
             step: step,
             agent: agent,
             cwd: cwd,
-            argv: json["argv"] as? [String] ?? [],
-            env: json["env"] as? [String: String] ?? [:],
+            argv: argv,
+            env: env,
             source: source,
             tmuxName: tmuxName,
             status: status,
@@ -1637,31 +1654,72 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    static func parseTerminalSessionLaunchResponseFromJSON(_ json: [String: Any]) -> TerminalSessionLaunchResponse? {
+    static func parseSessionLaunchResponseFromJSON(_ json: [String: Any]) -> SessionLaunchResponse? {
         guard
             let sessionJSON = json["session"] as? [String: Any],
             let connectionJSON = json["connection"] as? [String: Any],
-            let session = parseTerminalSessionFromJSON(sessionJSON),
-            let connection = parseTerminalConnectionInfoFromJSON(connectionJSON)
+            let session = parseSessionFromJSON(sessionJSON),
+            let connection = parseSessionConnectionInfoFromJSON(connectionJSON)
         else {
             return nil
         }
 
-        return TerminalSessionLaunchResponse(session: session, connection: connection)
+        return SessionLaunchResponse(session: session, connection: connection)
     }
 
-    static func parseTerminalConnectionInfoFromJSON(_ json: [String: Any]) -> TerminalConnectionInfo? {
+    static func parseWaveAgentTreeFromJSON(_ json: [String: Any]) -> WaveAgentTree? {
         guard
+            let object = json["object"] as? String,
+            let id = json["id"] as? String,
+            let waveJSON = json["wave"] as? [String: Any],
+            let childWaveJSON = json["child_waves"] as? [[String: Any]],
+            let sessionJSON = json["sessions"] as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        let wave = parseWaveFromJSON(waveJSON)
+        let childWaves = childWaveJSON.map(parseWaveFromJSON)
+        let sessions = sessionJSON.compactMap(parseWaveAgentTreeSessionFromJSON)
+        guard sessions.count == sessionJSON.count else {
+            return nil
+        }
+
+        return WaveAgentTree(
+            object: object,
+            id: id,
+            wave: wave,
+            childWaves: childWaves,
+            sessions: sessions
+        )
+    }
+
+    static func parseWaveAgentTreeSessionFromJSON(_ json: [String: Any]) -> WaveAgentTreeSession? {
+        guard
+            let sessionJSON = json["session"] as? [String: Any],
+            let session = parseSessionFromJSON(sessionJSON)
+        else {
+            return nil
+        }
+        let connection = (json["connection"] as? [String: Any])
+            .flatMap(parseSessionConnectionInfoFromJSON)
+        return WaveAgentTreeSession(session: session, connection: connection)
+    }
+
+    static func parseSessionConnectionInfoFromJSON(_ json: [String: Any]) -> SessionConnectionInfo? {
+        guard
+            let kind = json["kind"] as? String,
             let sessionName = json["session_name"] as? String,
             let host = json["host"] as? String,
             let cwd = json["cwd"] as? String,
             let statusRaw = json["status"] as? String,
-            let status = TerminalSessionStatus(rawValue: statusRaw)
+            let status = SessionStatus(rawValue: statusRaw)
         else {
             return nil
         }
 
-        return TerminalConnectionInfo(
+        return SessionConnectionInfo(
+            kind: kind,
             sessionName: sessionName,
             host: host,
             cwd: cwd,
@@ -1912,7 +1970,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return .string(String(describing: value))
     }
 
-    private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
+    private static func parseRunFromJSON(_ json: [String: Any]) -> Run? {
         guard let id = json["id"] as? String,
               let flow = json["flow"] as? String,
               let repoPath = json["repo"] as? String else {
@@ -1922,8 +1980,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let waveId = json["wave_id"] as? String
         let area = normalizeAreaDisplay(json["area"])
         let direction = normalizeDirection(json["direction"])
-        let statusStr = json["status"] as? String ?? WaveRunStatus.pending.rawValue
-        let status = WaveRunStatus(rawValue: statusStr) ?? .pending
+        let statusStr = json["status"] as? String ?? RunStatus.pending.rawValue
+        let status = RunStatus(rawValue: statusStr) ?? .pending
         let iteration = normalizeInt(json["iteration"])
         let stepIndex = normalizeInt(json["step_index"])
 
@@ -1940,7 +1998,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             pr = nil
         }
 
-        return WaveRun(
+        return Run(
             id: id,
             waveId: waveId,
             flow: flow,

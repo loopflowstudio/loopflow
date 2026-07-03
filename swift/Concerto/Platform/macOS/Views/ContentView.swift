@@ -328,7 +328,7 @@ struct ContentView: View {
         case .focusSessionComposer:
             if let selectedWave = repoState.selectedWave,
                let terminalSession = repoState.terminalWorkspaceStore.activeSession(for: selectedWave.id) {
-                repoState.selectTerminalSession(terminalSession.id)
+                repoState.selectSession(terminalSession.id)
             } else if let selectedWave = repoState.selectedWave,
                       repoState.shouldShowInteractiveSession(for: selectedWave) {
                 NotificationCenter.default.post(
@@ -385,7 +385,7 @@ struct ContentView: View {
         let agent = wave.agent?.isEmpty == false ? wave.agent! : (repoState.supportedHarnesses.first ?? "claude:opus")
         Task {
             do {
-                let response = try await repoState.createTerminalSession(
+                let response = try await repoState.createSession(
                     waveId: wave.id,
                     flow: flow,
                     worktree: worktreePath,
@@ -427,7 +427,7 @@ struct ContentView: View {
 
         if let closedPane = repoState.multiplexerStore.closePane(context.focusedPane.id, for: context.waveId),
            let sessionId = closedPane.config.terminalSessionId {
-            Task { _ = try? await repoState.cancelTerminalSession(sessionId) }
+            Task { _ = try? await repoState.cancelSession(sessionId) }
         }
     }
 

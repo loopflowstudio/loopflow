@@ -1,32 +1,45 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves**. Waves are chains of coding agents working together in pre-defined ways.  
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works a roadmap, delegates the implementation to workers, remembers what it learns, and shows you every live session.
 
-Waves are first built manually through more interactive exploration. Eventually waves become autonomous through looping, scheduled cron runs, and watching for changes.
+Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
 ## Waves
 
-A wave is **goal × flow × runtime state**.
+A wave is a named agent with a goal. Two files author it:
 
-| Field | Usage | Form |
-|-------|------|------|
-| **Goal** | Loop prompt for autonomous runs | `wave/<name>/goal.md` |
-| **Flow** | Default process the goal dispatches | flow name |
-| **Runtime state** | Mode, workers, crons, triggers, status | lfd |
+| File | Holds |
+|------|-------|
+| **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
+| **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
 ```markdown
-<!-- wave/designer/goal.md -->
+<!-- wave/designer/GOAL.md -->
 ---
 primary_flow: build
-mode: loop
 metrics:
   - design reviews are complete
 ---
 
-Run one loop iteration for the designer wave.
-Pick the next useful design task, dispatch the right flow, and fold what changed
-back into the wave.
+Keep the design system coherent. Each loop: read the roadmap, pick the next
+design task, dispatch a worker to build it, and fold what changed into memory.
 ```
+
+Run the wave agent, then watch its work:
+
+```bash
+lfq wave run designer        # start (or attach to) the wave agent
+lfq sessions                 # every live session — the wave agent and its workers
+lfq attach <session-id>      # jump into one over tmux
+```
+
+The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
+
+```bash
+lfq worker run designer --flow build --task "unify button variants"
+```
+
+Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
 ### Modes
 
@@ -39,26 +52,18 @@ The wave's `mode` controls its execution pattern.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave without changing its primary mode. They run independently of the worker pool, and `workers: 0` is valid for cron-driven waves.
+Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. `workers: 0` is valid for a cron-only wave.
 
-```yaml
-# member wave — workers handle the primary flow, crons sweep maintenance
-flow: build
-workers: 2
-mode: loop
-crons:
-  - flow: sync
-    schedule: "0 0 1 * *"
+```python
+import loopflow.api as loopflow
 
-# root wave — no workers, all work comes from crons
-flow: garden
-workers: 0
-mode: manual
-crons:
-  - flow: govern-identity
-    schedule: "0 0 * * 0"
-  - flow: govern-coordination
-    schedule: "0 0 * * *"
+# workers handle the primary flow; crons sweep maintenance
+loopflow.create_wave("designer", repo=".", flow="build", workers=2,
+                     crons=[{"flow": "sync", "schedule": "0 0 1 * *"}])
+
+# cron-only governance wave — no workers, all work comes from schedules
+loopflow.create_wave("governance", repo=".", flow="garden", workers=0,
+                     crons=[{"flow": "govern-identity", "schedule": "0 0 * * 0"}])
 ```
 
 ### Triggers
@@ -135,13 +140,13 @@ Autonomous coordination — crons, triggers, and waves-watching-waves drive thes
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
 | `ingest` | Refresh PM-backed waves, then pick a wave item into scratch/ |
-| `s5-scan` | Scan chord identity, roster, policy, and recent structural change |
+| `s5-scan` | Scan wave identity, children, policy, and recent structural change |
 | `s5-assess` | Assess identity, boundary, roster, and autonomy drift |
 | `s4-scan` | Scan dependencies, advisories, upstream APIs, and other external signals |
 | `s4-assess` | Assess which environmental changes matter and what they imply |
 | `s3-scan` | Scan live health, velocity, CI, retries, and usage signals |
 | `s3-assess` | Assess control health, mechanical blocks, and worker-pool size |
-| `s2-scan` | Scan backlogs, PR overlap, area overlap, and conflict history |
+| `s2-scan` | Scan backlogs, PR overlap, path overlap, and conflict history |
 | `s2-assess` | Assess coordination risk, conflict map, and safe ordering |
 
 ### Ops steps (`ops/`)
@@ -188,7 +193,7 @@ Flows can include mechanical ops items directly:
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
 | `build-or-silent` | op: pm pull → ingest → xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
-| `queue` | gate → update-wave → deploy |
+| `queue` | compress → update-wave → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
 | `deploy` | gate → op: land --create-pr → op: pm push-diff |
@@ -267,25 +272,25 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 
 ## Playing in the Waves
 
-Once you have played with chaining steps into flows, you're ready to ride some waves.
+Once you're chaining steps into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lfq create engbot .                # create a wave
-lfq run engbot                            # ride a wave
+lfq wave run engbot        # start (or attach to) the wave agent
+lfq list                   # see every wave
 ```
 
-Configure a goal and primary flow with `loopflow.update_wave(...)`, then ride it with `loopflow.run_wave(...)`.
+Or drive it from Python:
 
 ```bash
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("engbot", flow="build", goal="ship-roadmap")
+loopflow.create_wave("engbot", repo=".", flow="build")
 loopflow.run_wave("engbot")
 PY
 ```
 
-You can compose multiple directions to add additional nuance or perspectives.
+Directions compose extra nuance into any step or flow the wave dispatches.
 
 ```bash
 lf research -d ux,clarity
@@ -327,6 +332,9 @@ uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
 lfq show engbot      # show wave details
+lfq wave run engbot  # start or attach the Wave-agent session
+lfq worker run engbot --flow implement --task "Add the endpoint"
+lfq whoami           # show current lfd agent identity
 lfq sessions         # list live terminal sessions
 lfq attach <id>      # attach to one over tmux
 lfq logs engbot      # tail agent output
@@ -398,9 +406,9 @@ uv pip install loopflow
 import loopflow.api as loopflow
 
 loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
-loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="govern-control", direction=["infra"], area=["rust/"])
+loopflow.create_wave("engbot", repo=".", flow="build")
+loopflow.create_wave("ux", repo=".", flow="build")
+loopflow.create_wave("infra", repo=".", flow="govern-control")
 loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 ```
@@ -411,7 +419,6 @@ import loopflow.api as loopflow
 loopflow.create_wave("conductor", repo=".")
 conductor = loopflow.wave("conductor")
 print(conductor.primary_flow)
-print(conductor.area)
 ```
 
 [Documentation →](docs/index.md)

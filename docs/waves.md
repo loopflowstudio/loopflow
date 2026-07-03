@@ -5,18 +5,28 @@ title: Waves
 
 # Waves
 
-A wave is **goal × flow × runtime state**. The goal prompt drives autonomous loop iterations, the primary flow is the default hand it dispatches, and lfd tracks mode, crons, triggers, status, and sessions.
+A wave is a named agent with a goal. You author two files under `wave/<name>/`:
+
+| File | Holds |
+|------|-------|
+| **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
+| **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
+
+Run the agent and it works a loop: read the roadmap and memory, pick the next move, dispatch a worker to build it, watch the PR, and fold what changed back into memory.
 
 ```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("shipper", repo=".", flow="build", goal="ship-roadmap")
-loopflow.run_wave("shipper")
-PY
+lfq wave run shipper       # start (or attach to) the wave agent
+lfq sessions               # the wave agent and every worker it launches
+lfq attach <session-id>    # jump into one over tmux
 ```
 
-This creates a wave with the `build` flow and the `ship-roadmap` loop goal.
+The wave agent coordinates; workers do the implementation. When the agent picks a substantial task it dispatches one:
+
+```bash
+lfq worker run shipper --flow build --task "add retry to token refresh"
+```
+
+A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
 
 Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
@@ -42,7 +52,7 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR. When 
 Crons schedule supplementary flows on a wave. They do not replace the wave's primary flow, and they do not consume the wave's `workers` budget.
 
 ```markdown
-<!-- wave/shipper/goal.md -->
+<!-- wave/shipper/GOAL.md -->
 ---
 primary_flow: build
 workers: 2
@@ -67,10 +77,10 @@ loopflow.create_wave(
 )
 ```
 
-Use `workers: 0` in `goal.md` for waves that only run from cron schedules:
+Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 
 ```markdown
-<!-- wave/governance/goal.md -->
+<!-- wave/governance/GOAL.md -->
 ---
 primary_flow: garden
 workers: 0
@@ -191,8 +201,8 @@ lfq delete <name>       # remove wave and history
 Status output:
 
 ```
-ID       MODE   AREA                             STATUS     ITER  REPO
-abc1234  loop   src/ [ship] [clarity]             running    12    ~/repo
+ID       NAME     MODE   STATUS   ITER  REPO
+abc1234  shipper  loop   running  12    ~/repo
 ```
 
 ## Next

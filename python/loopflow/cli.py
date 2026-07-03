@@ -6,6 +6,7 @@ import shutil
 import time
 import webbrowser
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -20,6 +21,7 @@ from loopflow.models import (
     CostRates,
     ProviderInfo,
     Repo,
+    Session,
     TokenTotals,
     UsageSummary,
     UsageSummaryGroup,
@@ -29,9 +31,14 @@ from loopflow.models import (
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
 repos_app = typer.Typer(help="Manage registered repositories.")
+worker_app = typer.Typer(help="Launch and inspect worker agents.")
+wave_app = typer.Typer(help="Launch and inspect Wave agents.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(repos_app, name="repos")
+app.add_typer(worker_app, name="worker")
+app.add_typer(wave_app, name="wave")
 console = Console()
+
 
 _PROVIDER_LABELS = {
     "github": "GitHub",
@@ -115,27 +122,60 @@ def _short_id(value: object) -> str:
     return text[:12]
 
 
-def _terminal_session_role(session: dict[str, Any]) -> str:
-    if session.get("wave_run_id"):
-        return "dispatch"
-
-    source = str(session.get("source") or "")
-    if source == "wave_agent":
-        return "agent"
-    if source == "palette":
-        return "palette"
-    return source or "-"
+def _session_role(session: Session) -> str:
+    return session.session_use or "-"
 
 
-def _terminal_session_id_from_attention(item: dict[str, Any]) -> Optional[str]:
-    value = item.get("terminal_session_id")
+def _find_explicit_env_agent_session() -> Optional[Session]:
+    session_id = os.environ.get("LFD_SESSION_ID")
+    if session_id:
+        try:
+            return api.get_session(session_id)
+        except LoopflowError:
+            return None
+
+    wave_id = os.environ.get("LFD_WAVE_ID")
+    run_id = os.environ.get("LFD_RUN_ID")
+    role = os.environ.get("LFD_AGENT_ROLE")
+    if not any((wave_id, run_id, role)):
+        return None
+
+    matches = api.list_sessions()
+    if wave_id:
+        matches = [session for session in matches if session.wave_id == wave_id]
+    if run_id:
+        matches = [session for session in matches if session.run_id == run_id]
+    if role:
+        matches = [session for session in matches if _session_role(session) == role]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _find_current_agent_session() -> Optional[Session]:
+    explicit = _find_explicit_env_agent_session()
+    if explicit is not None:
+        return explicit
+
+    if any(os.environ.get(name) for name in ("LFD_WAVE_ID", "LFD_RUN_ID", "LFD_AGENT_ROLE")):
+        return None
+
+    try:
+        session = api.current_session(str(Path.cwd()))
+    except LoopflowError:
+        return None
+    return session
+
+
+def _session_id_from_attention(item: dict[str, Any]) -> Optional[str]:
+    value = item.get("session_id")
     if isinstance(value, str):
         return value
 
     context = item.get("context")
     if not isinstance(context, dict):
         return None
-    context_value = context.get("terminal_session_id")
+    context_value = context.get("session_id")
     if isinstance(context_value, str):
         return context_value
     return None
@@ -146,14 +186,14 @@ def _needs_input_session_ids(items: list[dict[str, Any]]) -> set[str]:
     for item in items:
         if item.get("kind") != "interactive" or item.get("status") == "resolved":
             continue
-        session_id = _terminal_session_id_from_attention(item)
+        session_id = _session_id_from_attention(item)
         if session_id:
             session_ids.add(session_id)
     return session_ids
 
 
-def _terminal_sessions_table(
-    sessions: list[dict[str, Any]],
+def _sessions_table(
+    sessions: list[Session],
     attention_items: list[dict[str, Any]],
     wave_names: dict[str, str],
 ) -> Table:
@@ -167,14 +207,14 @@ def _terminal_sessions_table(
     table.add_column("needs-input")
 
     for session in sessions:
-        session_id = str(session.get("id") or "")
-        wave_id = str(session.get("wave_id") or "")
+        session_id = session.id
+        wave_id = session.wave_id
         table.add_row(
             wave_names.get(wave_id, _short_id(wave_id)),
             _short_id(session_id),
-            _terminal_session_role(session),
-            str(session.get("step") or "-"),
-            str(session.get("status") or "-"),
+            _session_role(session),
+            session.step or "-",
+            session.status or "-",
             "yes" if session_id in needs_input_ids else "-",
         )
     return table
@@ -630,9 +670,33 @@ def create_wave(
     typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
 
 
+def _print_launch_response(response: Session, label: str) -> None:
+    typer.echo(f"{label} {response.id}")
+    typer.echo(f"wave    {response.wave_id}")
+    typer.echo(f"use     {response.session_use}")
+    typer.echo(f"run     {response.run_id or '-'}")
+    typer.echo(f"attach  lfq attach {response.id}")
+
+
+def _print_json_or_launch_response(response: Session, label: str, json_output: bool) -> None:
+    if json_output:
+        typer.echo(json.dumps(response.model_dump(mode="json", by_alias=True), indent=2))
+        return
+    _print_launch_response(response, label)
+
+
+def _run_wave_command(name_or_id: str, json_output: bool) -> None:
+    _print_json_or_launch_response(api.run_wave(name_or_id), "run", json_output)
+
+
 @app.command("run", help="Ride a wave.")
-def run_wave(name_or_id: str) -> None:
-    api.run_wave(name_or_id)
+def run_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
+    _run_wave_command(name_or_id, json_output)
+
+
+@wave_app.command("run", help="Start or attach the canonical Wave-agent session.")
+def run(name_or_id: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
+    _run_wave_command(name_or_id, json_output)
 
 
 @app.command("stop", help="Stop a running wave.")
@@ -674,36 +738,92 @@ def sessions(wave: Optional[str] = typer.Argument(None)) -> None:
         wave_id = resolved_wave.id
         wave_names[resolved_wave.id] = resolved_wave.name
 
-    live_statuses = ["pending", "attached", "running"]
-    sessions_payload = api.list_terminal_sessions(wave_id=wave_id, statuses=live_statuses)
+    sessions_payload = api.list_sessions(wave_id=wave_id)
     attention_items = api.list_attention(status="unresolved")
     if sessions_payload:
-        console.print(_terminal_sessions_table(sessions_payload, attention_items, wave_names))
+        console.print(_sessions_table(sessions_payload, attention_items, wave_names))
     else:
         console.print("no sessions")
+
+
+@app.command("whoami", help="Show the current lfd agent identity.")
+def whoami(json_output: bool = typer.Option(False, "--json", "-j")) -> None:
+    session = _find_current_agent_session()
+    if session is None:
+        typer.echo(
+            "current session not found; run inside an lfd-managed agent session "
+            "or set LFD_SESSION_ID",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if json_output:
+        typer.echo(json.dumps(session.model_dump(mode="json", by_alias=True), indent=2))
+        return
+
+    table = Table(show_header=False)
+    table.add_row("session", session.id)
+    table.add_row("wave", session.wave_id)
+    table.add_row("run", session.run_id or "-")
+    table.add_row("role", _session_role(session))
+    table.add_row("cwd", session.cwd)
+    table.add_row("status", session.status)
+    console.print(table)
+
+
+@worker_app.command("run", help="Launch a PR-producing worker agent.")
+def worker_run(
+    wave: Optional[str] = typer.Argument(None),
+    flow: str = typer.Option(..., "--flow", "-f"),
+    task: str = typer.Option(..., "--task", "-t"),
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    has_env_identity = any(
+        os.environ.get(name)
+        for name in ("LFD_SESSION_ID", "LFD_WAVE_ID", "LFD_RUN_ID", "LFD_AGENT_ROLE")
+    )
+    caller = _find_current_agent_session() if wave is None or has_env_identity else None
+    target_wave = wave or os.environ.get("LFD_WAVE_ID") or (caller.wave_id if caller else None)
+    if target_wave is None:
+        typer.echo(
+            "wave is required outside an lfd-managed wave session",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        response = api.run_worker(
+            target_wave,
+            flow,
+            task,
+            parent_session_id=caller.id if caller else None,
+        )
+    except LoopflowError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_json_or_launch_response(response, "worker_run", json_output)
 
 
 @app.command("attach", help="Attach to a terminal session.")
 def attach(session_id: str) -> None:
     try:
-        connection = api.attach_terminal_session(session_id)
+        connection = api.attach_session(session_id)
     except LoopflowError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-
-    tmux_name = connection.get("tmux_name") or connection.get("session_name")
-    if not tmux_name:
-        typer.echo("Error: attach response did not include a tmux session name", err=True)
-        raise typer.Exit(code=1)
 
     if shutil.which("tmux") is None:
         typer.echo("Error: tmux is not available on PATH", err=True)
         raise typer.Exit(code=1)
 
     try:
-        os.execvp("tmux", ["tmux", "attach", "-t", str(tmux_name)])
+        os.execvp("tmux", ["tmux", "attach", "-t", connection.session_name])
     except OSError as exc:
-        typer.echo(f"Error: failed to attach tmux session {tmux_name}: {exc}", err=True)
+        typer.echo(
+            f"Error: failed to attach tmux session {connection.session_name}: {exc}",
+            err=True,
+        )
         raise typer.Exit(code=1) from exc
 
 

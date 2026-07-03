@@ -10,14 +10,14 @@ use crate::engine::config::load_config_or_default;
 use crate::engine::flow::{ConcreteStep, Step};
 use crate::engine::git::hash_areas;
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Summary, Wave, WaveRun};
+use crate::lfd::types::{Run, Summary, Wave};
 
-use super::launch::AgentLaunchRequest;
+use super::launch::ExecutionProcessRequest;
 use super::WaveExecutor;
 
 impl WaveExecutor {
     /// Check if the wave's area summary is fresh; regenerate if stale or missing.
-    pub(crate) async fn ensure_summary_fresh(&self, wave: &Wave, run: &WaveRun) -> Result<()> {
+    pub(crate) async fn ensure_summary_fresh(&self, wave: &Wave, run: &Run) -> Result<()> {
         if wave.area().is_empty() {
             return Ok(());
         }
@@ -48,7 +48,7 @@ impl WaveExecutor {
     async fn run_internal_summarize(
         &self,
         wave: &Wave,
-        run: &WaveRun,
+        run: &Run,
         source_hash: &str,
     ) -> Result<()> {
         let template = get_builtin_ops_prompt("summarize")
@@ -103,11 +103,11 @@ impl WaveExecutor {
         };
 
         let outcome = self
-            .launch_agent(AgentLaunchRequest {
+            .launch_agent(ExecutionProcessRequest {
                 wave_id: wave.id().clone(),
-                wave_run_id: run.id.clone(),
+                run_id: run.id.clone(),
                 branch: Some(run.branch.clone()),
-                repo: run.snapshot.repo.clone(),
+                repo: run.repo.clone(),
                 worktree: run.worktree.clone(),
                 step,
                 agent: agent.clone(),

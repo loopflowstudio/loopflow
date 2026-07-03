@@ -1,5 +1,5 @@
 """Guards against stuck "running" waves after an lfd restart. Previously
-`fail_orphaned_runs` marked in-flight wave_runs as Failed on startup but
+`fail_orphaned_runs` marked in-flight runs as Failed on startup but
 left the parent wave's `status` alone, so Concerto's "Run" and
 "Ingest & build" buttons stayed disabled forever — the user had to stop
 the wave manually to unstick it.

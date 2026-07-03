@@ -13,7 +13,7 @@ use crate::engine::stream::{render_event, ParseResult, StreamParser};
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
-pub use helpers::{create_parallel_wave_run, create_wave_run_with_id, ensure_wave_worktree};
+pub use helpers::{create_parallel_wave_run, create_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
 pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
@@ -48,10 +48,10 @@ pub(crate) fn cleanup_workspace_worktree(worktree: &Path) -> Result<()> {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgentRunContext {
+pub struct ExecutionContext {
     pub wave_id: String,
     pub agent_id: String,
-    pub wave_run_id: String,
+    pub run_id: String,
     pub branch: Option<String>,
     pub output: OutputHub,
     pub output_prefix: Option<String>,
@@ -61,17 +61,17 @@ pub struct AgentRunContext {
 #[derive(Debug, Clone)]
 pub(crate) struct OutputContext {
     pub(crate) wave_id: String,
-    pub(crate) wave_run_id: String,
+    pub(crate) run_id: String,
     pub(crate) agent_id: String,
     pub(crate) output: OutputHub,
     pub(crate) output_prefix: Option<String>,
 }
 
-impl From<AgentRunContext> for OutputContext {
-    fn from(context: AgentRunContext) -> Self {
+impl From<ExecutionContext> for OutputContext {
+    fn from(context: ExecutionContext) -> Self {
         Self {
             wave_id: context.wave_id,
-            wave_run_id: context.wave_run_id,
+            run_id: context.run_id,
             agent_id: context.agent_id,
             output: context.output,
             output_prefix: context.output_prefix,
@@ -81,7 +81,7 @@ impl From<AgentRunContext> for OutputContext {
 
 #[async_trait]
 pub trait AgentExecutor: Send + Sync {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext) -> Result<i32>;
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: ExecutionContext) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
     async fn write_to_workspace(
         &self,
@@ -163,7 +163,7 @@ fn send_output(context: &OutputContext, text: String) {
     };
     context.output.send(OutputEvent {
         wave_id: context.wave_id.clone(),
-        wave_run_id: context.wave_run_id.clone(),
+        run_id: context.run_id.clone(),
         agent_id: context.agent_id.clone(),
         text,
     });
@@ -208,7 +208,7 @@ mod tests {
             reader,
             OutputContext {
                 wave_id: "wave-1".to_string(),
-                wave_run_id: "run-1".to_string(),
+                run_id: "run-1".to_string(),
                 agent_id: "agent-1".to_string(),
                 output: output.clone(),
                 output_prefix: None,
@@ -242,7 +242,7 @@ mod tests {
             reader,
             OutputContext {
                 wave_id: "wave-1".to_string(),
-                wave_run_id: "run-2".to_string(),
+                run_id: "run-2".to_string(),
                 agent_id: "agent-1".to_string(),
                 output: output.clone(),
                 output_prefix: None,
@@ -268,7 +268,7 @@ mod tests {
             &mut parser,
             &OutputContext {
                 wave_id: "wave-1".to_string(),
-                wave_run_id: "run-prefix".to_string(),
+                run_id: "run-prefix".to_string(),
                 agent_id: "agent-1".to_string(),
                 output: output.clone(),
                 output_prefix: Some("[fork-0] ".to_string()),

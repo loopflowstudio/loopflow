@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus};
+    use crate::lfd::types::{Run, RunStatus, Wave, WaveMode, WaveStatus};
     use std::sync::Arc;
 
     async fn create_store() -> SharedStore {
@@ -284,7 +284,7 @@ mod tests {
     }
 
     fn stub_executor(store: SharedStore, event_hub: EventHub) -> (WaveExecutor, Arc<Scheduler>) {
-        use crate::lfd::executor::{AgentExecutor, AgentRunContext};
+        use crate::lfd::executor::{AgentExecutor, ExecutionContext};
         use crate::lfd::output::OutputHub;
         use async_trait::async_trait;
         use std::path::Path;
@@ -297,7 +297,7 @@ mod tests {
                 &self,
                 _cmd: Vec<String>,
                 _cwd: &Path,
-                _ctx: AgentRunContext,
+                _ctx: ExecutionContext,
             ) -> anyhow::Result<i32> {
                 Ok(0)
             }
@@ -325,12 +325,12 @@ mod tests {
         let event_hub = EventHub::new(16);
         let wave = create_serialized_wave(&store).await;
         let trigger = create_ci_failure_trigger(&store, &wave).await;
-        let mut active_run = WaveRun::new(LfdId::new(), wave.id.clone());
-        active_run.status = WaveRunStatus::Running;
-        active_run.snapshot.repo = wave.repo.clone();
-        active_run.snapshot.flow = wave.primary_flow.clone();
+        let mut active_run = Run::new(LfdId::new(), wave.id.clone());
+        active_run.status = RunStatus::Running;
+        active_run.repo = wave.repo.clone();
+        active_run.flow = wave.primary_flow.clone();
         store
-            .create_wave_run(&active_run)
+            .create_run(&active_run)
             .await
             .expect("seed active run");
         let activation = CiFailureActivation {

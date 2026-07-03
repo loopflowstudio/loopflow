@@ -1,4 +1,4 @@
-use crate::lfd::sessions::types::{SessionEvent, SuggestedActionPayload};
+use crate::lfd::conversations::types::{ConversationEvent, SuggestedActionPayload};
 
 const SUGGEST_ACTIONS_OPEN: &str = "<lf:suggest_actions>";
 const SUGGEST_ACTIONS_CLOSE: &str = "</lf:suggest_actions>";
@@ -12,7 +12,7 @@ pub(super) struct LfTagParser {
 }
 
 impl LfTagParser {
-    pub(super) fn consume_text(&mut self, turn_id: &str, text: &str) -> Vec<SessionEvent> {
+    pub(super) fn consume_text(&mut self, turn_id: &str, text: &str) -> Vec<ConversationEvent> {
         if text.is_empty() {
             return Vec::new();
         }
@@ -31,7 +31,7 @@ impl LfTagParser {
                     if let Ok(actions) = serde_json::from_str::<Vec<SuggestedActionPayload>>(
                         self.suggest_actions_payload.trim(),
                     ) {
-                        events.push(SessionEvent::SuggestedActions {
+                        events.push(ConversationEvent::SuggestedActions {
                             turn_id: turn_id.to_string(),
                             actions,
                         });
@@ -69,7 +69,7 @@ impl LfTagParser {
         events
     }
 
-    pub(super) fn finish_turn(&mut self, turn_id: &str) -> Vec<SessionEvent> {
+    pub(super) fn finish_turn(&mut self, turn_id: &str) -> Vec<ConversationEvent> {
         let mut events = Vec::new();
         let trailing = std::mem::take(&mut self.stream_buffer);
 
@@ -141,11 +141,11 @@ fn is_line_start_or_indented(buffer: &str, idx: usize) -> bool {
         .all(|char| matches!(char, ' ' | '\t' | '\r'))
 }
 
-fn push_text_delta(events: &mut Vec<SessionEvent>, turn_id: &str, content: String) {
+fn push_text_delta(events: &mut Vec<ConversationEvent>, turn_id: &str, content: String) {
     if content.is_empty() {
         return;
     }
-    events.push(SessionEvent::TextDelta {
+    events.push(ConversationEvent::TextDelta {
         turn_id: turn_id.to_string(),
         content,
     });
@@ -166,15 +166,15 @@ mod tests {
         assert_eq!(events.len(), 3);
         assert!(matches!(
             events[0],
-            SessionEvent::TextDelta { ref content, .. } if content == "Hello\n"
+            ConversationEvent::TextDelta { ref content, .. } if content == "Hello\n"
         ));
         assert!(matches!(
             events[1],
-            SessionEvent::SuggestedActions { ref actions, .. } if actions.len() == 1 && actions[0].label == "Land PR"
+            ConversationEvent::SuggestedActions { ref actions, .. } if actions.len() == 1 && actions[0].label == "Land PR"
         ));
         assert!(matches!(
             events[2],
-            SessionEvent::TextDelta { ref content, .. } if content == "\nDone"
+            ConversationEvent::TextDelta { ref content, .. } if content == "\nDone"
         ));
 
         let trailing = parser.finish_turn("turn_1");
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert!(matches!(
             second[0],
-            SessionEvent::SuggestedActions { ref actions, .. } if actions[0].label == "Run tests"
+            ConversationEvent::SuggestedActions { ref actions, .. } if actions[0].label == "Run tests"
         ));
     }
 
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            SessionEvent::TextDelta { ref content, .. } if content == "<lf:suggest_actions>[{"
+            ConversationEvent::TextDelta { ref content, .. } if content == "<lf:suggest_actions>[{"
         ));
     }
 
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            SessionEvent::TextDelta { ref content, .. } if content == "hello"
+            ConversationEvent::TextDelta { ref content, .. } if content == "hello"
         ));
     }
 
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            SessionEvent::TextDelta { ref content, .. } if content == input
+            ConversationEvent::TextDelta { ref content, .. } if content == input
         ));
     }
 }

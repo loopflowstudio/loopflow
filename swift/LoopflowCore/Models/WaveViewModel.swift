@@ -129,7 +129,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.iteration = newValue }
     }
 
-    public var activeRun: WaveRun? {
+    public var activeRun: Run? {
         get { api.activeRun }
         set { api.activeRun = newValue }
     }

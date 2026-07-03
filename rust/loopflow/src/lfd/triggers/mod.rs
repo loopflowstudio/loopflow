@@ -15,7 +15,7 @@ pub use activation::{
     DEFAULT_ACTIVATION_QUEUE_LIMIT,
 };
 pub use ci_failure::spawn_ci_failure_handler;
-pub use common::spawn_run_task_with_slot;
+pub use common::{spawn_run_task_with_session, spawn_run_task_with_slot};
 pub use cron::spawn_cron_poller;
 pub use loop_ticker::spawn_loop_ticker;
 pub use queue_reconcile::spawn_queue_reconciler;

@@ -207,7 +207,7 @@ def _scenario_sse_streaming(
 
         input_response = api.request(
             "POST",
-            f"/v0/sessions/{session_id}/input",
+            f"/v0/conversations/{session_id}/input",
             json={"text": "Reply with one short sentence."},
         )
         ApiAssertions.expect_status(input_response, 200)
@@ -216,7 +216,7 @@ def _scenario_sse_streaming(
         seen_session_event = False
         current_event_name = ""
 
-        with api.stream("GET", f"/v0/sessions/{session_id}/events") as response:
+        with api.stream("GET", f"/v0/conversations/{session_id}/events") as response:
             ApiAssertions.expect_status(response, 200)
             for line in response.iter_lines():
                 if time.monotonic() > deadline:

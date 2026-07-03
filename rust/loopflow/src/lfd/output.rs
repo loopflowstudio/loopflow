@@ -1,7 +1,7 @@
 //! Output streaming hub with file-backed persistence.
 //!
 //! Output lines are broadcast in-memory AND appended to per-run log files
-//! at `~/.lf/output/<wave_run_id>.log`. The logs endpoint replays from
+//! at `~/.lf/output/<run_id>.log`. The logs endpoint replays from
 //! the file, then follows live — no race conditions.
 
 use std::collections::HashMap;
@@ -19,12 +19,12 @@ use crate::lfd::security::{path_within_root_existing, path_within_root_planned, 
 #[derive(Debug, Clone)]
 pub struct OutputEvent {
     pub wave_id: String,
-    pub wave_run_id: String,
+    pub run_id: String,
     pub agent_id: String,
     pub text: String,
 }
 
-/// File writer cache — one writer per wave_run_id.
+/// File writer cache — one writer per run_id.
 struct Writers {
     dir: PathBuf,
     files: HashMap<String, File>,
@@ -39,36 +39,36 @@ impl Writers {
         }
     }
 
-    fn append(&mut self, wave_run_id: &str, line: &str) {
-        let Some(relative) = relative_log_path(wave_run_id) else {
-            warn!(wave_run_id = %wave_run_id, "rejecting unsafe wave_run_id for output log");
+    fn append(&mut self, run_id: &str, line: &str) {
+        let Some(relative) = relative_log_path(run_id) else {
+            warn!(run_id = %run_id, "rejecting unsafe run_id for output log");
             return;
         };
 
-        let file = if let Some(file) = self.files.get_mut(wave_run_id) {
+        let file = if let Some(file) = self.files.get_mut(run_id) {
             file
         } else {
             let path = match path_within_root_planned(&self.dir, &relative) {
                 Ok(path) => path,
                 Err(err) => {
-                    warn!(wave_run_id = %wave_run_id, error = %err, "failed to resolve output log path");
+                    warn!(run_id = %run_id, error = %err, "failed to resolve output log path");
                     return;
                 }
             };
             let file = match OpenOptions::new().create(true).append(true).open(path) {
                 Ok(file) => file,
                 Err(err) => {
-                    warn!(wave_run_id = %wave_run_id, error = %err, "failed to open output log file");
+                    warn!(run_id = %run_id, error = %err, "failed to open output log file");
                     return;
                 }
             };
-            self.files.entry(wave_run_id.to_string()).or_insert(file)
+            self.files.entry(run_id.to_string()).or_insert(file)
         };
         let _ = writeln!(file, "{line}");
     }
 
-    fn close(&mut self, wave_run_id: &str) {
-        self.files.remove(wave_run_id);
+    fn close(&mut self, run_id: &str) {
+        self.files.remove(run_id);
     }
 }
 
@@ -102,7 +102,7 @@ impl OutputHub {
     /// that replay-then-follow has a clean dedup boundary.
     pub fn send(&self, event: OutputEvent) {
         if let Ok(mut w) = self.writers.lock() {
-            w.append(&event.wave_run_id, &event.text);
+            w.append(&event.run_id, &event.text);
         }
         let _ = self.sender.send(event);
     }
@@ -113,8 +113,8 @@ impl OutputHub {
 
     /// Read the log file for a wave run. Returns lines and the byte offset
     /// at end of read (for dedup with the broadcast stream).
-    pub fn read_log(&self, wave_run_id: &str) -> Option<(Vec<String>, u64)> {
-        let relative = relative_log_path(wave_run_id)?;
+    pub fn read_log(&self, run_id: &str) -> Option<(Vec<String>, u64)> {
+        let relative = relative_log_path(run_id)?;
         let path = path_within_root_existing(&self.output_dir, &relative).ok()?;
         let file = File::open(&path).ok()?;
         let metadata = file.metadata().ok()?;
@@ -125,9 +125,9 @@ impl OutputHub {
     }
 
     /// Drop the file handle for a completed/failed wave run.
-    pub fn close_writer(&self, wave_run_id: &str) {
+    pub fn close_writer(&self, run_id: &str) {
         if let Ok(mut w) = self.writers.lock() {
-            w.close(wave_run_id);
+            w.close(run_id);
         }
     }
 
@@ -168,9 +168,9 @@ pub fn prune_output_logs(dir: &Path, max_age: Duration) {
     }
 }
 
-fn relative_log_path(wave_run_id: &str) -> Option<PathBuf> {
-    validate_safe_id(wave_run_id).ok()?;
-    Some(PathBuf::from(format!("{wave_run_id}.log")))
+fn relative_log_path(run_id: &str) -> Option<PathBuf> {
+    validate_safe_id(run_id).ok()?;
+    Some(PathBuf::from(format!("{run_id}.log")))
 }
 
 #[cfg(test)]
@@ -179,21 +179,21 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn read_log_returns_none_for_unsafe_wave_run_id() {
+    fn read_log_returns_none_for_unsafe_run_id() {
         let tmp = tempdir().expect("tempdir");
         let hub = OutputHub::new(8, tmp.path().to_path_buf());
         assert!(hub.read_log("../escape").is_none());
     }
 
     #[test]
-    fn send_ignores_unsafe_wave_run_id_without_creating_file() {
+    fn send_ignores_unsafe_run_id_without_creating_file() {
         let tmp = tempdir().expect("tempdir");
         let hub = OutputHub::new(8, tmp.path().to_path_buf());
         let outside = tmp.path().parent().expect("parent").join("escape.log");
 
         hub.send(OutputEvent {
             wave_id: "wave-1".to_string(),
-            wave_run_id: "../escape".to_string(),
+            run_id: "../escape".to_string(),
             agent_id: "agent-1".to_string(),
             text: "nope".to_string(),
         });

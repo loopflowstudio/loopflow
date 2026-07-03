@@ -7,11 +7,11 @@ use tokio::sync::mpsc;
 use super::claude_mapping::{self, ReaderState};
 use super::codex_mapping::{self, ItemPhase};
 use super::opencode_mapping;
-use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus};
+use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, TurnStatus};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/lfd/sessions/harness/testdata")
+        .join("src/lfd/conversations/harness/testdata")
         .join(file_name);
     fs::read_to_string(path)
         .expect("trace file should exist")
@@ -20,13 +20,16 @@ fn read_trace_lines(file_name: &str) -> Vec<String> {
         .collect()
 }
 
-fn drain_events(rx: &mut mpsc::UnboundedReceiver<SessionEvent>, out: &mut Vec<SessionEvent>) {
+fn drain_events(
+    rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
+    out: &mut Vec<ConversationEvent>,
+) {
     while let Ok(event) = rx.try_recv() {
         out.push(event);
     }
 }
 
-fn replay_claude_trace(file_name: &str) -> Vec<SessionEvent> {
+fn replay_claude_trace(file_name: &str) -> Vec<ConversationEvent> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut events = Vec::new();
     let mut state = ReaderState::default();
@@ -47,12 +50,12 @@ fn replay_claude_trace(file_name: &str) -> Vec<SessionEvent> {
 
     if !saw_turn_completed {
         for item in state.drain_failed_items() {
-            events.push(SessionEvent::ItemCompleted {
+            events.push(ConversationEvent::ItemCompleted {
                 turn_id: "turn_trace".to_string(),
                 item,
             });
         }
-        events.push(SessionEvent::TurnCompleted {
+        events.push(ConversationEvent::TurnCompleted {
             turn_id: "turn_trace".to_string(),
             status: TurnStatus::Failed,
         });
@@ -70,11 +73,11 @@ fn resolve_turn_id(
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn replay_codex_trace(file_name: &str) -> Vec<SessionEvent> {
+fn replay_codex_trace(file_name: &str) -> Vec<ConversationEvent> {
     replay_codex_lines(read_trace_lines(file_name))
 }
 
-fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
+fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
     let mut events = Vec::new();
     let mut current_turn_id: Option<String> = None;
 
@@ -95,16 +98,16 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
             "turn/started" => {
                 let turn_id = turn_id_from_params.unwrap_or_else(|| "unknown".to_string());
                 current_turn_id = Some(turn_id.clone());
-                events.push(SessionEvent::TurnStarted { turn_id });
+                events.push(ConversationEvent::TurnStarted { turn_id });
             }
             "turn/completed" => {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
                 current_turn_id = None;
-                events.push(SessionEvent::TurnCompleted {
+                events.push(ConversationEvent::TurnCompleted {
                     turn_id: turn_id.clone(),
                     status: codex_mapping::map_turn_status(&params),
                 });
-                events.push(SessionEvent::TurnUsage {
+                events.push(ConversationEvent::TurnUsage {
                     turn_id,
                     usage: codex_mapping::map_turn_usage(&params),
                 });
@@ -112,23 +115,23 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
             "item/started" => {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
                 let item = codex_mapping::build_item(&params, ItemPhase::Started);
-                events.push(SessionEvent::ItemStarted { turn_id, item });
+                events.push(ConversationEvent::ItemStarted { turn_id, item });
             }
             "item/completed" => {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
                 let item = codex_mapping::build_item(&params, ItemPhase::Completed);
-                events.push(SessionEvent::ItemCompleted { turn_id, item });
+                events.push(ConversationEvent::ItemCompleted { turn_id, item });
             }
             "item/agentMessage/delta" => {
                 if let Some(content) = codex_mapping::text_content(&params) {
                     let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(SessionEvent::TextDelta { turn_id, content });
+                    events.push(ConversationEvent::TextDelta { turn_id, content });
                 }
             }
             "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
                 if let Some(content) = codex_mapping::text_content(&params) {
                     let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(SessionEvent::ReasoningDelta { turn_id, content });
+                    events.push(ConversationEvent::ReasoningDelta { turn_id, content });
                 }
             }
             "item/commandExecution/outputDelta"
@@ -137,7 +140,7 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
                 if let Some(data) = codex_mapping::map_item_delta(method, &params) {
                     let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
                     let item_id = codex_mapping::map_item_id(&params);
-                    events.push(SessionEvent::ItemUpdated {
+                    events.push(ConversationEvent::ItemUpdated {
                         turn_id,
                         item_id,
                         data,
@@ -151,11 +154,11 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
                     .map(ToString::to_string)
                 {
                     let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(SessionEvent::DiffUpdated { turn_id, diff });
+                    events.push(ConversationEvent::DiffUpdated { turn_id, diff });
                 }
             }
             "error" => {
-                events.push(SessionEvent::Error {
+                events.push(ConversationEvent::Error {
                     code: params
                         .get("code")
                         .and_then(Value::as_str)
@@ -175,7 +178,7 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
     events
 }
 
-fn replay_opencode_trace(file_name: &str) -> Vec<SessionEvent> {
+fn replay_opencode_trace(file_name: &str) -> Vec<ConversationEvent> {
     let mut lines = read_trace_lines(file_name)
         .into_iter()
         .filter(|line| !line.trim().is_empty());
@@ -205,7 +208,7 @@ fn replay_opencode_trace(file_name: &str) -> Vec<SessionEvent> {
 #[test]
 fn claude_trace_normal_turn() {
     let events = replay_claude_trace("claude_normal_turn.ndjson");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
         vec![
@@ -218,8 +221,8 @@ fn claude_trace_normal_turn() {
     assert!(matches!(
         events
             .iter()
-            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
-        Some(SessionEvent::TurnCompleted {
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
         })
@@ -232,8 +235,8 @@ fn claude_trace_crash_mid_tool_marks_failed_items() {
 
     assert!(matches!(
         events.first(),
-        Some(SessionEvent::ItemStarted {
-            item: SessionItem::Command { .. },
+        Some(ConversationEvent::ItemStarted {
+            item: ConversationItem::Command { .. },
             ..
         })
     ));
@@ -241,16 +244,16 @@ fn claude_trace_crash_mid_tool_marks_failed_items() {
     assert!(events.iter().any(|event| {
         matches!(
             event,
-            SessionEvent::ItemCompleted {
-                item: SessionItem::Command { status, .. },
+            ConversationEvent::ItemCompleted {
+                item: ConversationItem::Command { status, .. },
                 ..
-            } if *status == crate::lfd::sessions::types::ItemStatus::Failed
+            } if *status == crate::lfd::conversations::types::ItemStatus::Failed
         )
     }));
 
     assert!(matches!(
         events.last(),
-        Some(SessionEvent::TurnCompleted {
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Failed,
             ..
         })
@@ -262,11 +265,11 @@ fn claude_trace_multi_tool_lifecycle() {
     let events = replay_claude_trace("claude_multi_tool.ndjson");
     let started = events
         .iter()
-        .filter(|event| matches!(event, SessionEvent::ItemStarted { .. }))
+        .filter(|event| matches!(event, ConversationEvent::ItemStarted { .. }))
         .count();
     let completed = events
         .iter()
-        .filter(|event| matches!(event, SessionEvent::ItemCompleted { .. }))
+        .filter(|event| matches!(event, ConversationEvent::ItemCompleted { .. }))
         .count();
 
     assert_eq!(started, 2);
@@ -274,8 +277,8 @@ fn claude_trace_multi_tool_lifecycle() {
     assert!(matches!(
         events
             .iter()
-            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
-        Some(SessionEvent::TurnCompleted {
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
         })
@@ -285,7 +288,7 @@ fn claude_trace_multi_tool_lifecycle() {
 #[test]
 fn codex_trace_normal_turn() {
     let events = replay_codex_trace("codex_normal_turn.jsonl");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
         vec![
@@ -300,8 +303,8 @@ fn codex_trace_normal_turn() {
     assert!(matches!(
         events
             .iter()
-            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
-        Some(SessionEvent::TurnCompleted {
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
         })
@@ -317,14 +320,14 @@ fn codex_turn_completed_maps_usage_payload() {
 
     assert!(matches!(
         events[1],
-        SessionEvent::TurnCompleted {
+        ConversationEvent::TurnCompleted {
             ref turn_id,
             status: TurnStatus::Completed
         } if turn_id == "turn_codex_usage"
     ));
     assert!(matches!(
         events[2],
-        SessionEvent::TurnUsage {
+        ConversationEvent::TurnUsage {
             ref turn_id,
             ref usage,
         } if turn_id == "turn_codex_usage"
@@ -338,20 +341,20 @@ fn codex_turn_completed_maps_usage_payload() {
 #[test]
 fn codex_trace_error_turn() {
     let events = replay_codex_trace("codex_error.jsonl");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
         vec!["turn_started", "error", "turn_completed", "turn_usage"]
     );
     assert!(matches!(
         events[1],
-        SessionEvent::Error { ref code, .. } if code == "codex_internal"
+        ConversationEvent::Error { ref code, .. } if code == "codex_internal"
     ));
     assert!(matches!(
         events
             .iter()
-            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
-        Some(SessionEvent::TurnCompleted {
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Failed,
             ..
         })
@@ -361,14 +364,14 @@ fn codex_trace_error_turn() {
 #[test]
 fn opencode_trace_normal_turn() {
     let events = replay_opencode_trace("opencode_normal_turn.ndjson");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
         vec!["turn_started", "text_delta", "turn_completed"]
     );
     assert!(matches!(
         events.last(),
-        Some(SessionEvent::TurnCompleted {
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
         })
@@ -378,7 +381,7 @@ fn opencode_trace_normal_turn() {
 #[test]
 fn opencode_trace_tool_lifecycle() {
     let events = replay_opencode_trace("opencode_tool_lifecycle.ndjson");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
         vec![
@@ -390,7 +393,7 @@ fn opencode_trace_tool_lifecycle() {
     );
     assert!(matches!(
         events.last(),
-        Some(SessionEvent::TurnCompleted {
+        Some(ConversationEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
         })
@@ -400,17 +403,17 @@ fn opencode_trace_tool_lifecycle() {
 #[test]
 fn opencode_trace_error_turn() {
     let events = replay_opencode_trace("opencode_error_turn.ndjson");
-    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(event_types, vec!["turn_started", "turn_completed", "error"]);
     assert!(matches!(
         events[1],
-        SessionEvent::TurnCompleted {
+        ConversationEvent::TurnCompleted {
             status: TurnStatus::Failed,
             ..
         }
     ));
     assert!(matches!(
         events[2],
-        SessionEvent::Error { ref code, .. } if code == "command_failed"
+        ConversationEvent::Error { ref code, .. } if code == "command_failed"
     ));
 }

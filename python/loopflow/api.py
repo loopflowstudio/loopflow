@@ -8,21 +8,23 @@ from .models import (
     AuthFlow,
     AuthProviderStatus,
     CommitEntry,
+    Conversation,
     CostRates,
     ModelInfo,
     ProviderInfo,
     PullRequest,
     Repo,
     Session,
-    SessionConfig,
-    SessionEventEnvelope,
+    ConversationEventEnvelope,
+    SessionConnectionInfo,
     TokenTotals,
     Trigger,
     UsageSummary,
     UsageSummaryGroup,
     Wave,
+    WaveAgentTree,
     WaveCron,
-    WaveRun,
+    Run,
 )
 
 _default_client: Optional[Client] = None
@@ -180,7 +182,7 @@ def run_wave(
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     goal: Optional[str] = None,
-) -> dict[str, Any]:
+) -> Session:
     return _client().run_wave(
         name_or_id,
         flow=flow,
@@ -188,6 +190,14 @@ def run_wave(
         direction=direction,
         area=area,
     )
+
+
+def ensure_wave_agent(name_or_id: str) -> Session:
+    return _client().ensure_wave_agent(name_or_id)
+
+
+def get_wave_agent_tree(name_or_id: str, active_only: bool = True) -> WaveAgentTree:
+    return _client().get_wave_agent_tree(name_or_id, active_only=active_only)
 
 
 def add_trigger(
@@ -234,59 +244,72 @@ def next_wave(name_or_id: str) -> dict[str, Any]:
     return _client().next_wave(name_or_id)
 
 
-def wave_runs(
+def runs(
     wave_id: Optional[str] = None,
     repo: Optional[str] = None,
     limit: Optional[int] = None,
-) -> list[WaveRun]:
-    return _client().wave_runs(wave_id=wave_id, repo=repo, limit=limit)
+) -> list[Run]:
+    return _client().runs(wave_id=wave_id, repo=repo, limit=limit)
 
 
 def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)
 
 
-def list_terminal_sessions(
+def run_worker(
+    name_or_id: str,
+    flow: str,
+    task: str,
+    parent_session_id: Optional[str] = None,
+) -> Session:
+    return _client().run_worker(
+        name_or_id,
+        flow,
+        task,
+        parent_session_id=parent_session_id,
+    )
+
+
+def list_sessions(
     wave_id: Optional[str] = None,
-    statuses: Optional[list[str]] = None,
-) -> list[dict[str, Any]]:
-    return _client().list_terminal_sessions(wave_id=wave_id, statuses=statuses)
+    parent_session_id: Optional[str] = None,
+    use: Optional[str] = None,
+    active_only: bool = True,
+) -> list[Session]:
+    return _client().list_sessions(
+        wave_id=wave_id,
+        parent_session_id=parent_session_id,
+        use=use,
+        active_only=active_only,
+    )
 
 
-def attach_terminal_session(session_id: str) -> dict[str, Any]:
-    return _client().attach_terminal_session(session_id)
+def get_session(session_id: str) -> Session:
+    return _client().get_session(session_id)
+
+
+def current_session(cwd: str) -> Optional[Session]:
+    return _client().current_session(cwd)
+
+
+def attach_session(session_id: str) -> SessionConnectionInfo:
+    return _client().attach_session(session_id)
 
 
 def list_attention(status: Optional[str] = None) -> list[dict[str, Any]]:
     return _client().list_attention(status=status)
 
 
-def create_session(
-    harness: str,
-    wave_run_id: Optional[str] = None,
-    config: Optional[SessionConfig] = None,
-) -> Session:
-    return _client().create_session(harness, wave_run_id=wave_run_id, config=config)
+def send_conversation_input(session_id: str, content: str) -> Conversation:
+    return _client().send_conversation_input(session_id, content)
 
 
-def session(session_id: str) -> Optional[Session]:
-    return _client().session(session_id)
-
-
-def send_session_input(session_id: str, content: str) -> Session:
-    return _client().send_session_input(session_id, content)
-
-
-def stop_session(session_id: str) -> Session:
-    return _client().stop_session(session_id)
-
-
-def stream_session_events(
+def stream_conversation_events(
     session_id: str,
     after_seq: Optional[int] = None,
     timeout: float = 60.0,
-) -> Iterator[SessionEventEnvelope]:
-    return _client().stream_session_events(
+) -> Iterator[ConversationEventEnvelope]:
+    return _client().stream_conversation_events(
         session_id,
         after_seq=after_seq,
         timeout=timeout,
@@ -298,21 +321,23 @@ __all__ = [
     "AuthFlow",
     "AuthProviderStatus",
     "CommitEntry",
+    "Conversation",
     "CostRates",
     "ModelInfo",
     "PullRequest",
     "ProviderInfo",
     "Repo",
     "Session",
-    "SessionConfig",
-    "SessionEventEnvelope",
+    "ConversationEventEnvelope",
+    "SessionConnectionInfo",
     "Trigger",
     "TokenTotals",
     "UsageSummary",
     "UsageSummaryGroup",
     "Wave",
+    "WaveAgentTree",
     "WaveCron",
-    "WaveRun",
+    "Run",
     "health",
     "status",
     "auth_status",
@@ -335,16 +360,20 @@ __all__ = [
     "list_children",
     "list_parents",
     "run_wave",
+    "ensure_wave_agent",
+    "get_wave_agent_tree",
     "add_trigger",
     "remove_trigger",
     "stop_wave",
     "land_wave",
     "next_wave",
-    "wave_runs",
+    "runs",
     "wave_logs",
-    "create_session",
-    "session",
-    "send_session_input",
-    "stop_session",
-    "stream_session_events",
+    "run_worker",
+    "list_sessions",
+    "current_session",
+    "get_session",
+    "attach_session",
+    "send_conversation_input",
+    "stream_conversation_events",
 ]

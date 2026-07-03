@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS agents (
     step TEXT NOT NULL,
     repo TEXT NOT NULL,
     worktree TEXT NOT NULL,
-    wave_run_id TEXT,
+    run_id TEXT,
     status INTEGER NOT NULL,
     started_at BIGINT NOT NULL,
     ended_at BIGINT,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS pending_activations (
 
 CREATE INDEX IF NOT EXISTS idx_pending_wave_id ON pending_activations(wave_id);
 
-CREATE TABLE IF NOT EXISTS wave_runs (
+CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
     iteration INTEGER NOT NULL,
@@ -74,18 +74,18 @@ CREATE TABLE IF NOT EXISTS wave_runs (
     flow_parents TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE INDEX IF NOT EXISTS idx_wave_runs_wave_id ON wave_runs(wave_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_runs_wave_id ON runs(wave_id, started_at);
 
 CREATE TABLE IF NOT EXISTS fork_runs (
     id TEXT PRIMARY KEY,
-    wave_run_id TEXT REFERENCES wave_runs(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
     step_index INTEGER NOT NULL,
     branch_index INTEGER NOT NULL,
     status INTEGER NOT NULL,
     worktree TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_run_id ON fork_runs(wave_run_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_fork_runs_run_id ON fork_runs(run_id, step_index);
 
 CREATE TABLE IF NOT EXISTS summaries (
     id TEXT PRIMARY KEY,

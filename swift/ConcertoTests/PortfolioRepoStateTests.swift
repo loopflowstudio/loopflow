@@ -35,7 +35,7 @@ struct PortfolioRepoStateTests {
             WaveEvent(
                 type: .created,
                 waveId: createdWave.id,
-                waveRunId: nil,
+                runId: nil,
                 step: nil,
                 sessionId: nil,
                 initialUserMessage: nil,
@@ -51,7 +51,7 @@ struct PortfolioRepoStateTests {
             WaveEvent(
                 type: .deleted,
                 waveId: createdWave.id,
-                waveRunId: nil,
+                runId: nil,
                 step: nil,
                 sessionId: nil,
                 initialUserMessage: nil,
@@ -80,7 +80,7 @@ struct PortfolioRepoStateTests {
             WaveEvent(
                 type: .deleted,
                 waveId: localWave.id,
-                waveRunId: nil,
+                runId: nil,
                 step: nil,
                 sessionId: nil,
                 initialUserMessage: nil,

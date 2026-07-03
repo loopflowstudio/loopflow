@@ -111,7 +111,7 @@ pub enum LaunchTarget {
 
 /// Interactive session launch configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionConfig {
+pub struct ConversationConfig {
     #[serde(default)]
     pub launch: LaunchTarget,
 }
@@ -207,7 +207,7 @@ pub struct Config {
 
     /// Interactive session launch configuration
     #[serde(default)]
-    pub session: SessionConfig,
+    pub session: ConversationConfig,
 
     /// Tasks that default to interactive mode
     #[serde(default)]
@@ -289,7 +289,7 @@ impl Default for Config {
             land: default_land(),
             context: Vec::new(),
             exclude: Vec::new(),
-            session: SessionConfig::default(),
+            session: ConversationConfig::default(),
             interactive: Vec::new(),
             docs: Vec::new(),
             diff: false,
@@ -567,7 +567,7 @@ pm:
 
     #[test]
     fn default_session_config() {
-        let session = SessionConfig::default();
+        let session = ConversationConfig::default();
         assert_eq!(session.launch, LaunchTarget::Tui);
     }
 

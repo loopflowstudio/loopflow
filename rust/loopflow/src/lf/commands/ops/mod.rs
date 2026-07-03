@@ -18,11 +18,11 @@ use crate::lf::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, dispatch_wave, ingest, land,
-    list_branch_candidates, next_branch, prune_branches, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, AbandonOptions,
-    BranchFilterOptions, BranchListOptions, BranchPruneOptions, CommitOptions, DispatchOptions,
-    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
+    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, list_branch_candidates,
+    next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
+    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
+    BranchListOptions, BranchPruneOptions, CommitOptions, IngestOptions, LandOptions, NextOptions,
+    PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -105,7 +105,6 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
         }
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
-        OpsCommand::Dispatch { wave, flow, task } => dispatch_cmd(wave, flow, task),
     }
 }
 
@@ -347,19 +346,6 @@ fn ingest_cmd(wave: Option<&str>, item: Option<&str>, progress: &impl Progress) 
         progress,
     )?;
     println!("{}", result.dest.display());
-    Ok(())
-}
-
-/// Spawn a wave dispatch and print its run id — the human (or the calling
-/// looping agent) monitors it separately with `lfq sessions`/`lfq attach`.
-fn dispatch_cmd(wave: &str, flow: &str, task: &str) -> Result<()> {
-    let run = dispatch_wave(&DispatchOptions {
-        wave: wave.to_string(),
-        flow: flow.to_string(),
-        task: task.to_string(),
-    })?;
-    println!("{}", run.id);
-    println!("status: {}", run.status);
     Ok(())
 }
 

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS wave_queue_blocks (
     error TEXT,
     PRIMARY KEY (wave_id, run_id),
     FOREIGN KEY (wave_id) REFERENCES waves(id) ON DELETE CASCADE,
-    FOREIGN KEY (run_id) REFERENCES wave_runs(id) ON DELETE CASCADE
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_wave_queue_blocks_wave_id

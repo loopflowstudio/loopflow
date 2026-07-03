@@ -12,15 +12,15 @@ use tokio::task::JoinHandle;
 
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_agent;
-use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
-use crate::lfd::sessions::opencode_runtime;
-use crate::lfd::sessions::types::SessionEvent;
+use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::lfd::conversations::harness::{opencode_mapping, Harness, HarnessError};
+use crate::lfd::conversations::opencode_runtime;
+use crate::lfd::conversations::types::ConversationEvent;
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
-    events: mpsc::UnboundedSender<SessionEvent>,
+    events: mpsc::UnboundedSender<ConversationEvent>,
     client: reqwest::Client,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
@@ -40,7 +40,7 @@ impl std::fmt::Debug for OpenCodeHarness {
 }
 
 impl OpenCodeHarness {
-    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
             client: reqwest::Client::new(),
@@ -92,7 +92,7 @@ impl OpenCodeHarness {
             }
         };
 
-        let _ = self.events.send(SessionEvent::ProviderSessionId {
+        let _ = self.events.send(ConversationEvent::ProviderSessionId {
             provider_session_id: provider_session_id.clone(),
         });
 
@@ -164,10 +164,10 @@ impl OpenCodeHarness {
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
                     for event in mapped.events {
                         match &event {
-                            SessionEvent::TurnStarted { .. } => {
+                            ConversationEvent::TurnStarted { .. } => {
                                 turn_in_progress.store(true, Ordering::SeqCst)
                             }
-                            SessionEvent::TurnCompleted { .. } => {
+                            ConversationEvent::TurnCompleted { .. } => {
                                 turn_in_progress.store(false, Ordering::SeqCst)
                             }
                             _ => {}
@@ -202,7 +202,7 @@ impl OpenCodeHarness {
             );
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::opencode");
+        let stderr_task = spawn_stderr_logger(stderr, "lfd::conversations::opencode");
 
         let opencode_pid = child.id();
         if let Some(pid) = opencode_pid {
@@ -357,7 +357,7 @@ async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Re
 }
 
 fn send_disconnect_error(
-    event_tx: &mpsc::UnboundedSender<SessionEvent>,
+    event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     shutdown_requested: &AtomicBool,
     message: impl Into<String>,
 ) {
@@ -365,7 +365,7 @@ fn send_disconnect_error(
         return;
     }
 
-    let _ = event_tx.send(SessionEvent::Error {
+    let _ = event_tx.send(ConversationEvent::Error {
         code: OPENCODE_DISCONNECTED_CODE.to_string(),
         message: message.into(),
     });

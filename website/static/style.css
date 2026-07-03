@@ -489,6 +489,7 @@ a:focus-visible,
     border-radius: 12px;
     padding: 24px;
     background: var(--bg);
+    min-width: 0;
 }
 .product-card-header {
     display: flex;
@@ -514,7 +515,12 @@ a:focus-visible,
 .product-card .terminal {
     border-radius: 8px;
     width: 100%;
+    max-width: 100%;
     margin: 0;
+}
+.product-card img {
+    display: block;
+    height: auto;
 }
 .product-card ul {
     padding-left: 20px;

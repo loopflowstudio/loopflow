@@ -1,4 +1,4 @@
-"""Tests for loopflow.models — Wave and WaveRun parsing."""
+"""Tests for loopflow.models — Wave and Run parsing."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from conftest import (
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
-    SESSION_FULL,
-    SESSION_MINIMAL,
+    CONVERSATION_FULL,
+    CONVERSATION_MINIMAL,
     WAVE_FULL,
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
@@ -20,14 +20,15 @@ from loopflow.models import (
     AuthFlow,
     AuthProviderStatus,
     CommitEntry,
+    Conversation,
     CostRates,
     ModelInfo,
     ProviderInfo,
     Repo,
     Session,
-    SessionEventEnvelope,
+    ConversationEventEnvelope,
     Wave,
-    WaveRun,
+    Run,
 )
 
 
@@ -94,29 +95,29 @@ class TestCommitEntryModel:
         assert entry.message == "fix bug"
 
 
-class TestWaveRunModel:
+class TestRunModel:
     def test_minimal_payload(self):
-        run = WaveRun.model_validate(WAVE_RUN_MINIMAL)
+        run = Run.model_validate(WAVE_RUN_MINIMAL)
         assert run.pr is None
         assert run.error is None
         assert run.flow_parents == []
 
     def test_with_error(self):
         data = {**WAVE_RUN_MINIMAL, "error": "rebase conflict"}
-        run = WaveRun.model_validate(data)
+        run = Run.model_validate(data)
         assert run.error == "rebase conflict"
 
 
-class TestSessionModel:
+class TestConversationModel:
     def test_minimal_payload(self):
-        session = Session.model_validate(SESSION_MINIMAL)
+        session = Conversation.model_validate(CONVERSATION_MINIMAL)
         assert session.harness == "claude"
         assert session.config.yolo_mode is False
         assert session.created_at is None
 
     def test_full_payload(self):
-        session = Session.model_validate(SESSION_FULL)
-        assert session.wave_run_id == "run-1"
+        session = Conversation.model_validate(CONVERSATION_FULL)
+        assert session.run_id == "run-1"
         assert session.provider_session_id == "provider-1"
         assert session.input_supported is False
         assert session.config.agent == "claude-sonnet-4-5-20250929"
@@ -124,9 +125,9 @@ class TestSessionModel:
         assert session.ended_at is not None
 
 
-class TestSessionEventEnvelopeModel:
+class TestConversationEventEnvelopeModel:
     def test_parse(self):
-        event = SessionEventEnvelope.model_validate(
+        event = ConversationEventEnvelope.model_validate(
             {"seq": 12, "event": {"type": "turn_completed", "status": "completed"}}
         )
         assert event.seq == 12

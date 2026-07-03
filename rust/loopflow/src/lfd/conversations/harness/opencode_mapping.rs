@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::lfd::sessions::types::{
-    FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+use crate::lfd::conversations::types::{
+    ConversationEvent, ConversationItem, FileEdit, ItemStatus, TurnStatus, TurnUsage,
 };
 
 #[derive(Debug, Default)]
@@ -59,7 +59,7 @@ struct ToolLifecycle {
 
 #[derive(Debug, Default)]
 pub(super) struct MappedEvent {
-    pub(super) events: Vec<SessionEvent>,
+    pub(super) events: Vec<ConversationEvent>,
     pub(super) permission_requests: Vec<String>,
 }
 
@@ -98,7 +98,9 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
             let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
             state.current_turn_id = Some(turn_id.clone());
             state.tools.clear();
-            mapped.events.push(SessionEvent::TurnStarted { turn_id });
+            mapped
+                .events
+                .push(ConversationEvent::TurnStarted { turn_id });
         }
         SessionState::Idle => {
             if was_active {
@@ -126,14 +128,14 @@ fn complete_turn(
         .take()
         .unwrap_or_else(|| "unknown".to_string());
     state.tools.clear();
-    mapped.events.push(SessionEvent::TurnCompleted {
+    mapped.events.push(ConversationEvent::TurnCompleted {
         turn_id: turn_id.clone(),
         status,
     });
     if let Some(usage) = usage {
         mapped
             .events
-            .push(SessionEvent::TurnUsage { turn_id, usage });
+            .push(ConversationEvent::TurnUsage { turn_id, usage });
     }
 }
 
@@ -181,7 +183,7 @@ fn map_part_updated(properties: &Value, state: &mut ReaderState, mapped: &mut Ma
 
     if part_type.contains("reasoning") || part_type.contains("thinking") {
         if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped.events.push(SessionEvent::ReasoningDelta {
+            mapped.events.push(ConversationEvent::ReasoningDelta {
                 turn_id: turn_id.to_string(),
                 content,
             });
@@ -191,7 +193,7 @@ fn map_part_updated(properties: &Value, state: &mut ReaderState, mapped: &mut Ma
 
     if part_type.contains("text") && !part_type.contains("tool") {
         if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped.events.push(SessionEvent::TextDelta {
+            mapped.events.push(ConversationEvent::TextDelta {
                 turn_id: turn_id.to_string(),
                 content,
             });
@@ -222,7 +224,7 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
 
     if !lifecycle.started {
         lifecycle.started = true;
-        mapped.events.push(SessionEvent::ItemStarted {
+        mapped.events.push(ConversationEvent::ItemStarted {
             turn_id: turn_id.clone(),
             item: build_tool_item(part, &tool_id, ItemStatus::InProgress, false),
         });
@@ -234,7 +236,7 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
     ) && !lifecycle.completed
     {
         lifecycle.completed = true;
-        mapped.events.push(SessionEvent::ItemCompleted {
+        mapped.events.push(ConversationEvent::ItemCompleted {
             turn_id,
             item: build_tool_item(part, &tool_id, status, true),
         });
@@ -263,7 +265,7 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
     else {
         return;
     };
-    mapped.events.push(SessionEvent::DiffUpdated {
+    mapped.events.push(ConversationEvent::DiffUpdated {
         turn_id: turn_id.to_string(),
         diff,
     });
@@ -286,7 +288,9 @@ fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEve
         complete_turn(state, TurnStatus::Failed, None, mapped);
     }
 
-    mapped.events.push(SessionEvent::Error { code, message });
+    mapped
+        .events
+        .push(ConversationEvent::Error { code, message });
 }
 
 fn value_by_keys<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
@@ -349,7 +353,7 @@ fn build_tool_item(
     tool_id: &str,
     status: ItemStatus,
     include_output: bool,
-) -> SessionItem {
+) -> ConversationItem {
     let input = tool_input(part);
     let input_ref = input.as_ref();
     let output = if include_output {
@@ -359,7 +363,7 @@ fn build_tool_item(
     };
 
     if let Some(command) = part_or_input_value(part, input_ref, &["command"]) {
-        return SessionItem::Command {
+        return ConversationItem::Command {
             id: tool_id.to_string(),
             command: command_args(command),
             cwd: part_or_input_text(part, input_ref, &["cwd"]).unwrap_or_default(),
@@ -371,7 +375,7 @@ fn build_tool_item(
     }
 
     if let Some(path) = part_or_input_text(part, input_ref, &["file", "path"]) {
-        return SessionItem::File {
+        return ConversationItem::File {
             id: tool_id.to_string(),
             changes: if path.is_empty() {
                 Vec::new()
@@ -386,7 +390,7 @@ fn build_tool_item(
         };
     }
 
-    SessionItem::Tool {
+    ConversationItem::Tool {
         id: tool_id.to_string(),
         name: tool_name(part),
         status,
@@ -469,7 +473,7 @@ mod tests {
         );
         assert_eq!(started.events.len(), 1);
         let started_turn_id = match &started.events[0] {
-            SessionEvent::TurnStarted { turn_id } => turn_id.clone(),
+            ConversationEvent::TurnStarted { turn_id } => turn_id.clone(),
             other => panic!("expected TurnStarted, got {other:?}"),
         };
 
@@ -482,7 +486,7 @@ mod tests {
         );
         assert_eq!(completed.events.len(), 1);
         match &completed.events[0] {
-            SessionEvent::TurnCompleted { turn_id, status } => {
+            ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, &started_turn_id);
                 assert_eq!(*status, TurnStatus::Completed);
             }
@@ -502,7 +506,7 @@ mod tests {
             &mut state,
         );
         let started_turn_id = match &started.events[0] {
-            SessionEvent::TurnStarted { turn_id } => turn_id.clone(),
+            ConversationEvent::TurnStarted { turn_id } => turn_id.clone(),
             other => panic!("expected TurnStarted, got {other:?}"),
         };
 
@@ -525,12 +529,12 @@ mod tests {
         assert_eq!(completed.events.len(), 2);
         assert!(matches!(
             &completed.events[0],
-            SessionEvent::TurnCompleted { turn_id, status }
+            ConversationEvent::TurnCompleted { turn_id, status }
                 if turn_id == &started_turn_id && *status == TurnStatus::Completed
         ));
         assert!(matches!(
             &completed.events[1],
-            SessionEvent::TurnUsage { turn_id, usage }
+            ConversationEvent::TurnUsage { turn_id, usage }
                 if turn_id == &started_turn_id
                     && usage.input_tokens == 222
                     && usage.output_tokens == 77
@@ -562,7 +566,7 @@ mod tests {
 
         assert_eq!(mapped.events.len(), 1);
         match &mapped.events[0] {
-            SessionEvent::TextDelta { content, .. } => assert_eq!(content, "hello"),
+            ConversationEvent::TextDelta { content, .. } => assert_eq!(content, "hello"),
             other => panic!("expected TextDelta, got {other:?}"),
         }
     }
@@ -597,7 +601,7 @@ mod tests {
         assert_eq!(started.events.len(), 1);
         assert!(matches!(
             started.events[0],
-            SessionEvent::ItemStarted { .. }
+            ConversationEvent::ItemStarted { .. }
         ));
 
         let duplicate_start = map_event(
@@ -637,8 +641,8 @@ mod tests {
         );
         assert_eq!(completed.events.len(), 1);
         match &completed.events[0] {
-            SessionEvent::ItemCompleted {
-                item: SessionItem::Command { output, .. },
+            ConversationEvent::ItemCompleted {
+                item: ConversationItem::Command { output, .. },
                 ..
             } => assert_eq!(output.as_deref(), Some("ok")),
             other => panic!("expected ItemCompleted command, got {other:?}"),
@@ -717,12 +721,12 @@ mod tests {
         assert_eq!(mapped.events.len(), 2);
         assert!(matches!(
             mapped.events[0],
-            SessionEvent::TurnCompleted {
+            ConversationEvent::TurnCompleted {
                 status: TurnStatus::Failed,
                 ..
             }
         ));
-        assert!(matches!(mapped.events[1], SessionEvent::Error { .. }));
+        assert!(matches!(mapped.events[1], ConversationEvent::Error { .. }));
     }
 
     #[test]

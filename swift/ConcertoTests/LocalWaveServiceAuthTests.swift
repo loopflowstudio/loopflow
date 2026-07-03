@@ -97,17 +97,18 @@ struct LocalWaveServiceAuthTests {
         #expect(result.status == .none)
     }
 
-    @Test("attachTerminalSession decodes tmux connection info")
-    func attachTerminalSessionDecodesConnectionInfo() async throws {
+    @Test("attachSession decodes tmux connection info")
+    func attachSessionDecodesConnectionInfo() async throws {
         let service = makeService { request in
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v0/terminal-sessions/session-1/attach")
+            #expect(request.url?.path == "/v0/sessions/session-1/attach")
 
             return StubResponse(
                 statusCode: 200,
                 body: Data(
                     """
                     {
+                      "kind": "tmux",
                       "session_name": "lfd-session-1",
                       "host": "localhost",
                       "cwd": "/tmp/repo",
@@ -118,8 +119,9 @@ struct LocalWaveServiceAuthTests {
             )
         }
 
-        let info = try await service.attachTerminalSession("session-1")
+        let info = try await service.attachSession("session-1")
 
+        #expect(info.kind == "tmux")
         #expect(info.sessionName == "lfd-session-1")
         #expect(info.host == "localhost")
         #expect(info.cwd == "/tmp/repo")
@@ -180,8 +182,8 @@ struct LocalWaveServiceAuthTests {
         #expect(wave.name == "agent-embedding")
     }
 
-    @Test("run sends one-shot flow override")
-    func runSendsFlowOverride() async throws {
+    @Test("ensureWaveAgent sends one-shot flow override")
+    func ensureWaveAgentSendsFlowOverride() async throws {
         let service = makeService { request in
             #expect(request.httpMethod == "POST")
             #expect(request.url?.path == "/v0/waves/wave-1/run")
@@ -197,18 +199,20 @@ struct LocalWaveServiceAuthTests {
 
             return StubResponse(
                 statusCode: 200,
-                body: Data("{\"ok\":true}".utf8)
+                body: agentLaunchData()
             )
         }
 
-        try await service.run(
-            "wave-1",
+        let session = try await service.ensureWaveAgent(
+            waveId: "wave-1",
             overrides: RunOverrides(flow: "design")
         )
+        #expect(session.id == "terminal-session-1")
+        #expect(session.sessionUse == .waveAgent)
     }
 
-    @Test("run sends targeted roadmap item override")
-    func runSendsRoadmapItemOverride() async throws {
+    @Test("ensureWaveAgent sends targeted roadmap item override")
+    func ensureWaveAgentSendsRoadmapItemOverride() async throws {
         let service = makeService { request in
             #expect(request.httpMethod == "POST")
             #expect(request.url?.path == "/v0/waves/wave-1/run")
@@ -222,20 +226,165 @@ struct LocalWaveServiceAuthTests {
 
             return StubResponse(
                 statusCode: 200,
-                body: Data("{\"ok\":true}".utf8)
+                body: agentLaunchData()
             )
         }
 
-        try await service.run(
-            "wave-1",
+        let session = try await service.ensureWaveAgent(
+            waveId: "wave-1",
             overrides: RunOverrides(flow: "build", roadmapItem: "03-calibration-view.md")
         )
+        #expect(session.id == "terminal-session-1")
+        #expect(session.sessionUse == .waveAgent)
+    }
+
+    @Test("getWaveAgentTree decodes session connection")
+    func getWaveAgentTreeDecodesSessionConnection() async throws {
+        let service = makeService { request in
+            #expect(request.httpMethod == "GET")
+            #expect(request.url?.path == "/v0/waves/wave-1/agent-tree")
+            let activeOnly = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "active_only" })?
+                .value
+            #expect(activeOnly == "true")
+
+            return StubResponse(
+                statusCode: 200,
+                body: waveAgentTreeData()
+            )
+        }
+
+        let tree = try await service.getWaveAgentTree(waveId: "wave-1")
+        #expect(tree.object == "wave_agent_tree")
+        #expect(tree.wave.id == "wave-1")
+        #expect(tree.sessions.first?.session.parentSessionId == "terminal-session-1")
+        #expect(tree.sessions.first?.connection?.sessionName == "lf-worker")
+    }
+
+    @Test("Session requires argv and env")
+    func terminalSessionRequiresArgvAndEnv() {
+        let session = LocalWaveService.parseSessionFromJSON([
+            "id": "terminal-session-1",
+            "object": "session",
+            "wave_id": "wave-1",
+            "run_id": NSNull(),
+            "parent_session_id": NSNull(),
+            "use": "worker",
+            "step": "implement",
+            "agent": "lf",
+            "cwd": "/tmp/repo.worker",
+            "source": "wave_step_tmux",
+            "tmux_name": "lf-worker",
+            "status": "running",
+            "created_at": "2026-07-02T00:00:00Z",
+            "attached_at": NSNull(),
+            "started_at": NSNull(),
+            "completed_at": NSNull()
+        ])
+
+        #expect(session == nil)
     }
 }
 
 private struct StubResponse {
     let statusCode: Int
     let body: Data
+}
+
+private func agentLaunchData() -> Data {
+    Data(
+        """
+        {
+          "id": "terminal-session-1",
+          "object": "session",
+          "wave_id": "wave-1",
+          "run_id": null,
+          "use": "wave_agent",
+          "step": "goal:ship-roadmap",
+          "agent": "lf",
+          "cwd": "/tmp/repo.wave",
+          "argv": [],
+          "env": {},
+          "source": "wave_step_tmux",
+          "tmux_name": "lf-wave-agent",
+          "status": "running",
+          "created_at": "2026-07-02T00:00:00Z",
+          "attached_at": null,
+          "started_at": null,
+          "completed_at": null
+        }
+        """.utf8
+    )
+}
+
+private func waveAgentTreeData() -> Data {
+    Data(
+        """
+        {
+          "object": "wave_agent_tree",
+          "id": "tree-wave-1",
+          "wave": {
+            "id": "wave-1",
+            "object": "wave",
+            "name": "goalreview",
+            "repo": "/tmp/repo",
+            "mode": "manual",
+            "primary_flow": "ship-roadmap",
+            "goal": "ship-roadmap",
+            "metrics": [],
+            "direction": [],
+            "area": [],
+            "created_at": "2026-07-02T00:00:00Z",
+            "status": "running",
+            "iteration": 1,
+            "local_worktree": "/tmp/repo.goalreview",
+            "remote_branch": "wave/goalreview",
+            "commits": [],
+            "diff_stat": null,
+            "flow_steps": [],
+            "open_pr_count": 0,
+            "stack_count": 0,
+            "has_stale_pr_state": false,
+            "workers": 1,
+            "triggers": [],
+            "crons": []
+          },
+          "child_waves": [],
+          "sessions": [
+            {
+              "session": {
+                "id": "terminal-worker",
+                "object": "session",
+                "wave_id": "wave-1",
+                "run_id": "run-1",
+                "parent_session_id": "terminal-session-1",
+                "use": "worker",
+                "step": "implement",
+                "agent": "lf",
+                "cwd": "/tmp/repo.worker",
+                "argv": [],
+                "env": {},
+                "source": "wave_step_tmux",
+                "tmux_name": "lf-worker",
+                "status": "running",
+                "created_at": "2026-07-02T00:00:00Z",
+                "attached_at": null,
+                "started_at": null,
+                "completed_at": null
+              },
+              "connection": {
+                "kind": "tmux",
+                "session_name": "lf-worker",
+                "host": "localhost",
+                "cwd": "/tmp/repo.worker",
+                "status": "running"
+              }
+            }
+          ]
+        }
+        """.utf8
+    )
 }
 
 // SAFETY: lock-guarded test recorder; all mutation is serialized via NSLock.

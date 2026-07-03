@@ -7,6 +7,11 @@ use std::time::Duration;
 
 use loopflow::lfd::auth::{AuthFailureThrottle, AuthProvider};
 use loopflow::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+use loopflow::lfd::conversations::types::{
+    Conversation, ConversationConfig, ConversationEvent, ConversationStatus,
+    CreateConversationParams,
+};
+use loopflow::lfd::conversations::ConversationManager;
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::{router, HttpState};
@@ -14,8 +19,6 @@ use loopflow::lfd::id::LfdId;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
-use loopflow::lfd::sessions::types::{Session, SessionEvent, SessionStatus};
-use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{open_store, StorageConfig};
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -112,7 +115,7 @@ async fn test_http_state(root: &Path) -> HttpState {
     let scheduler = Arc::new(Scheduler::new(1));
     let output_hub = OutputHub::new(128, root.join("output"));
     let event_hub = EventHub::new(128);
-    let sessions = SessionManager::new(store.clone());
+    let sessions = ConversationManager::new(store.clone());
     let executor = Arc::new(
         WaveExecutor::new(
             store.clone(),
@@ -140,7 +143,7 @@ async fn test_http_state(root: &Path) -> HttpState {
         http_security: HttpSecurityConfig::default(),
         auth_failure_throttle: AuthFailureThrottle::new(),
         ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        sessions,
+        conversations: sessions,
     }
 }
 
@@ -156,52 +159,52 @@ async fn start_server(state: HttpState) -> (String, JoinHandle<()>) {
     (format!("http://{addr}"), server)
 }
 
-async fn create_session(client: &Client, base_url: &str, harness: &str, repo: &Path) -> Value {
-    let response = client
-        .post(format!("{base_url}/v0/sessions"))
-        .bearer_auth(TEST_TOKEN)
-        .json(&json!({
-            "harness": harness,
-            "step": "design",
-            "repo_root": repo,
-        }))
-        .send()
+async fn create_session(
+    sessions: &ConversationManager,
+    harness: &str,
+    repo: &Path,
+) -> Conversation {
+    sessions
+        .create_conversation(CreateConversationParams {
+            harness: harness.to_string(),
+            run_id: None,
+            config: ConversationConfig {
+                step: "design".to_string(),
+                repo_root: repo.to_string_lossy().to_string(),
+                ..Default::default()
+            },
+        })
         .await
-        .expect("create session request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    response.json().await.expect("create session json")
+        .expect("create session")
 }
 
-async fn get_session(client: &Client, base_url: &str, session_id: &str) -> Value {
-    let response = client
-        .get(format!("{base_url}/v0/sessions/{session_id}"))
-        .bearer_auth(TEST_TOKEN)
-        .send()
-        .await
-        .expect("get session request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    response.json().await.expect("get session json")
-}
-
-async fn wait_for_http_status(
-    client: &Client,
-    base_url: &str,
-    session_id: &str,
-    expected: SessionStatus,
+async fn wait_for_session_status(
+    conversations: &ConversationManager,
+    conversation_id: &LfdId,
+    expected: ConversationStatus,
 ) -> Value {
     for _ in 0..100 {
-        let session = get_session(client, base_url, session_id).await;
-        if session["status"] == expected.as_str() {
-            return session;
+        let session = conversations
+            .get_conversation(conversation_id)
+            .await
+            .expect("get session");
+        if session.status == expected {
+            return json!({
+                "id": session.id.to_string(),
+                "status": session.status.as_str(),
+                "input_supported": session.harness == "codex",
+            });
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("session never reached expected status");
 }
 
-async fn send_input(client: &Client, base_url: &str, session_id: &str, text: &str) -> Value {
+async fn send_input(client: &Client, base_url: &str, conversation_id: &str, text: &str) -> Value {
     let response = client
-        .post(format!("{base_url}/v0/sessions/{session_id}/input"))
+        .post(format!(
+            "{base_url}/v0/conversations/{conversation_id}/input"
+        ))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({ "text": text }))
         .send()
@@ -214,11 +217,11 @@ async fn send_input(client: &Client, base_url: &str, session_id: &str, text: &st
 async fn collect_sse_until(
     client: &Client,
     base_url: &str,
-    session_id: &str,
+    conversation_id: &str,
     after_seq: Option<i64>,
-    matches_event: impl Fn(&SessionEvent) -> bool,
-) -> Vec<(i64, SessionEvent)> {
-    let mut url = format!("{base_url}/v0/sessions/{session_id}/events");
+    matches_event: impl Fn(&ConversationEvent) -> bool,
+) -> Vec<(i64, ConversationEvent)> {
+    let mut url = format!("{base_url}/v0/conversations/{conversation_id}/events");
     if let Some(seq) = after_seq {
         url.push_str(&format!("?after_seq={seq}"));
     }
@@ -263,12 +266,13 @@ async fn collect_sse_until(
                 }
             }
 
-            if event_name != "session.event" {
+            if event_name != "conversation.event" {
                 continue;
             }
 
-            let seq = id.expect("session event id");
-            let event: SessionEvent = serde_json::from_str(&data).expect("session event json");
+            let seq = id.expect("conversation event id");
+            let event: ConversationEvent =
+                serde_json::from_str(&data).expect("conversation event json");
             let matched = matches_event(&event);
             events.push((seq, event));
             if matched {
@@ -278,7 +282,7 @@ async fn collect_sse_until(
     }
 }
 
-fn last_seq(events: &[(i64, SessionEvent)]) -> i64 {
+fn last_seq(events: &[(i64, ConversationEvent)]) -> i64 {
     events.last().map(|(seq, _)| *seq).unwrap_or(-1)
 }
 
@@ -291,63 +295,68 @@ async fn http_session_input_steers_running_turn_starts_idle_turn_and_replays_eve
     std::fs::write(repo.join(".lf/steps/design.md"), "Design the thing.").expect("write step");
 
     let state = test_http_state(tmp.path()).await;
+    let sessions = state.conversations.clone();
     let (base_url, server) = start_server(state).await;
     let client = Client::new();
 
-    let created = create_session(&client, &base_url, "codex", &repo).await;
-    assert_eq!(created["input_supported"], true);
-    let session_id = created["id"].as_str().expect("session id");
-    let _ = wait_for_http_status(&client, &base_url, session_id, SessionStatus::Active).await;
+    let created = create_session(&sessions, "codex", &repo).await;
+    assert_eq!(created.harness, "codex");
+    let conversation_id = created.id.clone();
+    let session_id_text = conversation_id.to_string();
+    let _ = wait_for_session_status(&sessions, &conversation_id, ConversationStatus::Active).await;
 
-    let first_response = send_input(&client, &base_url, session_id, "first request").await;
+    let first_response = send_input(&client, &base_url, &session_id_text, "first request").await;
     assert_eq!(first_response["input_supported"], true);
     let first_events = collect_sse_until(
         &client,
         &base_url,
-        session_id,
+        &session_id_text,
         None,
-        |event| matches!(event, SessionEvent::TurnStarted { turn_id } if turn_id == "turn_1"),
+        |event| matches!(event, ConversationEvent::TurnStarted { turn_id } if turn_id == "turn_1"),
     )
     .await;
 
-    let _ = send_input(&client, &base_url, session_id, "also check the tests").await;
+    let _ = send_input(&client, &base_url, &session_id_text, "also check the tests").await;
     let steered_events =
-        collect_sse_until(&client, &base_url, session_id, Some(last_seq(&first_events)), |event| {
-        matches!(event, SessionEvent::TextDelta { turn_id, content } if turn_id == "turn_1" && content.contains("steered:also check the tests"))
+        collect_sse_until(&client, &base_url, &session_id_text, Some(last_seq(&first_events)), |event| {
+        matches!(event, ConversationEvent::TextDelta { turn_id, content } if turn_id == "turn_1" && content.contains("steered:also check the tests"))
     })
     .await;
     let completed_first = collect_sse_until(
         &client,
         &base_url,
-        session_id,
+        &session_id_text,
         Some(last_seq(&steered_events)),
-        |event| matches!(event, SessionEvent::TurnCompleted { turn_id, .. } if turn_id == "turn_1"),
+        |event| matches!(event, ConversationEvent::TurnCompleted { turn_id, .. } if turn_id == "turn_1"),
     )
     .await;
     let after_seq = last_seq(&completed_first);
 
-    let _ = send_input(&client, &base_url, session_id, "second request").await;
+    let _ = send_input(&client, &base_url, &session_id_text, "second request").await;
     let replayed = collect_sse_until(
         &client,
         &base_url,
-        session_id,
+        &session_id_text,
         Some(after_seq),
-        |event| matches!(event, SessionEvent::TurnCompleted { turn_id, .. } if turn_id == "turn_2"),
+        |event| matches!(event, ConversationEvent::TurnCompleted { turn_id, .. } if turn_id == "turn_2"),
     )
     .await;
     assert!(replayed.iter().any(|(_, event)| {
-        matches!(event, SessionEvent::TurnStarted { turn_id } if turn_id == "turn_2")
+        matches!(event, ConversationEvent::TurnStarted { turn_id } if turn_id == "turn_2")
     }));
     for (offset, (seq, _)) in replayed.iter().enumerate() {
         assert_eq!(*seq, after_seq + offset as i64 + 1);
     }
 
-    let claude = create_session(&client, &base_url, "claude", &repo).await;
-    let claude_id = claude["id"].as_str().expect("claude session id");
-    let claude = wait_for_http_status(&client, &base_url, claude_id, SessionStatus::Active).await;
+    let claude = create_session(&sessions, "claude", &repo).await;
+    let claude_id = claude.id.clone();
+    let claude_id_text = claude_id.to_string();
+    let claude = wait_for_session_status(&sessions, &claude_id, ConversationStatus::Active).await;
     assert_eq!(claude["input_supported"], false);
     let response = client
-        .post(format!("{base_url}/v0/sessions/{claude_id}/input"))
+        .post(format!(
+            "{base_url}/v0/conversations/{claude_id_text}/input"
+        ))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({ "text": "hello" }))
         .send()
@@ -371,27 +380,30 @@ async fn non_codex_session_input_is_rejected_before_runtime_lookup() {
             .await
             .expect("open store"),
     );
-    let manager = SessionManager::new(store.clone());
-    let session_id = LfdId::new();
-    let session = Session {
-        id: session_id.clone(),
+    let manager = ConversationManager::new(store.clone());
+    let conversation_id = LfdId::new();
+    let session = Conversation {
+        id: conversation_id.clone(),
         harness: "claude".to_string(),
-        status: SessionStatus::Active,
-        wave_run_id: None,
+        status: ConversationStatus::Active,
+        run_id: None,
         provider_session_id: None,
         config: Default::default(),
         created_at: time::OffsetDateTime::now_utc(),
         ended_at: None,
     };
-    store.create_session(&session).await.expect("seed session");
+    store
+        .create_conversation(&session)
+        .await
+        .expect("seed session");
 
     let err = manager
-        .send_input(&session_id, "hello")
+        .send_input(&conversation_id, "hello")
         .await
         .expect_err("claude input should be rejected");
     assert!(matches!(
         err,
-        loopflow::lfd::sessions::SessionManagerError::InputNotSupported(ref harness)
+        loopflow::lfd::conversations::ConversationManagerError::InputNotSupported(ref harness)
             if harness == "claude"
     ));
 }

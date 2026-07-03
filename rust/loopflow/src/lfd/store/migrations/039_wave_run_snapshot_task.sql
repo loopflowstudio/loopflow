@@ -1,1 +1,1 @@
-ALTER TABLE wave_runs ADD COLUMN snapshot_task TEXT;
+ALTER TABLE runs ADD COLUMN snapshot_task TEXT;

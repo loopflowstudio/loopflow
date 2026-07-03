@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::lfd::sessions::harness::lf_tag::LfTagParser;
-use crate::lfd::sessions::types::{
-    FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+use crate::lfd::conversations::harness::lf_tag::LfTagParser;
+use crate::lfd::conversations::types::{
+    ConversationEvent, ConversationItem, FileEdit, ItemStatus, TurnStatus, TurnUsage,
 };
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -80,7 +80,7 @@ impl ReaderState {
         self.tool_blocks.get(index)
     }
 
-    pub(super) fn drain_failed_items(&mut self) -> Vec<SessionItem> {
+    pub(super) fn drain_failed_items(&mut self) -> Vec<ConversationItem> {
         let mut tools: Vec<_> = self.tool_blocks.drain().map(|(_, tool)| tool).collect();
         self.tool_indexes.clear();
         tools.sort_by(|left, right| left.id.cmp(&right.id));
@@ -103,7 +103,7 @@ impl ReaderState {
 pub(super) fn process_line(
     line: &str,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<SessionEvent>,
+    events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
 ) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -125,7 +125,7 @@ pub(super) fn process_line(
                 .or_else(|| value.get("session_id"))
                 .and_then(Value::as_str)
             {
-                let _ = events.send(SessionEvent::ProviderSessionId {
+                let _ = events.send(ConversationEvent::ProviderSessionId {
                     provider_session_id: session_id.to_string(),
                 });
             }
@@ -152,7 +152,7 @@ pub(super) fn process_line(
                 };
                 if state.track_tool(index, tool_id, tool_name, None) {
                     let item = infer_item(tool_name, tool_id, None);
-                    let _ = events.send(SessionEvent::ItemStarted {
+                    let _ = events.send(ConversationEvent::ItemStarted {
                         turn_id: turn_id.to_string(),
                         item,
                     });
@@ -184,7 +184,7 @@ pub(super) fn process_line(
                         .or_else(|| delta.get("summary"))
                         .and_then(Value::as_str)
                     {
-                        let _ = events.send(SessionEvent::ReasoningDelta {
+                        let _ = events.send(ConversationEvent::ReasoningDelta {
                             turn_id: turn_id.to_string(),
                             content: text.to_string(),
                         });
@@ -218,11 +218,11 @@ pub(super) fn process_line(
             } else {
                 TurnStatus::Completed
             };
-            let _ = events.send(SessionEvent::TurnCompleted {
+            let _ = events.send(ConversationEvent::TurnCompleted {
                 turn_id: turn_id.to_string(),
                 status,
             });
-            let _ = events.send(SessionEvent::TurnUsage {
+            let _ = events.send(ConversationEvent::TurnUsage {
                 turn_id: turn_id.to_string(),
                 usage,
             });
@@ -276,8 +276,8 @@ fn map_turn_usage(event: &Value) -> TurnUsage {
     }
 }
 
-/// Map Claude tool name to a SessionItem category.
-fn infer_item(tool_name: &str, tool_use_id: &str, input: Option<Value>) -> SessionItem {
+/// Map Claude tool name to a ConversationItem category.
+fn infer_item(tool_name: &str, tool_use_id: &str, input: Option<Value>) -> ConversationItem {
     build_item(tool_name, tool_use_id, input, ItemStatus::InProgress, None)
 }
 
@@ -287,9 +287,9 @@ fn build_item(
     input: Option<Value>,
     status: ItemStatus,
     output: Option<String>,
-) -> SessionItem {
+) -> ConversationItem {
     match tool_name {
-        "Bash" => SessionItem::Command {
+        "Bash" => ConversationItem::Command {
             id: tool_use_id.to_string(),
             command: command_from_input(input.as_ref()),
             cwd: String::new(),
@@ -298,12 +298,12 @@ fn build_item(
             exit_code: None,
             duration_ms: None,
         },
-        "Edit" | "Write" | "NotebookEdit" => SessionItem::File {
+        "Edit" | "Write" | "NotebookEdit" => ConversationItem::File {
             id: tool_use_id.to_string(),
             changes: file_changes_from_input(tool_name, input.as_ref()),
             status,
         },
-        _ => SessionItem::Tool {
+        _ => ConversationItem::Tool {
             id: tool_use_id.to_string(),
             name: tool_name.to_string(),
             status,
@@ -373,7 +373,7 @@ fn synthesize_edit_diff(path: &str, input: &Value) -> Option<String> {
 fn process_assistant_message(
     value: &Value,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<SessionEvent>,
+    events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -402,7 +402,7 @@ fn process_assistant_message(
                 // emit both started and track it.
                 if state.track_tool(idx, &tool_id, &tool_name, input.clone()) {
                     let item = infer_item(&tool_name, &tool_id, input);
-                    let _ = events.send(SessionEvent::ItemStarted {
+                    let _ = events.send(ConversationEvent::ItemStarted {
                         turn_id: turn_id.to_string(),
                         item,
                     });
@@ -423,7 +423,7 @@ fn process_assistant_message(
 fn process_user_message(
     value: &Value,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<SessionEvent>,
+    events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -450,7 +450,7 @@ fn process_user_message(
                 let input = tool.parsed_input();
                 let completed_item =
                     build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
-                let _ = events.send(SessionEvent::ItemCompleted {
+                let _ = events.send(ConversationEvent::ItemCompleted {
                     turn_id: turn_id.to_string(),
                     item: completed_item,
                 });
@@ -496,7 +496,7 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
 }
 
 fn emit_text_delta(
-    events: &mpsc::UnboundedSender<SessionEvent>,
+    events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
     turn_id: &str,
     content: &str,
@@ -507,7 +507,7 @@ fn emit_text_delta(
 }
 
 fn flush_text_delta_parser(
-    events: &mpsc::UnboundedSender<SessionEvent>,
+    events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
     turn_id: &str,
 ) {
@@ -525,7 +525,7 @@ mod tests {
     fn infer_item_bash_to_command() {
         let item = infer_item("Bash", "tu_1", Some(json!({"command": "cargo test"})));
         match item {
-            SessionItem::Command { id, command, .. } => {
+            ConversationItem::Command { id, command, .. } => {
                 assert_eq!(id, "tu_1");
                 assert_eq!(command, vec!["cargo test"]);
             }
@@ -537,7 +537,7 @@ mod tests {
     fn infer_item_edit_to_file() {
         let item = infer_item("Edit", "tu_2", Some(json!({"file_path": "src/main.rs"})));
         match item {
-            SessionItem::File { id, changes, .. } => {
+            ConversationItem::File { id, changes, .. } => {
                 assert_eq!(id, "tu_2");
                 assert_eq!(changes[0].path, "src/main.rs");
                 assert_eq!(changes[0].kind.as_deref(), Some("edit"));
@@ -550,7 +550,7 @@ mod tests {
     fn infer_item_write_to_file() {
         let item = infer_item("Write", "tu_3", Some(json!({"file_path": "new.txt"})));
         match item {
-            SessionItem::File { id, changes, .. } => {
+            ConversationItem::File { id, changes, .. } => {
                 assert_eq!(id, "tu_3");
                 assert_eq!(changes[0].path, "new.txt");
                 assert_eq!(changes[0].kind.as_deref(), Some("write"));
@@ -567,7 +567,7 @@ mod tests {
             Some(json!({"notebook_path": "analysis.ipynb"})),
         );
         match item {
-            SessionItem::File { id, changes, .. } => {
+            ConversationItem::File { id, changes, .. } => {
                 assert_eq!(id, "tu_4");
                 assert_eq!(changes[0].path, "analysis.ipynb");
             }
@@ -579,7 +579,7 @@ mod tests {
     fn infer_item_unknown_to_tool() {
         let item = infer_item("WebSearch", "tu_5", Some(json!({"query": "rust async"})));
         match item {
-            SessionItem::Tool {
+            ConversationItem::Tool {
                 id, name, input, ..
             } => {
                 assert_eq!(id, "tu_5");
@@ -601,7 +601,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::ProviderSessionId {
+            ConversationEvent::ProviderSessionId {
                 provider_session_id,
             } => {
                 assert_eq!(provider_session_id, "sess_abc123");
@@ -621,7 +621,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::ProviderSessionId {
+            ConversationEvent::ProviderSessionId {
                 provider_session_id,
             } => {
                 assert_eq!(provider_session_id, "sess_wrapped");
@@ -640,7 +640,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::TextDelta { turn_id, content } => {
+            ConversationEvent::TextDelta { turn_id, content } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(content, "Hello world");
             }
@@ -658,7 +658,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::SuggestedActions { turn_id, actions } => {
+            ConversationEvent::SuggestedActions { turn_id, actions } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(actions.len(), 1);
                 assert_eq!(actions[0].label, "Land PR");
@@ -677,7 +677,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::ReasoningDelta { turn_id, content } => {
+            ConversationEvent::ReasoningDelta { turn_id, content } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(content, "Let me think...");
             }
@@ -696,7 +696,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::TurnCompleted { turn_id, status } => {
+            ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(status, TurnStatus::Completed);
             }
@@ -705,7 +705,7 @@ mod tests {
 
         let usage_event = rx.try_recv().expect("should have usage event");
         match usage_event {
-            SessionEvent::TurnUsage { turn_id, usage } => {
+            ConversationEvent::TurnUsage { turn_id, usage } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(usage.input_tokens, 0);
                 assert_eq!(usage.output_tokens, 0);
@@ -726,7 +726,7 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::TurnCompleted { turn_id, status } => {
+            ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(status, TurnStatus::Failed);
             }
@@ -746,7 +746,7 @@ mod tests {
         let _completed = rx.try_recv().expect("completion event");
         let usage_event = rx.try_recv().expect("usage event");
         match usage_event {
-            SessionEvent::TurnUsage { turn_id, usage } => {
+            ConversationEvent::TurnUsage { turn_id, usage } => {
                 assert_eq!(turn_id, "turn_42");
                 assert_eq!(usage.input_tokens, 321);
                 assert_eq!(usage.output_tokens, 123);
@@ -776,9 +776,9 @@ mod tests {
 
         let event = rx.try_recv().expect("should have event");
         match event {
-            SessionEvent::ItemStarted { turn_id, item } => {
+            ConversationEvent::ItemStarted { turn_id, item } => {
                 assert_eq!(turn_id, "turn_1");
-                assert!(matches!(item, SessionItem::Command { .. }));
+                assert!(matches!(item, ConversationItem::Command { .. }));
             }
             other => panic!("expected ItemStarted, got {other:?}"),
         }
@@ -863,7 +863,7 @@ mod tests {
             })),
         );
         match item {
-            SessionItem::File { changes, .. } => {
+            ConversationItem::File { changes, .. } => {
                 let diff = changes[0].diff.as_deref().unwrap();
                 assert!(diff.contains("--- a/src/main.rs"));
                 assert!(diff.contains("+++ b/src/main.rs"));
@@ -885,7 +885,7 @@ mod tests {
             })),
         );
         match item {
-            SessionItem::File { changes, .. } => {
+            ConversationItem::File { changes, .. } => {
                 assert!(changes[0].diff.is_none());
             }
             other => panic!("expected File, got {other:?}"),
@@ -924,7 +924,7 @@ mod tests {
             })),
         );
         match item {
-            SessionItem::File { changes, .. } => {
+            ConversationItem::File { changes, .. } => {
                 assert!(changes[0].diff.is_none());
             }
             other => panic!("expected File, got {other:?}"),

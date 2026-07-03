@@ -20,8 +20,7 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AgentRun, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-    WaveStatus,
+    ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Wave, WaveStatus,
 };
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
@@ -31,7 +30,7 @@ pub async fn create_parallel_wave_run(
     wave: &Wave,
     run_id: &LfdId,
     target_branch: Option<&str>,
-) -> anyhow::Result<WaveRun> {
+) -> anyhow::Result<Run> {
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
     let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
@@ -53,19 +52,17 @@ pub async fn create_parallel_wave_run(
     let (wt_path, branch) =
         create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?;
 
-    let run = WaveRun {
+    let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        snapshot: WaveRunSnapshot {
-            repo: wave.repo().clone(),
-            flow: wave.primary_flow().clone(),
-            task: None,
-            direction: wave.direction().clone(),
-            area: wave.area().clone(),
-        },
+        repo: wave.repo().clone(),
+        flow: wave.primary_flow().clone(),
+        task: None,
+        direction: wave.direction().clone(),
+        area: wave.area().clone(),
         iteration,
         step_index: 0,
-        status: WaveRunStatus::Running,
+        status: RunStatus::Running,
         worktree: wt_path,
         branch,
         started_at: Some(OffsetDateTime::now_utc()),
@@ -78,13 +75,13 @@ pub async fn create_parallel_wave_run(
         parent_pr_number,
         stack_position,
         stack_group_id,
-        stack_status: WaveRunStackStatus::Active,
+        stack_status: RunStackStatus::Active,
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
         repair_of: None,
         pr: None,
     };
-    store.create_wave_run(&run).await?;
+    store.create_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
         // New cycle: record the starting iteration for max_iterations safety valve.
         if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
@@ -103,12 +100,12 @@ pub async fn create_parallel_wave_run(
 ///
 /// For serialized waves targeting a specific branch (non-"main"),
 /// uses a per-run worktree instead of the shared wave worktree.
-pub async fn create_wave_run_with_id(
+pub async fn create_run_with_id(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
     target_branch: Option<&str>,
-) -> anyhow::Result<WaveRun> {
+) -> anyhow::Result<Run> {
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
     let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
@@ -140,19 +137,17 @@ pub async fn create_wave_run_with_id(
         ensure_wave_worktree(main_repo, wave.name())?
     };
 
-    let run = WaveRun {
+    let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        snapshot: WaveRunSnapshot {
-            repo: wave.repo().clone(),
-            flow: wave.primary_flow().clone(),
-            task: None,
-            direction: wave.direction().clone(),
-            area: wave.area().clone(),
-        },
+        repo: wave.repo().clone(),
+        flow: wave.primary_flow().clone(),
+        task: None,
+        direction: wave.direction().clone(),
+        area: wave.area().clone(),
         iteration,
         step_index: 0,
-        status: WaveRunStatus::Running,
+        status: RunStatus::Running,
         worktree: wt_path,
         branch,
         started_at: Some(OffsetDateTime::now_utc()),
@@ -165,13 +160,13 @@ pub async fn create_wave_run_with_id(
         parent_pr_number,
         stack_position,
         stack_group_id,
-        stack_status: WaveRunStackStatus::Active,
+        stack_status: RunStackStatus::Active,
         lineage_inferred: false,
         target_branch: target_branch.unwrap_or("main").to_string(),
         repair_of: None,
         pr: None,
     };
-    store.create_wave_run(&run).await?;
+    store.create_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
         if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
             wave.cycle_start_iteration = iteration;
@@ -270,10 +265,10 @@ pub fn create_run_worktree(
     Ok((run_wt.to_string_lossy().to_string(), branch))
 }
 
-pub(crate) fn is_active_wave_run_status(status: WaveRunStatus) -> bool {
+pub(crate) fn is_active_wave_run_status(status: RunStatus) -> bool {
     matches!(
         status,
-        WaveRunStatus::Pending | WaveRunStatus::Running | WaveRunStatus::Waiting
+        RunStatus::Pending | RunStatus::Running | RunStatus::Waiting
     )
 }
 
@@ -300,19 +295,19 @@ fn has_run_suffix(path_component: &str) -> bool {
 }
 
 pub(crate) fn build_agent_for_step(
-    wave_run_id: &LfdId,
+    run_id: &LfdId,
     repo: &str,
     worktree: &str,
     step: &ConcreteStep,
-    status: AgentStatus,
+    status: ExecutionProcessStatus,
     agent: &str,
-) -> AgentRun {
-    AgentRun {
+) -> ExecutionProcess {
+    ExecutionProcess {
         id: LfdId::new(),
         step: step.step.name.clone(),
         repo: repo.to_string(),
         worktree: worktree.to_string(),
-        wave_run_id: Some(wave_run_id.clone()),
+        run_id: Some(run_id.clone()),
         status,
         started_at: Some(OffsetDateTime::now_utc()),
         ended_at: None,

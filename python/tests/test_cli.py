@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import typer
 from conftest import (
@@ -31,7 +33,7 @@ from loopflow.cli import (
     _repo_table,
     _split_repo_slug,
     _status_details,
-    _terminal_sessions_table,
+    _sessions_table,
     _usage_table,
     _wave_detail_table,
     _wave_table,
@@ -39,10 +41,13 @@ from loopflow.cli import (
 )
 from loopflow.errors import LoopflowError
 from loopflow.models import (
+    Session,
     AuthProviderStatus,
     CostRates,
     ProviderInfo,
     Repo,
+    SessionConnectionInfo,
+    Session,
     TokenTotals,
     UsageSummary,
     Wave,
@@ -55,6 +60,49 @@ def _render_table(wave: Wave) -> str:
     console = Console(record=True, width=220)
     console.print(_wave_table([wave]))
     return console.export_text()
+
+
+def _session_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": "terminal-session-agent",
+        "object": "session",
+        "wave_id": "abc-123",
+        "run_id": None,
+        "parent_session_id": None,
+        "use": "wave_agent",
+        "source": "wave_agent",
+        "step": "goal",
+        "agent": "lf",
+        "cwd": "/tmp/repo",
+        "argv": [],
+        "env": {},
+        "tmux_name": "lf-wave-agent",
+        "status": "running",
+        "created_at": "2026-07-02T00:00:00Z",
+        "attached_at": None,
+        "started_at": None,
+        "completed_at": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _session(**overrides: object) -> Session:
+    return Session.model_validate(_session_payload(**overrides))
+
+
+def _worker_launch_response(flow: str = "implement") -> Session:
+    return Session.model_validate(
+        _session_payload(
+            id="terminal-session-child",
+            run_id="run-1",
+            parent_session_id="terminal-session-agent",
+            use="worker",
+            source="wave_dispatch",
+            step=flow,
+            tmux_name="lf-worker",
+        )
+    )
 
 
 def test_wave_table_includes_worktree_and_branch_columns() -> None:
@@ -103,39 +151,32 @@ def test_wave_detail_table_includes_flow_and_area() -> None:
     assert "wave/chord-model/, wave/signals/" in rendered
 
 
-def test_terminal_sessions_table_flags_interactive_attention() -> None:
+def test_sessions_table_flags_interactive_attention() -> None:
     sessions = [
-        {
-            "id": "terminal-session-agent",
-            "wave_id": "abc-123",
-            "wave_run_id": None,
-            "source": "wave_agent",
-            "step": "goal",
-            "status": "running",
-        },
-        {
-            "id": "terminal-session-child",
-            "wave_id": "abc-123",
-            "wave_run_id": "run-1",
-            "source": "wave_dispatch",
-            "step": "implement",
-            "status": "attached",
-        },
+        _session(),
+        _session(
+            id="terminal-session-child",
+            run_id="run-1",
+            use="worker",
+            source="wave_dispatch",
+            step="implement",
+            status="attached",
+        ),
     ]
     attention_items = [
         {
             "kind": "interactive",
             "status": "surfaced",
-            "context": {"terminal_session_id": "terminal-session-child"},
+            "context": {"session_id": "terminal-session-child"},
         }
     ]
     console = Console(record=True, width=220)
-    console.print(_terminal_sessions_table(sessions, attention_items, {"abc-123": "reduce"}))
+    console.print(_sessions_table(sessions, attention_items, {"abc-123": "reduce"}))
     rendered = console.export_text()
 
     assert "reduce" in rendered
-    assert "agent" in rendered
-    assert "dispatch" in rendered
+    assert "wave_agent" in rendered
+    assert "worker" in rendered
     assert "implement" in rendered
     assert "yes" in rendered
 
@@ -143,24 +184,24 @@ def test_terminal_sessions_table_flags_interactive_attention() -> None:
 def test_sessions_command_renders_live_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     wave = Wave.model_validate(WAVE_MINIMAL)
     sessions = [
-        {
-            "id": "terminal-session-child",
-            "wave_id": wave.id,
-            "wave_run_id": "run-1",
-            "source": "wave_dispatch",
-            "step": "implement",
-            "status": "running",
-        }
+        _session(
+            id="terminal-session-child",
+            wave_id=wave.id,
+            run_id="run-1",
+            use="worker",
+            source="wave_dispatch",
+            step="implement",
+        )
     ]
     attention_items = [
         {
             "kind": "interactive",
             "status": "surfaced",
-            "context": {"terminal_session_id": "terminal-session-child"},
+            "context": {"session_id": "terminal-session-child"},
         }
     ]
     monkeypatch.setattr("loopflow.cli.api.wave", lambda _name: wave)
-    monkeypatch.setattr("loopflow.cli.api.list_terminal_sessions", lambda **_kwargs: sessions)
+    monkeypatch.setattr("loopflow.cli.api.list_sessions", lambda **_kwargs: sessions)
     monkeypatch.setattr("loopflow.cli.api.list_attention", lambda **_kwargs: attention_items)
 
     result = CliRunner().invoke(app, ["sessions", "reduce"])
@@ -171,6 +212,128 @@ def test_sessions_command_renders_live_sessions(monkeypatch: pytest.MonkeyPatch)
     assert "yes" in result.stdout
 
 
+def test_whoami_renders_current_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _session()
+    monkeypatch.setenv("LFD_SESSION_ID", "terminal-session-agent")
+    monkeypatch.setattr("loopflow.cli.api.get_session", lambda _session_id: session)
+
+    result = CliRunner().invoke(app, ["whoami"])
+
+    assert result.exit_code == 0
+    assert "terminal-session-agent" in result.stdout
+    assert "wave_agent" in result.stdout
+
+
+def test_worker_run_dispatches_and_prints_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "loopflow.cli.api.run_worker",
+        lambda wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["worker", "run", "reduce", "--flow", "implement", "--task", "Add the endpoint"],
+    )
+
+    assert result.exit_code == 0
+    assert "worker_run terminal-session-child" in result.stdout
+    assert "run     run-1" in result.stdout
+    assert "lfq attach terminal-session-child" in result.stdout
+
+
+def test_worker_run_json_includes_session_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "loopflow.cli.api.run_worker",
+        lambda _wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "worker",
+            "run",
+            "reduce",
+            "--flow",
+            "implement",
+            "--task",
+            "Add the endpoint",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "terminal-session-child"
+    assert payload["run_id"] == "run-1"
+    assert payload["tmux_name"] == "lf-worker"
+
+
+def test_worker_run_infers_wave_from_current_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "loopflow.cli.api.current_session",
+        lambda _cwd: _session(),
+    )
+
+    def run_worker(
+        wave: str,
+        flow: str,
+        task: str,
+        parent_session_id: str | None = None,
+    ) -> Session:
+        received.update(
+            {
+                "wave": wave,
+                "flow": flow,
+                "task": task,
+                "parent_session_id": parent_session_id,
+            }
+        )
+        return _worker_launch_response()
+
+    monkeypatch.setattr("loopflow.cli.api.run_worker", run_worker)
+
+    result = CliRunner().invoke(
+        app,
+        ["worker", "run", "--flow", "implement", "--task", "Add the endpoint"],
+    )
+
+    assert result.exit_code == 0
+    assert received == {
+        "wave": "abc-123",
+        "flow": "implement",
+        "task": "Add the endpoint",
+        "parent_session_id": "terminal-session-agent",
+    }
+
+
+def test_worker_run_rejects_worker_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LFD_SESSION_ID", "terminal-session-child")
+    monkeypatch.setattr(
+        "loopflow.cli.api.get_session",
+        lambda _session_id: _session(
+            id="terminal-session-child",
+            run_id="run-1",
+            use="worker",
+        ),
+    )
+    monkeypatch.setattr(
+        "loopflow.cli.api.run_worker",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            LoopflowError("worker sessions cannot launch worker sessions")
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["worker", "run", "reduce", "--flow", "implement", "--task", "Add the endpoint"],
+    )
+
+    assert result.exit_code == 1
+    assert "worker sessions cannot launch worker sessions" in result.stderr
+
+
 def test_attach_command_execs_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
     executed: dict[str, object] = {}
 
@@ -179,8 +342,14 @@ def test_attach_command_execs_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
         executed["args"] = args
 
     monkeypatch.setattr(
-        "loopflow.cli.api.attach_terminal_session",
-        lambda _session_id: {"session_name": "lfq-terminal-session-child"},
+        "loopflow.cli.api.attach_session",
+        lambda _session_id: SessionConnectionInfo(
+            kind="tmux",
+            session_name="lfq-terminal-session-child",
+            host="localhost",
+            cwd="/tmp/repo",
+            status="running",
+        ),
     )
     monkeypatch.setattr("loopflow.cli.shutil.which", lambda _name: "/usr/bin/tmux")
     monkeypatch.setattr("loopflow.cli.os.execvp", fake_execvp)
@@ -193,10 +362,10 @@ def test_attach_command_execs_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_attach_command_errors_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_attach(_session_id: str) -> dict[str, object]:
+    def fail_attach(_session_id: str) -> SessionConnectionInfo:
         raise LoopflowError("terminal session is not tmux-backed")
 
-    monkeypatch.setattr("loopflow.cli.api.attach_terminal_session", fail_attach)
+    monkeypatch.setattr("loopflow.cli.api.attach_session", fail_attach)
 
     result = CliRunner().invoke(app, ["attach", "terminal-session-child"])
 

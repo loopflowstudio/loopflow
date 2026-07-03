@@ -1,9 +1,9 @@
-// WaveRun - a single execution of a Wave.
+// Run - a single execution of a Wave.
 
 import Foundation
 import SwiftUI
 
-public enum WaveRunStatus: String, Sendable, Codable {
+public enum RunStatus: String, Sendable, Codable {
     case pending
     case running
     case waiting
@@ -23,7 +23,7 @@ public enum WaveRunStatus: String, Sendable, Codable {
     }
 }
 
-public struct WaveRun: Sendable, Identifiable, Hashable {
+public struct Run: Sendable, Identifiable, Hashable {
     public let id: String
     public let waveId: String?
 
@@ -33,7 +33,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
     public let repo: String
     public let direction: [String]
 
-    public var status: WaveRunStatus
+    public var status: RunStatus
     public var iteration: Int
     public var stepIndex: Int
 
@@ -55,7 +55,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
         area: String,
         repo: String,
         direction: [String] = [],
-        status: WaveRunStatus = .pending,
+        status: RunStatus = .pending,
         iteration: Int = 0,
         stepIndex: Int = 0,
         worktree: String? = nil,
@@ -89,7 +89,7 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
 
 }
 
-public extension WaveRun {
+public extension Run {
     var duration: String? {
         guard let startedAt, let endedAt else { return nil }
         let interval = max(0, endedAt.timeIntervalSince(startedAt))

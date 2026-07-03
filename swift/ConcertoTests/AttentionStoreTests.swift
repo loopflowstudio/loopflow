@@ -79,14 +79,14 @@ struct AttentionStoreTests {
     func parsesInteractiveContext() {
         let context: [String: Any] = [
             "step": "code/design",
-            "terminal_session_id": "ts-123",
+            "session_id": "ts-123",
             "design_path": "scratch/my-branch.md",
             "mutation_summary": "- Rebalance the backlog",
         ]
         let parsed = AttentionItem.context(kind: .interactive, json: context)
         if case .interactive(let ctx) = parsed {
             #expect(ctx.step == "code/design")
-            #expect(ctx.terminalSessionId == "ts-123")
+            #expect(ctx.sessionId == "ts-123")
             #expect(ctx.designPath == "scratch/my-branch.md")
             #expect(ctx.mutationSummary == "- Rebalance the backlog")
         } else {

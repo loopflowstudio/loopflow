@@ -2,7 +2,7 @@
 primary_flow: build
 pm:
   provider: asana
-  asana_project: ''
+  asana_project: '1216257803789751'
 ---
 
 Make releases boring and self-hosted: nightly verification that never deploys,

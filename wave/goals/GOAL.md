@@ -1,5 +1,8 @@
 ---
 primary_flow: ship-roadmap
+pm:
+  provider: asana
+  asana_project: '1216257471889000'
 ---
 
 Turn a Wave from a ticker spawning cold, stateless runs into a persistent Looping

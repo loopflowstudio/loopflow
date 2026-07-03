@@ -78,28 +78,90 @@ pub async fn build_wave_dto(
 ) -> Result<WaveDto, StoreError> {
     let latest = store.get_latest_run(wave.id()).await?;
     let stack_runs = store.list_stack_runs(wave.id()).await?;
-    let live_snapshot = build_live_pr_snapshot(store, github_config, &stack_runs).await?;
-    let queue_views = build_wave_queue_views(store, wave.id(), &live_snapshot).await?;
-    let repo = wave.repo().clone();
-    let name = wave.name().clone();
+    let blocks = store.list_queue_blocks(wave.id()).await?;
+    let blocks_by_run = blocks
+        .into_iter()
+        .map(|block| (block.run_id.clone(), block))
+        .collect::<HashMap<_, _>>();
+
     let flow_name = wave.primary_flow().clone();
     let flow_repo = wave.repo().clone();
-    let (git_state, flow_steps) = tokio::join!(
-        async {
-            tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
-                .await
-                .ok()
-                .flatten()
-        },
-        async {
-            tokio::task::spawn_blocking(move || {
-                flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo))
-                    .unwrap_or_default()
-            })
+    let flow_steps = tokio::task::spawn_blocking(move || {
+        flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+
+    // Per-repo execution surface: infer git state + live-PR snapshot per repo.
+    let mut repos = Vec::with_capacity(wave.repos.len());
+    let mut has_stale_pr_state = false;
+    for repo_work in &wave.repos {
+        let repo_runs: Vec<Run> = stack_runs
+            .iter()
+            .filter(|run| run.repo == repo_work.repo)
+            .cloned()
+            .collect();
+        let snapshot = build_live_pr_snapshot(store, github_config, &repo_runs).await?;
+        has_stale_pr_state |= snapshot.has_stale_pr_state();
+        let queue_views = project_queue_views(
+            &repo_runs,
+            |run| snapshot.state_for_run(run).cloned(),
+            &blocks_by_run,
+        );
+
+        let repo = repo_work.repo.clone();
+        let name = wave.name().clone();
+        let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
             .await
-            .unwrap_or_default()
-        }
-    );
+            .ok()
+            .flatten();
+        let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
+            Some(state) => (
+                Some(state.worktree),
+                state.branch,
+                state.commits,
+                state.diff_stat,
+            ),
+            None => (None, None, Vec::new(), None),
+        };
+
+        let latest_for_repo = latest.as_ref().filter(|run| run.repo == repo_work.repo);
+        let pr = latest_for_repo.and_then(|run| {
+            run.pr.as_ref().map(|pr| PullRequestDto {
+                url: pr.url.clone(),
+                number: pr.number,
+                state: pr.state.clone(),
+                title: pr.title.clone(),
+                branch: pr.branch.clone(),
+            })
+        });
+        let active_run = if include_active_run {
+            latest_for_repo.cloned().map(|run| {
+                let live_pr_state = snapshot.state_for_run(&run);
+                let pr_state_stale = snapshot.stale_for_run(&run);
+                let queue_view = queue_views.get(&run.id);
+                run_dto(run, live_pr_state, pr_state_stale, queue_view)
+            })
+        } else {
+            None
+        };
+
+        repos.push(RepoWorkDto {
+            repo: repo_work.repo.clone(),
+            status: repo_work.status.as_str().to_string(),
+            iteration: repo_work.iteration,
+            worktree: non_empty(&repo_work.worktree),
+            branch: non_empty(&repo_work.branch),
+            local_worktree,
+            remote_branch,
+            commits,
+            diff_stat,
+            open_pr_count: snapshot.open_pr_count(),
+            stack_count: repo_runs.len() as u32,
+            active_run,
+            pr,
+        });
+    }
 
     let triggers_list = store
         .list_triggers(Some(wave.id()))
@@ -110,31 +172,10 @@ pub async fn build_wave_dto(
     let crons = crons_list.into_iter().map(wave_cron_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
-    let active_run = if include_active_run {
-        latest.map(|run| {
-            let live_pr_state = live_snapshot.state_for_run(&run);
-            let pr_state_stale = live_snapshot.stale_for_run(&run);
-            let queue_view = queue_views.get(&run.id);
-            run_dto(run, live_pr_state, pr_state_stale, queue_view)
-        })
-    } else {
-        None
-    };
-    let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
-        Some(state) => (
-            Some(state.worktree),
-            state.branch,
-            state.commits,
-            state.diff_stat,
-        ),
-        None => (None, None, Vec::new(), None),
-    };
-
     Ok(WaveDto {
         id: wave.id().to_string(),
         object: "wave".to_string(),
         name: wave.name().clone(),
-        repo: wave.repo().clone(),
         mode: wave.mode().as_str().to_string(),
         primary_flow: wave.primary_flow().to_string(),
         goal: wave.goal().to_string(),
@@ -145,20 +186,23 @@ pub async fn build_wave_dto(
         step_agents: wave_config.and_then(|config| config.step_agents),
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
-        iteration: wave.iteration(),
-        local_worktree,
-        remote_branch,
-        commits,
-        diff_stat,
         flow_steps,
-        open_pr_count: live_snapshot.open_pr_count(),
-        stack_count: stack_runs.len() as u32,
-        has_stale_pr_state: live_snapshot.has_stale_pr_state(),
+        has_stale_pr_state,
         workers: wave.workers(),
         triggers,
         crons,
-        active_run,
+        repos,
     })
+}
+
+/// `""` maps to `None`; any other value is wrapped. Used for persisted
+/// worktree/branch fields that use the empty string as their "unset" marker.
+fn non_empty(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 pub(crate) async fn build_wave_queue_views(
@@ -638,11 +682,12 @@ mod tests {
         .await
         .expect("wave dto should be built");
 
+        assert_eq!(dto.repos.len(), 1);
         assert_eq!(
-            dto.open_pr_count, 0,
+            dto.repos[0].open_pr_count, 0,
             "closed live PRs should not count as open even if snapshot says open"
         );
-        assert_eq!(dto.stack_count, 1);
+        assert_eq!(dto.repos[0].stack_count, 1);
         assert!(dto.has_stale_pr_state);
     }
 

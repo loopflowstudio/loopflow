@@ -1,5 +1,25 @@
 # Waves, one level outward
 
+## This PR builds — Slice 1 only
+
+**Scope of this run:** the blank repo-filtered wave list. Nothing else.
+
+Gut `swift/Concerto/Platform/macOS/Views/ContentView.swift` down to a bare list:
+active waves touching the current repo, rendered as rows (name · repo chips ·
+rollup status). Remove the sidebar+detail / multiplexer / session-takeover surface
+from the exposed path — start from blankness.
+
+- **UI-first.** Build against today's single-repo `Wave`. Stub the repo set as
+  `repos = [wave.repo]`; do NOT split `Wave`/`RepoWork` across the wire mirrors
+  yet (that's a later slice — see Build order).
+- Repo-filter = `waves.filter { $0.repos.contains(currentRepo) }` (with the stub,
+  that's `wave.repo == currentRepo`).
+- No create-wave flow, no open-a-wave detail, no context injection yet.
+
+Slices 2–4 (create-wave, open-a-wave, in-repo workspace) and the `Wave`/`RepoWork`
+model split are OUT of scope for this run. See "Build order" below and
+`scratch/questions.md` for deferred forks — do not resolve them here.
+
 ## The move
 
 Not an inversion — a **new outer layer**. Today `Wave.repo: String` conflates the

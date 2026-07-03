@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional, TypeVar
 from urllib.parse import urlparse
@@ -14,14 +12,11 @@ from .errors import LoopflowError, WaveAlreadyRunning
 from .models import (
     AuthFlow,
     AuthProviderStatus,
-    Conversation,
-    ConversationEventEnvelope,
     ProviderInfo,
     Repo,
     Run,
     Session,
     SessionConnectionInfo,
-    UsageSummary,
     Wave,
     WaveAgentTree,
 )
@@ -129,31 +124,6 @@ class Client:
         if not isinstance(payload, list):
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
-
-    def usage_summary(
-        self,
-        group_by: str = "wave",
-        wave: Optional[str] = None,
-        flow: Optional[str] = None,
-        step: Optional[str] = None,
-        model: Optional[str] = None,
-        source: Optional[str] = None,
-        from_: Optional[str] = None,
-        to_: Optional[str] = None,
-    ) -> UsageSummary:
-        params = {
-            "group_by": group_by,
-            **_compact_dict(
-                wave=wave,
-                flow=flow,
-                step=step,
-                model=model,
-                source=source,
-                **{"from": from_, "to": to_},
-            ),
-        }
-        payload = self._request_json("GET", "/v0/usage/summary", params=params)
-        return UsageSummary.model_validate(payload)
 
     def waves(self, repo: Optional[str] = None) -> list[Wave]:
         params: dict[str, str] = {}
@@ -397,64 +367,6 @@ class Client:
         params = _compact_dict(status=status)
         payload = self._request_json("GET", "/v0/attention", params=params)
         return self._parse_dict_list(payload)
-
-    def send_conversation_input(self, session_id: str, content: str) -> Conversation:
-        payload = self._request_json(
-            "POST",
-            f"/v0/conversations/{session_id}/input",
-            json={"text": content},
-        )
-        return Conversation.model_validate(payload)
-
-    def stream_conversation_events(
-        self,
-        session_id: str,
-        after_seq: Optional[int] = None,
-        timeout: float = 60.0,
-    ) -> Iterator[ConversationEventEnvelope]:
-        params = _compact_dict(after_seq=str(after_seq) if after_seq is not None else None)
-
-        try:
-            with self._client.stream(
-                "GET",
-                f"/v0/conversations/{session_id}/events",
-                params=params or None,
-                timeout=timeout,
-            ) as response:
-                if response.status_code >= 400:
-                    self._raise_for_error(response)
-
-                pending_seq: Optional[int] = None
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("id:"):
-                        value = line[3:].strip()
-                        try:
-                            pending_seq = int(value)
-                        except ValueError:
-                            pending_seq = None
-                        continue
-
-                    if not line.startswith("data:"):
-                        continue
-
-                    payload = line[5:].strip()
-                    if not payload:
-                        continue
-
-                    try:
-                        event = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if not isinstance(event, dict):
-                        continue
-
-                    yield ConversationEventEnvelope(seq=pending_seq, event=event)
-                    pending_seq = None
-        except httpx.RequestError as exc:
-            raise ConnectionError(str(exc)) from exc
 
     def _request_json(
         self,

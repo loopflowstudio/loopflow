@@ -178,37 +178,9 @@ struct WaveSidebar: View {
         !repoState.isConnected || repoState.repoTarget == nil
     }
 
-    private var analyticsRow: some View {
-        Button {
-            repoState.selectedWaveId = nil
-            repoState.showingFlows = false
-            repoState.showingAnalytics = true
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(Typography.caption())
-                Text("Analytics")
-                    .font(Typography.caption())
-                Spacer()
-            }
-            .foregroundStyle(repoState.showingAnalytics ? .white : .white.opacity(0.8))
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(repoState.showingAnalytics ? .white.opacity(0.14) : .clear)
-            )
-            .padding(.horizontal, Spacing.sm)
-            .padding(.bottom, Spacing.xs)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sidebar-analytics")
-    }
-
     private var flowsRow: some View {
         Button {
             repoState.selectedWaveId = nil
-            repoState.showingAnalytics = false
             repoState.showingFlows = true
         } label: {
             HStack(spacing: Spacing.sm) {
@@ -417,7 +389,6 @@ struct WaveSidebar: View {
     private func selectWave(_ waveId: String) {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
-        repoState.showingAnalytics = false
         repoState.showingFlows = false
     }
 
@@ -434,7 +405,6 @@ struct WaveSidebar: View {
             return
         }
 
-        repoState.showingAnalytics = false
         repoState.selectedWaveId = nil
     }
 }

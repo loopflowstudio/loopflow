@@ -103,8 +103,8 @@ Important paths:
 - `python/loopflow/models.py`
 
 Concerto is the Swift app. It reads lfd state, renders waves and sessions, and
-provides native surfaces for attention, usage, terminal workspaces, provider
-auth, and live output.
+provides native surfaces for attention, terminal workspaces, provider auth, and
+live output.
 
 Important paths:
 

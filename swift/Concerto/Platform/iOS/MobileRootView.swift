@@ -68,20 +68,11 @@ struct MobileRootView: View {
             }
             .tag(0)
 
-            NavigationStack {
-                AnalyticsDashboardView()
-                    .navigationTitle("Analytics")
-            }
-            .tabItem {
-                Label("Analytics", systemImage: "chart.line.uptrend.xyaxis")
-            }
-            .tag(1)
-
             DiscoveryView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(2)
+                .tag(1)
         }
         .onChange(of: selectedWaveId) { _, newValue in
             guard newValue != nil else { return }
@@ -95,15 +86,6 @@ struct MobileRootView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            repoState.showingAnalytics = true
-                            selectedWaveId = nil
-                        } label: {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                        }
-                        .accessibilityLabel("Analytics")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
                             showingSettings = true
                         } label: {
                             Image(systemName: "gearshape")
@@ -111,9 +93,7 @@ struct MobileRootView: View {
                     }
                 }
         } detail: {
-            if repoState.showingAnalytics {
-                AnalyticsDashboardView()
-            } else if let selectedWaveId {
+            if let selectedWaveId {
                 MobileWaveDetailView(waveId: selectedWaveId)
             } else {
                 ContentUnavailableView("Select a Wave", systemImage: "waveform.path.ecg")
@@ -123,9 +103,7 @@ struct MobileRootView: View {
             DiscoveryView()
         }
         .onChange(of: selectedWaveId) { _, newValue in
-            if newValue != nil {
-                repoState.showingAnalytics = false
-            }
+            _ = newValue
         }
     }
 }

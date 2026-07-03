@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Any, Optional
 
 from .client import Client
@@ -8,8 +7,6 @@ from .models import (
     AuthFlow,
     AuthProviderStatus,
     CommitEntry,
-    Conversation,
-    ConversationEventEnvelope,
     CostRates,
     ModelInfo,
     ProviderInfo,
@@ -18,10 +15,7 @@ from .models import (
     Run,
     Session,
     SessionConnectionInfo,
-    TokenTotals,
     Trigger,
-    UsageSummary,
-    UsageSummaryGroup,
     Wave,
     WaveAgentTree,
     WaveCron,
@@ -70,28 +64,6 @@ def configure_api_key(
 
 def providers() -> list[ProviderInfo]:
     return _client().providers()
-
-
-def usage_summary(
-    group_by: str = "wave",
-    wave: Optional[str] = None,
-    flow: Optional[str] = None,
-    step: Optional[str] = None,
-    model: Optional[str] = None,
-    source: Optional[str] = None,
-    from_: Optional[str] = None,
-    to_: Optional[str] = None,
-) -> UsageSummary:
-    return _client().usage_summary(
-        group_by=group_by,
-        wave=wave,
-        flow=flow,
-        step=step,
-        model=model,
-        source=source,
-        from_=from_,
-        to_=to_,
-    )
 
 
 def waves(repo: Optional[str] = None) -> list[Wave]:
@@ -300,40 +272,19 @@ def list_attention(status: Optional[str] = None) -> list[dict[str, Any]]:
     return _client().list_attention(status=status)
 
 
-def send_conversation_input(session_id: str, content: str) -> Conversation:
-    return _client().send_conversation_input(session_id, content)
-
-
-def stream_conversation_events(
-    session_id: str,
-    after_seq: Optional[int] = None,
-    timeout: float = 60.0,
-) -> Iterator[ConversationEventEnvelope]:
-    return _client().stream_conversation_events(
-        session_id,
-        after_seq=after_seq,
-        timeout=timeout,
-    )
-
-
 __all__ = [
     "Client",
     "AuthFlow",
     "AuthProviderStatus",
     "CommitEntry",
-    "Conversation",
     "CostRates",
     "ModelInfo",
     "PullRequest",
     "ProviderInfo",
     "Repo",
     "Session",
-    "ConversationEventEnvelope",
     "SessionConnectionInfo",
     "Trigger",
-    "TokenTotals",
-    "UsageSummary",
-    "UsageSummaryGroup",
     "Wave",
     "WaveAgentTree",
     "WaveCron",
@@ -346,7 +297,6 @@ __all__ = [
     "disconnect_auth",
     "configure_api_key",
     "providers",
-    "usage_summary",
     "waves",
     "wave",
     "create_wave",
@@ -374,6 +324,4 @@ __all__ = [
     "current_session",
     "get_session",
     "attach_session",
-    "send_conversation_input",
-    "stream_conversation_events",
 ]

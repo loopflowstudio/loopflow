@@ -110,11 +110,6 @@ public protocol SessionService: Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func sendConversationInput(conversationId: String, content: String) async throws -> AgentSession
-    func streamConversationEvents(
-        conversationId: String,
-        afterSeq: Int?
-    ) -> AsyncThrowingStream<ConversationEventEnvelope, Error>
     func stopSession(_ id: String) async throws -> AgentSession
 }
 
@@ -148,7 +143,6 @@ public final class SessionState {
     public var awaitingSessionJoin: Bool = false
     public var suggestedActions: [SuggestedAction] = []
     public var contextSnapshot: ContextSnapshot?
-    public private(set) var inputSupported: Bool
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
@@ -161,16 +155,11 @@ public final class SessionState {
     private let truncationSuffix = "…truncated"
 
     private var sessionId: String?
-    private var lastAppliedSeq: Int?
-    private var currentTurnId: String?
 
     private var itemEntryIdByItemId: [String: UUID] = [:]
     private var assistantEntryIdByTurnId: [String: UUID] = [:]
     private var messageEntryIdByItemId: [String: UUID] = [:]
     private var transcriptIndexById: [UUID: Int] = [:]
-
-    private var streamTask: Task<Void, Never>?
-    private var streamGeneration = 0
 
     public init(
         waveId: String,
@@ -184,7 +173,6 @@ public final class SessionState {
         self.sessionHarness = sessionHarness
         self.sessionRunId = sessionRunId
         self.sessionConfig = sessionConfig
-        self.inputSupported = false
         self.waveService = waveService
         self.userDefaults = userDefaults
     }
@@ -194,8 +182,7 @@ public final class SessionState {
     }
 
     public var canSend: Bool {
-        let inputAllowed = sessionId == nil || inputSupported
-        return inputAllowed && turnState != .running && streamPhase != .replaying && streamPhase != .ending
+        sessionId == nil && turnState != .running && streamPhase != .ending
     }
 
     public var canEndSession: Bool {
@@ -205,10 +192,7 @@ public final class SessionState {
     public func onAppear() async {
         if let sessionId {
             awaitingSessionJoin = false
-            if streamTask == nil {
-                let phase: StreamPhase = lastAppliedSeq == nil ? .replaying : .live
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: phase)
-            }
+            _ = sessionId
             return
         }
 
@@ -247,7 +231,6 @@ public final class SessionState {
     }
 
     public func onDisappear() {
-        cancelStreamTask()
         if streamPhase != .ending {
             streamPhase = .idle
         }
@@ -257,13 +240,8 @@ public final class SessionState {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        guard streamPhase != .replaying else {
-            appendMessage(role: .system, content: "Replaying… Please wait.")
-            return
-        }
-
-        if sessionId != nil && !inputSupported {
-            appendMessage(role: .system, content: "Input is not supported for this session harness.")
+        guard sessionId == nil else {
+            appendMessage(role: .system, content: "Input is no longer supported for joined sessions.")
             return
         }
 
@@ -275,16 +253,8 @@ public final class SessionState {
         awaitingSessionJoin = false
 
         do {
-            let sessionId = try await ensureSession()
-            if !inputSupported {
-                appendMessage(role: .system, content: "Input is not supported for this session harness.")
-                turnState = .idle
-                return
-            }
-            if streamTask == nil {
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
-            }
-            _ = try await waveService.sendConversationInput(conversationId: sessionId, content: text)
+            _ = try await ensureSession()
+            turnState = .completed
         } catch {
             appendMessage(role: .error, content: error.localizedDescription)
             turnState = .failed
@@ -305,7 +275,6 @@ public final class SessionState {
 
         self.sessionId = nil
         persistSessionId(nil)
-        currentTurnId = nil
         turnState = .idle
         streamPhase = .idle
         clearSuggestedActions()
@@ -331,7 +300,6 @@ public final class SessionState {
 
         do {
             let session = try await waveService.getSession(storedSessionId)
-            inputSupported = session.inputSupported
             if isSessionTerminalStatus(session.status) {
                 persistSessionId(nil)
                 streamPhase = .idle
@@ -341,8 +309,8 @@ public final class SessionState {
 
             sessionId = session.id
             resetForReplay()
-            appendMessage(role: .system, content: "Replaying…")
-            startStream(sessionId: storedSessionId, afterSeq: nil, phase: .replaying)
+            appendMessage(role: .system, content: "Session restored")
+            streamPhase = .idle
         } catch {
             persistSessionId(nil)
             streamPhase = .idle
@@ -374,7 +342,6 @@ public final class SessionState {
             config: sessionConfig
         )
         sessionId = session.id
-        inputSupported = session.inputSupported
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
         awaitingSessionJoin = false
@@ -424,74 +391,6 @@ public final class SessionState {
         return normalized == "ended" || normalized == "failed"
     }
 
-    private func startStream(sessionId: String, afterSeq: Int?, phase: StreamPhase) {
-        cancelStreamTask()
-        streamGeneration += 1
-        let generation = streamGeneration
-        streamPhase = phase
-        awaitingSessionJoin = false
-
-        streamTask = Task { [weak self] in
-            guard let self else { return }
-            await self.consumeStream(
-                sessionId: sessionId,
-                afterSeq: afterSeq,
-                generation: generation,
-                reconnecting: phase == .replaying
-            )
-        }
-    }
-
-    private func consumeStream(
-        sessionId: String,
-        afterSeq: Int?,
-        generation: Int,
-        reconnecting: Bool
-    ) async {
-        do {
-            for try await envelope in waveService.streamConversationEvents(conversationId: sessionId, afterSeq: afterSeq) {
-                if envelope.replayCompletedLastSeq != nil {
-                    promoteToLiveIfCurrent(generation: generation)
-                    continue
-                }
-                applyEnvelope(envelope)
-            }
-
-            if reconnecting {
-                promoteToLiveIfCurrent(generation: generation)
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            guard generation == streamGeneration else { return }
-            appendMessage(role: .error, content: error.localizedDescription)
-            turnState = .failed
-            if streamPhase != .ending {
-                streamPhase = .idle
-            }
-            streamTask = nil
-            return
-        }
-
-        guard generation == streamGeneration else { return }
-        streamTask = nil
-        if streamPhase != .ending {
-            streamPhase = .idle
-        }
-    }
-
-    private func promoteToLiveIfCurrent(generation: Int) {
-        guard generation == streamGeneration else { return }
-        if streamPhase == .replaying {
-            streamPhase = .live
-        }
-    }
-
-    private func cancelStreamTask() {
-        streamTask?.cancel()
-        streamTask = nil
-    }
-
     private func resetForReplay() {
         setTranscript([])
         turnState = .idle
@@ -499,8 +398,6 @@ public final class SessionState {
     }
 
     private func resetSessionCaches() {
-        currentTurnId = nil
-        lastAppliedSeq = nil
         itemsById.removeAll()
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
@@ -561,81 +458,6 @@ public final class SessionState {
     private func normalizedItemId(_ rawId: String) -> String? {
         let trimmed = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func applyEnvelope(_ envelope: ConversationEventEnvelope) {
-        guard let event = envelope.event else { return }
-
-        if let seq = envelope.seq {
-            if let lastAppliedSeq, seq <= lastAppliedSeq {
-                return
-            }
-            lastAppliedSeq = seq
-        }
-
-        reduce(event)
-    }
-
-    private func reduce(_ event: AgentSessionEvent) {
-        switch event {
-        case .turnStarted(let turnId):
-            currentTurnId = turnId
-            turnState = .running
-            clearSuggestedActions()
-
-        case .turnCompleted(let turnId, let status):
-            guard currentTurnId == nil || currentTurnId == turnId else { return }
-            currentTurnId = nil
-            if status == "completed" {
-                turnState = .completed
-            } else {
-                turnState = .failed
-            }
-
-        case .contextSnapshot(let snapshot):
-            contextSnapshot = snapshot
-
-        case .textDelta(let turnId, let content):
-            guard !content.isEmpty else { return }
-            appendAssistantDelta(turnId: turnId, delta: content)
-
-        case .itemStarted(let turnId, let item):
-            if upsertMessageBubble(item: item, isCompletion: false) {
-                return
-            }
-            upsertItem(turnId: turnId, item: item)
-
-        case .itemUpdated(let turnId, let itemId, let delta):
-            applyItemUpdate(turnId: turnId, itemId: itemId, delta: delta)
-
-        case .itemCompleted(let turnId, let item):
-            if upsertMessageBubble(item: item, isCompletion: true) {
-                return
-            }
-            upsertItem(turnId: turnId, item: item)
-
-        case .diffUpdated(_, _):
-            return
-
-        case .suggestedActions(_, let actions):
-            applySuggestedActions(actions)
-
-        case .statusChanged(let status):
-            if status == "ended" || status == "failed" {
-                streamPhase = .idle
-                clearSuggestedActions()
-            }
-
-        case .error(_, let message):
-            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                appendMessage(role: .error, content: trimmed)
-            }
-            turnState = .failed
-
-        case .reasoningDelta, .other:
-            return
-        }
     }
 
     private func appendAssistantDelta(turnId: String, delta: String) {

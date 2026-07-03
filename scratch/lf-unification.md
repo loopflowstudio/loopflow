@@ -94,6 +94,51 @@ paths outright rather than carry compat shims or a migration bridge. Existing lo
 dbs/sessions are disposable. Do not preserve the old HTTP-executor launch path once
 `lf` owns tmux launch + registration.
 
+## Ship-vs-defer plan (this branch: Concerto lfd-free basic UX)
+
+**Crux resolved.** Concerto's attach is already `tmux attach-session -t <name>`
+(`WavesView.swift:890`, `TerminalWorkspaceView.swift:186`). lfd only *resolves the
+name* (`attachSession(id)` → `connection.sessionName`); the attach itself is plain
+tmux. Since name = worktree name (deterministic), Concerto can get the name with
+zero lfd. The ship slice is small.
+
+### Ship now — "kill lfd, click a wave, watch its goal loop launch + attach"
+
+1. `lf goal --tmux` runs in the wave's **worktree** (create-if-missing), session
+   named after the worktree. (Rust — extends the built primitive; today it runs in
+   `main_repo`.)
+2. Concerto wave-list renders **from disk alone** — drop the lfd live-wave overlay.
+   (Swift — authored-placeholder path already exists.)
+3. Concerto click → exec bundled `lf goal <wave> --tmux` → read handle → feed the
+   existing `tmux attach-session -t <name>`, bypassing `attachSession(id)`. (Swift —
+   small; reuses the attach view.)
+
+Proof-of-working: kill lfd, click a wave, the loop still launches + attaches.
+
+### Research to close first
+
+- R1 — worktree create mechanics: reuse `engine::worktrees`; decide branch naming
+  (stable `jack-heart.<wave>` vs timestamped).
+- R2 — does `lf goal` run to a watchable state in a fresh worktree with lfd/lfq
+  absent? (renders prompt + launches agent; verify the loop visibly starts).
+- R3 — attach-by-name: DONE (resolved above).
+
+### Design decisions
+
+- D1 — worktree lifecycle: `lf goal` creates-if-missing; Concerto proactive
+  pre-allocation deferred.
+- D2 — naming rule shared lf↔Concerto: `lf-<worktree-basename>`; Concerto derives
+  it to show "running?" via `tmux has-session`. Multiple-per-worktree grouping
+  deferred.
+- D3 — status without lfd: derive running state from `tmux has-session`.
+
+### Deferred to reduce (not needed for the demo)
+
+`lfdb` extraction · self-registration/registry · `lf d`/`lf q` · the hard cut
+(delete lfd's HTTP executor) · subscription live-status · proactive worktree
+pre-alloc. The demo runs as **lfd-present-but-unused** (provable by killing it),
+so no irreversible cut is required to see it work.
+
 ## reduce roadmap seed
 
 The full fold-in is a reduce-wave job (collapse a concept, net-negative code):

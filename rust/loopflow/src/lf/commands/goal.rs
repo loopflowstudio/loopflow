@@ -2,11 +2,13 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
-use crate::engine::config::load_config_or_default;
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::config::{load_config_or_default, BranchNameConfig};
+use crate::engine::naming::format_branch_name;
+use crate::engine::worktree::create_worktree;
+use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::{
     available_flow_names, load_goal, parse_agent, prepare_goal_launch, render_goal,
     GoalRenderContext, InFlightDispatch,
@@ -68,11 +70,19 @@ pub fn run(name: &str, once: bool, tmux: bool, cli: &Cli) -> Result<()> {
 /// client attaches to with `tmux attach`. Idempotent — re-running against a
 /// live session just reprints the handle so a re-click re-attaches.
 fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> Result<()> {
-    let repo_name = main_repo
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("repo");
-    let handle = tmux_session_name(&format!("{repo_name}-{wave_name}"));
+    let worktree = worktree_path(main_repo, wave_name);
+    if !worktree.exists() {
+        let branch = stable_wave_branch_name(main_repo, wave_name)?;
+        create_worktree(main_repo, &worktree, &branch).with_context(|| {
+            format!(
+                "failed to create worktree '{}' on branch '{}'",
+                worktree.display(),
+                branch
+            )
+        })?;
+    }
+
+    let handle = wave_worktree_session_handle(&worktree);
 
     if tmux_has_session(&handle) {
         println!("{handle}");
@@ -111,7 +121,7 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
             "-s",
             &handle,
             "-c",
-            &main_repo.to_string_lossy(),
+            &worktree.to_string_lossy(),
             "/bin/zsh",
             "-lc",
             &inner_cmd,
@@ -129,6 +139,22 @@ fn launch_in_tmux(main_repo: &Path, wave_name: &str, once: bool, cli: &Cli) -> R
 
     println!("{handle}");
     Ok(())
+}
+
+fn stable_wave_branch_name(main_repo: &Path, wave_name: &str) -> Result<String> {
+    let stable_schema = BranchNameConfig {
+        schema_: "{user}.{name}".to_string(),
+    };
+    format_branch_name(wave_name, Some(&stable_schema), main_repo)
+        .map_err(|err| anyhow!("failed to format branch name for wave '{wave_name}': {err}"))
+}
+
+fn wave_worktree_session_handle(worktree: &Path) -> String {
+    let worktree_name = worktree
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    tmux_session_name(worktree_name)
 }
 
 fn tmux_has_session(name: &str) -> bool {
@@ -321,5 +347,12 @@ mod tests {
         assert!(is_open_pr_state(Some("DRAFT")));
         assert!(!is_open_pr_state(Some("merged")));
         assert!(!is_open_pr_state(None));
+    }
+
+    #[test]
+    fn wave_worktree_session_handle_uses_worktree_basename() {
+        let handle = wave_worktree_session_handle(Path::new("/tmp/loopflow.concerto"));
+
+        assert_eq!(handle, "lf-loopflow-concerto");
     }
 }

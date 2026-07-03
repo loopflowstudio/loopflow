@@ -15,6 +15,11 @@ enum RepoFilter: Hashable {
     case repo(String)
 }
 
+private struct AuthoredWaveSnapshot: Hashable {
+    let name: String
+    let status: WaveStatus
+}
+
 struct WavesView: View {
     let portfolioService: PortfolioService
 
@@ -38,7 +43,7 @@ struct WavesView: View {
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
     /// Merged with lfd's running waves so not-yet-launched waves are still listed.
-    @State private var authoredWaveNames: [String: [String]] = [:]
+    @State private var authoredWavesByRepo: [String: [AuthoredWaveSnapshot]] = [:]
 
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
@@ -60,9 +65,9 @@ struct WavesView: View {
     private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
-        let placeholders = (authoredWaveNames[repo.path] ?? [])
-            .filter { !liveNames.contains($0) }
-            .map { authoredPlaceholder(repoPath: repo.path, name: $0) }
+        let placeholders = (authoredWavesByRepo[repo.path] ?? [])
+            .filter { !liveNames.contains($0.name) }
+            .map { authoredPlaceholder(repoPath: repo.path, snapshot: $0) }
         return (live + placeholders).sorted { lhs, rhs in
             let lp = Self.statusPriority(lhs.status)
             let rp = Self.statusPriority(rhs.status)
@@ -73,12 +78,12 @@ struct WavesView: View {
 
     /// An idle, not-yet-launched row for a wave authored on disk. Its id carries the
     /// `authoredIdPrefix` so the terminal pane knows to create-and-run on launch.
-    private func authoredPlaceholder(repoPath: String, name: String) -> WaveViewModel {
+    private func authoredPlaceholder(repoPath: String, snapshot: AuthoredWaveSnapshot) -> WaveViewModel {
         WaveViewModel(api: Wave(
-            id: "\(Self.authoredIdPrefix)\(repoPath)#\(name)",
-            name: name,
+            id: "\(Self.authoredIdPrefix)\(repoPath)#\(snapshot.name)",
+            name: snapshot.name,
             repo: repoPath,
-            status: .idle
+            status: snapshot.status
         ))
     }
 
@@ -357,43 +362,12 @@ struct WavesView: View {
         }
     }
 
-    /// Attach the wave's /goal agent. An authored-on-disk wave (synthetic id) is
-    /// created-and-run first, then selection moves to the real wave so the row and
-    /// terminal persist once lfd knows about it. But lfd often already has the wave
-    /// (concerto-dev seeds lfd waves from the repo's `wave/` dir on launch), so an
-    /// existing live wave is attached rather than re-created.
+    /// Attach the wave's /goal agent through local `lf goal --tmux`. The returned
+    /// tmux handle is enough for Ghostty to attach; no lfd run/attach route needed.
     private func launchOrAttach(wave: WaveViewModel, state: PortfolioRepoState) async throws -> SessionConnectionInfo {
-        guard wave.id.hasPrefix(Self.authoredIdPrefix) else {
-            return try await state.attachWaveAgent(waveId: wave.id)
-        }
-        if let existing = await existingLiveWave(named: wave.name, in: state) {
-            selectedWaveId = existing.id
-            return try await state.attachWaveAgent(waveId: existing.id)
-        }
-        do {
-            let created = try await state.createWave(name: wave.name)
-            selectedWaveId = created.id
-            return try await state.attachWaveAgent(waveId: created.id)
-        } catch {
-            // Lost a race (seeded/created between the check and now): fall back to
-            // the now-live wave instead of surfacing "already exists".
-            await state.refresh()
-            guard let existing = state.waves.first(where: { $0.name == wave.name }) else {
-                throw error
-            }
-            selectedWaveId = existing.id
-            return try await state.attachWaveAgent(waveId: existing.id)
-        }
-    }
-
-    /// The live (lfd-known) wave for `name` in this repo, refreshing once if the
-    /// current snapshot doesn't have it. `nil` means it genuinely isn't created yet.
-    private func existingLiveWave(named name: String, in state: PortfolioRepoState) async -> WaveViewModel? {
-        if let match = state.waves.first(where: { $0.name == name }) {
-            return match
-        }
-        await state.refresh()
-        return state.waves.first(where: { $0.name == name })
+        let connection = try await state.attachWaveAgent(waveName: wave.name)
+        await refreshAuthoredWaves()
+        return connection
     }
 
     private func repoState(for wave: WaveViewModel) -> PortfolioRepoState? {
@@ -535,8 +509,8 @@ struct WavesView: View {
     private func refreshAuthoredWaves() async {
         if RepoState.uiTestMode() != nil { return }
         let paths = repos.map(\.path)
-        authoredWaveNames = await Task.detached {
-            var result: [String: [String]] = [:]
+        authoredWavesByRepo = await Task.detached {
+            var result: [String: [AuthoredWaveSnapshot]] = [:]
             for path in paths {
                 result[path] = Self.authoredWaves(inRepo: path)
             }
@@ -545,7 +519,7 @@ struct WavesView: View {
     }
 
     /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
-    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [String] {
+    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [AuthoredWaveSnapshot] {
         let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
         let fm = FileManager.default
         guard let children = try? fm.contentsOfDirectory(
@@ -561,8 +535,14 @@ struct WavesView: View {
                 let goal = url.appendingPathComponent("GOAL.md")
                 return fm.fileExists(atPath: goal.path, isDirectory: &isDir) && !isDir.boolValue
             }
-            .map { $0.lastPathComponent }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { url in
+                let name = url.lastPathComponent
+                let status: WaveStatus = PortfolioRepoState.waveAgentSessionExists(repoPath: repoPath, waveName: name)
+                    ? .running
+                    : .idle
+                return AuthoredWaveSnapshot(name: name, status: status)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func ensureRepoStates() {

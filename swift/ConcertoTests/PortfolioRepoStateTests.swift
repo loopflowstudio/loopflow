@@ -93,6 +93,26 @@ struct PortfolioRepoStateTests {
         #expect(state.waves[0].id == localWave.id)
     }
 
+    @Test("wave agent session name mirrors lf tmux handle")
+    func waveAgentSessionNameMirrorsLfTmuxHandle() {
+        let name = PortfolioRepoState.waveAgentSessionName(
+            repoPath: "/Users/jack/src/loopflow",
+            waveName: "concerto"
+        )
+
+        #expect(name == "lf-loopflow-concerto")
+    }
+
+    @Test("wave worktree path is deterministic sibling")
+    func waveWorktreePathIsDeterministicSibling() {
+        let path = PortfolioRepoState.waveWorktreePath(
+            repoPath: "/Users/jack/src/loopflow",
+            waveName: "feature/new*wave"
+        )
+
+        #expect(path == "/Users/jack/src/loopflow.feature-new-wave")
+    }
+
     private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {
         Wave(
             id: id,

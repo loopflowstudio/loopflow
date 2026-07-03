@@ -14,7 +14,7 @@ proven it can carry a design decision through the gate, not just study.
 Study bootstrap is done: the four analysis maps and `docs/architecture.md` are on
 main, each analysis carries a HEAD freshness marker, and one assess pass can name
 its next move from that state. The conversation subsystem — the false pressure
-behind the session model — was pulled in HEAD `42a663ee`, leaving a smaller live
+behind the session model — was pulled as reduce's first reduction, leaving a smaller live
 split: `Run`, `Session`, `ExecutionProcess`, and agent/output events.
 
 The live proposal is `proposals/session-record-spine.md` (status: `draft`). It

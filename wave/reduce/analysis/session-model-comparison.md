@@ -1,5 +1,5 @@
 ---
-head: 615729570782d730d2ea3b196e34779db9f63555
+head: 5d3f965a6618d3f89281493b26135750886ff4c0
 status: bootstrap
 ---
 
@@ -10,7 +10,7 @@ status: bootstrap
 What should loopflow call and store as an agent session?
 
 The live system now has three nearby concepts (the `Conversation` subsystem was
-removed in HEAD `42a663ee`; see the shipped history in the wave and git):
+removed as reduce's first reduction; see the shipped history in the wave and git):
 
 - `Run` - wave/flow execution lineage.
 - `Session` - tmux/control session tied to a wave and optional run.
@@ -136,7 +136,7 @@ harness name, provider session id, run id, config, status, input support,
 context snapshots, turn/item events, and token usage. Its Rust manager,
 harnesses, runtime, types, usage helpers, routes, store traits, migrations,
 Python models/client, Swift service/session-state hooks, docs, and e2e tests
-were all pulled in HEAD `42a663ee`.
+were all pulled as reduce's first reduction.
 
 It was cut rather than wrapped: loopflow was not doing enough with provider
 conversations to justify the concept, and keeping it created a parallel model
@@ -261,4 +261,4 @@ until a prototype proves a smaller implementation is safe.
   panes or only as panes inside a main agent tmux session.
 
 The conversation-root mapping this section once called for is done: every root
-was pulled in HEAD `42a663ee`.
+was pulled as reduce's first reduction.

@@ -47,10 +47,10 @@ diffs.
 Study bootstrap shipped. Durable analyses cover architecture, references,
 leverage, continuity, and the Codex/OpenCode session-model comparison;
 `docs/architecture.md` gives one whole-system map. All analyses are marked
-current against HEAD `615729570782d730d2ea3b196e34779db9f63555`. The first
-reduction also shipped: the dormant conversation subsystem was pulled in HEAD
-`42a663ee`, leaving a smaller live split — `Run`, `Session`, `ExecutionProcess`,
-and agent/output events.
+current against HEAD `5d3f965a6618d3f89281493b26135750886ff4c0`. The first
+reduction also shipped: the dormant conversation subsystem was pulled as
+reduce's first reduction, leaving a smaller live split — `Run`, `Session`,
+`ExecutionProcess`, and agent/output events.
 
 The arc now sits at the **proposal spine** (roadmap item 2). Live draft:
 `wave/reduce/proposals/session-record-spine.md` — one user-facing Session Record

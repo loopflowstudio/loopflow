@@ -40,8 +40,8 @@ and app surfaces. Loopflow should not make users choose between run id, session
 id, process id, and UI terminal pane id when they are trying to answer one
 session-shaped question.
 
-`Conversation` was the false pressure, and it has now been removed (HEAD
-`42a663ee`). The Session Record can be a small aggregate over live concepts
+`Conversation` was the false pressure, and it has now been removed (reduce's
+first reduction). The Session Record can be a small aggregate over live concepts
 instead of a compatibility wrapper around a dormant subsystem.
 
 ## Shape
@@ -89,6 +89,12 @@ With conversations gone, the proposal is now a read model over the live layers:
 
 This makes the first implementation slice small: build the read model and update
 clients/UI to consume it where they currently stitch sessions and runs by hand.
+
+Removing conversations also removed the usage/cost dashboard it fed. Any future
+metering must derive from the live session/run model — usage as a facet of the
+Session Record — not from resurrected conversation events. The dashboard is not a
+thing to rebuild; it is a thing to re-derive from live state if the product wants
+it back.
 
 ## Prototype plan
 

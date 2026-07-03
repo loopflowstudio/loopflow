@@ -146,9 +146,12 @@ async fn resolve_asana_token() -> OpsResult<String> {
                 refreshed.login = token.login.clone();
             }
             let access_token = refreshed.access_token.clone();
-            store.upsert_provider_token(&refreshed).await.map_err(|err| {
-                OpsError::Message(format!("failed to persist refreshed asana token: {err}"))
-            })?;
+            store
+                .upsert_provider_token(&refreshed)
+                .await
+                .map_err(|err| {
+                    OpsError::Message(format!("failed to persist refreshed asana token: {err}"))
+                })?;
             return Ok(access_token);
         }
     }

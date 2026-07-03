@@ -1528,9 +1528,12 @@ pub async fn land_wave_handler(
         .worktree
         .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
-    let worktree =
-        resolve_wave_work_dir_for_api(wave.repo().to_string(), wave.name().clone(), latest_worktree)
-            .await?;
+    let worktree = resolve_wave_work_dir_for_api(
+        wave.repo().to_string(),
+        wave.name().clone(),
+        latest_worktree,
+    )
+    .await?;
 
     let strict = payload.strict.unwrap_or(false);
     let local = payload.local.unwrap_or(false);
@@ -1712,9 +1715,12 @@ async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, 
     let latest_worktree = latest_run
         .map(|run| run.worktree)
         .filter(|value| !value.is_empty());
-    let work_dir =
-        resolve_wave_work_dir_for_api(wave.repo().to_string(), wave.name().clone(), latest_worktree)
-            .await?;
+    let work_dir = resolve_wave_work_dir_for_api(
+        wave.repo().to_string(),
+        wave.name().clone(),
+        latest_worktree,
+    )
+    .await?;
 
     Ok((wave, work_dir))
 }

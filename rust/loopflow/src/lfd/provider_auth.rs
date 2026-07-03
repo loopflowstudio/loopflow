@@ -2052,16 +2052,6 @@ fn pm_oauth_endpoint(provider: Provider) -> Option<PmOAuthEndpoint> {
             client_id_env: ASANA_CLIENT_ID_ENV,
             client_secret_env: ASANA_CLIENT_SECRET_ENV,
         }),
-        Provider::Linear => Some(PmOAuthEndpoint {
-            token_url: LINEAR_OAUTH_TOKEN_URL,
-            client_id_env: LINEAR_CLIENT_ID_ENV,
-            client_secret_env: LINEAR_CLIENT_SECRET_ENV,
-        }),
-        Provider::Notion => Some(PmOAuthEndpoint {
-            token_url: NOTION_OAUTH_TOKEN_URL,
-            client_id_env: NOTION_CLIENT_ID_ENV,
-            client_secret_env: NOTION_CLIENT_SECRET_ENV,
-        }),
         _ => None,
     }
 }
@@ -2074,7 +2064,7 @@ struct OAuthRefreshResponse {
 }
 
 /// Exchange a stored refresh token for a fresh access token via the PM provider's
-/// OAuth `grant_type=refresh_token` endpoint. Only Asana/Linear/Notion are supported;
+/// OAuth `grant_type=refresh_token` endpoint. Only Asana is supported;
 /// client credentials are read from the provider's `*_CLIENT_ID`/`*_CLIENT_SECRET` env vars.
 ///
 /// The returned token carries `login: None`; callers should preserve the prior login.
@@ -2841,14 +2831,6 @@ mod tests {
         assert_eq!(
             pm_oauth_endpoint(Provider::Asana).map(|e| e.token_url),
             Some(ASANA_OAUTH_TOKEN_URL)
-        );
-        assert_eq!(
-            pm_oauth_endpoint(Provider::Linear).map(|e| e.token_url),
-            Some(LINEAR_OAUTH_TOKEN_URL)
-        );
-        assert_eq!(
-            pm_oauth_endpoint(Provider::Notion).map(|e| e.token_url),
-            Some(NOTION_OAUTH_TOKEN_URL)
         );
         assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
     }

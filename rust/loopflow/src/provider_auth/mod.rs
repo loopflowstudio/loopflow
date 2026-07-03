@@ -11,6 +11,7 @@ pub mod credential_socket;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -413,12 +414,13 @@ impl AsanaOAuthBroker {
         }
     }
 
-    fn oauth_app() -> Result<AsanaOAuthApp, AuthError> {
+    async fn oauth_app() -> Result<AsanaOAuthApp, AuthError> {
         let (client_id, client_secret) = oauth_client_credentials(
             Provider::Asana,
             ASANA_CLIENT_ID_ENV,
             ASANA_CLIENT_SECRET_ENV,
-        )?;
+        )
+        .await?;
         let scope = read_nonempty_env(ASANA_OAUTH_SCOPE_ENV)
             .unwrap_or_else(|| ASANA_OAUTH_DEFAULT_SCOPE.to_string());
 
@@ -536,7 +538,7 @@ impl AuthBroker for AsanaOAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app()?;
+        let app = Self::oauth_app().await?;
         let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
@@ -589,7 +591,7 @@ impl AuthBroker for AsanaOAuthBroker {
     }
 
     async fn complete_auth(&self, code: &str) -> Result<(), AuthError> {
-        let app = Self::oauth_app()?;
+        let app = Self::oauth_app().await?;
         let pending = self
             .pending_flow
             .lock()
@@ -1874,29 +1876,89 @@ fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
-fn oauth_client_credentials(
+async fn oauth_client_credentials(
     provider: Provider,
-    client_id_env: &str,
-    client_secret_env: &str,
+    client_id_env: &'static str,
+    client_secret_env: &'static str,
 ) -> Result<(String, String), AuthError> {
-    let missing_credentials = || AuthError::CommandUnavailable {
+    oauth_client_credentials_with_doppler_runner(
         provider,
-        command: format!("set {client_id_env} and {client_secret_env} to enable {provider} OAuth"),
+        client_id_env,
+        client_secret_env,
+        fetch_doppler_secret,
+    )
+    .await
+}
+
+async fn oauth_client_credentials_with_doppler_runner<F, Fut>(
+    provider: Provider,
+    client_id_env: &'static str,
+    client_secret_env: &'static str,
+    mut fetch_secret: F,
+) -> Result<(String, String), AuthError>
+where
+    F: FnMut(&'static str) -> Fut,
+    Fut: Future<Output = Option<String>>,
+{
+    let missing_credentials = || {
+        AuthError::CommandUnavailable {
+        provider,
+        command: format!(
+            "set {client_id_env} and {client_secret_env}, or configure them in Doppler, to enable {provider} OAuth"
+        ),
+    }
     };
-    let client_id = read_nonempty_env(client_id_env).ok_or_else(missing_credentials)?;
-    let client_secret = read_nonempty_env(client_secret_env).ok_or_else(missing_credentials)?;
+    let client_id = read_oauth_client_credential(client_id_env, &mut fetch_secret)
+        .await
+        .ok_or_else(missing_credentials)?;
+    let client_secret = read_oauth_client_credential(client_secret_env, &mut fetch_secret)
+        .await
+        .ok_or_else(missing_credentials)?;
     Ok((client_id, client_secret))
 }
 
+async fn read_oauth_client_credential<F, Fut>(
+    name: &'static str,
+    fetch_secret: &mut F,
+) -> Option<String>
+where
+    F: FnMut(&'static str) -> Fut,
+    Fut: Future<Output = Option<String>>,
+{
+    if let Some(value) = read_nonempty_env(name) {
+        return Some(value);
+    }
+
+    fetch_secret(name)
+        .await
+        .and_then(|value| read_nonempty_value(&value))
+}
+
+async fn fetch_doppler_secret(name: &'static str) -> Option<String> {
+    let output = Command::new("doppler")
+        .args(["secrets", "get", name, "--plain"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    read_nonempty_value(&String::from_utf8_lossy(&output.stdout))
+}
+
 fn read_nonempty_env(name: &str) -> Option<String> {
-    std::env::var(name).ok().and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
+    std::env::var(name)
+        .ok()
+        .and_then(|value| read_nonempty_value(&value))
+}
+
+fn read_nonempty_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// Read OpenCode credential from `~/.local/share/opencode/auth.json`.
@@ -2123,7 +2185,8 @@ pub async fn refresh_pm_oauth_token(
     let endpoint = pm_oauth_endpoint(provider)
         .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
     let (client_id, client_secret) =
-        oauth_client_credentials(provider, endpoint.client_id_env, endpoint.client_secret_env)?;
+        oauth_client_credentials(provider, endpoint.client_id_env, endpoint.client_secret_env)
+            .await?;
 
     let body = serde_urlencoded::to_string([
         ("grant_type", "refresh_token"),
@@ -2367,7 +2430,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
     use std::os::unix::process::ExitStatusExt;
-    use std::sync::Mutex as StdMutex;
+    use std::sync::{Mutex as StdMutex, OnceLock};
     use std::thread;
 
     use super::*;
@@ -2384,6 +2447,38 @@ mod tests {
                 responses: StdMutex::new(VecDeque::from(responses)),
             }
         }
+    }
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn snapshot(vars: &[&'static str]) -> Self {
+            Self {
+                vars: vars
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.vars {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    fn env_lock() -> &'static StdMutex<()> {
+        static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| StdMutex::new(()))
     }
 
     #[async_trait]
@@ -3020,6 +3115,97 @@ mod tests {
                 .map(|value| value.as_ref()),
             Some("S256")
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn oauth_client_credentials_prefers_env_over_doppler() {
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+
+        let _lock = env_lock().lock().expect("env lock");
+        let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
+        std::env::set_var(CLIENT_ID_ENV, " env-client ");
+        std::env::set_var(CLIENT_SECRET_ENV, " env-secret ");
+
+        let mut doppler_calls = Vec::new();
+        let credentials = oauth_client_credentials_with_doppler_runner(
+            Provider::Asana,
+            CLIENT_ID_ENV,
+            CLIENT_SECRET_ENV,
+            |name| {
+                doppler_calls.push(name);
+                std::future::ready(None)
+            },
+        )
+        .await
+        .expect("env credentials should resolve");
+
+        assert_eq!(
+            credentials,
+            ("env-client".to_string(), "env-secret".to_string())
+        );
+        assert!(doppler_calls.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn oauth_client_credentials_falls_back_to_doppler() {
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+
+        let _lock = env_lock().lock().expect("env lock");
+        let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
+        std::env::remove_var(CLIENT_ID_ENV);
+        std::env::remove_var(CLIENT_SECRET_ENV);
+
+        let mut doppler_calls = Vec::new();
+        let credentials = oauth_client_credentials_with_doppler_runner(
+            Provider::Asana,
+            CLIENT_ID_ENV,
+            CLIENT_SECRET_ENV,
+            |name| {
+                doppler_calls.push(name);
+                std::future::ready(match name {
+                    CLIENT_ID_ENV => Some("doppler-client".to_string()),
+                    CLIENT_SECRET_ENV => Some("doppler-secret".to_string()),
+                    _ => None,
+                })
+            },
+        )
+        .await
+        .expect("doppler credentials should resolve");
+
+        assert_eq!(
+            credentials,
+            ("doppler-client".to_string(), "doppler-secret".to_string())
+        );
+        assert_eq!(doppler_calls, vec![CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn oauth_client_credentials_returns_unavailable_when_env_and_doppler_miss() {
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+
+        let _lock = env_lock().lock().expect("env lock");
+        let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
+        std::env::remove_var(CLIENT_ID_ENV);
+        std::env::remove_var(CLIENT_SECRET_ENV);
+
+        let result = oauth_client_credentials_with_doppler_runner(
+            Provider::Asana,
+            CLIENT_ID_ENV,
+            CLIENT_SECRET_ENV,
+            |_| std::future::ready(None),
+        )
+        .await;
+
+        let Err(AuthError::CommandUnavailable { provider, command }) = result else {
+            panic!("expected missing OAuth client credentials");
+        };
+        assert_eq!(provider, Provider::Asana);
+        assert!(command.contains(CLIENT_ID_ENV));
+        assert!(command.contains(CLIENT_SECRET_ENV));
+        assert!(command.contains("Doppler"));
     }
 
     #[test]

@@ -86,6 +86,17 @@ the executor/trigger paths the collapse item hard-cuts. Not this branch's
 work — but this branch shouldn't add to them. Standing question for every
 new feature: "does this create a center?"
 
+### 8. Explicit invocation grammar: `lf step` / `lf flow`  [queued — Jack,
+2026-07-04; dispatch AFTER items 1–2 land (lf/mod.rs collisions)]
+Agents are the primary invokers now; clarity beats ease of entry. `lf step
+<name> ["task"]`, `lf flow <name> ["task"]`, and `lf : "text"` kept as the
+one colon form. Bare-name invocation (`lf design`) and the flow-colon form
+(`lf implement: task`) die — hard cut — taking the KNOWN_COMMANDS bare-name
+disambiguation machinery with them. Touches: clap surface, bin/lf.rs
+dispatch, executor command builders (build_lf_dispatch_command,
+build_wave_agent_command), lf q worker run's spawned command, the mind's
+operating prompt, docs, python tests.
+
 ## Done-when for this branch (revised)
 The MVP done-when (wave-agent-design.md §4) plus: a worker's `lf chat`
 report visibly lands in the thread and the next heartbeat's context; an

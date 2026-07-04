@@ -13,8 +13,9 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
-    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row, map_trigger_row,
+    map_wave_cron_row, map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix,
+    serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{
@@ -1987,6 +1988,7 @@ impl PostgresStore {
                         &(usage.output_tokens as i64),
                         &(usage.cache_read_tokens as i64),
                         &usage.recorded_at,
+                        &usage.repo,
                     ],
                 )
                 .await?;
@@ -1997,14 +1999,26 @@ impl PostgresStore {
 
     pub async fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
         self.with_client(|client| async move {
-            let rows = client
+            let repo_rows = client
+                .query(Self::sql(Query::AggregateTokenUsageByRepoProvider), &[])
+                .await?;
+            let by_repo_provider = repo_rows
+                .iter()
+                .map(map_repo_provider_usage_row)
+                .collect::<StoreResult<Vec<_>>>()?;
+
+            let wave_rows = client
                 .query(Self::sql(Query::AggregateTokenUsageByWaveProvider), &[])
                 .await?;
-            let by_wave_provider = rows
+            let by_wave_provider = wave_rows
                 .iter()
                 .map(map_wave_provider_usage_row)
                 .collect::<StoreResult<Vec<_>>>()?;
-            Ok(TokenUsageReport::from_wave_provider(by_wave_provider))
+
+            Ok(TokenUsageReport::from_grouped(
+                by_repo_provider,
+                by_wave_provider,
+            ))
         })
         .await
     }

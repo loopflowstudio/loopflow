@@ -47,12 +47,14 @@ pub struct ForkRun {
     pub worktree: String,
 }
 
-/// Token usage recorded for a single run, tagged with the wave it belongs to
-/// and the provider (agent) that generated it.
+/// Token usage recorded for a single run, tagged with the wave and repo it
+/// belongs to and the provider (agent) that generated it. `repo` is optional
+/// because rows recorded before migration 043 carry no repo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunTokenUsage {
     pub run_id: LfdId,
     pub wave: LfdId,
+    pub repo: Option<String>,
     pub provider: String,
     pub model: Option<String>,
     pub input_tokens: u64,
@@ -71,6 +73,17 @@ pub struct WaveProviderUsage {
     pub cache_read_tokens: u64,
 }
 
+/// Summed token usage for one (repo, provider) pair. `repo` is optional to
+/// account for usage rows recorded before the repo dimension existed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoProviderUsage {
+    pub repo: Option<String>,
+    pub provider: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+}
+
 /// Summed token usage for one provider across all waves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderUsage {
@@ -80,17 +93,23 @@ pub struct ProviderUsage {
     pub cache_read_tokens: u64,
 }
 
-/// Aggregated token usage: per (wave, provider) plus per-provider rollups.
+/// Aggregated token usage: per (repo, provider), per (wave, provider), plus
+/// per-provider rollups.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TokenUsageReport {
+    pub by_repo_provider: Vec<RepoProviderUsage>,
     pub by_wave_provider: Vec<WaveProviderUsage>,
     pub by_provider: Vec<ProviderUsage>,
 }
 
 impl TokenUsageReport {
-    /// Build the report from the per-(wave, provider) rows, folding the
-    /// per-provider totals. Rows are assumed to be one per (wave, provider).
-    pub fn from_wave_provider(by_wave_provider: Vec<WaveProviderUsage>) -> Self {
+    /// Build the report from the per-(repo, provider) and per-(wave, provider)
+    /// grouped rows, folding the per-provider totals from the wave rows. Rows
+    /// are assumed to be one per group.
+    pub fn from_grouped(
+        by_repo_provider: Vec<RepoProviderUsage>,
+        by_wave_provider: Vec<WaveProviderUsage>,
+    ) -> Self {
         let mut by_provider: Vec<ProviderUsage> = Vec::new();
         for row in &by_wave_provider {
             match by_provider
@@ -111,6 +130,7 @@ impl TokenUsageReport {
             }
         }
         Self {
+            by_repo_provider,
             by_wave_provider,
             by_provider,
         }
@@ -2662,6 +2682,7 @@ mod tests {
             .record_run_usage(&RunTokenUsage {
                 run_id: claude_run.id.clone(),
                 wave: wave.id().clone(),
+                repo: Some(wave.repo().to_string()),
                 provider: "claude".to_string(),
                 model: Some("claude-opus-4-8".to_string()),
                 input_tokens: 100,
@@ -2675,6 +2696,7 @@ mod tests {
             .record_run_usage(&RunTokenUsage {
                 run_id: codex_run.id.clone(),
                 wave: wave.id().clone(),
+                repo: Some(wave.repo().to_string()),
                 provider: "codex".to_string(),
                 model: None,
                 input_tokens: 200,
@@ -2726,6 +2748,7 @@ mod tests {
             .record_run_usage(&RunTokenUsage {
                 run_id: claude_run.id.clone(),
                 wave: wave.id().clone(),
+                repo: Some(wave.repo().to_string()),
                 provider: "claude".to_string(),
                 model: None,
                 input_tokens: 10,
@@ -2746,6 +2769,77 @@ mod tests {
             .expect("claude row after replace");
         assert_eq!(claude.input_tokens, 10);
         assert_eq!(claude.cache_read_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn token_usage_aggregates_by_repo_and_provider() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        // Two runs in one repo (different providers) plus a run in a second repo.
+        let wave_a = make_wave("/repo-alpha");
+        let wave_b = make_wave("/repo-beta");
+        store.create_wave(&wave_a).await.expect("create wave a");
+        store.create_wave(&wave_b).await.expect("create wave b");
+        let alpha_claude = make_run(&wave_a, RunStatus::Completed);
+        let alpha_codex = make_run(&wave_a, RunStatus::Completed);
+        let beta_claude = make_run(&wave_b, RunStatus::Completed);
+        store.create_run(&alpha_claude).await.expect("create run");
+        store.create_run(&alpha_codex).await.expect("create run");
+        store.create_run(&beta_claude).await.expect("create run");
+
+        for (run, wave, provider, input, output, cache) in [
+            (&alpha_claude, &wave_a, "claude", 100u64, 50u64, 10u64),
+            (&alpha_codex, &wave_a, "codex", 200, 80, 0),
+            (&beta_claude, &wave_b, "claude", 300, 100, 5),
+        ] {
+            store
+                .record_run_usage(&RunTokenUsage {
+                    run_id: run.id.clone(),
+                    wave: wave.id().clone(),
+                    repo: Some(wave.repo().to_string()),
+                    provider: provider.to_string(),
+                    model: None,
+                    input_tokens: input,
+                    output_tokens: output,
+                    cache_read_tokens: cache,
+                    recorded_at: OffsetDateTime::now_utc().unix_timestamp(),
+                })
+                .await
+                .expect("record usage");
+        }
+
+        let report = store.aggregate_token_usage().await.expect("aggregate");
+
+        // Three (repo, provider) groups: (alpha, claude), (alpha, codex), (beta, claude).
+        assert_eq!(report.by_repo_provider.len(), 3);
+        let find = |repo: &str, provider: &str| {
+            report
+                .by_repo_provider
+                .iter()
+                .find(|row| row.repo.as_deref() == Some(repo) && row.provider == provider)
+                .expect("repo/provider row")
+        };
+        let alpha_claude_row = find("/repo-alpha", "claude");
+        assert_eq!(alpha_claude_row.input_tokens, 100);
+        assert_eq!(alpha_claude_row.output_tokens, 50);
+        assert_eq!(alpha_claude_row.cache_read_tokens, 10);
+        let alpha_codex_row = find("/repo-alpha", "codex");
+        assert_eq!(alpha_codex_row.input_tokens, 200);
+        let beta_claude_row = find("/repo-beta", "claude");
+        assert_eq!(beta_claude_row.input_tokens, 300);
+        assert_eq!(beta_claude_row.cache_read_tokens, 5);
+
+        // Per-provider rollup sums across repos: claude spans both repos.
+        let claude_total = report
+            .by_provider
+            .iter()
+            .find(|row| row.provider == "claude")
+            .expect("claude total");
+        assert_eq!(claude_total.input_tokens, 400);
+        assert_eq!(claude_total.output_tokens, 150);
+        assert_eq!(claude_total.cache_read_tokens, 15);
     }
 
     #[tokio::test]

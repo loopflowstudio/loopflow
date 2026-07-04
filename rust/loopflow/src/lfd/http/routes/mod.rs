@@ -9,6 +9,7 @@ pub mod runs;
 pub mod secrets;
 pub mod session_controls;
 pub mod system;
+pub mod usage;
 pub mod wave_config;
 pub mod waves;
 pub mod worktrees;

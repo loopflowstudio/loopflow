@@ -1,11 +1,13 @@
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::claude_mapping::{self, ReaderState};
-use super::codex_mapping::{self, ItemPhase};
+use super::codex::{process_notification, NotificationState};
 use super::opencode_mapping;
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
 
@@ -29,7 +31,7 @@ fn drain_events(
     }
 }
 
-fn replay_claude_trace(file_name: &str) -> Vec<ConversationEvent> {
+fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<String>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut events = Vec::new();
     let mut state = ReaderState::default();
@@ -48,8 +50,10 @@ fn replay_claude_trace(file_name: &str) -> Vec<ConversationEvent> {
         }
     }
 
+    let session_id = state.take_provider_session_id();
+
     if !saw_turn_completed {
-        for item in state.drain_failed_items() {
+        for item in state.drain_open_items(Lifecycle::Failed) {
             events.push(ConversationEvent::ItemCompleted {
                 turn_id: "turn_trace".to_string(),
                 item,
@@ -61,25 +65,23 @@ fn replay_claude_trace(file_name: &str) -> Vec<ConversationEvent> {
         });
     }
 
-    events
-}
-
-fn resolve_turn_id(
-    turn_id_from_params: Option<String>,
-    current_turn_id: &Option<String>,
-) -> String {
-    turn_id_from_params
-        .or_else(|| current_turn_id.clone())
-        .unwrap_or_else(|| "unknown".to_string())
+    (events, session_id)
 }
 
 fn replay_codex_trace(file_name: &str) -> Vec<ConversationEvent> {
     replay_codex_lines(read_trace_lines(file_name))
 }
 
+/// Replay codex app-server lines through the production notification
+/// dispatch (`codex::process_notification`), so traces pin real behavior.
 fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut state = NotificationState::new(
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(None)),
+        None,
+    );
     let mut events = Vec::new();
-    let mut current_turn_id: Option<String> = None;
 
     for line in lines {
         if line.trim().is_empty() {
@@ -91,88 +93,12 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
             .get("method")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
-        let turn_id_from_params = codex_mapping::extract_turn_id(&params);
-
-        match method {
-            "turn/started" => {
-                let turn_id = turn_id_from_params.unwrap_or_else(|| "unknown".to_string());
-                current_turn_id = Some(turn_id.clone());
-                events.push(ConversationEvent::TurnStarted { turn_id });
-            }
-            "turn/completed" => {
-                let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                current_turn_id = None;
-                events.push(ConversationEvent::TurnCompleted {
-                    turn_id: turn_id.clone(),
-                    status: codex_mapping::map_turn_status(&params),
-                });
-                events.push(ConversationEvent::TurnUsage {
-                    turn_id,
-                    usage: codex_mapping::map_turn_usage(&params),
-                });
-            }
-            "item/started" => {
-                let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                let item = codex_mapping::build_item(&params, ItemPhase::Started);
-                events.push(ConversationEvent::ItemStarted { turn_id, item });
-            }
-            "item/completed" => {
-                let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                let item = codex_mapping::build_item(&params, ItemPhase::Completed);
-                events.push(ConversationEvent::ItemCompleted { turn_id, item });
-            }
-            "item/agentMessage/delta" => {
-                if let Some(content) = codex_mapping::text_content(&params) {
-                    let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(ConversationEvent::TextDelta { turn_id, content });
-                }
-            }
-            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
-                if let Some(content) = codex_mapping::text_content(&params) {
-                    let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(ConversationEvent::ReasoningDelta { turn_id, content });
-                }
-            }
-            "item/commandExecution/outputDelta"
-            | "item/fileChange/outputDelta"
-            | "item/plan/delta" => {
-                if let Some(data) = codex_mapping::map_item_delta(method, &params) {
-                    let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    let item_id = codex_mapping::map_item_id(&params);
-                    events.push(ConversationEvent::ItemUpdated {
-                        turn_id,
-                        item_id,
-                        data,
-                    });
-                }
-            }
-            "turn/diff/updated" => {
-                if let Some(diff) = params
-                    .get("diff")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-                {
-                    let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
-                    events.push(ConversationEvent::DiffUpdated { turn_id, diff });
-                }
-            }
-            "error" => {
-                events.push(ConversationEvent::Error {
-                    code: params
-                        .get("code")
-                        .and_then(Value::as_str)
-                        .unwrap_or("codex_error")
-                        .to_string(),
-                    message: params
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("codex error")
-                        .to_string(),
-                });
-            }
-            _ => {}
+        if method.is_empty() {
+            continue;
         }
+        let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
+        process_notification(method, &params, &mut state, &tx);
+        drain_events(&mut rx, &mut events);
     }
 
     events
@@ -207,16 +133,16 @@ fn replay_opencode_trace(file_name: &str) -> Vec<ConversationEvent> {
 
 #[test]
 fn claude_trace_normal_turn() {
-    let events = replay_claude_trace("claude_normal_turn.ndjson");
+    let (events, session_id) = replay_claude_trace("claude_normal_turn.ndjson");
+    assert_eq!(
+        session_id.as_deref(),
+        Some("sess_claude_normal"),
+        "system event's session id should be captured for --resume"
+    );
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
-        vec![
-            "provider_session_id",
-            "text_delta",
-            "turn_completed",
-            "turn_usage",
-        ]
+        vec!["text_delta", "turn_completed", "turn_usage"]
     );
     assert!(matches!(
         events
@@ -231,7 +157,7 @@ fn claude_trace_normal_turn() {
 
 #[test]
 fn claude_trace_crash_mid_tool_marks_failed_items() {
-    let events = replay_claude_trace("claude_crash_mid_tool.ndjson");
+    let (events, _session_id) = replay_claude_trace("claude_crash_mid_tool.ndjson");
 
     assert!(matches!(
         events.first(),
@@ -262,7 +188,7 @@ fn claude_trace_crash_mid_tool_marks_failed_items() {
 
 #[test]
 fn claude_trace_multi_tool_lifecycle() {
-    let events = replay_claude_trace("claude_multi_tool.ndjson");
+    let (events, _session_id) = replay_claude_trace("claude_multi_tool.ndjson");
     let started = events
         .iter()
         .filter(|event| matches!(event, ConversationEvent::ItemStarted { .. }))

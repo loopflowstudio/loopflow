@@ -171,11 +171,6 @@ pub enum ConversationEvent {
         code: String,
         message: String,
     },
-
-    // Internal (not persisted or forwarded to SSE clients)
-    ProviderSessionId {
-        provider_session_id: String,
-    },
 }
 
 impl ConversationEvent {
@@ -193,7 +188,6 @@ impl ConversationEvent {
             Self::SuggestedActions { .. } => "suggested_actions",
             Self::StatusChanged { .. } => "status_changed",
             Self::Error { .. } => "error",
-            Self::ProviderSessionId { .. } => "provider_session_id",
         }
     }
 }

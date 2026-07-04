@@ -19,6 +19,20 @@ pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// Vendor thread id from a `thread/started` notification's params or a
+/// `thread/start` response's result. Shapes seen across app-server versions:
+/// `{"thread":{"id":..}}`, `{"threadId":..}`, or a bare thread object
+/// `{"id":..}`.
+pub(super) fn extract_thread_id(value: &Value) -> Option<String> {
+    value
+        .get("thread")
+        .and_then(|t| t.get("id"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("threadId").and_then(Value::as_str))
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .map(ToString::to_string)
+}
+
 pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
     let turn_status = params
         .get("turn")

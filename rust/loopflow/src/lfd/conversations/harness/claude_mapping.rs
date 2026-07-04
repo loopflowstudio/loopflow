@@ -17,6 +17,9 @@ pub(super) struct ReaderState {
     tool_indexes: HashMap<String, usize>,
     /// Streaming parser for `<lf:...>` tagged payloads.
     tag_parser: LfTagParser,
+    /// Vendor session id from the turn's `system` event; the harness drains
+    /// it for `--resume` and persistence.
+    provider_session_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -80,22 +83,21 @@ impl ReaderState {
         self.tool_blocks.get(index)
     }
 
-    pub(super) fn drain_failed_items(&mut self) -> Vec<ConversationItem> {
+    /// Drain tools still in flight when the turn ended without a result,
+    /// stamped with the turn's terminal status (Failed for a crash,
+    /// Interrupted for a kill we asked for).
+    pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
         let mut tools: Vec<_> = self.tool_blocks.drain().map(|(_, tool)| tool).collect();
         self.tool_indexes.clear();
         tools.sort_by(|left, right| left.id.cmp(&right.id));
         tools
             .into_iter()
-            .map(|tool| {
-                build_item(
-                    &tool.name,
-                    &tool.id,
-                    tool.parsed_input(),
-                    Lifecycle::Failed,
-                    None,
-                )
-            })
+            .map(|tool| build_item(&tool.name, &tool.id, tool.parsed_input(), status, None))
             .collect()
+    }
+
+    pub(super) fn take_provider_session_id(&mut self) -> Option<String> {
+        self.provider_session_id.take()
     }
 }
 
@@ -125,9 +127,7 @@ pub(super) fn process_line(
                 .or_else(|| value.get("session_id"))
                 .and_then(Value::as_str)
             {
-                let _ = events.send(ConversationEvent::ProviderSessionId {
-                    provider_session_id: session_id.to_string(),
-                });
+                state.provider_session_id = Some(session_id.to_string());
             }
         }
 
@@ -591,43 +591,34 @@ mod tests {
     }
 
     #[test]
-    fn process_line_system_event() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    fn process_line_system_event_captures_session_id() {
+        let (tx, rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
 
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(!result);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::ProviderSessionId {
-                provider_session_id,
-            } => {
-                assert_eq!(provider_session_id, "sess_abc123");
-            }
-            other => panic!("expected ProviderSessionId event, got {other:?}"),
-        }
+        assert!(rx.is_empty(), "system event should not emit events");
+        assert_eq!(
+            state.take_provider_session_id().as_deref(),
+            Some("sess_abc123")
+        );
+        assert!(state.take_provider_session_id().is_none(), "take drains");
     }
 
     #[test]
-    fn process_line_wrapped_stream_event() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    fn process_line_wrapped_stream_event_captures_session_id() {
+        let (tx, rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
 
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(!result);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::ProviderSessionId {
-                provider_session_id,
-            } => {
-                assert_eq!(provider_session_id, "sess_wrapped");
-            }
-            other => panic!("expected ProviderSessionId event, got {other:?}"),
-        }
+        assert!(rx.is_empty(), "system event should not emit events");
+        assert_eq!(
+            state.take_provider_session_id().as_deref(),
+            Some("sess_wrapped")
+        );
     }
 
     #[test]

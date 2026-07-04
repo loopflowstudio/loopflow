@@ -13,19 +13,23 @@ use tokio::task::JoinHandle;
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_agent;
 use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::conversations::harness::{opencode_mapping, Harness, HarnessError};
+use crate::lfd::conversations::harness::{
+    opencode_mapping, ApprovalPolicy, Capabilities, Harness, HarnessError,
+};
 use crate::lfd::conversations::opencode_runtime;
-use crate::lfd::conversations::types::ConversationEvent;
+use crate::lfd::conversations::types::{ConversationEvent, Lifecycle};
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     client: reqwest::Client,
+    approval: ApprovalPolicy,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
+    interrupt_requested: Arc<AtomicBool>,
     child: Option<Child>,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
@@ -40,14 +44,16 @@ impl std::fmt::Debug for OpenCodeHarness {
 }
 
 impl OpenCodeHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
             client: reqwest::Client::new(),
+            approval,
             config: None,
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
+            interrupt_requested: Arc::new(AtomicBool::new(false)),
             child: None,
             stderr_task: None,
             sse_task: None,
@@ -92,14 +98,12 @@ impl OpenCodeHarness {
             }
         };
 
-        let _ = self.events.send(ConversationEvent::ProviderSessionId {
-            provider_session_id: provider_session_id.clone(),
-        });
-
         let event_tx = self.events.clone();
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
+        let interrupt_requested = self.interrupt_requested.clone();
+        let approval = self.approval;
         let reader_base_url = base_url.clone();
         let reader_session_id = provider_session_id.clone();
 
@@ -163,31 +167,46 @@ impl OpenCodeHarness {
 
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
                     for event in mapped.events {
-                        match &event {
-                            ConversationEvent::TurnStarted { .. } => {
-                                turn_in_progress.store(true, Ordering::SeqCst)
+                        let event = match event {
+                            ConversationEvent::TurnStarted { turn_id } => {
+                                turn_in_progress.store(true, Ordering::SeqCst);
+                                // An abort that raced turn completion must not
+                                // stamp the next turn.
+                                interrupt_requested.store(false, Ordering::SeqCst);
+                                ConversationEvent::TurnStarted { turn_id }
                             }
-                            ConversationEvent::TurnCompleted { .. } => {
-                                turn_in_progress.store(false, Ordering::SeqCst)
+                            ConversationEvent::TurnCompleted { turn_id, status } => {
+                                turn_in_progress.store(false, Ordering::SeqCst);
+                                // opencode's event stream does not distinguish
+                                // aborted turns (it reports idle or error), so
+                                // the first turn boundary after an abort
+                                // request is stamped Interrupted here.
+                                let status = if interrupt_requested.swap(false, Ordering::SeqCst) {
+                                    Lifecycle::Interrupted
+                                } else {
+                                    status
+                                };
+                                ConversationEvent::TurnCompleted { turn_id, status }
                             }
-                            _ => {}
-                        }
+                            other => other,
+                        };
                         let _ = event_tx.send(event);
                     }
 
                     for request_id in mapped.permission_requests {
-                        if let Err(err) = approve_permission(
+                        if let Err(err) = answer_permission(
                             &client,
                             &reader_base_url,
                             &reader_session_id,
                             &request_id,
+                            approval,
                         )
                         .await
                         {
                             tracing::warn!(
                                 request_id = %request_id,
                                 error = %err,
-                                "failed to auto-approve OpenCode permission request"
+                                "failed to answer OpenCode permission request"
                             );
                         }
                     }
@@ -255,6 +274,8 @@ impl Harness for OpenCodeHarness {
             return Ok(());
         };
 
+        self.interrupt_requested.store(false, Ordering::SeqCst);
+
         if self
             .turn_in_progress
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -280,6 +301,29 @@ impl Harness for OpenCodeHarness {
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
+        Ok(())
+    }
+
+    async fn interrupt(&mut self) -> Result<()> {
+        // opencode cancels via its session abort endpoint; the server and
+        // session stay up for the next turn. The turn's terminal status is
+        // stamped Interrupted by the SSE task (see the abort note there),
+        // since opencode itself reports the boundary as idle/error.
+        if !self.turn_in_progress.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let base_url = self
+            .server_base_url
+            .clone()
+            .ok_or_else(|| anyhow!("opencode server not started"))?;
+        let provider_session_id = self
+            .provider_session_id
+            .clone()
+            .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
+
+        self.interrupt_requested.store(true, Ordering::SeqCst);
+        let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
+        send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({}))).await?;
         Ok(())
     }
 
@@ -327,6 +371,20 @@ impl Harness for OpenCodeHarness {
         self.server_base_url = None;
 
         Ok(())
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            // opencode queues mid-turn messages server-side rather than
+            // steering the running turn; send_input reports
+            // TurnAlreadyInProgress and the caller queues.
+            supports_steer: false,
+            supports_interrupt: true,
+        }
+    }
+
+    fn provider_session_id(&self) -> Option<String> {
+        self.provider_session_id.clone()
     }
 
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
@@ -449,14 +507,18 @@ async fn send_request_with_retry(
     }
 }
 
-async fn approve_permission(
+async fn answer_permission(
     client: &reqwest::Client,
     base_url: &str,
     session_id: &str,
     request_id: &str,
+    approval: ApprovalPolicy,
 ) -> Result<()> {
     let url = format!("{base_url}/session/{session_id}/permissions/{request_id}");
-    let payload = json!({ "response": "always" });
+    let response = match approval {
+        ApprovalPolicy::AutoApprove => "always",
+    };
+    let payload = json!({ "response": response });
     let _ = send_request_with_retry(client, Method::POST, &url, Some(payload)).await?;
     Ok(())
 }

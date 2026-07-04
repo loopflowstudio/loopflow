@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -12,19 +12,22 @@ use tokio::task::JoinHandle;
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::lfd::conversations::harness::claude_mapping::ReaderState;
 use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::conversations::harness::{claude_mapping, Harness, HarnessError};
+use crate::lfd::conversations::harness::{claude_mapping, Capabilities, Harness, HarnessError};
 use crate::lfd::conversations::types::{ConversationEvent, Lifecycle};
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
-    provider_session_id: Option<String>,
+    /// Vendor session id captured from the first turn's `system` event;
+    /// subsequent turns resume it via `--resume`.
+    provider_session_id: Arc<Mutex<Option<String>>>,
     turn_in_progress: Arc<AtomicBool>,
     child: Option<Child>,
     reader_task: Option<JoinHandle<()>>,
     stderr_task: Option<JoinHandle<()>>,
     shutdown_requested: Arc<AtomicBool>,
+    interrupt_requested: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for ClaudeHarness {
@@ -39,13 +42,38 @@ impl ClaudeHarness {
             events,
             config: None,
             should_seed_task_prompt: true,
-            provider_session_id: None,
+            provider_session_id: Arc::new(Mutex::new(None)),
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             child: None,
             reader_task: None,
             stderr_task: None,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
+            interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    async fn kill_turn_process(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+
+        if let Some(task) = self.reader_task.take() {
+            let mut task = task;
+            if tokio::time::timeout(Duration::from_secs(2), &mut task)
+                .await
+                .is_err()
+            {
+                tracing::warn!("timed out waiting for claude reader task shutdown; aborting");
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        if let Some(task) = self.stderr_task.take() {
+            task.abort();
+        }
+
+        self.turn_in_progress.store(false, Ordering::SeqCst);
     }
 }
 
@@ -106,11 +134,12 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let args = build_claude_session_turn_args(
-            &turn_content,
-            config,
-            self.provider_session_id.as_deref(),
-        );
+        let resume_id = self
+            .provider_session_id
+            .lock()
+            .expect("claude provider session id lock poisoned")
+            .clone();
+        let args = build_claude_session_turn_args(&turn_content, config, resume_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
@@ -122,6 +151,7 @@ impl Harness for ClaudeHarness {
         }
 
         self.shutdown_requested.store(false, Ordering::SeqCst);
+        self.interrupt_requested.store(false, Ordering::SeqCst);
 
         let mut child = cmd
             .spawn()
@@ -150,6 +180,8 @@ impl Harness for ClaudeHarness {
         let events = self.events.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown = self.shutdown_requested.clone();
+        let interrupted = self.interrupt_requested.clone();
+        let session_slot = self.provider_session_id.clone();
         let reader_turn_id = turn_id.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -165,18 +197,32 @@ impl Harness for ClaudeHarness {
                     continue;
                 }
 
-                if claude_mapping::process_line(&line, &reader_turn_id, &events, &mut state) {
+                let done =
+                    claude_mapping::process_line(&line, &reader_turn_id, &events, &mut state);
+                if let Some(session_id) = state.take_provider_session_id() {
+                    *session_slot
+                        .lock()
+                        .expect("claude provider session id lock poisoned") = Some(session_id);
+                }
+                if done {
                     saw_turn_completed = true;
                     break;
                 }
             }
 
             if !saw_turn_completed && !shutdown.load(Ordering::Relaxed) {
-                tracing::warn!(
-                    turn_id = %reader_turn_id,
-                    "claude turn ended without result event"
-                );
-                for item in state.drain_failed_items() {
+                // The per-turn process died without a result event: either we
+                // killed it (interrupt) or it crashed (failed).
+                let status = if interrupted.load(Ordering::SeqCst) {
+                    Lifecycle::Interrupted
+                } else {
+                    tracing::warn!(
+                        turn_id = %reader_turn_id,
+                        "claude turn ended without result event"
+                    );
+                    Lifecycle::Failed
+                };
+                for item in state.drain_open_items(status) {
                     let _ = events.send(ConversationEvent::ItemCompleted {
                         turn_id: reader_turn_id.clone(),
                         item,
@@ -184,7 +230,7 @@ impl Harness for ClaudeHarness {
                 }
                 let _ = events.send(ConversationEvent::TurnCompleted {
                     turn_id: reader_turn_id,
-                    status: Lifecycle::Failed,
+                    status,
                 });
             }
 
@@ -197,35 +243,48 @@ impl Harness for ClaudeHarness {
         Ok(())
     }
 
-    async fn stop(&mut self) -> Result<()> {
-        self.shutdown_requested.store(true, Ordering::SeqCst);
-
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+    async fn interrupt(&mut self) -> Result<()> {
+        // Claude has no per-turn cancel RPC: every turn is its own
+        // `claude -p` process. Interrupt kills that process (no cooperative
+        // grace); the reader finalizes the turn as Interrupted, and the
+        // vendor session — addressed by the captured session id — survives
+        // for the next `--resume` turn.
+        if !self.turn_in_progress.load(Ordering::SeqCst) {
+            return Ok(());
         }
-
-        if let Some(task) = self.reader_task.take() {
-            let mut task = task;
-            if tokio::time::timeout(Duration::from_secs(2), &mut task)
-                .await
-                .is_err()
-            {
-                tracing::warn!("timed out waiting for claude reader task shutdown; aborting");
-                task.abort();
-                let _ = task.await;
-            }
-        }
-        if let Some(task) = self.stderr_task.take() {
-            task.abort();
-        }
-
-        self.turn_in_progress.store(false, Ordering::SeqCst);
+        self.interrupt_requested.store(true, Ordering::SeqCst);
+        self.kill_turn_process().await;
         Ok(())
     }
 
+    async fn stop(&mut self) -> Result<()> {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+        self.kill_turn_process().await;
+        Ok(())
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            // Mid-turn input cannot reach the running `claude -p` process;
+            // send_input fails with TurnAlreadyInProgress and the caller
+            // queues.
+            supports_steer: false,
+            supports_interrupt: true,
+        }
+    }
+
+    fn provider_session_id(&self) -> Option<String> {
+        self.provider_session_id
+            .lock()
+            .expect("claude provider session id lock poisoned")
+            .clone()
+    }
+
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
-        self.provider_session_id = provider_session_id;
+        *self
+            .provider_session_id
+            .lock()
+            .expect("claude provider session id lock poisoned") = provider_session_id;
     }
 }
 
@@ -273,5 +332,13 @@ mod tests {
             ),
             "second failure should not be turn-in-progress"
         );
+    }
+
+    #[tokio::test]
+    async fn interrupt_without_turn_is_noop() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.interrupt().await.expect("noop interrupt");
+        assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
     }
 }

@@ -1,0 +1,5 @@
+{"method":"turn/started","params":{"turn":{"id":"turn_codex_1"}}}
+{"method":"item/started","params":{"turn":{"id":"turn_codex_1"},"item":{"id":"item_msg_1","type":"agentMessage","text":"Working","status":"in_progress"}}}
+{"method":"item/agentMessage/delta","params":{"turn":{"id":"turn_codex_1"},"content":"Hello from Codex"}}
+{"method":"item/completed","params":{"turn":{"id":"turn_codex_1"},"item":{"id":"item_msg_1","type":"agentMessage","text":"Working","status":"completed"}}}
+{"method":"turn/completed","params":{"turn":{"id":"turn_codex_1","status":"completed"}}}

@@ -19,6 +19,7 @@ use tokio::process::Command;
 
 use crate::engine::stream::{ParseResult, StreamParser};
 use crate::lfd::conversations::turns::{ChatTurn, TurnBuilder};
+use crate::lfd::conversations::types::Lifecycle;
 
 /// Drain a child's stderr to the debug log so a failing subagent leaves a
 /// trace, without blocking the stdout parse loop.
@@ -121,8 +122,8 @@ where
         }
     }
 
-    // The stream ended. Close any turn left open (no terminating Result).
-    if let Some(turn) = builder.finish_open() {
+    // The stream ended unexpectedly (no terminating Result): the turn crashed.
+    if let Some(turn) = builder.finish_open(Lifecycle::Failed) {
         on_turn(turn);
     }
 
@@ -133,7 +134,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::conversations::turns::{ChatRole, ChatTurnStatus};
+    use crate::lfd::conversations::turns::ChatRole;
+    use crate::lfd::conversations::types::Lifecycle;
 
     /// A spec that replays canned codex `exec --json` output via `printf`, so
     /// the run path is exercised without a real codex binary.
@@ -163,7 +165,7 @@ mod tests {
         assert_eq!(turns.len(), 1);
         let turn = &turns[0];
         assert_eq!(turn.role, ChatRole::Assistant);
-        assert_eq!(turn.status, ChatTurnStatus::Completed);
+        assert_eq!(turn.status, Lifecycle::Completed);
         assert!(turn.text.contains("Implemented the feature."));
         assert_eq!(turn.items.len(), 1);
     }
@@ -180,7 +182,7 @@ mod tests {
             .expect("run subagent");
 
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].status, ChatTurnStatus::Failed);
+        assert_eq!(turns[0].status, Lifecycle::Failed);
         assert!(turns[0].text.contains("half a thought"));
     }
 

@@ -103,14 +103,15 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::lfd::conversations::turns::{ChatRole, ChatTurn, ChatTurnStatus};
+    use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
+    use crate::lfd::conversations::types::Lifecycle;
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
-            status: ChatTurnStatus::Completed,
+            status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
         }

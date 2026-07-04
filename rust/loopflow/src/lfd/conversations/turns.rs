@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::engine::stream::{ResultSubtype, StreamEvent};
-use crate::lfd::conversations::types::ConversationItem;
+use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,15 +23,6 @@ use crate::lfd::conversations::types::ConversationItem;
 pub enum ChatRole {
     User,
     Assistant,
-}
-
-/// Lifecycle of an assistant turn. A `user` turn is always `Completed`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatTurnStatus {
-    InProgress,
-    Completed,
-    Failed,
 }
 
 /// One turn in a wave's conversation — the unit the chat server streams.
@@ -45,7 +36,8 @@ pub struct ChatTurn {
     pub role: ChatRole,
     /// Accumulated assistant prose (or the human message for a `user` turn).
     pub text: String,
-    pub status: ChatTurnStatus,
+    /// Lifecycle of the turn. A `user` turn is always `Completed`.
+    pub status: Lifecycle,
     /// Tool/command/file/message items the agent produced, in order.
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
@@ -65,7 +57,7 @@ impl ChatTurn {
             id,
             role: ChatRole::User,
             text,
-            status: ChatTurnStatus::Completed,
+            status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: Self::now_rfc3339(),
         }
@@ -102,7 +94,7 @@ impl TurnBuilder {
                 id: format!("turn-{}", self.next_index),
                 role: ChatRole::Assistant,
                 text: String::new(),
-                status: ChatTurnStatus::InProgress,
+                status: Lifecycle::Running,
                 items: Vec::new(),
                 created_at: ChatTurn::now_rfc3339(),
             });
@@ -131,25 +123,26 @@ impl TurnBuilder {
             StreamEvent::Result { subtype, .. } => {
                 let mut turn = self.open.take()?;
                 turn.status = match subtype {
-                    ResultSubtype::Success => ChatTurnStatus::Completed,
-                    ResultSubtype::Error => ChatTurnStatus::Failed,
+                    ResultSubtype::Success => Lifecycle::Completed,
+                    ResultSubtype::Error => Lifecycle::Failed,
                 };
                 Some(turn)
             }
         }
     }
 
-    /// Close any in-progress turn (e.g. the pass ended without a `Result`).
-    /// Returns the finalized turn, marked failed since it never resolved.
-    pub fn finish_open(&mut self) -> Option<ChatTurn> {
+    /// Close any in-progress turn (e.g. the pass ended without a `Result`),
+    /// marking it with the given terminal status — `Failed` for a crash,
+    /// `Interrupted` for an operator interrupt.
+    pub fn finish_open(&mut self, status: Lifecycle) -> Option<ChatTurn> {
         let mut turn = self.open.take()?;
-        turn.status = ChatTurnStatus::Failed;
+        turn.status = status;
         Some(turn)
     }
 }
 
 fn tool_item(index: usize, name: &str, summary: &str) -> ConversationItem {
-    use crate::lfd::conversations::types::{FileEdit, ItemStatus};
+    use crate::lfd::conversations::types::FileEdit;
 
     let id = format!("item-{index}");
     match name {
@@ -157,7 +150,7 @@ fn tool_item(index: usize, name: &str, summary: &str) -> ConversationItem {
             id,
             command: vec![summary.to_string()],
             cwd: String::new(),
-            status: ItemStatus::Completed,
+            status: Lifecycle::Completed,
             output: None,
             exit_code: None,
             duration_ms: None,
@@ -173,12 +166,12 @@ fn tool_item(index: usize, name: &str, summary: &str) -> ConversationItem {
                     diff: None,
                 })
                 .collect(),
-            status: ItemStatus::Completed,
+            status: Lifecycle::Completed,
         },
         _ => ConversationItem::Tool {
             id,
             name: name.to_string(),
-            status: ItemStatus::Completed,
+            status: Lifecycle::Completed,
             input: None,
             output: if summary.is_empty() {
                 None
@@ -208,7 +201,7 @@ mod tests {
         assert_eq!(turn.id, "turn-1");
         assert_eq!(turn.role, ChatRole::Assistant);
         assert_eq!(turn.text, "hello\nworld");
-        assert_eq!(turn.status, ChatTurnStatus::Completed);
+        assert_eq!(turn.status, Lifecycle::Completed);
         assert!(builder.snapshot().is_none());
     }
 
@@ -238,7 +231,7 @@ mod tests {
                 duration_secs: None,
             })
             .expect("turn finalized");
-        assert_eq!(turn.status, ChatTurnStatus::Failed);
+        assert_eq!(turn.status, Lifecycle::Failed);
     }
 
     #[test]

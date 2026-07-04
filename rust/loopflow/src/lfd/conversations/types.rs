@@ -16,23 +16,16 @@ pub enum ConversationStatus {
     Failed,
 }
 
+/// Lifecycle of a turn or item, shared across the wire and the harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
-pub enum TurnStatus {
+pub enum Lifecycle {
+    Pending,
+    Running,
     Completed,
+    Failed,
     Interrupted,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-#[serde(rename_all = "snake_case")]
-pub enum ItemStatus {
-    InProgress,
-    Completed,
-    Failed,
-    Declined,
 }
 
 // -- Typed items --
@@ -40,9 +33,7 @@ pub enum ItemStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileEdit {
     pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
 }
 
@@ -52,44 +43,35 @@ pub struct FileEdit {
 pub enum ConversationItem {
     Command {
         id: String,
-        #[serde(default)]
+        /// argv when the vendor provides argv; otherwise the raw command line
+        /// as a single element.
         command: Vec<String>,
-        #[serde(default)]
         cwd: String,
-        status: ItemStatus,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Lifecycle,
         output: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         exit_code: Option<i32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
     },
     File {
         id: String,
-        #[serde(default)]
         changes: Vec<FileEdit>,
-        status: ItemStatus,
+        status: Lifecycle,
     },
     Message {
         id: String,
-        #[serde(default)]
         text: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         phase: Option<String>,
     },
     Thought {
         id: String,
-        #[serde(default)]
         text: String,
     },
     /// Generic fallback for harnesses that don't distinguish item types.
     Tool {
         id: String,
         name: String,
-        status: ItemStatus,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Lifecycle,
         input: Option<Value>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
     },
 }
@@ -138,7 +120,7 @@ pub enum ConversationEvent {
     },
     TurnCompleted {
         turn_id: String,
-        status: TurnStatus,
+        status: Lifecycle,
     },
     /// Token usage for a completed turn. Emitted after TurnCompleted.
     TurnUsage {

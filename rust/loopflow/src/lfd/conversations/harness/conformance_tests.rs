@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use super::claude_mapping::{self, ReaderState};
 use super::codex_mapping::{self, ItemPhase};
 use super::opencode_mapping;
-use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, TurnStatus};
+use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -57,7 +57,7 @@ fn replay_claude_trace(file_name: &str) -> Vec<ConversationEvent> {
         }
         events.push(ConversationEvent::TurnCompleted {
             turn_id: "turn_trace".to_string(),
-            status: TurnStatus::Failed,
+            status: Lifecycle::Failed,
         });
     }
 
@@ -223,7 +223,7 @@ fn claude_trace_normal_turn() {
             .iter()
             .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Completed,
+            status: Lifecycle::Completed,
             ..
         })
     ));
@@ -247,14 +247,14 @@ fn claude_trace_crash_mid_tool_marks_failed_items() {
             ConversationEvent::ItemCompleted {
                 item: ConversationItem::Command { status, .. },
                 ..
-            } if *status == crate::lfd::conversations::types::ItemStatus::Failed
+            } if *status == crate::lfd::conversations::types::Lifecycle::Failed
         )
     }));
 
     assert!(matches!(
         events.last(),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Failed,
+            status: Lifecycle::Failed,
             ..
         })
     ));
@@ -279,7 +279,7 @@ fn claude_trace_multi_tool_lifecycle() {
             .iter()
             .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Completed,
+            status: Lifecycle::Completed,
             ..
         })
     ));
@@ -305,7 +305,7 @@ fn codex_trace_normal_turn() {
             .iter()
             .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Completed,
+            status: Lifecycle::Completed,
             ..
         })
     ));
@@ -322,7 +322,7 @@ fn codex_turn_completed_maps_usage_payload() {
         events[1],
         ConversationEvent::TurnCompleted {
             ref turn_id,
-            status: TurnStatus::Completed
+            status: Lifecycle::Completed
         } if turn_id == "turn_codex_usage"
     ));
     assert!(matches!(
@@ -355,7 +355,7 @@ fn codex_trace_error_turn() {
             .iter()
             .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Failed,
+            status: Lifecycle::Failed,
             ..
         })
     ));
@@ -372,7 +372,7 @@ fn opencode_trace_normal_turn() {
     assert!(matches!(
         events.last(),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Completed,
+            status: Lifecycle::Completed,
             ..
         })
     ));
@@ -394,7 +394,7 @@ fn opencode_trace_tool_lifecycle() {
     assert!(matches!(
         events.last(),
         Some(ConversationEvent::TurnCompleted {
-            status: TurnStatus::Completed,
+            status: Lifecycle::Completed,
             ..
         })
     ));
@@ -408,7 +408,7 @@ fn opencode_trace_error_turn() {
     assert!(matches!(
         events[1],
         ConversationEvent::TurnCompleted {
-            status: TurnStatus::Failed,
+            status: Lifecycle::Failed,
             ..
         }
     ));

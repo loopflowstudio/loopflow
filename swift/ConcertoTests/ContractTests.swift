@@ -89,10 +89,10 @@ struct ContractTests {
         #expect(turn.id == "turn-3")
         #expect(turn.sequence == 3)
         #expect(turn.role == .assistant)
-        #expect(turn.status == .inProgress)
+        #expect(turn.status == .running)
         #expect(turn.isInProgress)
         #expect(turn.createdAtDate != nil)
-        #expect(turn.items.count == 5)
+        #expect(turn.items.count == 6)
 
         guard case let .command(id, command, cwd, status, output, exitCode, durationMs) = turn.items[0] else {
             Issue.record("item 0 should be a command")
@@ -134,6 +134,17 @@ struct ContractTests {
         #expect(name == "Grep")
         #expect(input == "TODO")
         #expect(toolOutput == "3 matches")
+
+        // Interrupted state with explicit-null optionals decodes as nils.
+        guard case let .command(_, rawCommand, _, interruptedStatus, nilOutput, nilExitCode, nilDurationMs) = turn.items[5] else {
+            Issue.record("item 5 should be a command")
+            return
+        }
+        #expect(rawCommand == ["cargo test --workspace"])
+        #expect(interruptedStatus == .interrupted)
+        #expect(nilOutput == nil)
+        #expect(nilExitCode == nil)
+        #expect(nilDurationMs == nil)
 
         // Round-trips: re-encode and decode again yields an identical turn.
         let reencoded = try JSONEncoder().encode(turn)

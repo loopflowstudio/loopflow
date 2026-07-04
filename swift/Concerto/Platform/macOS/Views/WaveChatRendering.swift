@@ -270,22 +270,23 @@ struct DiffLinesView: View {
 
 // MARK: - Item status glyphs
 
-extension ItemStatus {
+extension Lifecycle {
     var symbol: String {
         switch self {
-        case .inProgress: return "▶"
+        case .pending: return "…"
+        case .running: return "▶"
         case .completed: return "✓"
         case .failed: return "✗"
-        case .declined: return "⊘"
+        case .interrupted: return "⊘"
         }
     }
 
     var color: Color {
         switch self {
-        case .inProgress: return .statusInfo
+        case .pending, .running: return .statusInfo
         case .completed: return .statusSuccess
         case .failed: return .statusError
-        case .declined: return .statusWarning
+        case .interrupted: return .statusWarning
         }
     }
 }

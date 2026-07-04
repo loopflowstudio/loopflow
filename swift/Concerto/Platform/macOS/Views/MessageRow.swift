@@ -74,7 +74,7 @@ struct MessageRow: View {
                 }
             }
 
-            if turn.status == .inProgress {
+            if turn.status == .running {
                 StreamingCursorView()
                     .id("streaming-cursor-\(turn.id)")
             }
@@ -248,7 +248,7 @@ struct ConversationItemCard: View {
 }
 
 private extension ConversationItem {
-    var itemStatus: ItemStatus? {
+    var itemStatus: Lifecycle? {
         switch self {
         case let .command(_, _, _, status, _, _, _): return status
         case let .file(_, _, status): return status

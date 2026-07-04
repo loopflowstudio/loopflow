@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::lfd::conversations::types::{
-    ConversationItem, FileEdit, ItemDelta, ItemStatus, TurnStatus, TurnUsage,
+    ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(super) fn map_turn_status(params: &Value) -> TurnStatus {
+pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
     let turn_status = params
         .get("turn")
         .and_then(|t| t.get("status"))
@@ -27,9 +27,9 @@ pub(super) fn map_turn_status(params: &Value) -> TurnStatus {
         .or_else(|| params.get("status").and_then(Value::as_str))
         .unwrap_or_default();
     match turn_status {
-        "interrupted" | "cancelled" => TurnStatus::Interrupted,
-        "failed" | "error" => TurnStatus::Failed,
-        _ => TurnStatus::Completed,
+        "interrupted" | "cancelled" => Lifecycle::Interrupted,
+        "failed" | "error" => Lifecycle::Failed,
+        _ => Lifecycle::Completed,
     }
 }
 
@@ -179,17 +179,19 @@ fn map_item_type(params: &Value) -> &str {
         .unwrap_or("tool")
 }
 
-fn map_item_status(params: &Value) -> ItemStatus {
+fn map_item_status(params: &Value) -> Lifecycle {
     let status = item_payload(params)
         .get("status")
         .and_then(Value::as_str)
         .or_else(|| params.get("status").and_then(Value::as_str))
         .unwrap_or("in_progress");
     match status {
-        "completed" => ItemStatus::Completed,
-        "failed" | "error" => ItemStatus::Failed,
-        "declined" => ItemStatus::Declined,
-        _ => ItemStatus::InProgress,
+        "completed" => Lifecycle::Completed,
+        "failed" | "error" => Lifecycle::Failed,
+        // Declined tool calls map to Failed for now; Decisions will give
+        // declined a real home on the wire.
+        "declined" => Lifecycle::Failed,
+        _ => Lifecycle::Running,
     }
 }
 
@@ -271,7 +273,7 @@ mod tests {
                 status,
             } => {
                 assert_eq!(id, "item_1");
-                assert_eq!(status, ItemStatus::Completed);
+                assert_eq!(status, Lifecycle::Completed);
                 assert_eq!(changes.len(), 1);
                 assert_eq!(changes[0].path, "src/main.rs");
             }
@@ -346,7 +348,7 @@ mod tests {
             } => {
                 assert_eq!(id, "item_4");
                 assert_eq!(name, "github/search");
-                assert_eq!(status, ItemStatus::Completed);
+                assert_eq!(status, Lifecycle::Completed);
                 assert_eq!(input, Some(json!({ "query": "regression" })));
                 assert_eq!(output.as_deref(), Some("ok"));
             }

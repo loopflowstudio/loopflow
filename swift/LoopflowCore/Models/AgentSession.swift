@@ -23,11 +23,14 @@ public enum JSONValue: Sendable, Hashable {
     }
 }
 
-public enum ItemStatus: String, Sendable, Hashable, Codable {
-    case inProgress = "in_progress"
+/// Lifecycle of a turn or item. Mirrors Rust `Lifecycle` (types.rs); one enum
+/// spans turns and items on the wire.
+public enum Lifecycle: String, Sendable, Hashable, Codable {
+    case pending
+    case running
     case completed
     case failed
-    case declined
+    case interrupted
 }
 
 public struct FileEdit: Sendable, Hashable, Codable {
@@ -46,7 +49,7 @@ public struct CommandItem: Sendable, Hashable {
     public let id: String
     public let command: [String]
     public let cwd: String
-    public let status: ItemStatus
+    public let status: Lifecycle
     public let output: String?
     public let exitCode: Int?
     public let durationMs: UInt64?
@@ -55,7 +58,7 @@ public struct CommandItem: Sendable, Hashable {
         id: String,
         command: [String] = [],
         cwd: String = "",
-        status: ItemStatus,
+        status: Lifecycle,
         output: String? = nil,
         exitCode: Int? = nil,
         durationMs: UInt64? = nil
@@ -73,9 +76,9 @@ public struct CommandItem: Sendable, Hashable {
 public struct FileItem: Sendable, Hashable {
     public let id: String
     public let changes: [FileEdit]
-    public let status: ItemStatus
+    public let status: Lifecycle
 
-    public init(id: String, changes: [FileEdit] = [], status: ItemStatus) {
+    public init(id: String, changes: [FileEdit] = [], status: Lifecycle) {
         self.id = id
         self.changes = changes
         self.status = status
@@ -107,14 +110,14 @@ public struct ThoughtItem: Sendable, Hashable {
 public struct ToolItem: Sendable, Hashable {
     public let id: String
     public let name: String
-    public let status: ItemStatus
+    public let status: Lifecycle
     public let input: JSONValue?
     public let output: String?
 
     public init(
         id: String,
         name: String,
-        status: ItemStatus,
+        status: Lifecycle,
         input: JSONValue? = nil,
         output: String? = nil
     ) {
@@ -145,7 +148,7 @@ public enum SessionItem: Sendable, Hashable {
         }
     }
 
-    public var status: ItemStatus? {
+    public var status: Lifecycle? {
         switch self {
         case .command(let item): return item.status
         case .file(let item): return item.status

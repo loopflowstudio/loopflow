@@ -33,10 +33,10 @@ public enum SessionItemType: Equatable {
 public struct TranscriptItemCard: Equatable {
     public let type: SessionItemType
     public let label: String
-    public let status: ItemStatus?
+    public let status: Lifecycle?
     public let detail: String?
 
-    public init(type: SessionItemType, label: String, status: ItemStatus?, detail: String?) {
+    public init(type: SessionItemType, label: String, status: Lifecycle?, detail: String?) {
         self.type = type
         self.label = label
         self.status = status

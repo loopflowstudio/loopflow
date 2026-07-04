@@ -12,25 +12,19 @@ public enum ChatRole: String, Codable, Sendable, Hashable {
     case assistant
 }
 
-/// Lifecycle of a turn. A `user` turn is always `completed`.
-public enum ChatTurnStatus: String, Codable, Sendable, Hashable {
-    case inProgress = "in_progress"
-    case completed
-    case failed
-}
-
-// `ItemStatus` and `FileEdit` are shared with the session models in
+// `Lifecycle` and `FileEdit` are shared with the session models in
 // AgentSession.swift (made `Codable` there); the wire shape is identical.
+// One `Lifecycle` covers turns and items; a `user` turn is always `completed`.
 
 /// A tool/command/file/message/thought item the agent produced, serde-tagged by
 /// `type` on the wire. Unknown tags decode as `.unknown` rather than throwing, so
 /// a newer server that grows the enum doesn't break an older client.
 public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
-    case command(id: String, command: [String], cwd: String, status: ItemStatus, output: String?, exitCode: Int?, durationMs: Int?)
-    case file(id: String, changes: [FileEdit], status: ItemStatus)
+    case command(id: String, command: [String], cwd: String, status: Lifecycle, output: String?, exitCode: Int?, durationMs: Int?)
+    case file(id: String, changes: [FileEdit], status: Lifecycle)
     case message(id: String, text: String, phase: String?)
     case thought(id: String, text: String)
-    case tool(id: String, name: String, status: ItemStatus, input: String?, output: String?)
+    case tool(id: String, name: String, status: Lifecycle, input: String?, output: String?)
     case unknown(id: String, type: String)
 
     public var id: String {
@@ -61,7 +55,7 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
                 id: id,
                 command: try c.decode([String].self, forKey: .command),
                 cwd: try c.decode(String.self, forKey: .cwd),
-                status: try c.decode(ItemStatus.self, forKey: .status),
+                status: try c.decode(Lifecycle.self, forKey: .status),
                 output: try c.decodeIfPresent(String.self, forKey: .output),
                 exitCode: try c.decodeIfPresent(Int.self, forKey: .exitCode),
                 durationMs: try c.decodeIfPresent(Int.self, forKey: .durationMs)
@@ -70,7 +64,7 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
             self = .file(
                 id: id,
                 changes: try c.decode([FileEdit].self, forKey: .changes),
-                status: try c.decode(ItemStatus.self, forKey: .status)
+                status: try c.decode(Lifecycle.self, forKey: .status)
             )
         case "message":
             self = .message(
@@ -84,7 +78,7 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
             self = .tool(
                 id: id,
                 name: try c.decode(String.self, forKey: .name),
-                status: try c.decode(ItemStatus.self, forKey: .status),
+                status: try c.decode(Lifecycle.self, forKey: .status),
                 input: try Self.decodeLooseString(c, forKey: .input),
                 output: try c.decodeIfPresent(String.self, forKey: .output)
             )
@@ -142,7 +136,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let role: ChatRole
     public let text: String
-    public let status: ChatTurnStatus
+    public let status: Lifecycle
     public let items: [ConversationItem]
     public let createdAt: String
 
@@ -151,7 +145,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: ChatTurnStatus, items: [ConversationItem], createdAt: String) {
+    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String) {
         self.id = id
         self.role = role
         self.text = text
@@ -170,7 +164,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         ChatTurn.rfc3339.date(from: createdAt) ?? ChatTurn.rfc3339Fractional.date(from: createdAt)
     }
 
-    public var isInProgress: Bool { status == .inProgress }
+    public var isInProgress: Bool { status == .running }
 
     // ISO8601DateFormatter is safe for concurrent read-only formatting but isn't
     // marked Sendable; these are only ever read.

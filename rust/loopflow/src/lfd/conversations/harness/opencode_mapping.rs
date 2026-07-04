@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::lfd::conversations::types::{
-    ConversationEvent, ConversationItem, FileEdit, ItemStatus, TurnStatus, TurnUsage,
+    ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
 };
 
 #[derive(Debug, Default)]
@@ -105,12 +105,12 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
         SessionState::Idle => {
             if was_active {
                 let usage = map_turn_usage(properties);
-                complete_turn(state, TurnStatus::Completed, usage, mapped);
+                complete_turn(state, Lifecycle::Completed, usage, mapped);
             }
         }
         SessionState::Error => {
             if was_active {
-                complete_turn(state, TurnStatus::Failed, None, mapped);
+                complete_turn(state, Lifecycle::Failed, None, mapped);
             }
         }
         SessionState::Unknown => {}
@@ -119,7 +119,7 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
 
 fn complete_turn(
     state: &mut ReaderState,
-    status: TurnStatus,
+    status: Lifecycle,
     usage: Option<TurnUsage>,
     mapped: &mut MappedEvent,
 ) {
@@ -226,15 +226,11 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
         lifecycle.started = true;
         mapped.events.push(ConversationEvent::ItemStarted {
             turn_id: turn_id.clone(),
-            item: build_tool_item(part, &tool_id, ItemStatus::InProgress, false),
+            item: build_tool_item(part, &tool_id, Lifecycle::Running, false),
         });
     }
 
-    if matches!(
-        status,
-        ItemStatus::Completed | ItemStatus::Failed | ItemStatus::Declined
-    ) && !lifecycle.completed
-    {
+    if matches!(status, Lifecycle::Completed | Lifecycle::Failed) && !lifecycle.completed {
         lifecycle.completed = true;
         mapped.events.push(ConversationEvent::ItemCompleted {
             turn_id,
@@ -285,7 +281,7 @@ fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEve
 
     if state.status == SessionState::Active {
         state.status = SessionState::Error;
-        complete_turn(state, TurnStatus::Failed, None, mapped);
+        complete_turn(state, Lifecycle::Failed, None, mapped);
     }
 
     mapped
@@ -331,16 +327,18 @@ fn tool_id(part: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn tool_status(part: &Value) -> Option<ItemStatus> {
+fn tool_status(part: &Value) -> Option<Lifecycle> {
     let raw = part
         .get("state")
         .and_then(Value::as_str)?
         .to_ascii_lowercase();
     match raw.as_str() {
-        "running" => Some(ItemStatus::InProgress),
-        "completed" => Some(ItemStatus::Completed),
-        "failed" => Some(ItemStatus::Failed),
-        "declined" => Some(ItemStatus::Declined),
+        "running" => Some(Lifecycle::Running),
+        "completed" => Some(Lifecycle::Completed),
+        "failed" => Some(Lifecycle::Failed),
+        // Declined tool calls map to Failed for now; Decisions will give
+        // declined a real home on the wire.
+        "declined" => Some(Lifecycle::Failed),
         _ => {
             tracing::debug!(state = %raw, "opencode tool part had unknown canonical state");
             None
@@ -351,7 +349,7 @@ fn tool_status(part: &Value) -> Option<ItemStatus> {
 fn build_tool_item(
     part: &Value,
     tool_id: &str,
-    status: ItemStatus,
+    status: Lifecycle,
     include_output: bool,
 ) -> ConversationItem {
     let input = tool_input(part);
@@ -433,8 +431,13 @@ fn command_args(command: &Value) -> Vec<String> {
             .map(ToString::to_string)
             .collect();
     }
+    // A string command is a whole command line, not argv — keep it as a
+    // single element so quoted arguments survive.
     if let Some(text) = command.as_str() {
-        return text.split_whitespace().map(ToString::to_string).collect();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        return vec![text.to_string()];
     }
     Vec::new()
 }
@@ -488,7 +491,7 @@ mod tests {
         match &completed.events[0] {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, &started_turn_id);
-                assert_eq!(*status, TurnStatus::Completed);
+                assert_eq!(*status, Lifecycle::Completed);
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
@@ -530,7 +533,7 @@ mod tests {
         assert!(matches!(
             &completed.events[0],
             ConversationEvent::TurnCompleted { turn_id, status }
-                if turn_id == &started_turn_id && *status == TurnStatus::Completed
+                if turn_id == &started_turn_id && *status == Lifecycle::Completed
         ));
         assert!(matches!(
             &completed.events[1],
@@ -722,7 +725,7 @@ mod tests {
         assert!(matches!(
             mapped.events[0],
             ConversationEvent::TurnCompleted {
-                status: TurnStatus::Failed,
+                status: Lifecycle::Failed,
                 ..
             }
         ));

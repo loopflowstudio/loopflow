@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::lfd::conversations::harness::lf_tag::LfTagParser;
 use crate::lfd::conversations::types::{
-    ConversationEvent, ConversationItem, FileEdit, ItemStatus, TurnStatus, TurnUsage,
+    ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
 };
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -91,7 +91,7 @@ impl ReaderState {
                     &tool.name,
                     &tool.id,
                     tool.parsed_input(),
-                    ItemStatus::Failed,
+                    Lifecycle::Failed,
                     None,
                 )
             })
@@ -214,9 +214,9 @@ pub(super) fn process_line(
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                TurnStatus::Failed
+                Lifecycle::Failed
             } else {
-                TurnStatus::Completed
+                Lifecycle::Completed
             };
             let _ = events.send(ConversationEvent::TurnCompleted {
                 turn_id: turn_id.to_string(),
@@ -278,14 +278,14 @@ fn map_turn_usage(event: &Value) -> TurnUsage {
 
 /// Map Claude tool name to a ConversationItem category.
 fn infer_item(tool_name: &str, tool_use_id: &str, input: Option<Value>) -> ConversationItem {
-    build_item(tool_name, tool_use_id, input, ItemStatus::InProgress, None)
+    build_item(tool_name, tool_use_id, input, Lifecycle::Running, None)
 }
 
 fn build_item(
     tool_name: &str,
     tool_use_id: &str,
     input: Option<Value>,
-    status: ItemStatus,
+    status: Lifecycle,
     output: Option<String>,
 ) -> ConversationItem {
     match tool_name {
@@ -449,7 +449,7 @@ fn process_user_message(
                 let output = extract_tool_result_text(block);
                 let input = tool.parsed_input();
                 let completed_item =
-                    build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
+                    build_item(&tool.name, &tool.id, input, Lifecycle::Completed, output);
                 let _ = events.send(ConversationEvent::ItemCompleted {
                     turn_id: turn_id.to_string(),
                     item: completed_item,
@@ -698,7 +698,7 @@ mod tests {
         match event {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, "turn_1");
-                assert_eq!(status, TurnStatus::Completed);
+                assert_eq!(status, Lifecycle::Completed);
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
@@ -728,7 +728,7 @@ mod tests {
         match event {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, "turn_1");
-                assert_eq!(status, TurnStatus::Failed);
+                assert_eq!(status, Lifecycle::Failed);
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }

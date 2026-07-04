@@ -20,7 +20,8 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{broadcast, mpsc};
 
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn, ChatTurnStatus};
+use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
+use crate::lfd::conversations::types::Lifecycle;
 use crate::lfd::wave::memory::Memory;
 use crate::lfd::wave::supervisor::Supervisor;
 
@@ -149,7 +150,7 @@ impl WaveRuntime {
             id: String::new(),
             role: ChatRole::Assistant,
             text: reply,
-            status: ChatTurnStatus::Completed,
+            status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: now_rfc3339(),
         })
@@ -213,14 +214,14 @@ fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::conversations::turns::ChatTurnStatus;
+    use crate::lfd::conversations::types::Lifecycle;
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
-            status: ChatTurnStatus::Completed,
+            status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: now_rfc3339(),
         }

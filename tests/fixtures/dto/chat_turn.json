@@ -2,7 +2,7 @@
   "id": "turn-3",
   "role": "assistant",
   "text": "Ran the build and it passed.\n\n```bash\ncargo test\n```",
-  "status": "in_progress",
+  "status": "running",
   "items": [
     {
       "type": "command",
@@ -40,6 +40,16 @@
       "status": "completed",
       "input": "TODO",
       "output": "3 matches"
+    },
+    {
+      "type": "command",
+      "id": "item-5",
+      "command": ["cargo test --workspace"],
+      "cwd": "/home/user/project",
+      "status": "interrupted",
+      "output": null,
+      "exit_code": null,
+      "duration_ms": null
     }
   ],
   "created_at": "2026-07-03T18:30:00Z"

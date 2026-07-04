@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn, ChatTurnStatus};
-use loopflow::lfd::conversations::types::ConversationItem;
+use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn};
+use loopflow::lfd::conversations::types::{ConversationItem, Lifecycle};
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
 use serde_json::Value;
 
@@ -81,13 +81,33 @@ fn chat_turn_fixture_pins_wave_chat_shape() {
 
     assert_eq!(turn.id, "turn-3");
     assert_eq!(turn.role, ChatRole::Assistant);
-    assert_eq!(turn.status, ChatTurnStatus::InProgress);
-    assert_eq!(turn.items.len(), 5);
+    assert_eq!(turn.status, Lifecycle::Running);
+    assert_eq!(turn.items.len(), 6);
     assert!(matches!(turn.items[0], ConversationItem::Command { .. }));
     assert!(matches!(turn.items[1], ConversationItem::File { .. }));
     assert!(matches!(turn.items[2], ConversationItem::Message { .. }));
     assert!(matches!(turn.items[3], ConversationItem::Thought { .. }));
     assert!(matches!(turn.items[4], ConversationItem::Tool { .. }));
+
+    // The interrupted state and explicit-null optionals are pinned on the wire.
+    assert!(matches!(
+        turn.items[5],
+        ConversationItem::Command {
+            status: Lifecycle::Interrupted,
+            output: None,
+            exit_code: None,
+            duration_ms: None,
+            ..
+        }
+    ));
+
+    // Absent optionals serialize as explicit null, not omitted keys.
+    let value = serde_json::to_value(&turn).expect("serialize chat turn");
+    assert!(value["items"][5]["output"].is_null());
+    assert!(value["items"][5]
+        .as_object()
+        .expect("object")
+        .contains_key("output"));
 }
 
 #[test]

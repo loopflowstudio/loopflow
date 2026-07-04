@@ -442,4 +442,62 @@ cut, no compat shims. Its future beyond that: a global pubsub fabric (e.g.
 GitHub events) and/or the access/query gate for distributed compute across
 machines and teams — the thing you consult, not the thing that runs you.
 
+**The calling convention (2026-07-04, Jack): one door — exec.** Mind ↔
+loopflow is one interface, a small vocabulary rendered as `lf` commands:
+`lf q worker run` (dispatch), **`lf chat`** (post to a wave's thread),
+**`lf memory`** (read/update MEMORY.md via the server), later
+`decide`/`status`. The binary IS the harness with an exec entry point; the
+same commands serve minds, workers, humans, and scripts. The decisive
+argument: exec is the only door available to *every process on the machine*
+— a worker deep in tmux can `lf wave say` a rich completion report, which
+tags (parseable only from supervised streams) never could. Agents heredoc
+all day; prose-through-shell is not a hardship. Tags (`lf_tag.rs`) and MCP
+remain possible future *renderings* of the same vocabulary (MCP = the
+maximum-compliance door if vendor posture tightens), not MVP surface.
+
+Semantics that keep it clean:
+- **Reactive vs proactive speech**: replies to a user message are the turn's
+  own text (answers return on the channel the question came in); `lf wave
+  say` is for initiations — mid-work FYIs, worker reports.
+- **Attribution via the registry**: `lf chat` stamps `LFD_SESSION_ID` from
+  env, so the thread knows mind vs worker vs human; worker reports arrive
+  pre-attributed to their run.
+- **Wave-tree routing (Jack)**: `lf chat` defaults to the invoking context's
+  own wave (env, else worktree name); `--parent` walks `parent_wave_id` in
+  the store and posts to the parent's live server — its endpoint rides the
+  parent's WaveAgent registry row, so cross-repo parents resolve through the
+  store, not the filesystem. `--wave <name>` targets explicitly. This is the
+  algedonic channel's transport: child minds escalate/report upward through
+  the same verb workers use; root + `--parent` errors until Decisions give
+  it the human fall-through.
+- **Single-writer preserved**: `chat`/`memory` POST to the live server via
+  its endpoint — new doors into the same choke point, never a second
+  journal/file writer. The server holds MEMORY.md's pen (also fixing the
+  live bug where the mind's file tools edit the worktree copy while seeds
+  read the origin's).
+- **Intent-then-fact journaling**: command-item = intent; the journaled
+  emission/observed effect = fact. Same discipline as WorkerDispatched.
+
+**Concerto is a viewer, never a participant (2026-07-04, Jack).** Concerto ↔
+lf runs entirely on shared machine substrate — store rows, `.wave-endpoint`,
+tmux, per-wave SSE — nothing routes through Concerto and no loopflow harness
+"manages" it. No dashboard-in-the-loop failure mode; extra viewers are free;
+its writes are the human's acts through the same doors as any process.
+On-CPU tracking ends at the CPU: remote viewing (Mac Mini/Tailscale, teams)
+is the shrunken `lfd serve`'s whole job — a gate that execs lf and watches
+the same store, keeping remote Concerto a viewer one hop removed. (Gap on
+the books: fleet surfaces still call fat-daemon routes; they migrate with
+the collapse.)
+
+**Vendor-policy posture (2026-07-04).** The blessed pattern is *wrap the
+vendor's product, don't replace it*: minds ride official surfaces (codex
+app-server — their published integration point; claude via the official CLI,
+the HumanLayer-precedent shape), subscription credentials never touch raw
+APIs, volumes stay human-scaled (one mind per wave, slow heartbeat, every
+session attachable in the vendor's own surface). Public positioning:
+"orchestrates your Claude Code / Codex sessions." Keep hard-case competitor
+names out of committed docs. MCP stays the maximum-compliance rendering of
+the emission vocabulary if posture tightens; the 1c API-key seam remains the
+always-compliant escape hatch.
+
 **Open:** none blocking.

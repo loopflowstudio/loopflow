@@ -13,7 +13,7 @@ use crate::lfd::id::LfdId;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
-const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };

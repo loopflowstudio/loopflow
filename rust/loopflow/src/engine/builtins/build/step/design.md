@@ -83,7 +83,7 @@ This is the natural session exit point. The user's answer determines what to run
 
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
-   - frontmatter: `primary_flow` (default `ship-wave` unless the user asks for
+   - frontmatter: `primary_flow` (default `ship` unless the user asks for
      something else) and, once connected, `pm.asana_project`
    - body (the loop prompt): what this wave is and why it exists (scope
      boundaries as natural qualifiers), how it judges progress (numeric metrics
@@ -103,7 +103,7 @@ This is the natural session exit point. The user's answer determines what to run
 6. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
 7. End session and tell the user what to run next:
    - `lf implement` (for the immediate item)
-   - `lf ship-wave`
+   - `lf ship`
 
 Once breaking things up, be aggressive about commit boundaries—each roadmap item should be independently shippable.
 

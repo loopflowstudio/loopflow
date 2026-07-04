@@ -45,11 +45,12 @@ fn print_report(report: &UsageReportDto) {
     }
 
     print_repo_header(&colors);
-    let (mut grand_input, mut grand_output) = (0u64, 0u64);
+    let (mut grand_input, mut grand_output, mut grand_cache) = (0u64, 0u64, 0u64);
     for row in &report.by_repo_provider {
         print_repo_row(row);
         grand_input += row.input_tokens;
         grand_output += row.output_tokens;
+        grand_cache += row.cache_read_tokens;
     }
     println!();
 
@@ -59,18 +60,19 @@ fn print_report(report: &UsageReportDto) {
     }
     println!();
 
-    print_total_row(&colors, grand_input, grand_output);
+    print_total_row(&colors, grand_input, grand_output, grand_cache);
 }
 
 fn print_repo_header(colors: &Colors) {
     println!(
-        "{bold}{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {total:>num_w$}{reset}",
+        "{bold}{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         repo = "REPO",
         provider = "PROVIDER",
         input = "INPUT",
         output = "OUTPUT",
+        cache = "CACHE READ",
         total = "TOTAL",
         repo_w = REPO_WIDTH,
         prov_w = PROVIDER_WIDTH,
@@ -82,11 +84,12 @@ fn print_repo_row(row: &RepoProviderUsageDto) {
     let repo = row.repo.as_deref().unwrap_or("(unattributed)");
     let total = row.input_tokens + row.output_tokens;
     println!(
-        "{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {total:>num_w$}",
+        "{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}",
         repo = truncate(&short_repo(repo), REPO_WIDTH),
         provider = row.provider,
         input = format_int(row.input_tokens),
         output = format_int(row.output_tokens),
+        cache = format_int(row.cache_read_tokens),
         total = format_int(total),
         repo_w = REPO_WIDTH,
         prov_w = PROVIDER_WIDTH,
@@ -96,12 +99,13 @@ fn print_repo_row(row: &RepoProviderUsageDto) {
 
 fn print_provider_header(colors: &Colors) {
     println!(
-        "{bold}{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {total:>num_w$}{reset}",
+        "{bold}{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         provider = "PROVIDER",
         input = "INPUT",
         output = "OUTPUT",
+        cache = "CACHE READ",
         total = "TOTAL",
         prov_w = PROVIDER_WIDTH,
         num_w = NUM_WIDTH,
@@ -111,24 +115,26 @@ fn print_provider_header(colors: &Colors) {
 fn print_provider_row(row: &ProviderUsageDto) {
     let total = row.input_tokens + row.output_tokens;
     println!(
-        "{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {total:>num_w$}",
+        "{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}",
         provider = row.provider,
         input = format_int(row.input_tokens),
         output = format_int(row.output_tokens),
+        cache = format_int(row.cache_read_tokens),
         total = format_int(total),
         prov_w = PROVIDER_WIDTH,
         num_w = NUM_WIDTH,
     );
 }
 
-fn print_total_row(colors: &Colors, input: u64, output: u64) {
+fn print_total_row(colors: &Colors, input: u64, output: u64, cache: u64) {
     println!(
-        "{bold}{label:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {total:>num_w$}{reset}",
+        "{bold}{label:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         label = "TOTAL",
         input = format_int(input),
         output = format_int(output),
+        cache = format_int(cache),
         total = format_int(input + output),
         prov_w = PROVIDER_WIDTH,
         num_w = NUM_WIDTH,

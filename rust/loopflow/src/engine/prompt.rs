@@ -570,7 +570,12 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     );
 
     // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md.
-    let voice_doc = resolve_voice_doc(repo_root);
+    // Only read when it will render (see format_system_sections): interactive, non-IDE surfaces.
+    let voice_doc = if opts.surface.is_interactive() && opts.surface != Surface::Ide {
+        resolve_voice_doc(repo_root)
+    } else {
+        None
+    };
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
@@ -1945,7 +1950,9 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
 /// Durable: `~/.lf/logs/<repo>/<worktree>/<file>` — survives worktree deletion.
 ///
-/// File format: `{timestamp}-{flow_parents}.{step}.md` or `{timestamp}-{step}.md`
+/// File format: `{timestamp}-{run_id}-{flow_parents}.{step}.md`, with the
+/// `{run_id}` segment present only when `LF_RUN_ID` is set (daemon-dispatched
+/// runs) — it joins the log to the run's journal and token-usage records.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
 pub fn write_prompt_log(
@@ -1967,7 +1974,14 @@ pub fn write_prompt_log(
         }
         _ => safe_step,
     };
-    let filename = format!("{}-{}.md", timestamp, name_part);
+    let run_part = std::env::var(crate::journal::LF_RUN_ID_ENV)
+        .ok()
+        .map(|value| value.trim().replace('/', "."))
+        .filter(|value| !value.is_empty());
+    let filename = match run_part {
+        Some(run_id) => format!("{}-{}-{}.md", timestamp, run_id, name_part),
+        None => format!("{}-{}.md", timestamp, name_part),
+    };
     let path = prompts_dir.join(&filename);
 
     fs::write(&path, prompt)?;

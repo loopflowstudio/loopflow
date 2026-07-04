@@ -674,66 +674,15 @@ pub fn builtin_flow_descriptions() -> HashMap<String, String> {
 }
 
 /// Format a flow's YAML content as a human-readable step chain (e.g., "implement → compress → gate").
+/// Uses the same recursive extractor as user-defined flows, so builtin flows
+/// show their interior (loop bodies, xor branches) in `lf -l` too.
 fn format_flow_description(yaml_content: &str) -> String {
     let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(yaml_content) {
         Ok(v) => v,
         Err(_) => return String::new(),
     };
 
-    let names = extract_flow_summary(&value);
-    names.join(" → ")
-}
-
-/// Extract step names from a flow value, formatting forks as "fork(step×N)"
-/// and and/xor/or/loop constructs with their keyword.
-fn extract_flow_summary(value: &serde_yaml_ng::Value) -> Vec<String> {
-    let serde_yaml_ng::Value::Sequence(seq) = value else {
-        return Vec::new();
-    };
-
-    let mut names = Vec::new();
-    for item in seq {
-        match item {
-            serde_yaml_ng::Value::String(s) => names.push(s.clone()),
-            serde_yaml_ng::Value::Mapping(map) => {
-                let key = |k: &str| serde_yaml_ng::Value::String(k.into());
-                // Fork: { fork: { step: "reduce", drafts: [...] } }
-                if let Some(serde_yaml_ng::Value::Mapping(fork_map)) = map.get(key("fork")) {
-                    let step = fork_map
-                        .get(key("step"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    let count = fork_map
-                        .get(key("drafts"))
-                        .and_then(|v| v.as_sequence())
-                        .map(|s| s.len())
-                        .unwrap_or(0);
-                    names.push(format!("fork({step}×{count})"));
-                    continue;
-                }
-                if let Some(step) = map.get(key("step")).and_then(|v| v.as_str()) {
-                    names.push(step.to_string());
-                    continue;
-                }
-                if let Some(flow) = map.get(key("flow")).and_then(|v| v.as_str()) {
-                    names.push(flow.to_string());
-                    continue;
-                }
-                if let Some(op) = map.get(key("op")).and_then(|v| v.as_str()) {
-                    names.push(format!("op: {op}"));
-                    continue;
-                }
-                for branch_key in ["and", "xor", "or", "loop"] {
-                    if map.contains_key(key(branch_key)) {
-                        names.push(format!("[{branch_key}]"));
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    names
+    extract_step_names_from_value(&value).join(" → ")
 }
 
 /// All builtin flow names (from BUILTIN_FLOW_CATEGORIES).
@@ -870,7 +819,11 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                 names.extend(extract_branch_preview(loop_value));
             }
             if names.len() == initial_len {
-                for value in map.values() {
+                for (key, value) in map {
+                    // Prose metadata, not steps.
+                    if key.as_str() == Some("description") {
+                        continue;
+                    }
                     names.extend(extract_step_names_from_value(value));
                 }
             }

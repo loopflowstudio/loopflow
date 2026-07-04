@@ -17,9 +17,9 @@ agent file.
 |--------|--------------------|
 | **Reconstructable runs** | Any run from the last N days can be replayed on paper: prompt, context, children, tokens, duration |
 | **Measured prompt edits** | Gate/compress/implement changes cite observed runs; gate first-pass rate rises |
-| **Tokens per run** | Trending down while quality holds; nothing large loads unread |
+| **Tokens per run** | Trending down while the quality proxy holds; nothing large loads unread |
 | **Paved-road adherence** | Worktrees, commits, landings go through `lf op`; deviations counted, each one fixed at the prompt or tool |
-| **Flow legibility** | Every step/flow shows what it runs, how long, how hot; redundant ones die |
+| **Flow legibility** | Declared shape visible before a run; hotness and duration empirical, from the ledger |
 | **General/taste split** | Builtins carry what's universal; agent files carry the rest |
 
 ## The hard rule

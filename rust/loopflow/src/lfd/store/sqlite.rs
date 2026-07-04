@@ -1934,7 +1934,7 @@ impl SqliteStore {
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, step, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs
-             FROM run_events WHERE run_id LIKE ?1 ORDER BY run_id, seq",
+             FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
     }

@@ -17,6 +17,17 @@ const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 
+/// Serializes tests that mutate process-global env (LF_HOME, LF_RUN_ID).
+/// Every test in the crate that touches these vars must hold this lock —
+/// the ledger path is resolved from env at write time.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
     static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
@@ -25,8 +36,10 @@ thread_local! {
 #[derive(Debug, Clone)]
 struct RunContext {
     run_id: LfdId,
-    /// File-journal directory — present only in wave worktrees, where the
-    /// daemon's poller tails it. The SQLite ledger records every run.
+    /// File-journal directory. Written in any git repo (main, wave worktree,
+    /// or plain worktree); None only when the journal can't be git-excluded.
+    /// The daemon's poller tails wave worktrees; the SQLite ledger records
+    /// every run regardless.
     run_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
@@ -307,7 +320,26 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::lfd::store::StoreError> {
-    SqliteStore::new(&crate::lfd::default_db_path())
+    SqliteStore::new(&ledger_db_path())
+}
+
+#[cfg(not(test))]
+fn ledger_db_path() -> PathBuf {
+    crate::lfd::default_db_path()
+}
+
+/// In lib tests, never touch the real ~/.lf ledger: honor a test's LF_HOME
+/// if set, else fall back to one process-wide temp store.
+#[cfg(test)]
+fn ledger_db_path() -> PathBuf {
+    if let Ok(home) = std::env::var("LF_HOME") {
+        return PathBuf::from(home).join("lfd.db");
+    }
+    static TEST_HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    TEST_HOME
+        .get_or_init(|| tempfile::TempDir::new().expect("test ledger home"))
+        .path()
+        .join("lfd.db")
 }
 
 fn node_name(node: LfNode) -> &'static str {
@@ -352,15 +384,24 @@ fn ensure_run_context(
         }
     };
 
-    // The file journal exists for the daemon's poller, which only watches
-    // wave worktrees. Everything else still lands in the SQLite ledger.
-    let run_dir = if wave_name.is_some() {
-        ensure_journal_ignored(repo_root)?;
-        let dir = runs_root(repo_root).join(run_id.as_str());
-        fs::create_dir_all(&dir)?;
-        Some(dir)
-    } else {
-        None
+    // Write the file journal wherever we can, wave or not — the daemon's
+    // poller only tails wave worktrees today, but the record should exist in
+    // any repo. Fall back to ledger-only when the journal can't be
+    // git-excluded (e.g. not a git repo).
+    let run_dir = match ensure_journal_ignored(repo_root) {
+        Ok(()) => {
+            let dir = runs_root(repo_root).join(run_id.as_str());
+            fs::create_dir_all(&dir)?;
+            Some(dir)
+        }
+        Err(err) => {
+            debug!(
+                error = %err,
+                repo = %repo_root.display(),
+                "file journal unavailable; recording to ledger only"
+            );
+            None
+        }
     };
 
     let repo = main_repo
@@ -469,7 +510,12 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
         )));
     }
 
-    let exclude_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    // `--git-path` answers relative to the repo when run at its root (main
+    // repos) and absolute for linked worktrees — absolutize before writing.
+    let mut exclude_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if exclude_path.is_relative() {
+        exclude_path = repo_root.join(exclude_path);
+    }
     if let Some(parent) = exclude_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -493,19 +539,13 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{emit, read_events, runs_root, LfEventFields, LfEventType, LfNode};
+    use super::{emit, read_events, runs_root, test_env_lock, LfEventFields, LfEventType, LfNode};
     use crate::engine::git::is_clean;
     use crate::lfd::id::LfdId;
     use loopflow_test_support::TestRepo;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = test_env_lock();
         super::clear_context();
         super::clear_usage();
         let home = tempfile::TempDir::new().expect("ledger home");
@@ -527,7 +567,7 @@ mod tests {
     /// Holds the env lock and points the ledger (LF_HOME) at a tempdir so
     /// tests never touch the real ~/.lf store.
     fn journal_test_guard() -> (std::sync::MutexGuard<'static, ()>, tempfile::TempDir) {
-        let guard = env_lock().lock().expect("env lock");
+        let guard = test_env_lock();
         super::clear_context();
         super::clear_usage();
         std::env::remove_var(super::LF_RUN_ID_ENV);
@@ -559,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn file_journal_is_disabled_in_main_repo_but_ledger_records() {
+    fn main_repo_runs_record_to_file_journal_and_ledger() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let command = vec!["lf".to_string(), "implement".to_string()];
@@ -578,17 +618,29 @@ mod tests {
             LfEventFields::default(),
         );
 
-        // No file journal outside wave worktrees...
-        assert!(!runs_root(repo.path()).exists());
+        // The file journal exists in the main repo too — generic contexts
+        // record as much as possible; only the wave field is absent.
+        let run_dir = only_run_dir(repo.path());
+        let file_events = read_events(&run_dir).expect("file events");
+        assert_eq!(file_events.len(), 2);
+        assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
 
-        // ...but the machine-grain ledger has the run, with usage on the
-        // terminal event.
+        // And the machine-grain ledger has the run, with usage on the
+        // terminal event and a null wave. Filter by this repo's unique name —
+        // concurrent tests may write other repos' rows into the ledger.
+        let repo_name = repo.path().file_name().unwrap().to_str().unwrap();
         let store = super::open_ledger().expect("ledger");
-        let events = store.list_run_events_since(0).expect("ledger rows");
+        let events: Vec<_> = store
+            .list_run_events_since(0)
+            .expect("ledger rows")
+            .into_iter()
+            .filter(|event| event.repo.as_deref() == Some(repo_name))
+            .collect();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].node, "run");
         assert_eq!(events[0].event, "started");
         assert!(events[0].repo.is_some());
+        assert_eq!(events[0].wave, None);
         assert!(events[0]
             .command
             .as_deref()

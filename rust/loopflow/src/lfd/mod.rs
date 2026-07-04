@@ -148,6 +148,9 @@ mod tests {
 
     #[test]
     fn lf_home_dir_uses_env_var() {
+        // LF_HOME is process-global and the run ledger resolves it at write
+        // time — mutations must hold the shared env lock.
+        let _guard = crate::journal::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
 

@@ -202,6 +202,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "047_run_events",
         sql: include_str!("migrations/047_run_events.sql"),
     },
+    Migration {
+        version: "048_run_events_context",
+        sql: include_str!("migrations/048_run_events_context.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

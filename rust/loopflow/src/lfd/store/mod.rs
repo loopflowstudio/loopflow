@@ -71,6 +71,9 @@ pub struct RunEventRow {
     pub cache_read_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
     pub duration_secs: Option<f64>,
+    /// JSON context manifest — what got included in the prompt and how many
+    /// tokens each source weighed (see ContextBreakdown::to_ledger_json).
+    pub context: Option<String>,
 }
 
 /// Token usage recorded for a single run, tagged with the wave and repo it

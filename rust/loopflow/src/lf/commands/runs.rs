@@ -206,6 +206,9 @@ pub fn trace(run_id: &str) -> Result<()> {
         if let Some(error) = terminal.error.as_deref() {
             println!("  error     {}", truncate(error, 200));
         }
+        if let Some(context) = terminal.context.as_deref().and_then(format_context) {
+            println!("  context   {context}");
+        }
     }
 
     for path in prompt_logs(&full_id) {
@@ -290,6 +293,35 @@ fn status_label(event: &str) -> &'static str {
 
 fn parse_argv(json: &str) -> Option<Vec<String>> {
     serde_json::from_str(json).ok()
+}
+
+/// One-line context summary from the ledger manifest: total plus per-source
+/// weights, heaviest first (system bucket included).
+fn format_context(manifest_json: &str) -> Option<String> {
+    let manifest: serde_json::Value = serde_json::from_str(manifest_json).ok()?;
+    let total = manifest.get("total")?.as_i64()?;
+    let mut parts: Vec<(String, i64)> = manifest
+        .get("sources")?
+        .as_object()?
+        .iter()
+        .filter_map(|(source, tokens)| Some((source.clone(), tokens.as_i64()?)))
+        .collect();
+    if let Some(system) = manifest.get("system").and_then(|v| v.as_i64()) {
+        if system > 0 {
+            parts.push(("system".to_string(), system));
+        }
+    }
+    parts.sort_by_key(|(_, tokens)| std::cmp::Reverse(*tokens));
+    let breakdown = parts
+        .iter()
+        .map(|(source, tokens)| format!("{source} {}", format_tokens(*tokens)))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    Some(if breakdown.is_empty() {
+        format!("{} total", format_tokens(total))
+    } else {
+        format!("{} total — {breakdown}", format_tokens(total))
+    })
 }
 
 /// Prompt/context logs for a run: `~/.lf/logs/<repo>/<worktree>/*-<id>-*.md`.
@@ -409,6 +441,7 @@ mod tests {
             cache_read_tokens: None,
             cost_usd: None,
             duration_secs: None,
+            context: None,
         }
     }
 
@@ -436,6 +469,16 @@ mod tests {
         let summaries = summarize(&events);
         assert_eq!(summaries[0].status, "running");
         assert_eq!(summaries[0].ended, None);
+    }
+
+    #[test]
+    fn format_context_summarizes_heaviest_first() {
+        let manifest = r#"{"total":14200,"system":1000,"sources":{"step":1100,"diff":5900,"scratch":2400,"wave":3800},"docs":[]}"#;
+        let line = super::format_context(manifest).expect("context line");
+        assert_eq!(
+            line,
+            "14.2k total — diff 5.9k · wave 3.8k · scratch 2.4k · step 1.1k · system 1.0k"
+        );
     }
 
     #[test]

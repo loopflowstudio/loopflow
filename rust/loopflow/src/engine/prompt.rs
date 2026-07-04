@@ -34,6 +34,21 @@ pub enum DocumentSource {
     Clipboard,
 }
 
+/// Stable snake_case key for ledger/JSON encodings of a source.
+fn source_key(source: DocumentSource) -> &'static str {
+    match source {
+        DocumentSource::Step => "step",
+        DocumentSource::Direction => "direction",
+        DocumentSource::Scratch => "scratch",
+        DocumentSource::Wave => "wave",
+        DocumentSource::WaveMemory => "wave_memory",
+        DocumentSource::Docs => "docs",
+        DocumentSource::Summary => "summary",
+        DocumentSource::Diff => "diff",
+        DocumentSource::Clipboard => "clipboard",
+    }
+}
+
 /// A related repo resolved from the edge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedRepoContext {
@@ -88,6 +103,35 @@ pub struct ContextBreakdown {
 impl ContextBreakdown {
     pub fn total(&self) -> usize {
         self.system_tokens + self.source_tokens.values().sum::<usize>()
+    }
+
+    /// Compact JSON manifest for the run ledger: total/system token counts,
+    /// per-source token counts, and every included document with its weight.
+    pub fn to_ledger_json(&self) -> String {
+        let mut sources = serde_json::Map::new();
+        for (source, tokens) in &self.source_tokens {
+            if *tokens > 0 {
+                sources.insert(source_key(*source).to_string(), (*tokens).into());
+            }
+        }
+        let docs: Vec<serde_json::Value> = self
+            .documents
+            .iter()
+            .map(|doc| {
+                serde_json::json!({
+                    "path": doc.path,
+                    "source": source_key(doc.source),
+                    "tokens": doc.tokens,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "total": self.total(),
+            "system": self.system_tokens,
+            "sources": sources,
+            "docs": docs,
+        })
+        .to_string()
     }
 
     pub fn source_tokens(&self, source: DocumentSource) -> usize {

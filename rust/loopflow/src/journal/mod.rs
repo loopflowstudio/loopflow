@@ -31,6 +31,7 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
     static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
+    static PENDING_CONTEXT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +113,25 @@ fn snapshot_usage() -> Option<PendingUsage> {
 fn clear_usage() {
     PENDING_USAGE.with(|cell| {
         *cell.borrow_mut() = PendingUsage::new();
+    });
+}
+
+/// Record the assembled-context manifest (JSON from
+/// `ContextBreakdown::to_ledger_json`) for the current run; attached to the
+/// run's step-boundary and terminal ledger rows.
+pub fn record_context(manifest_json: String) {
+    PENDING_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = Some(manifest_json);
+    });
+}
+
+fn snapshot_context() -> Option<String> {
+    PENDING_CONTEXT.with(|cell| cell.borrow().clone())
+}
+
+fn clear_pending_context() {
+    PENDING_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = None;
     });
 }
 
@@ -258,6 +278,7 @@ fn try_emit(
         }
         clear_context();
         clear_usage();
+        clear_pending_context();
     }
 
     Ok(())
@@ -278,6 +299,11 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
     // cumulative snapshot so a reader can diff consecutive steps.
     let usage = if is_terminal_run || is_step_boundary {
         snapshot_usage()
+    } else {
+        None
+    };
+    let manifest = if is_terminal_run || is_step_boundary {
+        snapshot_context()
     } else {
         None
     };
@@ -304,6 +330,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         cache_read_tokens: usage.map(|u| u.cache_read_tokens as i64),
         cost_usd: usage.and_then(|u| u.cost_usd),
         duration_secs: usage.and_then(|u| u.duration_secs),
+        context: manifest,
     };
 
     match open_ledger() {
@@ -611,6 +638,7 @@ mod tests {
             started_fields(&command, repo.path(), "main"),
         );
         super::record_usage(Some(100), Some(20), Some(5));
+        super::record_context(r#"{"total":42,"sources":{"step":42}}"#.to_string());
         emit(
             repo.path(),
             LfNode::Run,
@@ -650,6 +678,10 @@ mod tests {
         assert_eq!(events[1].input_tokens, Some(100));
         assert_eq!(events[1].output_tokens, Some(20));
         assert_eq!(events[1].cache_read_tokens, Some(5));
+        assert_eq!(
+            events[1].context.as_deref(),
+            Some(r#"{"total":42,"sources":{"step":42}}"#)
+        );
     }
 
     #[test]

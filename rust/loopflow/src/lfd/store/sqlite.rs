@@ -1891,8 +1891,8 @@ impl SqliteStore {
             "INSERT INTO run_events (
                 run_id, seq, ts, repo, worktree, wave, node, event, command,
                 flow, step, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                cache_read_tokens, cost_usd, duration_secs, context
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 row.run_id,
                 row.seq,
@@ -1912,6 +1912,7 @@ impl SqliteStore {
                 row.cache_read_tokens,
                 row.cost_usd,
                 row.duration_secs,
+                row.context,
             ],
         )?;
         Ok(())
@@ -1921,7 +1922,7 @@ impl SqliteStore {
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, step, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs
+                    cache_read_tokens, cost_usd, duration_secs, context
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1933,7 +1934,7 @@ impl SqliteStore {
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, step, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs
+                    cache_read_tokens, cost_usd, duration_secs, context
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1966,6 +1967,7 @@ impl SqliteStore {
                 cache_read_tokens: row.get(15)?,
                 cost_usd: row.get(16)?,
                 duration_secs: row.get(17)?,
+                context: row.get(18)?,
             })
         })?;
         let mut events = Vec::new();

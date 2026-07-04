@@ -25,6 +25,8 @@ use tracing::{debug, info, instrument, trace, warn};
 #[instrument(skip(cli), fields(step = ?step, has_message = message.is_some()))]
 pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     let mut built = build_prompt(step, message, cli)?;
+    // What got included, and at what token weight — onto the run ledger.
+    crate::journal::record_context(built.breakdown.to_ledger_json());
 
     // Try fast-path: run the command before spinning up an agent.
     if let Some(ref cmd) = built.fast_path {

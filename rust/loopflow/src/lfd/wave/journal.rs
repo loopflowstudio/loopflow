@@ -276,16 +276,272 @@ pub fn read_events(path: &Path) -> Vec<Event> {
     events
 }
 
+// -- Console narration --------------------------------------------------
+//
+// The console is a human-readable projection of the journal: every append
+// emits exactly one tracing line. INFO narrates everything meaningful; the
+// item-level prose and thoughts (bulky — the thread has them in full) ride
+// at DEBUG (`RUST_LOG=loopflow=debug`). The tap lives here, at the
+// single-writer choke point, so no producer can journal silently.
+
+/// Loudness of one narrated line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NarrationLevel {
+    Info,
+    Debug,
+}
+
+/// One rendered console line.
+#[derive(Debug)]
+struct Narration {
+    level: NarrationLevel,
+    line: String,
+}
+
+fn info(line: String) -> Narration {
+    Narration {
+        level: NarrationLevel::Info,
+        line,
+    }
+}
+
+fn debug(line: String) -> Narration {
+    Narration {
+        level: NarrationLevel::Debug,
+        line,
+    }
+}
+
+/// Narration state for one in-progress turn: the item count for its closing
+/// line, and whether its first prose fragment already gave the gist at INFO.
+#[derive(Debug)]
+struct TurnNarration {
+    turn_id: String,
+    items: usize,
+    text_shown: bool,
+}
+
+/// Renders journal events as compact console lines. Owned by the [`Journal`],
+/// so it sees exactly the appends (never the boot replay).
+#[derive(Debug, Default)]
+struct Narrator {
+    turns: Vec<TurnNarration>,
+}
+
+impl Narrator {
+    fn narrate(&mut self, kind: &EventKind) {
+        let narration = self.render(kind);
+        match narration.level {
+            NarrationLevel::Info => tracing::info!("{}", narration.line),
+            NarrationLevel::Debug => tracing::debug!("{}", narration.line),
+        }
+    }
+
+    /// One console line per event. The match is exhaustive on purpose — a new
+    /// `EventKind` fails compilation here instead of going silent on the
+    /// console.
+    fn render(&mut self, kind: &EventKind) -> Narration {
+        match kind {
+            EventKind::UserMessage { id, op, text, from } => {
+                let op_tag = match op {
+                    MessageOp::Message | MessageOp::Say => "",
+                    MessageOp::Steer => "(steer) ",
+                    MessageOp::Interrupt => "(interrupt) ",
+                };
+                let byline = from
+                    .as_ref()
+                    .map(|from| format!("[{}] ", from.label))
+                    .unwrap_or_default();
+                info(format!(
+                    "chat ← {op_tag}{byline}\"{}\" ({id})",
+                    ellipsize(text, 60)
+                ))
+            }
+            EventKind::TurnStarted { turn_id, answers } => {
+                let turn = self.turn_mut(turn_id);
+                turn.items = 0;
+                turn.text_shown = false;
+                info(format!("turn {turn_id} opened{}", answers_segment(answers)))
+            }
+            EventKind::TurnItem { turn_id, item } => {
+                let turn = self.turn_mut(turn_id);
+                turn.items += 1;
+                match item {
+                    ConversationItem::Command {
+                        command, status, ..
+                    } => info(format!(
+                        "  $ {} → {}",
+                        ellipsize(&command.join(" "), 70),
+                        lifecycle_name(*status)
+                    )),
+                    ConversationItem::Message { text, .. } => {
+                        if turn.text_shown {
+                            debug(format!("  mind: \"{}\"", ellipsize(text, 120)))
+                        } else {
+                            turn.text_shown = true;
+                            info(format!("mind: \"{}\"", ellipsize(text, 80)))
+                        }
+                    }
+                    ConversationItem::Thought { text, .. } => {
+                        debug(format!("  thought: \"{}\"", ellipsize(text, 120)))
+                    }
+                    ConversationItem::File {
+                        changes, status, ..
+                    } => {
+                        let what = match changes.as_slice() {
+                            [only] => only.path.clone(),
+                            many => format!("{} files", many.len()),
+                        };
+                        info(format!("  edit {what} → {}", lifecycle_name(*status)))
+                    }
+                    ConversationItem::Tool { name, status, .. } => {
+                        info(format!("  tool {name} → {}", lifecycle_name(*status)))
+                    }
+                }
+            }
+            EventKind::TurnSteered { turn_id, answers } => info(format!(
+                "turn {turn_id} steered{}",
+                answers_segment(answers)
+            )),
+            EventKind::TurnFinished {
+                turn_id,
+                status,
+                usage,
+            } => {
+                let items = self.finish_turn(turn_id);
+                let plural = if items == 1 { "" } else { "s" };
+                info(format!(
+                    "turn {turn_id} {} · {items} item{plural}{}",
+                    lifecycle_name(*status),
+                    usage_segment(usage)
+                ))
+            }
+            EventKind::ThreadStarted { vendor, thread_id } => {
+                info(format!("mind thread {vendor} {thread_id}"))
+            }
+            EventKind::MindState { from, to, reason } => {
+                info(format!("state {} → {} ({reason})", from.name(), to.name()))
+            }
+            EventKind::WorkerDispatched {
+                run_id, flow, task, ..
+            } => info(format!(
+                "observed run {} flow={flow} dispatched · {}",
+                short_id(run_id),
+                ellipsize(task, 60)
+            )),
+            EventKind::WorkerFinished {
+                run_id,
+                outcome,
+                summary,
+            } => info(format!(
+                "observed run {} {} · {}",
+                short_id(run_id),
+                outcome.name(),
+                ellipsize(summary, 60)
+            )),
+            EventKind::MemoryUpdated { summary } => {
+                info(format!("memory curated: {}", ellipsize(summary, 70)))
+            }
+        }
+    }
+
+    fn turn_mut(&mut self, turn_id: &str) -> &mut TurnNarration {
+        if let Some(pos) = self.turns.iter().position(|t| t.turn_id == turn_id) {
+            return &mut self.turns[pos];
+        }
+        self.turns.push(TurnNarration {
+            turn_id: turn_id.to_string(),
+            items: 0,
+            text_shown: false,
+        });
+        self.turns.last_mut().expect("just pushed")
+    }
+
+    fn finish_turn(&mut self, turn_id: &str) -> usize {
+        match self.turns.iter().position(|t| t.turn_id == turn_id) {
+            Some(pos) => self.turns.remove(pos).items,
+            None => 0,
+        }
+    }
+}
+
+/// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
+fn ellipsize(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let mut cut: String = flat.chars().take(max).collect();
+    cut.push('…');
+    cut
+}
+
+/// Humanized token count: `812`, `1.4k`, `192k`.
+fn fmt_tokens(n: u64) -> String {
+    if n < 1000 {
+        return n.to_string();
+    }
+    let k = n as f64 / 1000.0;
+    if k < 10.0 {
+        format!("{k:.1}k")
+    } else {
+        format!("{k:.0}k")
+    }
+}
+
+fn lifecycle_name(status: Lifecycle) -> &'static str {
+    match status {
+        Lifecycle::Pending => "pending",
+        Lifecycle::Running => "running",
+        Lifecycle::Completed => "completed",
+        Lifecycle::Failed => "failed",
+        Lifecycle::Interrupted => "interrupted",
+    }
+}
+
+fn answers_segment(answers: &[MessageId]) -> String {
+    if answers.is_empty() {
+        return String::new();
+    }
+    let ids: Vec<&str> = answers.iter().map(|id| id.0.as_str()).collect();
+    format!(" (answers: {})", ids.join(", "))
+}
+
+fn usage_segment(usage: &Usage) -> String {
+    let mut parts = Vec::new();
+    if let Some(input) = usage.input_tokens {
+        parts.push(format!("{} in", fmt_tokens(input)));
+    }
+    if let Some(output) = usage.output_tokens {
+        parts.push(format!("{} out", fmt_tokens(output)));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    let mut segment = format!(" · {}", parts.join(" / "));
+    if let Some(cached) = usage.cache_read_tokens {
+        segment.push_str(&format!(" ({} cached)", fmt_tokens(cached)));
+    }
+    segment
+}
+
+/// A run id shortened for the console (ids correlate by prefix).
+fn short_id(run_id: &str) -> String {
+    run_id.chars().take(8).collect()
+}
+
 /// Append-only writer over one wave's JSONL log.
 ///
 /// There is exactly one `Journal` per running wave, owned by the runtime and
 /// serialized behind its lock — one writer appends and broadcasts; readers
 /// fold. Appends flush per line (no fsync — a lost tail is a truncated tail,
-/// which `open` tolerates).
+/// which `open` tolerates). Every append also narrates one console line (see
+/// [`Narrator`]); replayed events on `open` are not re-narrated.
 #[derive(Debug)]
 pub struct Journal {
     file: File,
     next_seq: u64,
+    narrator: Narrator,
 }
 
 impl Journal {
@@ -349,7 +605,14 @@ impl Journal {
 
         let next_seq = events.last().map(|e| e.seq + 1).unwrap_or(1);
         let file = OpenOptions::new().create(true).append(true).open(path)?;
-        Ok((Self { file, next_seq }, events))
+        Ok((
+            Self {
+                file,
+                next_seq,
+                narrator: Narrator::default(),
+            },
+            events,
+        ))
     }
 
     /// The seq the next appended event will get. Callers that embed ids in
@@ -374,6 +637,8 @@ impl Journal {
             Ok(line) => {
                 if let Err(err) = writeln!(self.file, "{line}").and_then(|_| self.file.flush()) {
                     tracing::error!(seq = event.seq, error = %err, "failed to append journal event");
+                } else {
+                    self.narrator.narrate(&event.kind);
                 }
             }
             Err(err) => {
@@ -734,6 +999,314 @@ mod tests {
             let line = serde_json::to_string(&event).expect("serialize");
             let decoded: Event = serde_json::from_str(&line).expect("deserialize");
             assert_eq!(decoded, event);
+        }
+    }
+
+    /// Every `EventKind` narrates without panicking. The compile-time half of
+    /// the guarantee lives in `Narrator::render` itself: its match has no
+    /// catch-all, so a future event kind fails compilation rather than
+    /// silently skipping narration.
+    #[test]
+    fn narration_renders_every_event_kind() {
+        let kinds = vec![
+            user_message(1, "hi"),
+            EventKind::TurnStarted {
+                turn_id: "turn-2".into(),
+                answers: vec![],
+            },
+            EventKind::TurnItem {
+                turn_id: "turn-2".into(),
+                item: ConversationItem::Message {
+                    id: "text-0".into(),
+                    text: "working on it".into(),
+                    phase: None,
+                },
+            },
+            EventKind::TurnItem {
+                turn_id: "turn-2".into(),
+                item: ConversationItem::Command {
+                    id: "cmd-0".into(),
+                    command: vec!["cargo".into(), "test".into()],
+                    cwd: "/repo".into(),
+                    status: Lifecycle::Completed,
+                    output: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(1200),
+                },
+            },
+            EventKind::TurnItem {
+                turn_id: "turn-2".into(),
+                item: ConversationItem::Thought {
+                    id: "thought-0".into(),
+                    text: "hmm".into(),
+                },
+            },
+            EventKind::TurnItem {
+                turn_id: "turn-2".into(),
+                item: ConversationItem::File {
+                    id: "file-0".into(),
+                    changes: vec![],
+                    status: Lifecycle::Completed,
+                },
+            },
+            EventKind::TurnItem {
+                turn_id: "turn-2".into(),
+                item: ConversationItem::Tool {
+                    id: "tool-0".into(),
+                    name: "Bash".into(),
+                    status: Lifecycle::Completed,
+                    input: None,
+                    output: None,
+                },
+            },
+            EventKind::TurnSteered {
+                turn_id: "turn-2".into(),
+                answers: vec![MessageId("msg-3".into())],
+            },
+            EventKind::TurnFinished {
+                turn_id: "turn-2".into(),
+                status: Lifecycle::Completed,
+                usage: Usage::empty(),
+            },
+            EventKind::ThreadStarted {
+                vendor: "codex".into(),
+                thread_id: "thread-abc".into(),
+            },
+            EventKind::MindState {
+                from: MindState::Idle,
+                to: MindState::Turning {
+                    turn_id: "turn-2".into(),
+                },
+                reason: "turn opened".into(),
+            },
+            EventKind::WorkerDispatched {
+                run_id: "run-1".into(),
+                session_id: "sess-1".into(),
+                flow: "design".into(),
+                task: "sketch the journal".into(),
+            },
+            EventKind::WorkerFinished {
+                run_id: "run-1".into(),
+                outcome: WorkerOutcome::Completed,
+                summary: "landed".into(),
+            },
+            EventKind::MemoryUpdated {
+                summary: "learned the fold".into(),
+            },
+        ];
+        let mut narrator = Narrator::default();
+        for kind in &kinds {
+            let narration = narrator.render(kind);
+            assert!(!narration.line.is_empty(), "silent narration for {kind:?}");
+        }
+    }
+
+    /// A fixed event sequence renders the console a human would want to read:
+    /// chat with bylines and ops, turn open/close with items and usage, the
+    /// prose gist once at INFO with the rest at DEBUG, worker observations,
+    /// memory curation.
+    #[test]
+    fn narration_demo_reads_like_a_console() {
+        let mut narrator = Narrator::default();
+        let mut render = |kind: EventKind| {
+            let narration = narrator.render(&kind);
+            println!(
+                "{:5} {}",
+                format!("{:?}", narration.level).to_uppercase(),
+                narration.line
+            );
+            narration
+        };
+
+        let n = render(EventKind::UserMessage {
+            id: MessageId("msg-1".into()),
+            op: MessageOp::Message,
+            text: "how is the reactive server refactor going?".into(),
+            from: None,
+        });
+        assert_eq!(n.level, NarrationLevel::Info);
+        assert_eq!(
+            n.line,
+            "chat ← \"how is the reactive server refactor going?\" (msg-1)"
+        );
+
+        let n = render(EventKind::UserMessage {
+            id: MessageId("msg-2".into()),
+            op: MessageOp::Say,
+            text: "run-42 landed: PR #12 merged, one clippy fix on the side".into(),
+            from: Some(Attribution {
+                session_id: Some("sess-42".into()),
+                label: "worker".into(),
+            }),
+        });
+        assert_eq!(
+            n.line,
+            "chat ← [worker] \"run-42 landed: PR #12 merged, one clippy fix on the side\" (msg-2)"
+        );
+
+        let n = render(EventKind::UserMessage {
+            id: MessageId("msg-3".into()),
+            op: MessageOp::Steer,
+            text: "focus on the journal tests first".into(),
+            from: None,
+        });
+        assert_eq!(
+            n.line,
+            "chat ← (steer) \"focus on the journal tests first\" (msg-3)"
+        );
+
+        let n = render(EventKind::MindState {
+            from: MindState::Idle,
+            to: MindState::Turning {
+                turn_id: "turn-4".into(),
+            },
+            reason: "turn opened".into(),
+        });
+        assert_eq!(n.line, "state idle → turning (turn opened)");
+
+        let n = render(EventKind::TurnStarted {
+            turn_id: "turn-4".into(),
+            answers: vec![MessageId("msg-1".into()), MessageId("msg-2".into())],
+        });
+        assert_eq!(n.line, "turn turn-4 opened (answers: msg-1, msg-2)");
+
+        // First prose fragment gives the gist at INFO ...
+        let n = render(EventKind::TurnItem {
+            turn_id: "turn-4".into(),
+            item: ConversationItem::Message {
+                id: "text-0".into(),
+                text: "Checking the worker reports,\nthen answering the chat.".into(),
+                phase: None,
+            },
+        });
+        assert_eq!(n.level, NarrationLevel::Info);
+        assert_eq!(
+            n.line,
+            "mind: \"Checking the worker reports, then answering the chat.\""
+        );
+
+        let n = render(EventKind::TurnItem {
+            turn_id: "turn-4".into(),
+            item: ConversationItem::Command {
+                id: "cmd-0".into(),
+                command: vec!["git".into(), "log".into(), "--oneline".into(), "-5".into()],
+                cwd: "/repo".into(),
+                status: Lifecycle::Completed,
+                output: None,
+                exit_code: Some(0),
+                duration_ms: Some(80),
+            },
+        });
+        assert_eq!(n.line, "  $ git log --oneline -5 → completed");
+
+        // ... the rest of the prose and every thought ride at DEBUG.
+        let n = render(EventKind::TurnItem {
+            turn_id: "turn-4".into(),
+            item: ConversationItem::Message {
+                id: "text-1".into(),
+                text: "The build worker is still grinding; I'll dispatch the doc pass.".into(),
+                phase: None,
+            },
+        });
+        assert_eq!(n.level, NarrationLevel::Debug);
+        let n = render(EventKind::TurnItem {
+            turn_id: "turn-4".into(),
+            item: ConversationItem::Thought {
+                id: "thought-0".into(),
+                text: "the queue is empty after this".into(),
+            },
+        });
+        assert_eq!(n.level, NarrationLevel::Debug);
+
+        let n = render(EventKind::TurnSteered {
+            turn_id: "turn-4".into(),
+            answers: vec![MessageId("msg-3".into())],
+        });
+        assert_eq!(n.line, "turn turn-4 steered (answers: msg-3)");
+
+        let n = render(EventKind::TurnFinished {
+            turn_id: "turn-4".into(),
+            status: Lifecycle::Completed,
+            usage: Usage {
+                input_tokens: Some(192_400),
+                output_tokens: Some(1_400),
+                cache_read_tokens: Some(182_000),
+                cost_usd: Some(0.42),
+            },
+        });
+        assert_eq!(
+            n.line,
+            "turn turn-4 completed · 4 items · 192k in / 1.4k out (182k cached)"
+        );
+
+        let n = render(EventKind::ThreadStarted {
+            vendor: "codex".into(),
+            thread_id: "thread-7f3a".into(),
+        });
+        assert_eq!(n.line, "mind thread codex thread-7f3a");
+
+        let n = render(EventKind::WorkerDispatched {
+            run_id: "run-8c1d2e3f4a".into(),
+            session_id: "sess-9".into(),
+            flow: "build".into(),
+            task: "wire the narration tap into the journal".into(),
+        });
+        assert_eq!(
+            n.line,
+            "observed run run-8c1d flow=build dispatched · wire the narration tap into the journal"
+        );
+
+        let n = render(EventKind::WorkerFinished {
+            run_id: "run-8c1d2e3f4a".into(),
+            outcome: WorkerOutcome::Completed,
+            summary: "narration tap landed, suite green".into(),
+        });
+        assert_eq!(
+            n.line,
+            "observed run run-8c1d completed · narration tap landed, suite green"
+        );
+
+        let n = render(EventKind::MemoryUpdated {
+            summary: "journal is the console's source of truth".into(),
+        });
+        assert_eq!(
+            n.line,
+            "memory curated: journal is the console's source of truth"
+        );
+    }
+
+    /// Long text is flattened and cut; a fresh turn resets the prose gist.
+    #[test]
+    fn narration_truncates_and_resets_per_turn() {
+        let mut narrator = Narrator::default();
+        let long = "x".repeat(100);
+        let n = narrator.render(&EventKind::UserMessage {
+            id: MessageId("msg-1".into()),
+            op: MessageOp::Message,
+            text: long.clone(),
+            from: None,
+        });
+        assert_eq!(n.line, format!("chat ← \"{}…\" (msg-1)", "x".repeat(60)));
+
+        for turn in ["turn-2", "turn-5"] {
+            narrator.render(&EventKind::TurnStarted {
+                turn_id: turn.into(),
+                answers: vec![],
+            });
+            let n = narrator.render(&EventKind::TurnItem {
+                turn_id: turn.into(),
+                item: ConversationItem::Message {
+                    id: "text-0".into(),
+                    text: "gist".into(),
+                    phase: None,
+                },
+            });
+            assert_eq!(n.level, NarrationLevel::Info, "each turn gets one gist");
+            narrator.render(&EventKind::TurnFinished {
+                turn_id: turn.into(),
+                status: Lifecycle::Completed,
+                usage: Usage::empty(),
+            });
         }
     }
 

@@ -129,7 +129,7 @@ across all sources. `from` is the speaker byline of an attributed emission
 
 ```
 lf wave demo
-# → lf wave · demo · reactive server on http://127.0.0.1:52306 (Ctrl-C to stop)
+# → lf wave · demo · reactive server on http://127.0.0.1:52306 (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)
 
 curl 127.0.0.1:52306/health
 curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \

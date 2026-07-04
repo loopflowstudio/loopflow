@@ -273,7 +273,10 @@ async fn serve(
     crate::engine::agent::register_interrupt_cleanup(move || {
         server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
     });
-    println!("lf wave · {wave} · reactive server on http://{addr} (Ctrl-C to stop)");
+    println!(
+        "lf wave · {wave} · reactive server on http://{addr} \
+         (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)"
+    );
 
     let app = server::router(runtime.clone());
     let result = axum::serve(listener, app)

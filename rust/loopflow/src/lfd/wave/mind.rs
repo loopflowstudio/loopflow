@@ -177,13 +177,19 @@ pub fn path_for_children() -> OsString {
     std::env::join_paths(paths).unwrap_or(inherited)
 }
 
-/// The mind's operating prompt: the rendered goal seed plus the orchestration
-/// discipline. Rides the harness `AgentConfig` system prompt, which the codex
-/// driver prepends to the first turn of the thread.
+/// The mind's operating prompt: the rendered goal seed, the orchestration
+/// discipline, and the shared speech vocabulary (the mind's prompt bypasses
+/// context assembly, so the `<lf:speak>` section is appended here). Rides the
+/// harness `AgentConfig` system prompt, which the codex driver prepends to
+/// the first turn of the thread.
 pub fn mind_agent_config(runtime: &WaveRuntime, cwd: &Path) -> AgentConfig {
     let seed = build_goal_seed(runtime.repo_root(), runtime.name(), runtime.memory());
     AgentConfig {
-        system_prompt: format!("{seed}\n\n{}", orchestration_discipline(runtime.name())),
+        system_prompt: format!(
+            "{seed}\n\n{}\n\n{}",
+            orchestration_discipline(runtime.name()),
+            crate::engine::prompt::speak_section()
+        ),
         task_prompt: String::new(),
         agent: None,
         max_turns: None,
@@ -224,7 +230,10 @@ fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
 }
 
 /// The coordinating-session discipline, promoted into the mind's system
-/// prompt: the mind orchestrates, it never grinds inline.
+/// prompt: the mind orchestrates, it never grinds inline. Mind-specific rules
+/// only — the speech/memory vocabulary rides the shared `<lf:speak>` section
+/// ([`crate::engine::prompt::speak_section`]), appended in
+/// [`mind_agent_config`], not duplicated here.
 fn orchestration_discipline(wave: &str) -> String {
     format!(
         "You are the mind of the '{wave}' wave — its long-running orchestrator.\n\
@@ -236,12 +245,6 @@ fn orchestration_discipline(wave: &str) -> String {
          human.\n\
          - Exception: trivial, single-file, sub-minute work is done inline \
          without dispatch; dispatch is for real units of work.\n\
-         - Speak through `lf chat`: replies to a human message stay normal \
-         turn text, but proactive FYIs go through `lf chat \"<note>\"`, and \
-         `lf chat --parent \"<report>\"` escalates to this wave's parent.\n\
-         - Curate memory with `lf memory update` (full replacement from \
-         stdin) or `lf memory add \"<fact>\"` — wave/{wave}/MEMORY.md is \
-         server-owned now; never edit the file directly.\n\
          - Keep turns short — decisions and dispatches, not implementation.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
@@ -255,19 +258,22 @@ fn orchestration_discipline(wave: &str) -> String {
 /// the existing [`TurnSink`] pipeline (journal, open-turn snapshot, SSE,
 /// `MindState`) keeps working unchanged — one pipeline, not a fork.
 ///
-/// Turn-grained for the MVP wire: token deltas (`TextDelta`,
-/// `ReasoningDelta`) and `ItemStarted`/`ItemUpdated` phases are dropped;
-/// prose lands once, via the completed `Message` item (codex sends the final
-/// agent message text in `item/completed`). Codex reports usage *after*
-/// `TurnCompleted`, so finalization is held until the trailing `TurnUsage`
-/// (or flushed by whatever event comes next) — the `Finished` delta then
-/// carries the assembled turn whole, as the sink expects.
+/// Turn-grained for the MVP wire: reasoning deltas and item phases are
+/// dropped. Prose lands once: prefer a completed `Message` item when the
+/// harness has one (codex), otherwise fold buffered `TextDelta`s at the turn
+/// boundary (Claude/OpenCode). Harnesses emit `TurnUsage` after
+/// `TurnCompleted` (possibly empty); finalization is held until that trailing
+/// usage so the `Finished` delta carries the assembled turn whole.
 #[derive(Debug, Default)]
 pub struct EventAdapter {
     /// The turn being assembled, mirroring what the sink journals.
     open: Option<ChatTurn>,
     /// Completed turn awaiting its trailing `TurnUsage` before `Finished`.
     finished: Option<ChatTurn>,
+    /// Streaming prose from harnesses that do not send a final Message item.
+    buffered_text_delta: String,
+    /// Whether this turn already received final prose as a Message item.
+    saw_message_item: bool,
 }
 
 impl EventAdapter {
@@ -282,6 +288,7 @@ impl EventAdapter {
                 self.flush_finished(&mut deltas, None);
                 if self.open.is_some() {
                     // Defensive: the vendor opened a turn over an open one.
+                    self.flush_buffered_text(&mut deltas);
                     self.close_open(Lifecycle::Failed);
                     self.flush_finished(&mut deltas, None);
                 }
@@ -294,6 +301,8 @@ impl EventAdapter {
                     created_at: String::new(),
                     from: None,
                 });
+                self.buffered_text_delta.clear();
+                self.saw_message_item = false;
                 deltas.push(TurnDelta::Opened);
             }
             ConversationEvent::ItemCompleted { item, .. } => {
@@ -310,6 +319,7 @@ impl EventAdapter {
                     return deltas;
                 };
                 if let ConversationItem::Message { text, .. } = item {
+                    self.saw_message_item = true;
                     if !open.text.is_empty() {
                         open.text.push('\n');
                     }
@@ -320,8 +330,15 @@ impl EventAdapter {
                     deltas.push(TurnDelta::Item(item.clone()));
                 }
             }
+            ConversationEvent::TextDelta { content, .. } => {
+                self.flush_finished(&mut deltas, None);
+                if self.open.is_some() {
+                    self.buffered_text_delta.push_str(content);
+                }
+            }
             ConversationEvent::TurnCompleted { status, .. } => {
                 self.flush_finished(&mut deltas, None);
+                self.flush_buffered_text(&mut deltas);
                 self.close_open(*status);
             }
             ConversationEvent::TurnUsage { usage, .. } => {
@@ -339,6 +356,7 @@ impl EventAdapter {
                 // scheduler decides whether the mind itself is dead.
                 self.flush_finished(&mut deltas, None);
                 if self.open.is_some() {
+                    self.flush_buffered_text(&mut deltas);
                     self.close_open(Lifecycle::Failed);
                     self.flush_finished(&mut deltas, None);
                 }
@@ -356,6 +374,26 @@ impl EventAdapter {
             turn.status = status;
             self.finished = Some(turn);
         }
+        self.buffered_text_delta.clear();
+        self.saw_message_item = false;
+    }
+
+    fn flush_buffered_text(&mut self, deltas: &mut Vec<TurnDelta>) {
+        if self.saw_message_item || self.buffered_text_delta.is_empty() {
+            self.buffered_text_delta.clear();
+            return;
+        }
+        let Some(open) = self.open.as_mut() else {
+            self.buffered_text_delta.clear();
+            return;
+        };
+        if !open.text.is_empty() {
+            open.text.push('\n');
+        }
+        open.text.push_str(&self.buffered_text_delta);
+        deltas.push(TurnDelta::Text(std::mem::take(
+            &mut self.buffered_text_delta,
+        )));
     }
 
     fn flush_finished(&mut self, deltas: &mut Vec<TurnDelta>, cost_usd: Option<f64>) {
@@ -1025,24 +1063,116 @@ mod tests {
         assert!(finished.text.is_empty(), "no stray text from empty items");
     }
 
-    /// The operating prompt teaches the speech/memory vocabulary: `lf chat`
-    /// for proactive FYIs and escalation, `lf memory` for curation (the file
-    /// is server-owned now).
     #[test]
-    fn operating_prompt_teaches_chat_and_memory_vocabulary() {
-        let prompt = orchestration_discipline("ship");
-        assert!(prompt.contains("lf chat"), "prompt names lf chat");
+    fn text_delta_only_turn_finishes_with_text() {
+        let mut adapter = EventAdapter::new();
+        adapter.feed(&ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        let deltas = adapter.feed(&ConversationEvent::TextDelta {
+            turn_id: "vt".into(),
+            content: "Hello from OpenCode".into(),
+        });
         assert!(
-            prompt.contains("lf chat --parent"),
-            "prompt names parent escalation"
+            deltas.is_empty(),
+            "streaming prose buffers until the turn boundary"
         );
+
+        let deltas = adapter.feed(&ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        assert!(matches!(
+            deltas.as_slice(),
+            [TurnDelta::Text(text)] if text == "Hello from OpenCode"
+        ));
+
+        let deltas = adapter.feed(&ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+        let finished = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                TurnDelta::Finished { turn, .. } => Some(turn.clone()),
+                _ => None,
+            })
+            .expect("turn finished");
+        assert_eq!(finished.text, "Hello from OpenCode");
+    }
+
+    #[test]
+    fn final_message_item_wins_over_buffered_text_delta() {
+        let mut adapter = EventAdapter::new();
+        adapter.feed(&ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        adapter.feed(&ConversationEvent::TextDelta {
+            turn_id: "vt".into(),
+            content: "Hello from Codex".into(),
+        });
+        let message_deltas = adapter.feed(&ConversationEvent::ItemCompleted {
+            turn_id: "vt".into(),
+            item: ConversationItem::Message {
+                id: "msg".into(),
+                text: "Hello from Codex".into(),
+                phase: None,
+            },
+        });
+        assert!(matches!(
+            message_deltas.as_slice(),
+            [TurnDelta::Text(text)] if text == "Hello from Codex"
+        ));
+
+        let completed_deltas = adapter.feed(&ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        assert!(
+            completed_deltas.is_empty(),
+            "buffered deltas are discarded once a final Message item arrived"
+        );
+
+        let deltas = adapter.feed(&ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+        let finished = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                TurnDelta::Finished { turn, .. } => Some(turn.clone()),
+                _ => None,
+            })
+            .expect("turn finished");
+        assert_eq!(finished.text, "Hello from Codex");
+    }
+
+    /// The mind's prompt teaches the speech/memory vocabulary through the one
+    /// shared `<lf:speak>` section — exactly once, and the mind-specific
+    /// discipline no longer duplicates it.
+    #[test]
+    fn mind_prompt_carries_the_shared_speech_vocabulary_once() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (runtime, _inbox) =
+            WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
+        let prompt = mind_agent_config(&runtime, tmp.path()).system_prompt;
+
+        assert_eq!(
+            prompt.matches("<lf:speak>").count(),
+            1,
+            "speech section appears exactly once"
+        );
+        assert!(prompt.contains("lf chat --parent"), "parent escalation");
         assert!(
             prompt.contains("lf memory update") && prompt.contains("lf memory add"),
-            "prompt names memory curation"
+            "memory curation"
         );
+        assert!(prompt.contains("server-owned"), "the file is server-owned");
+
+        let discipline = orchestration_discipline("ship");
         assert!(
-            prompt.contains("server-owned"),
-            "prompt says the file is server-owned"
+            !discipline.contains("lf chat") && !discipline.contains("lf memory"),
+            "the discipline keeps only mind-specific rules"
         );
     }
 

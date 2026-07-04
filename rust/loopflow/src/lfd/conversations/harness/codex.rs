@@ -13,7 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -33,6 +33,21 @@ use crate::lfd::conversations::harness::common::spawn_stderr_logger;
 use crate::lfd::conversations::harness::lf_tag::LfTagParser;
 use crate::lfd::conversations::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
 use crate::lfd::conversations::types::{ConversationEvent, TurnUsage};
+
+/// SIGKILL an entire process group. Killing only the direct child orphans
+/// the real app-server when `codex` on PATH is an npm shim that spawns it as
+/// a grandchild (verified live — the orphan kept running and held the stdio
+/// pipes open). Shared by `stop()` and the interrupt hook.
+fn kill_process_group(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: plain syscall; a negative pid targets the process group we
+    // created for the child at spawn (process_group(0)).
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL)
+    };
+    #[cfg(not(unix))]
+    let _ = pid;
+}
 
 #[derive(Debug)]
 enum OutboundRpc {
@@ -277,6 +292,13 @@ pub struct CodexHarness {
     thread_start_request_id: Arc<AtomicI64>,
     launch: Option<AgentConfig>,
     should_seed_prompt: bool,
+    /// Pid of the live child's process group; 0 = none. Read by the interrupt
+    /// hook so SIGINT/SIGTERM/SIGHUP kill the whole codex group before the
+    /// process exits — the signal handler exits without running destructors,
+    /// so `kill_on_drop` never fires on that path (observed live: `tmux
+    /// kill-session` orphaned the app-server pair).
+    child_group: Arc<AtomicU32>,
+    interrupt_hook_registered: bool,
 }
 
 impl std::fmt::Debug for CodexHarness {
@@ -304,6 +326,8 @@ impl CodexHarness {
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
             launch: None,
             should_seed_prompt: true,
+            child_group: Arc::new(AtomicU32::new(0)),
+            interrupt_hook_registered: false,
         }
     }
 
@@ -484,20 +508,14 @@ impl Harness for CodexHarness {
         let _ = self.interrupt().await;
 
         if let Some(child) = self.child.as_mut() {
-            // Kill the whole process group, not just the direct child: when
-            // `codex` on PATH is an npm shim, the real app-server is a
-            // grandchild and start_kill alone orphans it (verified live —
-            // the orphan kept running and held the stdio pipes open).
-            #[cfg(unix)]
             if let Some(pid) = child.id() {
-                // SAFETY: plain syscall; a negative pid targets the process
-                // group we created for the child at spawn (process_group(0)).
-                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                kill_process_group(pid);
             }
             let _ = child.start_kill();
             let _ = child.wait().await;
         }
         self.child = None;
+        self.child_group.store(0, Ordering::Release);
         self.turn_in_progress.store(false, Ordering::Relaxed);
 
         self.shutdown_tasks().await;
@@ -538,6 +556,26 @@ impl CodexHarness {
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
+
+        // Publish the group pid for the interrupt hook: the signal handler
+        // (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the process before
+        // destructors run, so `kill_on_drop` never fires on that path. The
+        // hook is what keeps `tmux kill-session` from orphaning the
+        // app-server group. Registered once per harness; restarts just
+        // update the atomic.
+        if let Some(pid) = child.id() {
+            self.child_group.store(pid, Ordering::Release);
+        }
+        if !self.interrupt_hook_registered {
+            self.interrupt_hook_registered = true;
+            let group = Arc::clone(&self.child_group);
+            crate::engine::agent::register_interrupt_cleanup(move || {
+                let pid = group.swap(0, Ordering::AcqRel);
+                if pid != 0 {
+                    kill_process_group(pid);
+                }
+            });
+        }
 
         let stdin = child
             .stdin
@@ -757,6 +795,33 @@ mod tests {
             None,
         );
         (state, slot)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_process_group_reaches_the_grandchild() {
+        // The npm-shim shape: the direct child backgrounds a grandchild
+        // (same process group) and exits. The grandchild touches a flag
+        // file after a short sleep; killing the group must take it down
+        // before the sleep finishes, so the flag never appears. This is
+        // the same kill the interrupt hook fires on SIGINT/SIGTERM/SIGHUP.
+        let tmp = tempfile::tempdir().unwrap();
+        let flag = tmp.path().join("survived");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("(sleep 1 && touch {}) &", flag.display()));
+        command.process_group(0);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+        // Let the shell fork the grandchild and exit.
+        let _ = child.wait().await;
+
+        kill_process_group(pid);
+
+        // Past the grandchild's sleep: if it leaked, the flag would exist.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(!flag.exists(), "grandchild outlived the group kill");
     }
 
     #[test]

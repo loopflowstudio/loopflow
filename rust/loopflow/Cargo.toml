@@ -49,7 +49,10 @@ subtle = "2"
 
 # --- Dependencies from lf ---
 anyhow = "1"
-ctrlc = "3"
+# `termination` extends the handler to SIGTERM and SIGHUP: `tmux kill-session`
+# delivers SIGHUP, which must run the same cleanups as Ctrl-C (endpoint removal,
+# registry deregistration, child kills) instead of orphaning them.
+ctrlc = { version = "3", features = ["termination"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # --- Dependencies from lfd ---

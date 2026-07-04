@@ -261,7 +261,10 @@ fn main() -> anyhow::Result<()> {
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
-    // survive as an orphan.
+    // survive as an orphan. The `termination` feature extends the handler
+    // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
+    // otherwise bypasses every cleanup (observed live: it orphaned the wave
+    // mind's codex app-server pair and left a stale .wave-endpoint).
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();

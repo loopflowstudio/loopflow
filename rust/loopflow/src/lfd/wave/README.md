@@ -31,8 +31,13 @@ a busy-loop.
   stop the heartbeat. The next user message revives it.
 - **One brain per wave.** On boot the server writes itself a `WaveAgent`
   session row in the shared store (source `wave_server`, endpoint + pid in
-  `env`; the db IS the registry — no daemon in the path). The row is marked
-  terminal on shutdown or Ctrl-C; a crashed server's row is closed by the
+  `env`; the db IS the registry — no daemon in the path; opening the store
+  applies pending migrations, so an `lf` built ahead of the machine's lfd
+  never hits schema drift). The row is marked terminal on shutdown or any
+  termination signal — the interrupt hooks cover SIGINT, SIGTERM, *and*
+  SIGHUP (`tmux kill-session` delivers SIGHUP; it must deregister the row,
+  remove the pointer, and kill the mind's codex process group, same as
+  Ctrl-C). A crashed server's row is closed by the
   next boot's pid probe (and by lfd's reconciliation, when one runs). lfd's
   loop ticker and `run_wave` skip a wave with a live registered brain; a
   second `lf wave` refuses to start naming the live session unless `--force`
@@ -63,7 +68,16 @@ context (`LFD_WAVE_ID`, else the worktree name; `--parent` walks
 `parent_wave_id` through the registry; `--wave <name>` is explicit), finds
 the live endpoint via the target's WaveAgent session row (falling back to
 `.wave-endpoint`), and POSTs a `say` op. Dispatched workers are instructed to
-finish with an `lf chat` report, closing the loop through the same door.
+finish with an `lf chat` report, closing the loop through the same door —
+it arrives in the thread with a `from` byline (label from `LFD_AGENT_ROLE`,
+session id from `LFD_SESSION_ID`) and wakes the mind like any input.
+
+The context flows back out the same way: every `lf` run born inside a wave
+(env, else worktree) inherits ambient wave context in its assembled prompt —
+`<lf:wave-chat-recent>` (the newest turns, hard-capped) and
+`<lf:wave-memory>` (MEMORY.md). Reads go through the live server, else a
+read-only journal fold, else nothing; no wave resolves → both sections are
+absent and flows stay wave-agnostic (see `engine/wave_context.rs`).
 
 `lf wave <name>` self-bootstraps its worktree: it ensures the wave's
 `<repo>.<wave>` sibling exists (creating it off main on first boot) and
@@ -86,7 +100,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 |---------------------------|----------|
 | `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
-| `GET /conversation/stream`| SSE; each event named `turn`, `data:` a `Turn` JSON. Replays the thread on connect, then streams live. |
+| `GET /conversation/stream`| SSE, two event names: `state` (`data:` the mind-state name, sent on subscribe and on every transition — the composer keys its verb off it) and `turn` (`data:` a `Turn` JSON; the thread replays on connect, then streams live; turn ids repeat — each frame replaces the client's previous state for that id). |
 | `POST /messages {op, text, from?}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). Returns `{turn, state}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `POST /memory {op, content, summary}` | `op`: `update` (full replacement) or `add` (append one bullet). `summary` null → first non-empty content line. The server holds MEMORY.md's pen and journals `MemoryUpdated`. Returns `{summary}`. |
@@ -123,3 +137,7 @@ curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \
 curl 127.0.0.1:52306/conversation
 curl -N 127.0.0.1:52306/conversation/stream
 ```
+
+The full guided walk — chat, steer, interrupt, worker dispatch, attributed
+reports, restart, teardown — is `scripts/demo_wave.sh` (`--smoke` for a
+zero-model-turn sanity pass).

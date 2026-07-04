@@ -36,8 +36,19 @@ lfq attach <session-id>      # jump into one over tmux
 Run the wave in your terminal:
 
 ```bash
-lf wave designer             # reactive server: progress loop + chat, until Ctrl-C
+lf wave designer             # the wave's server: one persistent mind, until Ctrl-C
+lf chat "ship the button audit first"     # speak into its thread (any process can)
+lf memory add "buttons: variants unified" # curate what it knows
 ```
+
+`lf wave <name>` starts a long-lived server in the wave's own worktree: one
+persistent codex thread handles progress and chat as a single conversation —
+messages queue mid-turn, steer redirects a live turn, interrupt finalizes a
+partial one. Truth is an append-only journal, so a restart keeps the whole
+thread. `lf chat` and `lf memory` are the speech surface — the same doors for
+minds, workers, humans, and scripts; worker reports arrive attributed in the
+thread. See `rust/loopflow/src/lfd/wave/README.md` for the wire contract, and
+`scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
@@ -48,7 +59,7 @@ lf wave s3           # the s3 (control) charter
 The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
 
 ```bash
-lfq worker run designer --flow build --task "unify button variants"
+lf q worker run designer --flow build --task "unify button variants"
 ```
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.

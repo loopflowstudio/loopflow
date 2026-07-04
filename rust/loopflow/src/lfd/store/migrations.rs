@@ -215,8 +215,7 @@ const ALL_MIGRATIONS: &[Migration] = &[
 /// Migrations that rename schema objects fresh dbs never had under the old
 /// names (the collapse edited historical CREATEs in place): their "no such
 /// table/column" failure means "already in the target state".
-const RENAME_CONVERGENCE_MIGRATIONS: &[&str] =
-    &["048_terminal_sessions_run_id", "049_runs_rename"];
+const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &["048_terminal_sessions_run_id", "049_runs_rename"];
 
 /// Per-migration failures that mean "the db is already in the target state":
 /// record the migration as applied and converge instead of crashing.
@@ -554,7 +553,6 @@ mod drift_tests {
         assert!(has_run_id, "wave_run_id should be renamed to run_id");
     }
 
-
     #[test]
     fn runs_rename_converges_an_old_schema_db() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -586,12 +584,17 @@ mod drift_tests {
         for table in ["agents", "fork_runs"] {
             let has_run_id: bool = conn
                 .query_row(
-                    &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name='run_id'"),
+                    &format!(
+                        "SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name='run_id'"
+                    ),
                     [],
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert!(has_run_id, "{table}.wave_run_id should be renamed to run_id");
+            assert!(
+                has_run_id,
+                "{table}.wave_run_id should be renamed to run_id"
+            );
         }
     }
 

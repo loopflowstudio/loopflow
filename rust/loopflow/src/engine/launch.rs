@@ -141,7 +141,7 @@ pub fn prepare_launch_prompt(
         .unwrap_or_else(|| "claude:opus".to_string());
     validate_agent_policy(&agent)?;
 
-    // Keep only system-safe sections (operate/voice/surface/directions) in
+    // Keep only system-safe sections (operate/surface/directions) in
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
     let system_prompt = format_claude_system_prompt(gathered.components());

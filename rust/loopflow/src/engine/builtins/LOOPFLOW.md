@@ -91,6 +91,6 @@ such as dropping tables or deleting branches.
 ## Adaptation
 
 When you learn something repo-specific, write it into `.lf/`: adapt a step
-(`.lf/steps/<name>.md`), a direction (`.lf/directions/<name>.md`), voice
-(`.lf/voice.md`), or config (`.lf/config.yaml`). Commit `.lf/` changes alongside
+(`.lf/steps/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
+(`.lf/config.yaml`). Commit `.lf/` changes alongside
 the work so they stay transparent and reviewable.

@@ -194,7 +194,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 step_name,
                 message,
                 prepared.components.operate,
-                prepared.components.voice_doc.as_deref(),
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
@@ -261,16 +260,11 @@ fn skill_launch_seed(
     step_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    voice: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
         surface,
         operate: loopflow,
-        voice_doc: voice
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
         ..Default::default()
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
@@ -505,18 +499,15 @@ mod tests {
     }
 
     #[test]
-    fn skill_launch_seed_starts_with_slash_step_surface_and_interactive_voice() {
+    fn skill_launch_seed_starts_with_slash_step_and_message() {
         let seed = skill_launch_seed(
             "claude",
             Surface::Cli,
             "implement",
             Some("build auth"),
             false,
-            Some("Be terse."),
         );
         assert!(seed.starts_with("/implement\n\n"));
-        assert!(seed.contains("Run mode is interactive"));
-        assert!(seed.contains("<lf:voice>\nBe terse.\n</lf:voice>"));
         // Orientation now lives in the step body, not the seed.
         assert!(!seed.contains("<lf:orientation>"));
         assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
@@ -526,61 +517,42 @@ mod tests {
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
-    fn skill_launch_seed_ide_omits_voice_and_surface() {
-        let seed = skill_launch_seed(
-            "claude",
-            Surface::Ide,
-            "gate",
-            Some("build auth"),
-            false,
-            Some("Be terse."),
-        );
-
-        assert!(seed.starts_with("/gate\n\n"));
-        assert!(!seed.contains("Run mode is interactive"));
-        assert!(!seed.contains("Run mode is headless"));
-        assert!(!seed.contains("<lf:voice>"));
-        assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
+    fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
+        for surface in [Surface::Cli, Surface::Ide, Surface::ConcertoMac] {
+            let seed = skill_launch_seed("claude", surface, "gate", None, false);
+            assert!(seed.starts_with("/gate\n\n"));
+            assert!(!seed.contains("Run mode"), "surface {surface:?}");
+        }
     }
 
     #[test]
-    fn skill_launch_seed_omits_voice_and_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None);
-        assert!(seed.starts_with("/gate\n\n"));
-        assert!(!seed.contains("<lf:voice>"));
+    fn skill_launch_seed_omits_message_when_absent() {
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
-    fn skill_launch_seed_omits_voice_for_headless_surface() {
-        let seed = skill_launch_seed(
-            "claude",
-            Surface::Headless,
-            "implement",
-            None,
-            false,
-            Some("Be terse."),
-        );
+    fn skill_launch_seed_headless_includes_preamble() {
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false);
         assert!(seed.contains("Run mode is headless"));
-        assert!(!seed.contains("<lf:voice>"));
     }
 
     #[test]
     fn skill_launch_seed_omits_loopflow_when_disabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false);
         assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf op commit"));
     }
 
     #[test]
     fn skill_launch_seed_includes_loopflow_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true);
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("lf op commit"));
         assert!(seed.contains("</lf:loopflow>"));

@@ -218,18 +218,13 @@ pub enum Surface {
 }
 
 impl Surface {
-    pub fn is_interactive(self) -> bool {
-        !matches!(self, Self::Headless)
-    }
-
+    /// Only headless runs need a preamble — no user is present, so the agent
+    /// must be told not to wait for one. Interactive surfaces speak for
+    /// themselves.
     pub fn instructions(self) -> &'static str {
-        use crate::engine::builtins;
         match self {
-            Self::Headless => builtins::SURFACE_HEADLESS,
-            Self::Cli => builtins::SURFACE_CLI,
-            Self::Ide => "",
-            Self::ConcertoMac => builtins::SURFACE_CONCERTO_MAC,
-            Self::ConcertoIphone => builtins::SURFACE_CONCERTO_IPHONE,
+            Self::Headless => crate::engine::builtins::SURFACE_HEADLESS,
+            _ => "",
         }
     }
 }
@@ -265,8 +260,6 @@ pub struct PromptComponents {
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    /// Voice/tone guidance resolved from user ~/.lf/ or repo .lf/.
-    pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,
     /// How diff context was tiered
@@ -569,14 +562,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md.
-    // Only read when it will render (see format_system_sections): interactive, non-IDE surfaces.
-    let voice_doc = if opts.surface.is_interactive() && opts.surface != Surface::Ide {
-        resolve_voice_doc(repo_root)
-    } else {
-        None
-    };
-
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
         surface: opts.surface,
@@ -591,7 +576,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         wave_memory,
         wave: opts.wave.clone(),
         operate: opts.operate,
-        voice_doc,
         message: opts.message.clone(),
         diff_tier,
         diff_file_count,
@@ -632,24 +616,6 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     docs.extend(gather_files(&spec.repo_root, &files)?);
 
     Ok(docs)
-}
-
-/// Resolve voice doc: user `~/.lf/voice.md` > repo `.lf/voice.md`.
-/// Only one is loaded — first match wins.
-fn resolve_voice_doc(repo_root: &Path) -> Option<String> {
-    // 1. User-global
-    if let Some(home) = dirs::home_dir() {
-        let user_voice = home.join(".lf/voice.md");
-        if let Ok(content) = std::fs::read_to_string(&user_voice) {
-            return Some(content);
-        }
-    }
-    // 2. Repo-local
-    let repo_voice = repo_root.join(".lf/voice.md");
-    if let Ok(content) = std::fs::read_to_string(&repo_voice) {
-        return Some(content);
-    }
-    None
 }
 
 fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
@@ -1647,7 +1613,7 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: loopflow, voice, surface.
+/// third-party app classifiers: loopflow, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1656,12 +1622,6 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
             "<lf:loopflow>\n{}\n</lf:loopflow>",
             crate::engine::builtins::LOOPFLOW_DOC
         ));
-    }
-
-    if components.surface.is_interactive() && components.surface != Surface::Ide {
-        if let Some(ref voice) = components.voice_doc {
-            parts.push(format!("<lf:voice>\n{}\n</lf:voice>", voice));
-        }
     }
 
     let instructions = components.surface.instructions();
@@ -2196,18 +2156,6 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_includes_voice_when_provided() {
-        let components = PromptComponents {
-            surface: Surface::Cli,
-            voice_doc: Some("Be crisp.".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:voice>\nBe crisp.\n</lf:voice>"));
-    }
-
-    #[test]
     fn format_prompt_includes_loopflow_when_enabled() {
         let components = PromptComponents {
             operate: true,
@@ -2233,55 +2181,22 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_cli_surface_no_auto_message() {
-        let components = PromptComponents {
-            surface: Surface::Cli,
-            ..Default::default()
-        };
+    fn format_prompt_interactive_surfaces_have_no_preamble() {
+        for surface in [
+            Surface::Cli,
+            Surface::Ide,
+            Surface::ConcertoMac,
+            Surface::ConcertoIphone,
+        ] {
+            let components = PromptComponents {
+                surface,
+                ..Default::default()
+            };
 
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("Run mode is auto"));
-        assert!(prompt.contains("Run mode is interactive"));
-    }
-
-    #[test]
-    fn format_prompt_ide_surface_omits_voice_and_surface_instructions() {
-        let components = PromptComponents {
-            surface: Surface::Ide,
-            voice_doc: Some("Use repo voice.".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("<lf:voice>"));
-        assert!(!prompt.contains("Run mode is interactive"));
-        assert!(!prompt.contains("Run mode is headless"));
-        assert!(!prompt.contains("Surface:"));
-    }
-
-    #[test]
-    fn format_prompt_concerto_mac_surface_message() {
-        let components = PromptComponents {
-            surface: Surface::ConcertoMac,
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Run mode is interactive"));
-        assert!(prompt.contains("Surface: Concerto (macOS)"));
-    }
-
-    #[test]
-    fn format_prompt_concerto_iphone_surface_message() {
-        let components = PromptComponents {
-            surface: Surface::ConcertoIphone,
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Run mode is interactive"));
-        assert!(prompt.contains("Surface: Concerto (iPhone)"));
-        assert!(prompt.contains("Minimize back-and-forth"));
+            let prompt = render_full_prompt(components);
+            assert!(!prompt.contains("Run mode"), "surface {surface:?}");
+            assert!(!prompt.contains("Surface:"), "surface {surface:?}");
+        }
     }
 
     #[test]
@@ -3189,7 +3104,6 @@ directions:
 
         let context = format_context_prompt(&components);
         // Should include context parts
-        assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("<lf:files>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
@@ -3202,16 +3116,15 @@ directions:
     }
 
     #[test]
-    fn format_context_prompt_cli_surface_message() {
+    fn format_context_prompt_headless_surface_message() {
         let components = PromptComponents {
-            surface: Surface::Cli,
+            surface: Surface::Headless,
             ..Default::default()
         };
 
         let context = format_context_prompt(&components);
-        assert!(context.contains("Run mode is interactive"));
-        assert!(context.contains("ask questions"));
-        assert!(context.contains("wait for feedback"));
+        assert!(context.contains("Run mode is headless"));
+        assert!(context.contains("scratch/questions.md"));
     }
 
     // ==========================================================================

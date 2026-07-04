@@ -1,4 +1,8 @@
-use serde_json::{json, Value};
+//! Mapping from codex app-server (codex-cli 0.142.5) wire shapes to
+//! conversation events. Shapes verified against a live session and the
+//! bundle from `codex app-server generate-json-schema` (v2).
+
+use serde_json::Value;
 
 use crate::lfd::conversations::types::{
     ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
@@ -10,87 +14,96 @@ pub(super) enum ItemPhase {
     Completed,
 }
 
+/// Turn id from notification params: item/turn-scoped notifications carry a
+/// top-level `turnId`; turn/started and turn/completed nest it as `turn.id`.
 pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
     params
-        .get("turn")
-        .and_then(|t| t.get("id"))
+        .get("turnId")
         .and_then(Value::as_str)
-        .or_else(|| params.get("turnId").and_then(Value::as_str))
+        .or_else(|| {
+            params
+                .get("turn")
+                .and_then(|t| t.get("id"))
+                .and_then(Value::as_str)
+        })
         .map(ToString::to_string)
 }
 
 /// Vendor thread id from a `thread/started` notification's params or a
-/// `thread/start` response's result. Shapes seen across app-server versions:
-/// `{"thread":{"id":..}}`, `{"threadId":..}`, or a bare thread object
-/// `{"id":..}`.
+/// `thread/start` response's result — both nest it as `thread.id`.
 pub(super) fn extract_thread_id(value: &Value) -> Option<String> {
     value
         .get("thread")
         .and_then(|t| t.get("id"))
         .and_then(Value::as_str)
-        .or_else(|| value.get("threadId").and_then(Value::as_str))
-        .or_else(|| value.get("id").and_then(Value::as_str))
         .map(ToString::to_string)
 }
 
+/// TurnStatus from turn/completed params: completed | interrupted | failed.
 pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
-    let turn_status = params
-        .get("turn")
-        .and_then(|t| t.get("status"))
+    match params
+        .pointer("/turn/status")
         .and_then(Value::as_str)
-        .or_else(|| params.get("status").and_then(Value::as_str))
-        .unwrap_or_default();
-    match turn_status {
-        "interrupted" | "cancelled" => Lifecycle::Interrupted,
-        "failed" | "error" => Lifecycle::Failed,
+        .unwrap_or_default()
+    {
+        "interrupted" => Lifecycle::Interrupted,
+        "failed" => Lifecycle::Failed,
         _ => Lifecycle::Completed,
     }
 }
 
-pub(super) fn map_turn_usage(params: &Value) -> TurnUsage {
+/// Usage from thread/tokenUsage/updated params. `total` is cumulative for the
+/// thread; the wave pipeline is turn-grained, so the latest snapshot before
+/// turn/completed is what gets reported for the turn.
+pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
+    let total = params.pointer("/tokenUsage/total");
+    let field = |key: &str| {
+        total
+            .and_then(|t| t.get(key))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
     TurnUsage {
-        input_tokens: params
-            .pointer("/usage/input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        output_tokens: params
-            .pointer("/usage/output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        reasoning_tokens: params
-            .pointer("/usage/reasoning_tokens")
-            .and_then(Value::as_u64),
-        cache_read_tokens: None,
+        input_tokens: field("inputTokens"),
+        output_tokens: field("outputTokens"),
+        reasoning_tokens: Some(field("reasoningOutputTokens")),
+        cache_read_tokens: Some(field("cachedInputTokens")),
         cache_write_tokens: None,
-        model: params
-            .get("model")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
+        model: None,
         cost_usd: None,
     }
 }
 
 pub(super) fn map_item_id(params: &Value) -> String {
-    item_payload(params)
-        .get("id")
+    params
+        .pointer("/item/id")
         .and_then(Value::as_str)
         .or_else(|| params.get("itemId").and_then(Value::as_str))
-        .or_else(|| params.get("id").and_then(Value::as_str))
         .unwrap_or("unknown")
         .to_string()
+}
+
+pub(super) fn map_item_type(params: &Value) -> &str {
+    params
+        .pointer("/item/type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
 }
 
 pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
     let id = map_item_id(params);
     let item_type = map_item_type(params);
-    let item = item_payload(params);
-    let status = map_item_status(params);
+    let item = params.get("item").unwrap_or(params);
+    let status = map_item_status(item);
     let completed = phase == ItemPhase::Completed;
 
     match item_type {
         "commandExecution" => ConversationItem::Command {
             id,
-            command: parse_command(item),
+            // 0.142.5 sends the raw command line as a single string.
+            command: text_field(item, "command")
+                .map(|c| vec![c])
+                .unwrap_or_default(),
             cwd: required_text_field(item, "cwd"),
             status,
             output: if completed {
@@ -120,9 +133,9 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
             id,
             name: mcp_tool_name(item),
             status,
-            input: Some(item.get("arguments").cloned().unwrap_or_else(|| json!({}))),
+            input: item.get("arguments").cloned(),
             output: if completed {
-                text_field(item, "result").or_else(|| text_field(item, "error"))
+                mcp_tool_output(item)
             } else {
                 None
             },
@@ -136,22 +149,22 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
             id,
             text: required_text_field(item, "text"),
         },
+        "reasoning" => ConversationItem::Thought {
+            id,
+            text: string_array(item, "summary").join("\n"),
+        },
         _ => ConversationItem::Tool {
             id,
             name: item_type.to_string(),
             status,
-            input: item.get("input").cloned(),
-            output: if completed {
-                text_field(item, "output")
-            } else {
-                None
-            },
+            input: None,
+            output: None,
         },
     }
 }
 
 pub(super) fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> {
-    let content = text_content(params)?;
+    let content = delta_content(params)?;
     match method {
         "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
             Some(ItemDelta::Output { content })
@@ -161,17 +174,12 @@ pub(super) fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> 
     }
 }
 
-pub(super) fn text_content(params: &Value) -> Option<String> {
+/// Streaming text: every 0.142.5 delta notification carries a `delta` field.
+pub(super) fn delta_content(params: &Value) -> Option<String> {
     params
-        .get("content")
+        .get("delta")
         .and_then(Value::as_str)
-        .or_else(|| params.get("delta").and_then(Value::as_str))
-        .or_else(|| params.get("output").and_then(Value::as_str))
         .map(ToString::to_string)
-}
-
-fn item_payload(params: &Value) -> &Value {
-    params.get("item").unwrap_or(params)
 }
 
 fn text_field(value: &Value, key: &str) -> Option<String> {
@@ -185,32 +193,9 @@ fn required_text_field(value: &Value, key: &str) -> String {
     text_field(value, key).unwrap_or_default()
 }
 
-fn map_item_type(params: &Value) -> &str {
-    item_payload(params)
-        .get("type")
-        .and_then(Value::as_str)
-        .or_else(|| params.get("kind").and_then(Value::as_str))
-        .unwrap_or("tool")
-}
-
-fn map_item_status(params: &Value) -> Lifecycle {
-    let status = item_payload(params)
-        .get("status")
-        .and_then(Value::as_str)
-        .or_else(|| params.get("status").and_then(Value::as_str))
-        .unwrap_or("in_progress");
-    match status {
-        "completed" => Lifecycle::Completed,
-        "failed" | "error" => Lifecycle::Failed,
-        // Declined tool calls map to Failed for now; Decisions will give
-        // declined a real home on the wire.
-        "declined" => Lifecycle::Failed,
-        _ => Lifecycle::Running,
-    }
-}
-
-fn parse_command(item: &Value) -> Vec<String> {
-    item.get("command")
+fn string_array(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
@@ -221,20 +206,56 @@ fn parse_command(item: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Item status enums (CommandExecutionStatus, PatchApplyStatus,
+/// McpToolCallStatus): inProgress | completed | failed | declined.
+fn map_item_status(item: &Value) -> Lifecycle {
+    match item
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("inProgress")
+    {
+        "completed" => Lifecycle::Completed,
+        "failed" => Lifecycle::Failed,
+        // Declined tool calls map to Failed for now; Decisions will give
+        // declined a real home on the wire.
+        "declined" => Lifecycle::Failed,
+        _ => Lifecycle::Running,
+    }
+}
+
 fn mcp_tool_name(item: &Value) -> String {
     let tool = required_text_field(item, "tool");
-    let server = text_field(item, "server").unwrap_or_default();
-    if server.is_empty() {
-        if tool.is_empty() {
-            "mcp_tool_call".to_string()
-        } else {
-            tool
-        }
-    } else if tool.is_empty() {
-        server
-    } else {
-        format!("{server}/{tool}")
+    let server = required_text_field(item, "server");
+    match (server.is_empty(), tool.is_empty()) {
+        (true, true) => "mcp_tool_call".to_string(),
+        (true, false) => tool,
+        (false, true) => server,
+        (false, false) => format!("{server}/{tool}"),
     }
+}
+
+/// McpToolCallResult is `{content: [MCP blocks]}`; join the text blocks.
+/// McpToolCallError is `{message}`.
+fn mcp_tool_output(item: &Value) -> Option<String> {
+    if let Some(result) = item.get("result").filter(|v| !v.is_null()) {
+        let texts: Vec<&str> = result
+            .get("content")
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if texts.is_empty() {
+            return Some(result.to_string());
+        }
+        return Some(texts.join("\n"));
+    }
+    item.pointer("/error/message")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
@@ -248,8 +269,9 @@ fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
+                    // PatchChangeKind is an object: {"type": "add"|"delete"|"update", ...}
                     kind: c
-                        .get("kind")
+                        .pointer("/kind/type")
                         .and_then(Value::as_str)
                         .map(ToString::to_string),
                     diff: c
@@ -264,6 +286,8 @@ fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -274,7 +298,7 @@ mod tests {
                 "type": "fileChange",
                 "status": "completed",
                 "changes": [
-                    {"path": "src/main.rs", "kind": "update", "diff": "-a\n+b"}
+                    {"path": "src/main.rs", "kind": {"type": "update", "move_path": null}, "diff": "-a\n+b"}
                 ]
             }
         });
@@ -290,6 +314,7 @@ mod tests {
                 assert_eq!(status, Lifecycle::Completed);
                 assert_eq!(changes.len(), 1);
                 assert_eq!(changes[0].path, "src/main.rs");
+                assert_eq!(changes[0].kind.as_deref(), Some("update"));
             }
             other => panic!("expected file item, got {other:?}"),
         }
@@ -299,39 +324,69 @@ mod tests {
     fn build_item_maps_agent_message_to_message() {
         let params = json!({
             "item": {
-                "id": "item_2",
+                "id": "msg_1",
                 "type": "agentMessage",
                 "text": "Done",
-                "phase": "final"
+                "phase": "final_answer",
+                "memoryCitation": null
             }
         });
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
             ConversationItem::Message { id, text, phase } => {
-                assert_eq!(id, "item_2");
+                assert_eq!(id, "msg_1");
                 assert_eq!(text, "Done");
-                assert_eq!(phase.as_deref(), Some("final"));
+                assert_eq!(phase.as_deref(), Some("final_answer"));
             }
             other => panic!("expected message item, got {other:?}"),
         }
     }
 
     #[test]
-    fn build_item_maps_plan_to_thought() {
+    fn build_item_maps_command_string_to_single_element_argv() {
         let params = json!({
             "item": {
-                "id": "item_3",
-                "type": "plan",
-                "text": "Run tests first"
+                "id": "cmd_1",
+                "type": "commandExecution",
+                "command": "ls -la",
+                "commandActions": [],
+                "cwd": "/tmp",
+                "status": "inProgress"
+            }
+        });
+
+        let item = build_item(&params, ItemPhase::Started);
+        match item {
+            ConversationItem::Command {
+                command,
+                cwd,
+                status,
+                ..
+            } => {
+                assert_eq!(command, vec!["ls -la".to_string()]);
+                assert_eq!(cwd, "/tmp");
+                assert_eq!(status, Lifecycle::Running);
+            }
+            other => panic!("expected command item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_item_maps_reasoning_to_thought() {
+        let params = json!({
+            "item": {
+                "id": "rsn_1",
+                "type": "reasoning",
+                "summary": ["Check tests", "Then land"]
             }
         });
 
         let item = build_item(&params, ItemPhase::Completed);
         match item {
             ConversationItem::Thought { id, text } => {
-                assert_eq!(id, "item_3");
-                assert_eq!(text, "Run tests first");
+                assert_eq!(id, "rsn_1");
+                assert_eq!(text, "Check tests\nThen land");
             }
             other => panic!("expected thought item, got {other:?}"),
         }
@@ -347,7 +402,7 @@ mod tests {
                 "server": "github",
                 "tool": "search",
                 "arguments": { "query": "regression" },
-                "result": "ok"
+                "result": { "content": [{"type": "text", "text": "ok"}] }
             }
         });
 
@@ -371,19 +426,31 @@ mod tests {
     }
 
     #[test]
-    fn map_turn_usage_reads_token_payload() {
-        let usage = map_turn_usage(&json!({
-            "model": "gpt-5.1-codex",
-            "usage": {
-                "input_tokens": 144,
-                "output_tokens": 55,
-                "reasoning_tokens": 3
+    fn map_token_usage_reads_total_breakdown() {
+        let usage = map_token_usage(&json!({
+            "threadId": "t",
+            "turnId": "u",
+            "tokenUsage": {
+                "total": {
+                    "totalTokens": 16070,
+                    "inputTokens": 16065,
+                    "cachedInputTokens": 9600,
+                    "outputTokens": 5,
+                    "reasoningOutputTokens": 0
+                },
+                "last": {
+                    "totalTokens": 16070,
+                    "inputTokens": 16065,
+                    "cachedInputTokens": 9600,
+                    "outputTokens": 5,
+                    "reasoningOutputTokens": 0
+                }
             }
         }));
 
-        assert_eq!(usage.input_tokens, 144);
-        assert_eq!(usage.output_tokens, 55);
-        assert_eq!(usage.reasoning_tokens, Some(3));
-        assert_eq!(usage.model.as_deref(), Some("gpt-5.1-codex"));
+        assert_eq!(usage.input_tokens, 16065);
+        assert_eq!(usage.output_tokens, 5);
+        assert_eq!(usage.reasoning_tokens, Some(0));
+        assert_eq!(usage.cache_read_tokens, Some(9600));
     }
 }

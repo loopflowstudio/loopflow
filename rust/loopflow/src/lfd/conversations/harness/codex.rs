@@ -1,3 +1,18 @@
+//! Codex app-server driver, targeting the codex-cli 0.142.5 protocol.
+//!
+//! Protocol shapes verified live (hand-driven session + probes) and against
+//! `codex app-server generate-json-schema` (v2 bundle):
+//! - `initialize {clientInfo}` -> response; the CLIENT then sends the
+//!   `initialized` notification (there is no server-side "initialized").
+//! - `thread/start {cwd, model?, approvalPolicy?, sandbox?}` -> response with
+//!   `thread.id`; also mirrored as a `thread/started` notification.
+//! - `turn/start {threadId, input: [{type:"text", text}]}`.
+//! - `turn/steer {threadId, expectedTurnId, input: [...]}` -> `{turnId}`;
+//!   injects a userMessage item into the running turn (probed live; sending
+//!   `content` instead of `input` is a -32600 "missing field `input`").
+//! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
+//!   `turn/completed` status "interrupted" (probed live).
+
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,7 +32,7 @@ use crate::lfd::conversations::harness::codex_mapping::ItemPhase;
 use crate::lfd::conversations::harness::common::spawn_stderr_logger;
 use crate::lfd::conversations::harness::lf_tag::LfTagParser;
 use crate::lfd::conversations::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
-use crate::lfd::conversations::types::ConversationEvent;
+use crate::lfd::conversations::types::{ConversationEvent, TurnUsage};
 
 #[derive(Debug)]
 enum OutboundRpc {
@@ -25,6 +40,10 @@ enum OutboundRpc {
         id: i64,
         method: String,
         params: Value,
+    },
+    /// Client notification (no id, no params), e.g. `initialized`.
+    Notification {
+        method: String,
     },
     Response {
         id: Value,
@@ -36,8 +55,11 @@ enum OutboundRpc {
 pub(super) struct NotificationState {
     turn_in_progress: Arc<AtomicBool>,
     provider_session_id: Arc<Mutex<Option<String>>>,
+    /// Shared with the harness so steer/interrupt can address the live turn.
+    current_turn_id: Arc<Mutex<Option<String>>>,
     thread_id_tx: Option<oneshot::Sender<String>>,
-    current_turn_id: Option<String>,
+    /// Latest thread/tokenUsage/updated snapshot, reported at turn/completed.
+    pending_usage: Option<TurnUsage>,
     tag_parser: LfTagParser,
 }
 
@@ -45,21 +67,35 @@ impl NotificationState {
     pub(super) fn new(
         turn_in_progress: Arc<AtomicBool>,
         provider_session_id: Arc<Mutex<Option<String>>>,
+        current_turn_id: Arc<Mutex<Option<String>>>,
         thread_id_tx: Option<oneshot::Sender<String>>,
     ) -> Self {
         Self {
             turn_in_progress,
             provider_session_id,
+            current_turn_id,
             thread_id_tx,
-            current_turn_id: None,
+            pending_usage: None,
             tag_parser: LfTagParser::default(),
         }
     }
 
     fn resolve_turn_id(&self, turn_id_from_params: Option<String>) -> String {
         turn_id_from_params
-            .or_else(|| self.current_turn_id.clone())
+            .or_else(|| {
+                self.current_turn_id
+                    .lock()
+                    .expect("codex turn id lock poisoned")
+                    .clone()
+            })
             .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn set_current_turn_id(&self, turn_id: Option<String>) {
+        *self
+            .current_turn_id
+            .lock()
+            .expect("codex turn id lock poisoned") = turn_id;
     }
 
     fn record_thread_id(&mut self, thread_id: String) {
@@ -95,7 +131,7 @@ pub(super) fn process_notification(
             let tid =
                 turn_id_from_params.unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
             state.turn_in_progress.store(true, Ordering::Relaxed);
-            state.current_turn_id = Some(tid.clone());
+            state.set_current_turn_id(Some(tid.clone()));
             let _ = events.send(ConversationEvent::TurnStarted { turn_id: tid });
         }
         "turn/completed" => {
@@ -104,7 +140,7 @@ pub(super) fn process_notification(
                 let _ = events.send(parsed_event);
             }
             state.turn_in_progress.store(false, Ordering::Relaxed);
-            state.current_turn_id = None;
+            state.set_current_turn_id(None);
             let status = codex_mapping::map_turn_status(params);
             let _ = events.send(ConversationEvent::TurnCompleted {
                 turn_id: tid.clone(),
@@ -112,32 +148,40 @@ pub(super) fn process_notification(
             });
             let _ = events.send(ConversationEvent::TurnUsage {
                 turn_id: tid,
-                usage: codex_mapping::map_turn_usage(params),
+                usage: state.pending_usage.take().unwrap_or_default(),
             });
         }
-        "item/started" => {
-            let tid = state.resolve_turn_id(turn_id_from_params);
-            let item = codex_mapping::build_item(params, ItemPhase::Started);
-            let _ = events.send(ConversationEvent::ItemStarted { turn_id: tid, item });
+        "thread/tokenUsage/updated" => {
+            // Usage arrives mid-turn as cumulative snapshots; hold the latest
+            // and report it with the terminal TurnCompleted.
+            state.pending_usage = Some(codex_mapping::map_token_usage(params));
         }
-        "item/completed" => {
+        "item/started" | "item/completed" => {
+            // The server echoes the client's own input (turn/start and
+            // turn/steer text) back as userMessage items; the caller already
+            // knows what it sent, so don't surface those as items.
+            if codex_mapping::map_item_type(params) == "userMessage" {
+                return;
+            }
             let tid = state.resolve_turn_id(turn_id_from_params);
-            let item = codex_mapping::build_item(params, ItemPhase::Completed);
-            let _ = events.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
+            if method == "item/started" {
+                let item = codex_mapping::build_item(params, ItemPhase::Started);
+                let _ = events.send(ConversationEvent::ItemStarted { turn_id: tid, item });
+            } else {
+                let item = codex_mapping::build_item(params, ItemPhase::Completed);
+                let _ = events.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
+            }
         }
         "item/agentMessage/delta" => {
-            if let Some(content) = codex_mapping::text_content(params) {
+            if let Some(content) = codex_mapping::delta_content(params) {
                 let tid = state.resolve_turn_id(turn_id_from_params);
                 for parsed_event in state.tag_parser.consume_text(&tid, &content) {
                     let _ = events.send(parsed_event);
                 }
             }
         }
-        "item/agentMessage/completed" | "item/agentMessage/done" => {
-            // Final agent message text is captured in item/completed.
-        }
         "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
-            if let Some(content) = codex_mapping::text_content(params) {
+            if let Some(content) = codex_mapping::delta_content(params) {
                 let tid = state.resolve_turn_id(turn_id_from_params);
                 let _ = events.send(ConversationEvent::ReasoningDelta {
                     turn_id: tid,
@@ -167,23 +211,47 @@ pub(super) fn process_notification(
             }
         }
         "error" => {
+            // ErrorNotification: {threadId, turnId, error: TurnError, willRetry}.
             let _ = events.send(ConversationEvent::Error {
-                code: params
-                    .get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or("codex_error")
-                    .to_string(),
+                code: "codex_error".to_string(),
                 message: params
-                    .get("message")
+                    .pointer("/error/message")
                     .and_then(Value::as_str)
                     .unwrap_or("codex error")
                     .to_string(),
             });
         }
+        // Known 0.142.5 chatter with no conversation-level meaning.
+        "thread/status/changed"
+        | "account/rateLimits/updated"
+        | "account/updated"
+        | "mcpServer/startupStatus/updated"
+        | "remoteControl/status/changed" => {
+            tracing::debug!(method, "ignoring codex app-server status notification");
+        }
         _ => {
             // Unknown notifications silently ignored.
         }
     }
+}
+
+/// Map a JSON-RPC error response (`{"error":{"code":-32600,"message":..},"id":N}`)
+/// to a harness error event. Called by the reader for any response frame that
+/// carries an `error` object.
+pub(super) fn process_rpc_error(error: &Value, events: &mpsc::UnboundedSender<ConversationEvent>) {
+    let code = error
+        .get("code")
+        .and_then(Value::as_i64)
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "codex_error".to_string());
+    let _ = events.send(ConversationEvent::Error {
+        code,
+        message: error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("codex rpc error")
+            .to_string(),
+    });
 }
 
 pub struct CodexHarness {
@@ -198,6 +266,12 @@ pub struct CodexHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     provider_session_id: Arc<Mutex<Option<String>>>,
+    /// Live turn id (from turn/started, cleared at turn/completed); steer and
+    /// interrupt address the turn with it.
+    current_turn_id: Arc<Mutex<Option<String>>>,
+    /// Request id of the in-flight `initialize` call; the reader completes the
+    /// handshake when the matching response arrives. 0 = none pending.
+    initialize_request_id: Arc<AtomicI64>,
     /// Request id of the in-flight `thread/start` call; the reader mines the
     /// matching response for the vendor thread id. 0 = none pending.
     thread_start_request_id: Arc<AtomicI64>,
@@ -225,6 +299,8 @@ impl CodexHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             provider_session_id: Arc::new(Mutex::new(None)),
+            current_turn_id: Arc::new(Mutex::new(None)),
+            initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
             launch: None,
             should_seed_prompt: true,
@@ -247,14 +323,46 @@ impl CodexHarness {
         Ok(id)
     }
 
+    async fn send_notification(&mut self, method: &str) -> Result<()> {
+        let Some(tx) = &self.outbound_tx else {
+            return Err(anyhow!("codex harness not started"));
+        };
+        tx.send(OutboundRpc::Notification {
+            method: method.to_string(),
+        })
+        .await
+        .map_err(|_| anyhow!("codex writer task unavailable"))?;
+        Ok(())
+    }
+
+    fn thread_id(&self) -> Option<String> {
+        self.provider_session_id
+            .lock()
+            .expect("codex provider session id lock poisoned")
+            .clone()
+    }
+
+    fn turn_id(&self) -> Option<String> {
+        self.current_turn_id
+            .lock()
+            .expect("codex turn id lock poisoned")
+            .clone()
+    }
+
     async fn shutdown_tasks(&mut self) {
         self.outbound_tx.take();
 
-        if let Some(handle) = self.writer_task.take() {
-            let _ = handle.await;
-        }
+        // Abort the reader before waiting on the writer: the reader holds a
+        // clone of the outbound sender (for approval responses), and the
+        // writer only exits once every sender is dropped. Waiting on the
+        // writer first deadlocks when the server's stdout outlives the
+        // direct child (observed live: an npm-shim `codex` leaves its real
+        // app-server grandchild holding the pipe).
         if let Some(handle) = self.reader_task.take() {
             handle.abort();
+            let _ = handle.await;
+        }
+        if let Some(handle) = self.writer_task.take() {
             let _ = handle.await;
         }
         if let Some(handle) = self.stderr_task.take() {
@@ -277,6 +385,10 @@ impl Harness for CodexHarness {
             .provider_session_id
             .lock()
             .expect("codex provider session id lock poisoned") = None;
+        *self
+            .current_turn_id
+            .lock()
+            .expect("codex turn id lock poisoned") = None;
 
         let start_result = self.start_inner(config).await;
         if let Err(err) = start_result {
@@ -291,7 +403,7 @@ impl Harness for CodexHarness {
         if text.is_empty() {
             return Ok(());
         }
-        let turn_content = if self.should_seed_prompt {
+        let turn_text = if self.should_seed_prompt {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
@@ -311,14 +423,39 @@ impl Harness for CodexHarness {
             text.to_string()
         };
 
-        let method = if self.turn_in_progress.load(Ordering::Relaxed) {
-            "turn/steer"
-        } else {
-            "turn/start"
-        };
+        let thread_id = self
+            .thread_id()
+            .ok_or_else(|| anyhow!("codex thread not started"))?;
+        let input = json!([{ "type": "text", "text": turn_text }]);
 
-        self.send_request(method, json!({ "content": turn_content }))
-            .await?;
+        // Steer requires the active turn id as a precondition
+        // (`expectedTurnId`); without one in hand the turn is effectively
+        // over, so start a new turn instead.
+        let steer_turn_id = if self.turn_in_progress.load(Ordering::Relaxed) {
+            self.turn_id()
+        } else {
+            None
+        };
+        match steer_turn_id {
+            Some(turn_id) => {
+                self.send_request(
+                    "turn/steer",
+                    json!({
+                        "threadId": thread_id,
+                        "expectedTurnId": turn_id,
+                        "input": input,
+                    }),
+                )
+                .await?;
+            }
+            None => {
+                self.send_request(
+                    "turn/start",
+                    json!({ "threadId": thread_id, "input": input }),
+                )
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -330,18 +467,33 @@ impl Harness for CodexHarness {
         if !self.turn_in_progress.load(Ordering::Relaxed) {
             return Ok(());
         }
-        self.send_request("turn/interrupt", json!({})).await?;
+        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+            return Ok(());
+        };
+        self.send_request(
+            "turn/interrupt",
+            json!({ "threadId": thread_id, "turnId": turn_id }),
+        )
+        .await?;
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.turn_in_progress.load(Ordering::Relaxed) {
-            let _ = self.send_request("turn/interrupt", json!({})).await;
-        }
+        let _ = self.interrupt().await;
 
         if let Some(child) = self.child.as_mut() {
+            // Kill the whole process group, not just the direct child: when
+            // `codex` on PATH is an npm shim, the real app-server is a
+            // grandchild and start_kill alone orphans it (verified live —
+            // the orphan kept running and held the stdio pipes open).
+            #[cfg(unix)]
+            if let Some(pid) = child.id() {
+                // SAFETY: plain syscall; a negative pid targets the process
+                // group we created for the child at spawn (process_group(0)).
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
             let _ = child.start_kill();
             let _ = child.wait().await;
         }
@@ -361,16 +513,14 @@ impl Harness for CodexHarness {
     }
 
     fn provider_session_id(&self) -> Option<String> {
-        self.provider_session_id
-            .lock()
-            .expect("codex provider session id lock poisoned")
-            .clone()
+        self.thread_id()
     }
 }
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        let mut child = Command::new("codex")
+        let mut command = Command::new("codex");
+        command
             // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
             // to `codex app-server` (verified against 0.142.5).
             .arg("app-server")
@@ -379,7 +529,13 @@ impl CodexHarness {
             .stderr(std::process::Stdio::piped())
             // Dropping the harness (e.g. the wave mind's task is aborted)
             // must not leak a live app-server.
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        // Own process group so stop() can kill everything under the `codex`
+        // entry point, including the real app-server binary that npm shims
+        // spawn as a grandchild.
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
 
@@ -403,6 +559,9 @@ impl CodexHarness {
                 let payload = match message {
                     OutboundRpc::Request { id, method, params } => {
                         json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+                    }
+                    OutboundRpc::Notification { method } => {
+                        json!({ "jsonrpc": "2.0", "method": method })
                     }
                     OutboundRpc::Response { id, result } => {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
@@ -431,6 +590,8 @@ impl CodexHarness {
         let approval_tx = outbound_tx.clone();
         let approval = self.approval;
         let provider_session_id = self.provider_session_id.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let initialize_request_id = self.initialize_request_id.clone();
         let thread_start_request_id = self.thread_start_request_id.clone();
         let reader_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -438,6 +599,7 @@ impl CodexHarness {
             let mut state = NotificationState::new(
                 turn_in_progress.clone(),
                 provider_session_id,
+                current_turn_id,
                 Some(thread_id_tx),
             );
 
@@ -453,10 +615,24 @@ impl CodexHarness {
                 let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
 
                 if method.is_empty() {
-                    // Response frame. The only one mined is the thread/start
-                    // response, which carries the vendor thread id.
-                    let pending = thread_start_request_id.load(Ordering::Relaxed);
-                    if pending != 0 && value.get("id").and_then(Value::as_i64) == Some(pending) {
+                    // Response frame.
+                    if let Some(error) = value.get("error") {
+                        process_rpc_error(error, &event_tx);
+                        continue;
+                    }
+                    let id = value.get("id").and_then(Value::as_i64);
+                    // The initialize response completes the handshake; the
+                    // harness then sends the client `initialized`
+                    // notification (there is no server-side "initialized").
+                    if id.is_some() && id == Some(initialize_request_id.load(Ordering::Relaxed)) {
+                        initialize_request_id.store(0, Ordering::Relaxed);
+                        if let Some(tx) = initialized_tx.take() {
+                            let _ = tx.send(());
+                        }
+                        continue;
+                    }
+                    // The thread/start response carries the vendor thread id.
+                    if id.is_some() && id == Some(thread_start_request_id.load(Ordering::Relaxed)) {
                         thread_start_request_id.store(0, Ordering::Relaxed);
                         if let Some(thread_id) = value
                             .get("result")
@@ -468,18 +644,14 @@ impl CodexHarness {
                     continue;
                 }
 
-                if method == "initialized" {
-                    if let Some(tx) = initialized_tx.take() {
-                        let _ = tx.send(());
-                    }
-                    continue;
-                }
-
-                // Any server request (method + id) is an approval request;
-                // answer it per the configured policy.
+                // Any server request (method + id) is an approval request
+                // (item/commandExecution/requestApproval and friends); answer
+                // it per the configured policy. With approvalPolicy "never"
+                // in thread/start these should not occur, but the belt goes
+                // with the suspenders.
                 if let Some(id) = value.get("id") {
                     let result = match approval {
-                        ApprovalPolicy::AutoApprove => json!("accept"),
+                        ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
                     };
                     let _ = approval_tx
                         .send(OutboundRpc::Response {
@@ -510,13 +682,38 @@ impl CodexHarness {
         self.reader_task = Some(reader_task);
         self.stderr_task = Some(stderr_task);
 
-        self.send_request("initialize", json!({})).await?;
+        // Handshake: initialize -> response -> client `initialized`.
+        let init_id = self.next_request_id;
+        self.initialize_request_id.store(init_id, Ordering::Relaxed);
+        self.send_request(
+            "initialize",
+            json!({
+                "clientInfo": {
+                    "name": "loopflow",
+                    "title": "loopflow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            }),
+        )
+        .await?;
         tokio::time::timeout(Duration::from_secs(15), initialized_rx)
             .await
-            .map_err(|_| anyhow!("timed out waiting for codex initialize"))?
+            .map_err(|_| anyhow!("timed out waiting for codex initialize response"))?
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
+        self.send_notification("initialized").await?;
 
-        let thread_params = build_codex_thread_start_params(launch);
+        let mut thread_params = build_codex_thread_start_params(launch);
+        // Pass the approval intent explicitly instead of inheriting whatever
+        // ~/.codex/config.toml says. Probed live on 0.142.5: thread/start
+        // accepts `approvalPolicy` (AskForApproval: "never" | "on-request" |
+        // "on-failure" | "untrusted") and `sandbox` (SandboxMode: "read-only"
+        // | "workspace-write" | "danger-full-access") and echoes them back in
+        // its response.
+        let (approval_policy, sandbox) = match self.approval {
+            ApprovalPolicy::AutoApprove => ("never", "danger-full-access"),
+        };
+        thread_params.insert("approvalPolicy".to_string(), json!(approval_policy));
+        thread_params.insert("sandbox".to_string(), json!(sandbox));
         // Publish the request id before sending so the reader can match the
         // response even if it races the send.
         let request_id = self.next_request_id;
@@ -553,7 +750,12 @@ mod tests {
 
     fn replay_state() -> (NotificationState, Arc<Mutex<Option<String>>>) {
         let slot = Arc::new(Mutex::new(None));
-        let state = NotificationState::new(Arc::new(AtomicBool::new(false)), slot.clone(), None);
+        let state = NotificationState::new(
+            Arc::new(AtomicBool::new(false)),
+            slot.clone(),
+            Arc::new(Mutex::new(None)),
+            None,
+        );
         (state, slot)
     }
 
@@ -564,7 +766,7 @@ mod tests {
 
         process_notification(
             "thread/started",
-            &json!({ "thread": { "id": "thread_abc" } }),
+            &json!({ "thread": { "id": "thread_abc", "sessionId": "thread_abc" } }),
             &mut state,
             &tx,
         );
@@ -573,26 +775,29 @@ mod tests {
     }
 
     #[test]
-    fn turn_started_sets_turn_in_progress() {
+    fn turn_started_sets_turn_in_progress_and_turn_id() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (mut state, _slot) = replay_state();
         let in_progress = state.turn_in_progress.clone();
+        let turn_slot = state.current_turn_id.clone();
 
         process_notification(
             "turn/started",
-            &json!({ "turn": { "id": "turn_1" } }),
+            &json!({ "threadId": "thread_1", "turn": { "id": "turn_1", "status": "inProgress" } }),
             &mut state,
             &tx,
         );
         assert!(in_progress.load(Ordering::Relaxed));
+        assert_eq!(turn_slot.lock().unwrap().as_deref(), Some("turn_1"));
 
         process_notification(
             "turn/completed",
-            &json!({ "turn": { "id": "turn_1", "status": "interrupted" } }),
+            &json!({ "threadId": "thread_1", "turn": { "id": "turn_1", "status": "interrupted", "error": null } }),
             &mut state,
             &tx,
         );
         assert!(!in_progress.load(Ordering::Relaxed));
+        assert!(turn_slot.lock().unwrap().is_none());
 
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert!(matches!(

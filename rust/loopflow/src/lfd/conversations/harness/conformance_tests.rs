@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::claude_mapping::{self, ReaderState};
-use super::codex::{process_notification, NotificationState};
+use super::codex::{process_notification, process_rpc_error, NotificationState};
 use super::opencode_mapping;
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
 
@@ -79,6 +79,7 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
     let mut state = NotificationState::new(
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(None)),
+        Arc::new(Mutex::new(None)),
         None,
     );
     let mut events = Vec::new();
@@ -94,6 +95,12 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
             .and_then(Value::as_str)
             .unwrap_or_default();
         if method.is_empty() {
+            // Response frame; error responses map to harness error events,
+            // mirroring the live reader.
+            if let Some(error) = value.get("error") {
+                process_rpc_error(error, &tx);
+                drain_events(&mut rx, &mut events);
+            }
             continue;
         }
         let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -215,6 +222,8 @@ fn claude_trace_multi_tool_lifecycle() {
 fn codex_trace_normal_turn() {
     let events = replay_codex_trace("codex_normal_turn.jsonl");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    // userMessage item echoes and status/rateLimit notifications produce no
+    // events; tokenUsage folds into the trailing turn_usage.
     assert_eq!(
         event_types,
         vec![
@@ -235,32 +244,21 @@ fn codex_trace_normal_turn() {
             ..
         })
     ));
-}
-
-#[test]
-fn codex_turn_completed_maps_usage_payload() {
-    let events = replay_codex_lines(vec![
-        r#"{"method":"turn/started","params":{"turn":{"id":"turn_codex_usage"}}}"#.to_string(),
-        r#"{"method":"turn/completed","params":{"turn":{"id":"turn_codex_usage","status":"completed"},"model":"gpt-5.1-codex","usage":{"input_tokens":144,"output_tokens":55,"reasoning_tokens":3}}}"#.to_string(),
-    ]);
-
     assert!(matches!(
-        events[1],
-        ConversationEvent::TurnCompleted {
-            ref turn_id,
-            status: Lifecycle::Completed
-        } if turn_id == "turn_codex_usage"
+        events
+            .iter()
+            .find(|event| matches!(event, ConversationEvent::ItemCompleted { .. })),
+        Some(ConversationEvent::ItemCompleted {
+            item: ConversationItem::Message { ref text, ref phase, .. },
+            ..
+        }) if text == "OK" && phase.as_deref() == Some("final_answer")
     ));
     assert!(matches!(
-        events[2],
-        ConversationEvent::TurnUsage {
-            ref turn_id,
-            ref usage,
-        } if turn_id == "turn_codex_usage"
-            && usage.input_tokens == 144
-            && usage.output_tokens == 55
-            && usage.reasoning_tokens == Some(3)
-            && usage.model.as_deref() == Some("gpt-5.1-codex")
+        events.last(),
+        Some(ConversationEvent::TurnUsage { usage, .. })
+            if usage.input_tokens == 16065
+                && usage.output_tokens == 5
+                && usage.cache_read_tokens == Some(9600)
     ));
 }
 
@@ -274,7 +272,8 @@ fn codex_trace_error_turn() {
     );
     assert!(matches!(
         events[1],
-        ConversationEvent::Error { ref code, .. } if code == "codex_internal"
+        ConversationEvent::Error { ref code, ref message, .. }
+            if code == "codex_error" && message == "stream disconnected before completion"
     ));
     assert!(matches!(
         events
@@ -284,6 +283,23 @@ fn codex_trace_error_turn() {
             status: Lifecycle::Failed,
             ..
         })
+    ));
+}
+
+#[test]
+fn codex_rpc_error_response_maps_to_error_event() {
+    // Live 0.142.5 shape: malformed requests (e.g. `content` instead of
+    // `input` on turn/steer) come back as JSON-RPC error responses.
+    let events = replay_codex_lines(vec![
+        r#"{"error":{"code":-32600,"message":"Invalid request: missing field `input`"},"id":5}"#
+            .to_string(),
+    ]);
+
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0],
+        ConversationEvent::Error { ref code, ref message }
+            if code == "-32600" && message == "Invalid request: missing field `input`"
     ));
 }
 

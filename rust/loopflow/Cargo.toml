@@ -66,6 +66,7 @@ gethostname = "1.1"
 hmac = "0.12"
 humantime = "2"
 ipnet = "2"
+libc = "0.2"
 reqwest = { version = "0.13", features = ["blocking", "json"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }

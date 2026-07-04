@@ -27,9 +27,15 @@ wave exits 0 — correct pubsub semantics, not degraded mode). The mind is
 just a publisher whose stream the listener supervises directly. Listener
 downtime never stops publishers; the restarted listener reconciles from the
 substrate (snapshot-then-delta, already built). Concerto is a second
-listener; remote lfd-serve a relay listener. Durability gap, small: a
-publication addressed to a down listener errors today — future: store-queued
-publications drained at boot.
+listener; **lfd-serve is a relay listener AND an access gate (Jack)** — 
+outbound it re-publishes the machine's substrate to remote subscribers
+(push, the one thing transient lf invocations can't be); inbound it is the
+authenticated doorway for remote speech and queries, the only place
+identity/teams/permissions live (on-machine there is no gate — adding one
+would be adding a center). Both are boundary functions: the gate controls
+the doorway into the machine, never the waves behind it. Durability gap,
+small: a publication addressed to a down listener errors today — future:
+store-queued publications drained at boot.
 
 Loopflow's evolution: from a way of launching agents into a toolset used by
 higher-level agents to execute progress through lower-level agents. The Wave —

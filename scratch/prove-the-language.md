@@ -62,17 +62,20 @@ manual wiring).
 **`scaffold`** — stand up a greenfield project from nothing.
 ```
 requires: GOAL.md describing the target surface
-produces: a runnable skeleton that builds and prints hello; committed
+produces: a runnable skeleton that builds and prints hello; scratch/<branch>.md seed brief; committed
 default_agent: codex
 action_style: procedural
 ```
 Reads the GOAL for surface + platform, picks idiomatic tooling (`cargo new`,
 `uv init`, `npm create`, SwiftPM/xcodegen), creates the *minimal* skeleton that
 **compiles and runs**, and — critically — **owns the greenfield git setup the
-other steps assume**: if there's no repo/branch/main, it inits them. `scaffold`
-does not design features; it produces the ground `design`/`implement`/`demo`
-stand on. This is the atom that fixes "everything today assumes an existing
-repo + design doc." `init` (sets up loopflow) is unchanged and orthogonal.
+other steps assume**: if there's no repo/branch/main, it inits them. It also
+seeds `scratch/<branch>.md` — a brief transcribed straight from the GOAL — so
+`implement` (which `requires: scratch/<branch>.md`) has the doc it stands on
+*without* an interactive `design` conversation. `scaffold` does not invent
+features; the GOAL *is* the brief. This is the atom that fixes "everything today
+assumes an existing repo + design doc." `init` (sets up loopflow) is unchanged
+and orthogonal.
 
 **`run`** — build and actually execute the artifact; report observed behavior.
 ```
@@ -105,23 +108,35 @@ two-local-dirs.
 ### The `greenfield` flow
 
 ```yaml
-# Originate a product from a goal, end to end.
-- scaffold      # empty dir -> runnable skeleton + repo/branch
-- design        # now has a repo to design within
-- implement     # design doc -> code + tests
+# Originate a product from a goal, end to end. Headless — no interactive steps.
+- scaffold      # empty dir -> runnable skeleton + repo/branch + seed brief
+- implement     # seed brief -> code + tests
 - run           # execute; observe real behavior
 - gate          # make it shippable
 ```
-This is `design-and-ship` with `scaffold` prepended (supplying the branch +
-skeleton the flow used to assume) and `run` inserted before the gate. A goal
-dispatches `greenfield` as its "originate" hand; `ship-roadmap` and the other
-goals stay untouched.
+
+**No `design` step.** `design` is `interactive: true` (design.md:2), and a
+headless flow returns `FlowAction::WaitInteractive` for any interactive step
+(flow.rs:272) — it would **park the probe at the first step**, never reaching a
+build. That's fatal for a "one GOAL.md, zero conversation" north star: the whole
+point is that the GOAL replaces the design conversation. So `scaffold` seeds the
+design brief from the GOAL (above), and `greenfield` goes straight to
+`implement`. The flow is `design-and-ship` with the interactive front half
+swapped for `scaffold`, `reduce`/`polish` dropped for the probe (the CLI is
+tiny), and `run` inserted before `gate`.
+
+*Fallback if seeding-in-scaffold feels overloaded:* keep a `design` step but
+override `interactive: false` on it inside the greenfield flow (per-step
+frontmatter override is supported, flow.rs:1339). Rejected as the default
+because it splits "produce the brief" across two atoms; folding it into
+`scaffold` keeps one greenfield origin point. A human can flip this in review.
 
 ## De-risking
 
 | Question | Finding | Impact on design |
 |----------|---------|-----------------|
 | Do the gaps actually exist, or is this prediction? | Direct inspection: **no** `scaffold`/`run`/`integrate` builtin step. `design` opens "ask what they want to build" (interactive, assumes a conversation); `implement` `requires: scratch/<branch>.md`; `demo`/`code-review`/`gate` `require: diff vs main`. Every build/ship flow assumes a branch off `main`. Confirmed, not guessed. | The probe validates a known prediction; atoms are the fix. Bounds risk to prompt quality, not discovery. |
+| Does a headless greenfield flow stall on `design`? | **Yes, if `design` is in it.** `design.md:2` is `interactive: true`; `flow.rs:272` returns `FlowAction::WaitInteractive` for any interactive step — headless, it parks and never builds. Verified in code. | `greenfield` **omits `design`**; `scaffold` seeds the brief from the GOAL. The registry test asserts `greenfield` expands with zero interactive steps, so this can't silently regress. |
 | Is adding a builtin step hard? | No. `build.rs` scans `build/step/*.md` and generates the registry (`builtins.rs:196`); dropping a file is the whole install. | Atoms are cheap markdown; ship all in one PR. |
 | Can one `scaffold` step handle Rust CLI *and* mobile *and* server? | Steps are prompts, not scripts (every existing step is a prompt). `scaffold` guides an agent to pick tooling from the GOAL; nothing is hardcoded. | `scaffold` stays a single step; platform-specificity is agent judgment. |
 | Does greenfield break git machinery (no branch, no `main`, no PR base)? | build/ship flows + `lf op` assume a branch off `main`. A truly empty dir has none. | `scaffold` explicitly owns repo/branch init — "make the ground the other steps assume." The probe runs in a scratch dir, never this repo. |
@@ -155,6 +170,14 @@ goals stay untouched.
   makes the repo the rest of the vocabulary assumes.
 - **`run` is a first-class atom, not a folded `demo` or a promoted skill.**
   Headless, chainable, produces an observation artifact, feeds `gate`.
+- **`greenfield` is headless — no interactive `design`.** The GOAL replaces the
+  design conversation; `scaffold` seeds the brief. An interactive step would park
+  the probe (flow.rs:272). This is the reshape that makes "one GOAL.md, zero
+  conversation" literally true, not just aspirational.
+- **The probe is a manual experiment, not a CI gate.** Merge gate = the fast
+  deterministic registry test. The agentic build (paid, minutes, nondeterministic)
+  is run by hand; its *result* lands on the roadmap. Don't put a model-driven
+  build in `cargo test`.
 - **One `greenfield` flow, `ship-roadmap` untouched.** The goal gains a new hand
   to dispatch; the loop doctrine doesn't change.
 - **`integrate` deferred, not dropped.** Precisely specified now, built with the
@@ -164,10 +187,12 @@ goals stay untouched.
 
 - **In scope:** the CLI probe (`scripts/prove_language_cli.sh` + its `GOAL.md`);
   `scaffold` and `run` as builtin `build/step/*.md`; the `greenfield` builtin
-  `build/flow/greenfield.yaml`; a builtin-registry test asserting all three
-  register; docs update (`docs/wave-authoring.md` + the vocabulary README) to
-  list the new atoms and the greenfield flow; roadmap write-back of the CLI
-  result and the two follow-on probes.
+  `build/flow/greenfield.yaml`; a registry test asserting `scaffold`, `run`, and
+  `greenfield` resolve **and that `greenfield` expands with zero interactive
+  steps** (the headless-safety invariant that keeps the probe from parking);
+  docs update (`docs/wave-authoring.md` + the vocabulary README) to list the new
+  atoms and the greenfield flow; roadmap write-back of the CLI result and the two
+  follow-on probes.
 - **Out of scope:** the `integrate` step implementation (specced here, built with
   the server probe); the mobile platform-build step + `rams`-as-step (the mobile
   probe); building any of the three products past "runs and is demoable"; the
@@ -176,31 +201,49 @@ goals stay untouched.
 
 ## Done when
 
-- `scripts/prove_language_cli.sh` runs green: from an **empty directory** + a
-  ~6-line `GOAL.md`, the `greenfield` flow scaffolds, designs, implements, runs,
-  and gates a working CLI; the script prints the built binary's **real output**
-  and asserts the probe dir's `.lf/steps/` is empty — **0 steps authored**.
-- `scaffold` + `run` builtin steps and the `greenfield` flow resolve
-  (`get_builtin_step`/`get_builtin_flow` and the registry test pass).
+Two bars, deliberately separated — one automated and deterministic, one a manual
+experiment. Conflating them (as the first draft did) would either put a slow,
+paid, nondeterministic agentic build into `cargo test`, or weaken the merge gate
+to "a human ran a script once."
+
+**Merge gate (deterministic, in CI):**
+- `scaffold` + `run` builtin steps and the `greenfield` flow resolve —
+  `get_builtin_step("scaffold")`, `get_builtin_step("run")`,
+  `get_builtin_flow("greenfield")` all succeed, and `greenfield` expands with no
+  interactive step (asserting the headless-safety invariant).
+- Docs list the new atoms and the greenfield flow.
 - `cargo test` and `uv run pytest python/tests/` pass.
+
+**Acceptance experiment (manual, one-shot — the falsification):**
+- `scripts/prove_language_cli.sh` is run *by hand*: from an **empty directory** +
+  a ~6-line `GOAL.md`, the `greenfield` flow scaffolds, implements, runs, and
+  gates a working CLI; the script prints the built binary's **real output** and
+  the probe dir's `.lf/steps/` is empty — **0 steps authored**. This is not a CI
+  gate: it's an agentic build (real model calls, minutes, nondeterministic). Its
+  *result* — did it reach a running CLI with zero authored steps? — is what gets
+  recorded on the roadmap.
 - Asana `1216257471904678` carries the CLI result; the server-probe (`integrate`)
   and mobile-probe (platform-build + `rams`) are filed with their precise
   missing primitives via `lf op pm update`.
 
 ## Measure
 
-The item's own metric: **vocabulary gap count against the acceptance test.**
+The item's own metric: **does a running product need any authored steps? >0 → 0.**
 
-- **Baseline (today, CLI surface):** run the probe against the *unmodified*
-  builtin vocabulary and count authored-step demands. Prediction: **2**
-  (`scaffold`, `run`). The run produces the real number — that's the falsifiable
-  result. Command: `scripts/prove_language_cli.sh --baseline` (drives builtin
-  vocab only, logs each point the flow stalls for a missing atom).
-- **Target (CLI surface, after atoms):** **0** authored steps; the CLI builds
-  and runs from `GOAL.md` alone.
-- **Across all three surfaces:** gap count = 0 is the finish line for the whole
-  item — CLI (this PR), then server (`integrate`), then mobile (platform-build +
-  `rams`). Each probe reports its own gap count on the roadmap.
+Binary and observable, not a fuzzy count. A headless agent *improvises* around a
+missing atom (it won't cleanly halt and announce "gap here"), so "count the
+stalls" isn't reliably measurable. What *is* observable at the end of a run:
+`.lf/steps/` in the probe dir — empty or not — and whether a binary built and ran.
+
+- **Before atoms:** the `greenfield` flow can't even be assembled from builtins
+  (no `scaffold`/`run` to reference) — the gap is structural, not a runtime count.
+  The predicted missing primitives are `scaffold` and `run`; the experiment
+  confirms them by their *absence* blocking assembly, not by tallying stalls.
+- **After atoms (CLI surface):** the probe reaches a running CLI with
+  `.lf/steps/` **empty**. That empty directory is the proof.
+- **Across all three surfaces:** empty `.lf/steps/` on CLI (this PR), then server
+  (`integrate`), then mobile (platform-build + `rams`). Each probe records its
+  outcome on the roadmap.
 
 "Better" = the number of `.lf/steps/*.md` a developer must write to get a
 running product goes from >0 to 0.

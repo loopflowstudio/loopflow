@@ -15,6 +15,28 @@ Headless run; assumptions made and proceeding.
 - **Probe runs in a throwaway temp dir**, not this repo, so greenfield git
   assumptions and product code never touch loopflow.
 
+## Design-review reshapes (headless review pass — confirm in a human pass)
+
+Made these executive calls against the code; a human should sanity-check them:
+
+- **Dropped `design` from the `greenfield` flow.** Verified `design` is
+  `interactive: true` (design.md:2) and headless flows park on interactive steps
+  (`FlowAction::WaitInteractive`, flow.rs:272), so the original scaffold→design→…
+  chain would stall the probe at step one. Reshaped to
+  scaffold→implement→run→gate, with `scaffold` seeding `scratch/<branch>.md` from
+  the GOAL. *Soft point:* this loads a design-brief responsibility onto
+  `scaffold`. Fallback (documented in the doc) is a non-interactive `design`
+  override inside the flow. A human should pick.
+- **Split "done when" into a CI merge gate vs a manual acceptance experiment.**
+  The full agentic greenfield build can't be a `cargo test` gate (paid, slow,
+  nondeterministic). Merge gate is now the registry test only; the probe run is a
+  one-shot experiment whose result goes on the roadmap. Confirm this is the
+  intended contract before implementation wires a "probe green" check into CI.
+- **Metric made binary (empty `.lf/steps/`), not a stall count.** A headless
+  agent improvises around gaps, so counting stalls isn't measurable. Confirm the
+  team is fine losing the "gap count = 2" narrative in favor of the observable
+  empty-directory proof.
+
 ## Blocker — roadmap write-back deferred
 
 `lf op pm show --wave goals` fails: `wave/goals/GOAL.md has no pm.asana_project`

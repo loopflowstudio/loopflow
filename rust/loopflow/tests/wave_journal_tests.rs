@@ -8,7 +8,7 @@ use loopflow::lfd::conversations::turns::ChatRole;
 use loopflow::lfd::conversations::types::{
     ConversationEvent, ConversationItem, Lifecycle, TurnUsage,
 };
-use loopflow::lfd::wave::journal::{fold_thread, journal_path, Journal};
+use loopflow::lfd::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::lfd::wave::mind::EventAdapter;
 use loopflow::lfd::wave::runtime::{TurnSink, WaveRuntime};
 use loopflow::lfd::wave::server;
@@ -91,7 +91,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     // First life: a user message and a real finalized turn.
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver_user_message("please build the feature".into());
+        rt.deliver_user_message("please build the feature".into(), MessageOp::Message);
         run_harness_turn(rt.clone(), &codex_turn_events());
         let before = rt.thread_snapshot();
         assert_eq!(before.len(), 2);
@@ -109,7 +109,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
 
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
-    let next = rt.deliver_user_message("still there?".into());
+    let next = rt.deliver_user_message("still there?".into(), MessageOp::Message);
     assert!(
         turn_seq(&next.id) > max_before,
         "new turn id {} continues past {max_before}",
@@ -183,7 +183,7 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver_user_message("kept message".into());
+        rt.deliver_user_message("kept message".into(), MessageOp::Message);
         rt.thread_snapshot()
     };
 
@@ -200,7 +200,7 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
         "thread intact past the torn tail"
     );
     // The journal still appends cleanly after truncation.
-    rt.deliver_user_message("after the crash".into());
+    rt.deliver_user_message("after the crash".into(), MessageOp::Message);
     assert_eq!(rt.thread_snapshot().len(), 2);
 }
 

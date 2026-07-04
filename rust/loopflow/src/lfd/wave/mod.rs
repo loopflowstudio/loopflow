@@ -232,23 +232,73 @@ mod tests {
         let (base, runtime, _tmp) = boot().await;
 
         let client = reqwest::Client::new();
-        let posted: ChatTurn = client
+        let body: serde_json::Value = client
             .post(format!("{base}/messages"))
-            .json(&serde_json::json!({ "text": "how's it going?" }))
+            .json(&serde_json::json!({ "op": "message", "text": "how's it going?" }))
             .send()
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
+        let posted: ChatTurn = serde_json::from_value(body["turn"].clone()).unwrap();
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
+        assert_eq!(body["state"], "idle");
 
         // The message is in the thread; the mind answers it at its next turn
         // (mind scheduling is covered in mind.rs tests).
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
+    }
+
+    #[tokio::test]
+    async fn post_without_op_or_without_text_is_rejected() {
+        let (base, _runtime, _tmp) = boot().await;
+        let client = reqwest::Client::new();
+
+        // Op is required — no serde default, no inference.
+        let no_op = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "text": "hello" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(no_op.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Text may be empty only for interrupt.
+        for op in ["message", "steer"] {
+            let empty = client
+                .post(format!("{base}/messages"))
+                .json(&serde_json::json!({ "op": op, "text": "  " }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                empty.status(),
+                reqwest::StatusCode::BAD_REQUEST,
+                "empty text rejected for {op}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bare_interrupt_while_idle_is_a_noop_success_with_state() {
+        let (base, runtime, _tmp) = boot().await;
+        let client = reqwest::Client::new();
+        let body: serde_json::Value = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "op": "interrupt", "text": "" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(body["turn"].is_null(), "nothing said, nothing appended");
+        assert_eq!(body["state"], "idle");
+        assert!(runtime.thread_snapshot().is_empty());
     }
 
     #[tokio::test]
@@ -354,6 +404,26 @@ mod tests {
                 }
             }
         }
+
+        /// Read until `pred` holds over every `state` frame received so far
+        /// (panics after 5s). Returns the state names, in order.
+        async fn states_until(&mut self, pred: impl Fn(&[String]) -> bool) -> Vec<String> {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let mut buf = [0u8; 4096];
+            loop {
+                let states = parse_state_frames(&dechunk(&self.raw));
+                if pred(&states) {
+                    return states;
+                }
+                match tokio::time::timeout_at(deadline, self.stream.read(&mut buf)).await {
+                    Ok(Ok(0)) | Err(_) => {
+                        panic!("SSE ended before condition; states so far: {states:?}")
+                    }
+                    Ok(Ok(n)) => self.raw.extend_from_slice(&buf[..n]),
+                    Ok(Err(err)) => panic!("SSE read error: {err}"),
+                }
+            }
+        }
     }
 
     /// Strip the HTTP response head and chunked transfer framing, tolerating a
@@ -385,6 +455,22 @@ mod tests {
             .filter_map(|line| line.strip_prefix("data:"))
             .filter_map(|data| serde_json::from_str(data.trim()).ok())
             .collect()
+    }
+
+    /// The `data:` of every `state` event, in order.
+    fn parse_state_frames(sse_body: &str) -> Vec<String> {
+        let mut states = Vec::new();
+        let mut in_state_event = false;
+        for line in sse_body.lines() {
+            if let Some(name) = line.strip_prefix("event:") {
+                in_state_event = name.trim() == "state";
+            } else if let Some(data) = line.strip_prefix("data:") {
+                if in_state_event {
+                    states.push(data.trim().to_string());
+                }
+            }
+        }
+        states
     }
 
     /// Feed one harness event through the production delta pipeline.
@@ -483,6 +569,28 @@ mod tests {
         let last = frames.iter().rfind(|t| t.id == open.id).unwrap();
         assert_eq!(last.status, Lifecycle::Completed, "terminal frame is last");
         assert_eq!(last.text, "thinking\nmore");
+    }
+
+    #[tokio::test]
+    async fn sse_state_events_track_the_mind_live() {
+        let (base, runtime, _tmp) = boot().await;
+
+        // Subscribe while idle: the first frame is the current state.
+        let mut client = SseClient::connect(&base).await;
+        let states = client.states_until(|s| !s.is_empty()).await;
+        assert_eq!(states, vec!["idle"]);
+
+        // A turn opens → `turning` arrives live; finalization → `idle`.
+        let mut sink = TurnSink::new(runtime.clone());
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        let states = client.states_until(|s| s.len() >= 2).await;
+        assert_eq!(states, vec!["idle", "turning"]);
+
+        feed(&mut adapter, &mut sink, ev_completed());
+        feed(&mut adapter, &mut sink, ev_usage());
+        let states = client.states_until(|s| s.len() >= 3).await;
+        assert_eq!(states, vec!["idle", "turning", "idle"]);
     }
 
     #[tokio::test]

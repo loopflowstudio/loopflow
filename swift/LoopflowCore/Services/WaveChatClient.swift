@@ -33,6 +33,61 @@ public enum WaveEndpoint {
     }
 }
 
+/// The wave mind's live state, streamed as `state` SSE events (the event data
+/// is the bare state name). The composer keys its verb off it.
+public enum WaveMindState: String, Equatable, Sendable {
+    case idle
+    case turning
+    case interrupting
+    case failed
+}
+
+/// How a posted message asks to be handled — the required `op` of the
+/// `POST /messages {op, text}` body. Explicit at the API, never inferred.
+public enum WaveMessageOp: String, Equatable, Sendable {
+    /// Queued; the mind's next turn answers it.
+    case message
+    /// Into the live turn (server degrades to a queued message when the
+    /// harness can't steer or nothing is turning).
+    case steer
+    /// Cancel the open turn. Empty text = bare interrupt (no-op while idle);
+    /// non-empty text becomes the next turn ("interrupt & send").
+    case interrupt
+}
+
+/// What the composer's buttons should do for a mind state + text presence.
+public enum ComposerVerb: Equatable, Sendable {
+    case send            // POST op=message
+    case steer           // POST op=steer
+    case interrupt       // POST op=interrupt, empty text
+    case interruptAndSend // POST op=interrupt carrying the text
+}
+
+/// The composer's action set: one primary button, an optional secondary
+/// ("Interrupt & Send" while a steer is primary). `primaryEnabled` assumes
+/// the connection is live; the view also gates on liveness.
+public struct ComposerVerbs: Equatable, Sendable {
+    public let primary: ComposerVerb
+    public let primaryEnabled: Bool
+    public let secondary: ComposerVerb?
+}
+
+/// Verb selection: idle+text = Send; turning+text = Steer (Interrupt & Send
+/// one step away); turning+empty = Interrupt. While interrupting, text
+/// degrades to a queued Send and a bare re-interrupt is pointless (disabled).
+public func composerVerbs(state: WaveMindState, hasText: Bool) -> ComposerVerbs {
+    switch (state, hasText) {
+    case (.turning, true):
+        return ComposerVerbs(primary: .steer, primaryEnabled: true, secondary: .interruptAndSend)
+    case (.turning, false):
+        return ComposerVerbs(primary: .interrupt, primaryEnabled: true, secondary: nil)
+    case (.interrupting, false):
+        return ComposerVerbs(primary: .interrupt, primaryEnabled: false, secondary: nil)
+    default:
+        return ComposerVerbs(primary: .send, primaryEnabled: hasText, secondary: nil)
+    }
+}
+
 /// Observable connection to one wave's chat server: the live thread plus a phase
 /// the UI renders (not running / connecting / live).
 @MainActor
@@ -50,6 +105,9 @@ public final class WaveChatConnection {
 
     public private(set) var turns: [ChatTurn] = []
     public private(set) var phase: Phase = .idle
+    /// Last mind state seen — sent once on subscribe, again on every
+    /// transition, and echoed by `POST /messages` responses.
+    public private(set) var mindState: WaveMindState = .idle
 
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
@@ -83,24 +141,38 @@ public final class WaveChatConnection {
         loop = nil
     }
 
-    /// POST a message; the created user turn is applied immediately and also
-    /// arrives over the stream (deduped by id). The assistant reply streams later.
-    public func send(_ text: String) async throws {
+    /// `POST /messages {op, text}` response: the appended user turn (null for
+    /// a bare interrupt) plus the mind-state name at acceptance.
+    private struct PostMessageResponse: Decodable {
+        let turn: ChatTurn?
+        let state: String
+    }
+
+    /// POST a message with an explicit op; a created user turn is applied
+    /// immediately and also arrives over the stream (deduped by id). The
+    /// assistant reply streams later. Text may be empty only for `.interrupt`
+    /// (a bare interrupt); empty message/steer sends are dropped client-side.
+    public func send(_ text: String, op: WaveMessageOp = .message) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || op == .interrupt else { return }
         guard let endpoint = currentEndpoint, let url = URL(string: "http://\(endpoint)/messages") else {
             throw WaveChatError.notRunning
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": trimmed])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["op": op.rawValue, "text": trimmed])
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        let turn = try decoder.decode(ChatTurn.self, from: data)
-        upsert(turn)
+        let posted = try decoder.decode(PostMessageResponse.self, from: data)
+        if let turn = posted.turn {
+            upsert(turn)
+        }
+        if let state = WaveMindState(rawValue: posted.state) {
+            mindState = state
+        }
     }
 
     // MARK: - Discovery + streaming loop
@@ -142,7 +214,9 @@ public final class WaveChatConnection {
         // A fresh stream replays the server's full transcript. Drop the previous
         // generation first: after a server restart, turn ids and sequences start
         // over, and stale high-sequence turns would interleave with the replay.
+        // The mind state resets too; the server's first frame is a `state` event.
         turns = []
+        mindState = .idle
         phase = .live
 
         var event = ""
@@ -164,10 +238,17 @@ public final class WaveChatConnection {
         }
     }
 
-    /// One SSE frame. The server re-sends an in-progress turn whole under the
-    /// same id as it grows, then a terminal frame at finalization — every frame
-    /// replaces the previous state of its id. Internal for tests.
+    /// One SSE frame. Two event names: `state` carries the bare mind-state
+    /// name (sent on subscribe and on every transition); `turn` carries a
+    /// whole turn — re-sent under the same id as it grows, then a terminal
+    /// frame at finalization, every frame replacing the previous state of its
+    /// id. Unknown events and unparseable payloads drop. Internal for tests.
     func handle(event: String, data: String) {
+        if event == "state" {
+            guard let state = WaveMindState(rawValue: data) else { return }
+            mindState = state
+            return
+        }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
         guard let turn = try? decoder.decode(ChatTurn.self, from: json) else { return }
         upsert(turn)

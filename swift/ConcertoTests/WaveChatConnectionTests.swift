@@ -85,4 +85,82 @@ struct WaveChatConnectionTests {
         conn.handle(event: "ping", data: frame(id: "turn-1", text: "x", status: "running"))
         #expect(conn.turns.isEmpty)
     }
+
+    @Test("state events update the observable mind state")
+    func stateEventsUpdateMindState() {
+        let conn = connection()
+        #expect(conn.mindState == .idle)
+        conn.handle(event: "state", data: "turning")
+        #expect(conn.mindState == .turning)
+        conn.handle(event: "state", data: "interrupting")
+        #expect(conn.mindState == .interrupting)
+        conn.handle(event: "state", data: "idle")
+        #expect(conn.mindState == .idle)
+
+        // Unknown state names are dropped, never crash the stream.
+        conn.handle(event: "state", data: "transcending")
+        #expect(conn.mindState == .idle)
+        // State payloads never masquerade as turns.
+        #expect(conn.turns.isEmpty)
+    }
+
+    @Test("message ops encode to the wire values the server expects")
+    func opWireEncoding() {
+        #expect(WaveMessageOp.message.rawValue == "message")
+        #expect(WaveMessageOp.steer.rawValue == "steer")
+        #expect(WaveMessageOp.interrupt.rawValue == "interrupt")
+    }
+}
+
+// Composer verb selection: the smallest honest mapping from (mind state, has
+// text) to what the primary/secondary buttons do. The view renders this
+// directly, so the table below IS the composer's behavior.
+@Suite("Composer verb selection")
+struct ComposerVerbTests {
+    @Test("idle + text sends; idle + empty is disabled")
+    func idleSends() {
+        let withText = composerVerbs(state: .idle, hasText: true)
+        #expect(withText.primary == .send)
+        #expect(withText.primaryEnabled)
+        #expect(withText.secondary == nil)
+
+        let empty = composerVerbs(state: .idle, hasText: false)
+        #expect(empty.primary == .send)
+        #expect(!empty.primaryEnabled)
+    }
+
+    @Test("turning + text steers, with Interrupt & Send one step away")
+    func turningSteers() {
+        let verbs = composerVerbs(state: .turning, hasText: true)
+        #expect(verbs.primary == .steer)
+        #expect(verbs.primaryEnabled)
+        #expect(verbs.secondary == .interruptAndSend)
+    }
+
+    @Test("turning + empty interrupts")
+    func turningEmptyInterrupts() {
+        let verbs = composerVerbs(state: .turning, hasText: false)
+        #expect(verbs.primary == .interrupt)
+        #expect(verbs.primaryEnabled)
+        #expect(verbs.secondary == nil)
+    }
+
+    @Test("interrupting degrades: text queues a Send, re-interrupt is disabled")
+    func interruptingDegrades() {
+        let withText = composerVerbs(state: .interrupting, hasText: true)
+        #expect(withText.primary == .send)
+        #expect(withText.primaryEnabled)
+        #expect(withText.secondary == nil)
+
+        let empty = composerVerbs(state: .interrupting, hasText: false)
+        #expect(empty.primary == .interrupt)
+        #expect(!empty.primaryEnabled, "the cancel is already in flight")
+    }
+
+    @Test("failed behaves like idle: a message revives the mind")
+    func failedSends() {
+        let verbs = composerVerbs(state: .failed, hasText: true)
+        #expect(verbs.primary == .send)
+        #expect(verbs.primaryEnabled)
+    }
 }

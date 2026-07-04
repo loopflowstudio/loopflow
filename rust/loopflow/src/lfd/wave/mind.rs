@@ -14,6 +14,23 @@
 //! - **Message while turning** → queued (append-and-coalesce, never
 //!   rejected); at the turn boundary one turn drains the whole queue and
 //!   `answers` names every consumed id.
+//! - **Steer while turning**, on a steer-capable harness → injected into the
+//!   live turn (`send_input` mid-turn; codex maps it to `turn/steer`). The
+//!   current turn consumed it, journaled as `TurnSteered.answers`. On a
+//!   non-capable harness, while interrupting, or while idle, a steer degrades
+//!   to a queued message — the `UserMessage{op: Steer}` row records the
+//!   intent either way.
+//! - **Interrupt while turning** → `Turning → Interrupting`, cooperative
+//!   `harness.interrupt()`; the harness finalizes the open turn
+//!   `Interrupted` (codex reports `turn/completed{interrupted}`) and the
+//!   boundary settles the mind to `Idle`. Text on the interrupt ("interrupt &
+//!   send") is queued first, so the post-interrupt boundary starts the next
+//!   turn with `answers` naming it. If the harness never delivers the
+//!   terminal event within [`INTERRUPT_DEADLINE`], the janitor force-path
+//!   fires: journal `TurnFinished{Interrupted}`, settle to `Idle`, log
+//!   loudly.
+//! - **Interrupt while idle** → no-op (nothing to cancel); text, if any,
+//!   starts the next turn immediately.
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
 //!   progress turn carrying a compact nudge ([`HEARTBEAT_PROMPT`]). Only the
 //!   first turn of a thread carries the full seed — the codex driver prepends
@@ -61,9 +78,9 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::lfd::conversations::harness::{is_terminal_harness_error, Harness};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
-use crate::lfd::wave::journal::MessageId;
+use crate::lfd::wave::journal::{MessageId, MessageOp};
 use crate::lfd::wave::memory::Memory;
-use crate::lfd::wave::runtime::{TurnSink, UserMessage, WaveRuntime};
+use crate::lfd::wave::runtime::{InboxItem, TurnSink, UserMessage, WaveRuntime};
 use crate::lfd::wave::state::MindState;
 
 /// How long the mind sits idle (empty queue, no turn) before a heartbeat
@@ -76,18 +93,28 @@ pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(300);
 /// the heartbeat stops. A user message resets the count and revives the mind.
 pub const MAX_CONSECUTIVE_TURN_FAILURES: u32 = 3;
 
+/// How long `Interrupting` may last before the janitor force-path fires. The
+/// harness's cooperative cancel should finalize the turn in well under this;
+/// past the deadline the open turn is force-finalized `Interrupted` and the
+/// mind settles to `Idle` — the one transient state the mind could otherwise
+/// wedge in (the HumanLayer stuck-`interrupting` lesson).
+pub const INTERRUPT_DEADLINE: Duration = Duration::from_secs(10);
+
 /// Compact nudge for heartbeat turns. The thread is persistent, so heartbeats
 /// never re-send the seed — the first turn carried it.
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration step. If nothing needs doing, say so in one line.";
 
-/// Scheduler knobs. `Default` is production: codex vendor, 5-minute heartbeat.
+/// Scheduler knobs. `Default` is production: codex vendor, 5-minute
+/// heartbeat, 10-second interrupt deadline.
 #[derive(Debug, Clone)]
 pub struct MindConfig {
     /// Vendor label journaled in `ThreadStarted`.
     pub vendor: String,
     /// Idle window before a heartbeat turn (see [`HEARTBEAT_IDLE`]).
     pub heartbeat_idle: Duration,
+    /// Janitor bound on `Interrupting` (see [`INTERRUPT_DEADLINE`]).
+    pub interrupt_deadline: Duration,
 }
 
 impl Default for MindConfig {
@@ -95,6 +122,7 @@ impl Default for MindConfig {
         Self {
             vendor: "codex".to_string(),
             heartbeat_idle: HEARTBEAT_IDLE,
+            interrupt_deadline: INTERRUPT_DEADLINE,
         }
     }
 }
@@ -275,7 +303,7 @@ impl EventAdapter {
 /// replaces both the old progress arm and the old chat consumer.
 pub async fn run_mind(
     runtime: Arc<WaveRuntime>,
-    mut inbox_rx: mpsc::UnboundedReceiver<UserMessage>,
+    mut inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
     harness: Box<dyn Harness>,
     mut events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     cwd: PathBuf,
@@ -294,6 +322,7 @@ pub async fn run_mind(
         failed: false,
         started: false,
         idle_since: Instant::now(),
+        interrupt_deadline: None,
     };
 
     if let Err(err) = mind.start_thread().await {
@@ -303,14 +332,15 @@ pub async fn run_mind(
     let mut events_open = true;
     loop {
         let heartbeat_at = mind.heartbeat_deadline();
+        let interrupt_at = mind.interrupt_deadline;
         tokio::select! {
             // Biased toward the inbox: a message that arrived before a turn
             // boundary is queued before the boundary drains, so coalescing
             // is deterministic.
             biased;
-            msg = inbox_rx.recv() => {
-                let Some(msg) = msg else { break };
-                mind.on_message(msg).await;
+            item = inbox_rx.recv() => {
+                let Some(item) = item else { break };
+                mind.on_inbox(item).await;
             }
             event = events_rx.recv(), if events_open => {
                 match event {
@@ -321,7 +351,10 @@ pub async fn run_mind(
                     }
                 }
             }
-            _ = heartbeat_sleep(heartbeat_at) => {
+            _ = sleep_until_opt(interrupt_at), if interrupt_at.is_some() => {
+                mind.on_interrupt_deadline().await;
+            }
+            _ = sleep_until_opt(heartbeat_at) => {
                 mind.on_heartbeat().await;
             }
         }
@@ -331,7 +364,7 @@ pub async fn run_mind(
     let _ = mind.harness.stop().await;
 }
 
-async fn heartbeat_sleep(deadline: Option<Instant>) {
+async fn sleep_until_opt(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
@@ -358,6 +391,9 @@ struct Mind {
     /// The vendor session is alive (start succeeded, no terminal error).
     started: bool,
     idle_since: Instant,
+    /// Janitor bound while `Interrupting`: set when the cancel fires, cleared
+    /// at the turn boundary. Past it, the force-path finalizes the turn.
+    interrupt_deadline: Option<Instant>,
 }
 
 impl Mind {
@@ -389,6 +425,17 @@ impl Mind {
         Ok(())
     }
 
+    async fn on_inbox(&mut self, item: InboxItem) {
+        match item {
+            InboxItem::Message(message) => match message.op {
+                MessageOp::Message => self.on_message(message).await,
+                MessageOp::Steer => self.on_steer(message).await,
+                MessageOp::Interrupt => self.on_interrupt(Some(message)).await,
+            },
+            InboxItem::Interrupt => self.on_interrupt(None).await,
+        }
+    }
+
     async fn on_message(&mut self, message: UserMessage) {
         self.queue.push(message);
         if self.failed {
@@ -397,6 +444,99 @@ impl Mind {
             self.start_queued_turn().await;
         }
         // else: turning — queued; the next boundary drains it.
+    }
+
+    /// Steer: inject into the live turn when there is one and the harness can
+    /// steer; the current turn consumed the message (`TurnSteered.answers`).
+    /// Otherwise — idle, interrupting, non-capable harness — degrade to a
+    /// queued message; the next boundary answers it. The `UserMessage{op:
+    /// Steer}` row was journaled at delivery either way: intent in the log,
+    /// consumption recording what actually happened.
+    async fn on_steer(&mut self, message: UserMessage) {
+        let steerable = self.in_flight
+            && self.interrupt_deadline.is_none()
+            && self.harness.capabilities().supports_steer;
+        if !steerable {
+            self.on_message(message).await;
+            return;
+        }
+        match self.harness.send_input(&message.text).await {
+            Ok(()) => {
+                if !self.runtime.journal_steered(vec![message.id.clone()]) {
+                    // The turn closed between the check and the send; the
+                    // message reached the vendor as the next turn's input.
+                    tracing::warn!("steer landed at a turn boundary; consumption not marked");
+                }
+            }
+            Err(err) => {
+                // The harness is broken, not the message: keep it queued so a
+                // revival re-sends it.
+                self.queue.push(message);
+                self.fail(&format!("steer send_input failed: {err:#}"));
+            }
+        }
+    }
+
+    /// Interrupt: cancel the open turn (cooperative, deadline-bounded). Text
+    /// riding the interrupt ("interrupt & send") is queued first so the
+    /// post-interrupt boundary starts the next turn answering it. While idle
+    /// there is nothing to cancel — a no-op, except that text starts the next
+    /// turn immediately. While already interrupting, only the text queues.
+    async fn on_interrupt(&mut self, message: Option<UserMessage>) {
+        if let Some(message) = message {
+            self.queue.push(message);
+        }
+        if self.failed {
+            // Nothing to interrupt; text (if any) revives the mind like any
+            // other message.
+            if !self.queue.is_empty() {
+                self.revive().await;
+            }
+            return;
+        }
+        if !self.in_flight {
+            // Idle: no-op; "interrupt & send" text becomes the next turn now.
+            if self.started && !self.queue.is_empty() {
+                self.start_queued_turn().await;
+            }
+            return;
+        }
+        if self.interrupt_deadline.is_some() {
+            return; // already interrupting; the boundary (or janitor) settles it
+        }
+        if !self.runtime.begin_interrupt("user interrupt") {
+            tracing::warn!("interrupt with a turn in flight but no Turning state; ignored");
+            return;
+        }
+        if let Err(err) = self.harness.interrupt().await {
+            // Cooperative cancel failed; the deadline janitor bounds the wait.
+            tracing::warn!(error = %format!("{err:#}"), "harness interrupt failed; janitor deadline armed");
+        }
+        self.interrupt_deadline = Some(Instant::now() + self.config.interrupt_deadline);
+    }
+
+    /// The janitor force-path: the harness swallowed the interrupt (no
+    /// terminal event within the deadline). Journal `TurnFinished
+    /// {Interrupted}`, settle to `Idle`, drop the sink/adapter's open-turn
+    /// state so a late terminal event is ignored, and drain the queue.
+    async fn on_interrupt_deadline(&mut self) {
+        self.interrupt_deadline = None;
+        tracing::error!(
+            wave = self.runtime.name(),
+            deadline_secs = self.config.interrupt_deadline.as_secs_f64(),
+            "interrupt deadline expired; force-finalizing the open turn as interrupted"
+        );
+        self.sink.abandon_open();
+        self.adapter = EventAdapter::new();
+        self.runtime.force_finalize_open_turn(
+            Lifecycle::Interrupted,
+            "interrupt deadline: harness never delivered the terminal event",
+        );
+        self.in_flight = false;
+        self.idle_since = Instant::now();
+        if !self.queue.is_empty() {
+            self.start_queued_turn().await;
+        }
     }
 
     async fn on_event(&mut self, event: ConversationEvent) {
@@ -431,6 +571,8 @@ impl Mind {
     async fn on_turn_boundary(&mut self, status: Lifecycle) {
         self.in_flight = false;
         self.idle_since = Instant::now();
+        // An interrupted turn finalized in time: the janitor stands down.
+        self.interrupt_deadline = None;
         if status == Lifecycle::Failed {
             self.consecutive_failures += 1;
             if self.consecutive_failures >= MAX_CONSECUTIVE_TURN_FAILURES {
@@ -523,6 +665,9 @@ impl Mind {
         );
         self.failed = true;
         self.in_flight = false;
+        // A dead mind has no turn for the janitor to force-finalize; the
+        // failure path already closed whatever was open.
+        self.interrupt_deadline = None;
         self.runtime.transition(
             MindState::Failed {
                 reason: reason.to_string(),
@@ -543,14 +688,19 @@ mod tests {
     use crate::lfd::conversations::types::TurnUsage;
     use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
 
-    /// Scriptless mock: records `send_input`/`set_provider_session_id`; the
-    /// TEST drives the event stream directly through the channel it created,
-    /// so turn lifecycles are fully deterministic.
+    /// Scriptless mock: records `send_input`/`interrupt`/
+    /// `set_provider_session_id`; the TEST drives the event stream directly
+    /// through the channel it created, so turn lifecycles are fully
+    /// deterministic. `interrupt` records the call and nothing else — a
+    /// "responsive" harness is simulated by the test emitting the terminal
+    /// event afterwards; a "swallowing" harness by not emitting it.
     struct MockHarness {
         inputs: Arc<Mutex<Vec<String>>>,
         seeded: Arc<Mutex<Option<String>>>,
         thread_id: String,
         starts: Arc<Mutex<u32>>,
+        interrupts: Arc<Mutex<u32>>,
+        supports_steer: bool,
     }
 
     #[async_trait]
@@ -564,6 +714,7 @@ mod tests {
             Ok(())
         }
         async fn interrupt(&mut self) -> Result<()> {
+            *self.interrupts.lock().unwrap() += 1;
             Ok(())
         }
         async fn stop(&mut self) -> Result<()> {
@@ -571,7 +722,7 @@ mod tests {
         }
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                supports_steer: true,
+                supports_steer: self.supports_steer,
                 supports_interrupt: true,
             }
         }
@@ -589,6 +740,7 @@ mod tests {
         inputs: Arc<Mutex<Vec<String>>>,
         seeded: Arc<Mutex<Option<String>>>,
         starts: Arc<Mutex<u32>>,
+        interrupts: Arc<Mutex<u32>>,
         _tmp: tempfile::TempDir,
     }
 
@@ -646,17 +798,29 @@ mod tests {
     }
 
     fn boot_in(tmp: tempfile::TempDir, heartbeat: Duration) -> TestMind {
+        boot_with(tmp, heartbeat, INTERRUPT_DEADLINE, true)
+    }
+
+    fn boot_with(
+        tmp: tempfile::TempDir,
+        heartbeat: Duration,
+        interrupt_deadline: Duration,
+        supports_steer: bool,
+    ) -> TestMind {
         let (runtime, inbox_rx) =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let seeded = Arc::new(Mutex::new(None));
         let starts = Arc::new(Mutex::new(0));
+        let interrupts = Arc::new(Mutex::new(0));
         let harness = Box::new(MockHarness {
             inputs: inputs.clone(),
             seeded: seeded.clone(),
             thread_id: "thread-new".to_string(),
             starts: starts.clone(),
+            interrupts: interrupts.clone(),
+            supports_steer,
         });
         tokio::spawn(run_mind(
             runtime.clone(),
@@ -667,6 +831,7 @@ mod tests {
             MindConfig {
                 vendor: "codex".to_string(),
                 heartbeat_idle: heartbeat,
+                interrupt_deadline,
             },
         ));
         TestMind {
@@ -675,6 +840,7 @@ mod tests {
             inputs,
             seeded,
             starts,
+            interrupts,
             _tmp: tmp,
         }
     }
@@ -707,7 +873,9 @@ mod tests {
     #[tokio::test]
     async fn message_while_idle_starts_a_turn_answering_it() {
         let mind = boot(Duration::from_secs(600));
-        let user_turn = mind.runtime.deliver_user_message("hello mind".into());
+        let user_turn = mind
+            .runtime
+            .deliver_user_message("hello mind".into(), MessageOp::Message);
         wait_for("input sent", || mind.input_count() == 1).await;
         assert_eq!(mind.inputs.lock().unwrap()[0], "hello mind");
 
@@ -727,7 +895,8 @@ mod tests {
     #[tokio::test]
     async fn messages_while_turning_coalesce_into_one_boundary_turn() {
         let mind = boot(Duration::from_secs(600));
-        mind.runtime.deliver_user_message("first".into());
+        mind.runtime
+            .deliver_user_message("first".into(), MessageOp::Message);
         wait_for("turn 1 sent", || mind.input_count() == 1).await;
         mind.emit(ConversationEvent::TurnStarted {
             turn_id: "vt".into(),
@@ -735,8 +904,12 @@ mod tests {
 
         // Two messages land mid-turn: queued, never rejected. The biased
         // select guarantees they're queued before the boundary drains.
-        let m2 = mind.runtime.deliver_user_message("second".into());
-        let m3 = mind.runtime.deliver_user_message("third".into());
+        let m2 = mind
+            .runtime
+            .deliver_user_message("second".into(), MessageOp::Message);
+        let m3 = mind
+            .runtime
+            .deliver_user_message("third".into(), MessageOp::Message);
         mind.emit(ConversationEvent::TurnCompleted {
             turn_id: "vt".into(),
             status: Lifecycle::Completed,
@@ -826,7 +999,9 @@ mod tests {
         assert_eq!(mind.input_count(), sends, "heartbeat stopped while failed");
 
         // A user message revives the mind (Failed → Idle) and gets answered.
-        let wake = mind.runtime.deliver_user_message("are you alive?".into());
+        let wake = mind
+            .runtime
+            .deliver_user_message("are you alive?".into(), MessageOp::Message);
         wait_for("revival turn sent", || mind.input_count() == sends + 1).await;
         assert_eq!(mind.runtime.mind_state(), MindState::Idle);
         mind.emit_turn("back!", Lifecycle::Completed);
@@ -841,7 +1016,8 @@ mod tests {
     #[tokio::test]
     async fn thread_started_is_journaled_before_the_first_turn() {
         let mind = boot(Duration::from_secs(600));
-        mind.runtime.deliver_user_message("go".into());
+        mind.runtime
+            .deliver_user_message("go".into(), MessageOp::Message);
         wait_for("input sent", || mind.input_count() == 1).await;
         mind.emit_turn("going", Lifecycle::Completed);
         wait_for("turn journaled", || {
@@ -909,5 +1085,312 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "from the first life");
         assert_eq!(*mind.starts.lock().unwrap(), 1);
+    }
+
+    // -- Steering --
+
+    fn steered_answers(events: &[EventKind]) -> Vec<(String, Vec<MessageId>)> {
+        events
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::TurnSteered { turn_id, answers } => {
+                    Some((turn_id.clone(), answers.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn steer_mid_turn_reaches_the_live_turn_and_is_answered_by_it() {
+        let mind = boot(Duration::from_secs(600));
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        // Steer mid-turn: injected into the live turn, not queued.
+        let steer = mind
+            .runtime
+            .deliver_user_message("focus on the parser".into(), MessageOp::Steer);
+        wait_for("steer injected", || mind.input_count() == 2).await;
+        assert_eq!(mind.inputs.lock().unwrap()[1], "focus on the parser");
+
+        // Consumption: the CURRENT turn answers it, via TurnSteered.
+        wait_for("TurnSteered journaled", || {
+            !steered_answers(&mind.journal_events()).is_empty()
+        })
+        .await;
+        let steered = steered_answers(&mind.journal_events());
+        assert_eq!(steered[0].1, vec![message_id(&steer)]);
+        let open_turn_id = mind
+            .runtime
+            .thread_snapshot()
+            .iter()
+            .find(|t| t.status == Lifecycle::Running)
+            .expect("open turn")
+            .id
+            .clone();
+        assert_eq!(steered[0].0, open_turn_id, "answered by the current turn");
+
+        // The boundary drains nothing: the steer was consumed mid-turn.
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
+        });
+        wait_for("back to idle", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        assert_eq!(
+            mind.input_count(),
+            2,
+            "no boundary turn for a steered message"
+        );
+    }
+
+    #[tokio::test]
+    async fn steer_degrades_to_queue_on_a_non_capable_harness() {
+        let mind = boot_with(
+            tempfile::tempdir().expect("tempdir"),
+            Duration::from_secs(600),
+            INTERRUPT_DEADLINE,
+            false, // supports_steer = false
+        );
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        let steer = mind
+            .runtime
+            .deliver_user_message("focus on the parser".into(), MessageOp::Steer);
+        // Queued, not injected: no send until the boundary.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            mind.input_count(),
+            1,
+            "degraded steer waits for the boundary"
+        );
+
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
+        });
+        wait_for("boundary turn sent", || mind.input_count() == 2).await;
+        assert_eq!(mind.inputs.lock().unwrap()[1], "focus on the parser");
+        mind.emit_turn("refocused", Lifecycle::Completed);
+        wait_for("boundary turn journaled", || {
+            started_answers(&mind.journal_events()).len() == 2
+        })
+        .await;
+        // Consumption is the normal boundary marker, not TurnSteered.
+        let answers = started_answers(&mind.journal_events());
+        assert_eq!(answers[1], vec![message_id(&steer)]);
+        assert!(steered_answers(&mind.journal_events()).is_empty());
+    }
+
+    // -- Interrupting --
+
+    #[tokio::test]
+    async fn interrupt_finalizes_the_turn_interrupted_and_settles_idle() {
+        let mind = boot(Duration::from_secs(600));
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        mind.runtime.deliver_interrupt();
+        wait_for("harness interrupt called", || {
+            *mind.interrupts.lock().unwrap() == 1
+        })
+        .await;
+        assert_eq!(mind.runtime.mind_state().name(), "interrupting");
+
+        // The harness cancels cooperatively: terminal event arrives.
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Interrupted,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
+        });
+        wait_for("idle", || mind.runtime.mind_state() == MindState::Idle).await;
+
+        // The turn is a well-formed interrupted record, and the journal walked
+        // Turning → Interrupting → Idle.
+        let thread = mind.runtime.thread_snapshot();
+        assert_eq!(
+            thread.last().unwrap().status,
+            Lifecycle::Interrupted,
+            "partial turn finalized as a value, not a crash"
+        );
+        let path: Vec<(String, String)> = mind
+            .journal_events()
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::MindState { from, to, .. } => {
+                    Some((from.name().to_string(), to.name().to_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            path,
+            vec![
+                ("idle".to_string(), "turning".to_string()),
+                ("turning".to_string(), "interrupting".to_string()),
+                ("interrupting".to_string(), "idle".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupt_and_send_starts_the_next_turn_answering_the_text() {
+        let mind = boot(Duration::from_secs(600));
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        let sent = mind
+            .runtime
+            .deliver_user_message("drop that; fix the build".into(), MessageOp::Interrupt);
+        wait_for("harness interrupt called", || {
+            *mind.interrupts.lock().unwrap() == 1
+        })
+        .await;
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Interrupted,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
+        });
+
+        // The interrupt's text starts the next turn immediately after Idle…
+        wait_for("next turn sent", || mind.input_count() == 2).await;
+        assert_eq!(mind.inputs.lock().unwrap()[1], "drop that; fix the build");
+        // …and its TurnStarted.answers names it.
+        mind.emit_turn("on it", Lifecycle::Completed);
+        wait_for("next turn journaled", || {
+            started_answers(&mind.journal_events()).len() == 2
+        })
+        .await;
+        let answers = started_answers(&mind.journal_events());
+        assert_eq!(answers[1], vec![message_id(&sent)]);
+    }
+
+    #[tokio::test]
+    async fn interrupt_while_idle_is_a_noop() {
+        let mind = boot(Duration::from_secs(600));
+        wait_for("started", || *mind.starts.lock().unwrap() == 1).await;
+
+        mind.runtime.deliver_interrupt();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(mind.runtime.mind_state(), MindState::Idle);
+        assert_eq!(*mind.interrupts.lock().unwrap(), 0, "nothing to cancel");
+        assert_eq!(mind.input_count(), 0, "no turn started");
+    }
+
+    #[tokio::test]
+    async fn interrupt_deadline_forces_the_turn_closed_when_the_harness_swallows_it() {
+        // Swallowing harness: interrupt is recorded but no terminal event
+        // ever arrives. A short deadline stands in for the 10s janitor bound.
+        let mind = boot_with(
+            tempfile::tempdir().expect("tempdir"),
+            Duration::from_secs(600),
+            Duration::from_millis(50),
+            true,
+        );
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        mind.runtime.deliver_interrupt();
+        wait_for("harness interrupt called", || {
+            *mind.interrupts.lock().unwrap() == 1
+        })
+        .await;
+
+        // No terminal event — the janitor force-path fires at the deadline.
+        wait_for("forced idle", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        let thread = mind.runtime.thread_snapshot();
+        assert_eq!(thread.last().unwrap().status, Lifecycle::Interrupted);
+        let finished: Vec<Lifecycle> = mind
+            .journal_events()
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::TurnFinished { status, .. } => Some(*status),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished, vec![Lifecycle::Interrupted]);
+
+        // The mind is live again: a new message starts a fresh turn.
+        mind.runtime
+            .deliver_user_message("still there?".into(), MessageOp::Message);
+        wait_for("fresh turn sent", || mind.input_count() == 2).await;
     }
 }

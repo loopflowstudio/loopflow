@@ -5,7 +5,8 @@
 //! per-machine, never committed). Every projection is a fold over it: the
 //! thread is the conversation events, the mind state is the last `MindState`
 //! event, the message queue is `UserMessage`s not yet named in any
-//! `TurnStarted.answers`. Store is truth; the SSE broadcast bus is liveness.
+//! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
+//! broadcast bus is liveness.
 //!
 //! These events are internal persistence, NOT wire DTOs — there is no
 //! Swift/Python mirror obligation. The no-defaults discipline still applies:
@@ -47,15 +48,18 @@ impl std::fmt::Display for MessageId {
     }
 }
 
-/// How a user message asks to be handled. The POST /messages wire body is
-/// still `{text}` — every message is `Message` until steering lands with the
-/// mind phase.
+/// How a user message asks to be handled. This is both the journaled op and
+/// the `POST /messages` wire op (`{op, text}`, snake_case) — explicit at the
+/// API, never inferred. The journaled op records *intent*; what actually
+/// happened is recorded by consumption (`TurnStarted.answers` for queued
+/// messages, `TurnSteered.answers` for mid-turn injection).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageOp {
     /// Append; queued; the next turn answers it.
     Message,
-    /// Inject into the current turn; falls back to `Message` when idle.
+    /// Inject into the current turn; degrades to `Message` when idle or when
+    /// the harness can't steer.
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
@@ -136,6 +140,15 @@ pub enum EventKind {
         /// A `Message` item is a prose fragment (folds into `ChatTurn.text`);
         /// anything else folds into `ChatTurn.items`.
         item: ConversationItem,
+    },
+    TurnSteered {
+        turn_id: String,
+        /// Consumption marker for steered messages: these `UserMessage`s were
+        /// injected into the turn *while it ran* (harness `send_input`
+        /// mid-turn), so the current turn answers them — no later turn will.
+        /// `TurnStarted.answers` can't be amended (append-only log), so
+        /// mid-turn consumption gets its own row.
+        answers: Vec<MessageId>,
     },
     TurnFinished {
         turn_id: String,
@@ -376,7 +389,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 thread_id = Some(started.clone());
             }
-            EventKind::WorkerDispatched { .. }
+            // Steer consumption affects the queue fold, not the thread: the
+            // steered text is already a user turn via its `UserMessage` row.
+            EventKind::TurnSteered { .. }
+            | EventKind::WorkerDispatched { .. }
             | EventKind::WorkerFinished { .. }
             | EventKind::MemoryUpdated { .. } => {}
         }
@@ -475,6 +491,10 @@ mod tests {
                     text: "working on it".into(),
                     phase: None,
                 },
+            },
+            EventKind::TurnSteered {
+                turn_id: "turn-2".into(),
+                answers: vec![MessageId("msg-3".into())],
             },
             EventKind::TurnFinished {
                 turn_id: "turn-2".into(),

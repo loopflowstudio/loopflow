@@ -11,13 +11,25 @@
 //!   `status` is the mind state (`idle | turning | interrupting | failed`).
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread.
-//! - `GET /conversation/stream` → SSE; each event named `turn`, data a `Turn`
-//!   JSON; replays the thread on connect (including the open turn), then
-//!   streams live. Turn ids repeat: an in-progress turn is re-sent whole as it
-//!   grows and finalization sends the terminal turn under the same id — each
-//!   frame replaces the client's previous state for that id (upsert, never
-//!   append-if-seen).
-//! - `POST /messages {text}` → appends a user `Turn` and returns it.
+//! - `GET /conversation/stream` → SSE, two event names and no more:
+//!   - `state`: data is the mind-state name (`idle | turning | interrupting |
+//!     failed`), sent once on subscribe (before the turn replay) and again on
+//!     every transition — the composer keys its verb off it.
+//!   - `turn`: data is a `Turn` JSON; the thread replays on connect
+//!     (including the open turn), then streams live. Turn ids repeat: an
+//!     in-progress turn is re-sent whole as it grows and finalization sends
+//!     the terminal turn under the same id — each frame replaces the client's
+//!     previous state for that id (upsert, never append-if-seen).
+//! - `POST /messages {op, text}` → `{turn, state}`. `op` is required —
+//!   `"message"` (queued; the next turn answers it), `"steer"` (into the live
+//!   turn when the harness supports it, else degrades to a queued message),
+//!   or `"interrupt"` (cancel the open turn; non-empty text becomes the next
+//!   turn — "interrupt & send"; while idle, an interrupt is a no-op success).
+//!   `text` may be empty only for `interrupt` (400 otherwise). `turn` is the
+//!   appended user `Turn`, or null for a bare interrupt (nothing was said);
+//!   `state` is the mind-state name when the request was accepted — ops are
+//!   applied by the mind asynchronously, so watch the stream's `state` events
+//!   for the outcome.
 //!
 //! `Turn` is [`crate::lfd::conversations::turns::ChatTurn`].
 
@@ -26,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -35,7 +48,9 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::conversations::turns::ChatTurn;
+use crate::lfd::wave::journal::MessageOp;
 use crate::lfd::wave::runtime::WaveRuntime;
+use crate::lfd::wave::state::MindState;
 
 /// Basename of the discovery pointer under `wave/<name>/`.
 pub const ENDPOINT_FILE: &str = ".wave-endpoint";
@@ -54,10 +69,21 @@ struct ConversationBody {
     turns: Vec<ChatTurn>,
 }
 
-/// `POST /messages` request body.
+/// `POST /messages` request body. `op` is required — explicit, never inferred
+/// (no serde default; an op-less body is a 422).
 #[derive(Debug, Deserialize)]
 struct PostMessage {
+    op: MessageOp,
     text: String,
+}
+
+/// `POST /messages` response. `turn` is the appended user turn; null for a
+/// bare interrupt, which appends nothing. `state` is the mind-state name at
+/// acceptance time.
+#[derive(Debug, Serialize)]
+struct PostMessageResponse {
+    turn: Option<ChatTurn>,
+    state: String,
 }
 
 /// Server state: the runtime plus when it started (for uptime).
@@ -100,23 +126,58 @@ async fn conversation_handler(State(state): State<ServerState>) -> Json<Conversa
 async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
-) -> Json<ChatTurn> {
-    Json(state.runtime.deliver_user_message(body.text))
+) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
+    let empty = body.text.trim().is_empty();
+    let turn = match body.op {
+        MessageOp::Message | MessageOp::Steer => {
+            if empty {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "text is required for message/steer ops".to_string(),
+                ));
+            }
+            Some(state.runtime.deliver_user_message(body.text, body.op))
+        }
+        MessageOp::Interrupt => {
+            if empty {
+                // Bare interrupt: nothing said, nothing appended. While idle
+                // this is a no-op success — the returned state says so.
+                state.runtime.deliver_interrupt();
+                None
+            } else {
+                // Interrupt & send: the text is journaled (op records intent)
+                // and becomes the next turn after the cancel settles.
+                Some(
+                    state
+                        .runtime
+                        .deliver_user_message(body.text, MessageOp::Interrupt),
+                )
+            }
+        }
+    };
+    Ok(Json(PostMessageResponse {
+        turn,
+        state: state.runtime.mind_state().name().to_string(),
+    }))
 }
 
-/// SSE: replay the thread on connect (open turn included, status `running`),
-/// then stream live frames as-is. Ids repeat by design — every frame replaces
-/// the client's state for that id, so an in-progress turn updates in place and
-/// its terminal frame lands under the same id. Snapshot and subscription are
+/// SSE: send the mind state, replay the thread on connect (open turn
+/// included, status `running`), then stream live frames as-is — `state` on
+/// every transition, `turn` ids repeating by design (every frame replaces the
+/// client's state for that id, so an in-progress turn updates in place and
+/// its terminal frame lands under the same id). Snapshot and subscription are
 /// atomic in the runtime (broadcasts share the append lock), so no live frame
 /// is ever older than the replayed snapshot.
 async fn conversation_stream_handler(
     State(state): State<ServerState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let (snapshot, rx) = state.runtime.subscribe_with_snapshot();
+    let sub = state.runtime.subscribe_with_snapshot();
 
-    let replay = stream::iter(snapshot.into_iter().map(|t| Ok(turn_event(&t))));
-    let live = BroadcastStream::new(rx).filter_map(move |res| {
+    let replay = stream::iter(
+        std::iter::once(Ok(state_event(&sub.state)))
+            .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t)))),
+    );
+    let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
         let out = match res {
             Ok(turn) => Some(Ok(turn_event(&turn))),
             // Lagged: the client fell behind. Skip; it resyncs from /conversation.
@@ -124,14 +185,26 @@ async fn conversation_stream_handler(
         };
         async move { out }
     });
+    let live_states = BroadcastStream::new(sub.state_rx).filter_map(move |res| {
+        let out = match res {
+            Ok(mind_state) => Some(Ok(state_event(&mind_state))),
+            // Lagged: fine — the next transition carries the current state.
+            Err(_) => None,
+        };
+        async move { out }
+    });
 
-    Sse::new(replay.chain(live)).keep_alive(KeepAlive::default())
+    Sse::new(replay.chain(stream::select(live_turns, live_states))).keep_alive(KeepAlive::default())
 }
 
 fn turn_event(turn: &ChatTurn) -> Event {
     Event::default()
         .event("turn")
         .data(serde_json::to_string(turn).unwrap_or_default())
+}
+
+fn state_event(state: &MindState) -> Event {
+    Event::default().event("state").data(state.name())
 }
 
 /// Path to the discovery pointer for a wave.

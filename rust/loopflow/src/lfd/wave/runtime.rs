@@ -41,11 +41,39 @@ use crate::lfd::wave::supervisor::Supervisor;
 /// of truth, so a dropped live turn is never lost.
 const TURN_BROADCAST_CAPACITY: usize = 256;
 
-/// A user message pulled from the inbox, awaiting a turn that answers it.
+/// Capacity of the live mind-state broadcast. Transitions are rare (a few per
+/// turn); a lagged subscriber just resyncs from the next transition.
+const STATE_BROADCAST_CAPACITY: usize = 64;
+
+/// A journaled user message pulled from the inbox, awaiting consumption
+/// (named in a `TurnStarted.answers` or `TurnSteered.answers`).
 #[derive(Debug, Clone)]
 pub struct UserMessage {
     pub id: MessageId,
+    pub op: MessageOp,
     pub text: String,
+}
+
+/// One item from the HTTP surface to the mind's scheduler.
+#[derive(Debug, Clone)]
+pub enum InboxItem {
+    /// A journaled user message (`message`, `steer`, or `interrupt` carrying
+    /// text — "interrupt & send").
+    Message(UserMessage),
+    /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
+    /// for it — the `MindState` transition records the interrupt itself.
+    Interrupt,
+}
+
+/// An atomic snapshot + live subscription over one wave: the thread and mind
+/// state as of one instant, plus receivers that carry exactly the frames sent
+/// after it (see [`WaveRuntime::subscribe_with_snapshot`]).
+#[derive(Debug)]
+pub struct Subscription {
+    pub turns: Vec<ChatTurn>,
+    pub turn_rx: broadcast::Receiver<ChatTurn>,
+    pub state: MindState,
+    pub state_rx: broadcast::Receiver<MindState>,
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
@@ -75,10 +103,13 @@ pub struct WaveRuntime {
     /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
     /// turn grows, then the terminal turn under the same id.
     turn_tx: broadcast::Sender<ChatTurn>,
+    /// Fans mind-state transitions out to live SSE subscribers (the composer
+    /// keys its verb off this).
+    state_tx: broadcast::Sender<MindState>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
     memory: Memory,
     /// In-process user-message inbox (a channel, not a file).
-    inbox_tx: mpsc::UnboundedSender<UserMessage>,
+    inbox_tx: mpsc::UnboundedSender<InboxItem>,
     /// Tracks all live subagent runs (the worker-dispatch phase spawns here).
     supervisor: Arc<Supervisor>,
 }
@@ -96,7 +127,7 @@ impl WaveRuntime {
     pub fn open(
         name: String,
         repo_root: PathBuf,
-    ) -> anyhow::Result<(Arc<Self>, mpsc::UnboundedReceiver<UserMessage>)> {
+    ) -> anyhow::Result<(Arc<Self>, mpsc::UnboundedReceiver<InboxItem>)> {
         let (mut journal, events) = Journal::open(&journal_path(&repo_root, &name))?;
         let mut fold = fold_thread(&events);
 
@@ -123,6 +154,7 @@ impl WaveRuntime {
         };
 
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
+        let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
         let memory = Memory::for_wave(&repo_root, &name);
         let runtime = Arc::new(Self {
@@ -136,6 +168,7 @@ impl WaveRuntime {
                 thread_id: fold.thread_id,
             }),
             turn_tx,
+            state_tx,
             memory,
             inbox_tx,
             supervisor: Supervisor::new(),
@@ -190,15 +223,20 @@ impl WaveRuntime {
         inner.thread_id = Some(thread_id.to_string());
     }
 
-    /// Atomically snapshot the thread (including the open turn) and subscribe
-    /// to live frames. Every broadcast happens under the same lock as the
-    /// append it reflects, so the receiver sees exactly the frames sent after
-    /// this snapshot — no gap, no overlap, no frame older than the snapshot.
-    /// A live frame's id may match a snapshot turn: it is that turn, newer;
-    /// consumers replace by id.
-    pub fn subscribe_with_snapshot(&self) -> (Vec<ChatTurn>, broadcast::Receiver<ChatTurn>) {
+    /// Atomically snapshot the thread (including the open turn) and the mind
+    /// state, and subscribe to live frames for both. Every broadcast happens
+    /// under the same lock as the append it reflects, so the receiver sees
+    /// exactly the frames sent after this snapshot — no gap, no overlap, no
+    /// frame older than the snapshot. A live frame's id may match a snapshot
+    /// turn: it is that turn, newer; consumers replace by id.
+    pub fn subscribe_with_snapshot(&self) -> Subscription {
         let inner = self.inner();
-        (snapshot_locked(&inner), self.turn_tx.subscribe())
+        Subscription {
+            turns: snapshot_locked(&inner),
+            turn_rx: self.turn_tx.subscribe(),
+            state: inner.state.clone(),
+            state_rx: self.state_tx.subscribe(),
+        }
     }
 
     /// Attempt a mind-state transition. Legal moves append a `MindState` event
@@ -222,9 +260,57 @@ impl WaveRuntime {
         let from = std::mem::replace(&mut inner.state, to.clone());
         inner.journal.append(|_| EventKind::MindState {
             from,
-            to,
+            to: to.clone(),
             reason: reason.to_string(),
         });
+        // A send error just means no live subscribers.
+        let _ = self.state_tx.send(to);
+        true
+    }
+
+    /// `Turning → Interrupting` for the open turn (a user interrupt landed).
+    /// Returns whether the transition applied — false when no turn is live.
+    pub fn begin_interrupt(&self, reason: &str) -> bool {
+        let mut inner = self.inner();
+        let MindState::Turning { turn_id } = inner.state.clone() else {
+            return false;
+        };
+        self.transition_locked(&mut inner, MindState::Interrupting { turn_id }, reason)
+    }
+
+    /// Journal that the open turn consumed steered messages mid-flight
+    /// (`TurnSteered.answers` — see [`crate::lfd::wave::journal`]). Returns
+    /// whether the marker was appended — false when no turn is turning, in
+    /// which case the caller should have queued instead of steered.
+    pub fn journal_steered(&self, answers: Vec<MessageId>) -> bool {
+        let mut inner = self.inner();
+        let MindState::Turning { turn_id } = inner.state.clone() else {
+            return false;
+        };
+        inner
+            .journal
+            .append(|_| EventKind::TurnSteered { turn_id, answers });
+        true
+    }
+
+    /// Janitor: finalize the open turn without a harness terminal event (the
+    /// interrupt deadline expired — the harness never delivered
+    /// `TurnCompleted`). Journals `TurnFinished`, commits and broadcasts the
+    /// turn as accumulated so far, and settles the mind to `Idle`. Returns
+    /// whether there was an open turn to finalize.
+    pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
+        let mut inner = self.inner();
+        let Some(mut turn) = inner.open_turn.take() else {
+            return false;
+        };
+        inner.journal.append(|_| EventKind::TurnFinished {
+            turn_id: turn.id.clone(),
+            status,
+            usage: Usage::empty(),
+        });
+        turn.status = status;
+        self.transition_locked(&mut inner, MindState::Idle, reason);
+        self.commit_locked(&mut inner, turn);
         true
     }
 
@@ -237,18 +323,16 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver a user message: append its `UserMessage` event, commit the user
-    /// turn (id from the event's seq), and hand it to the inbox for the mind's
-    /// scheduler. Returns the stored user turn so the HTTP handler can echo it.
-    ///
-    /// Wire body is `{text}` for now, so the op is always `Message`; steering
-    /// ops land with a later phase.
-    pub fn deliver_user_message(&self, text: String) -> ChatTurn {
+    /// Deliver a user message: append its `UserMessage` event (recording the
+    /// op — intent), commit the user turn (id from the event's seq), and hand
+    /// it to the inbox for the mind's scheduler. Returns the stored user turn
+    /// so the HTTP handler can echo it.
+    pub fn deliver_user_message(&self, text: String, op: MessageOp) -> ChatTurn {
         let (turn, id) = {
             let mut inner = self.inner();
             let event = inner.journal.append(|seq| EventKind::UserMessage {
                 id: MessageId(format!("msg-{seq}")),
-                op: MessageOp::Message,
+                op,
                 text: text.clone(),
             });
             let id = MessageId(format!("msg-{}", event.seq));
@@ -257,8 +341,17 @@ impl WaveRuntime {
             (self.commit_locked(&mut inner, turn), id)
         };
         // Unbounded inbox: delivering a message never blocks the mind.
-        let _ = self.inbox_tx.send(UserMessage { id, text });
+        let _ = self
+            .inbox_tx
+            .send(InboxItem::Message(UserMessage { id, op, text }));
         turn
+    }
+
+    /// Deliver a bare interrupt (no text). Nothing is journaled here — the
+    /// mind journals the `MindState` transition when it fires the cancel; an
+    /// interrupt while idle is a no-op by design.
+    pub fn deliver_interrupt(&self) {
+        let _ = self.inbox_tx.send(InboxItem::Interrupt);
     }
 
     /// Record an already-finalized turn as its full event triple
@@ -422,6 +515,14 @@ impl TurnSink {
         self.pending_answers = answers;
     }
 
+    /// Drop the open-turn record without finalizing it — the runtime janitor
+    /// already journaled the terminal event (interrupt deadline force-path).
+    /// A late harness terminal for that turn is then ignored instead of
+    /// journaled twice.
+    pub fn abandon_open(&mut self) {
+        self.open = None;
+    }
+
     pub fn on_delta(&mut self, delta: TurnDelta) {
         match delta {
             TurnDelta::Opened => {
@@ -519,7 +620,7 @@ mod tests {
 
     fn open_runtime(
         repo: &std::path::Path,
-    ) -> (Arc<WaveRuntime>, mpsc::UnboundedReceiver<UserMessage>) {
+    ) -> (Arc<WaveRuntime>, mpsc::UnboundedReceiver<InboxItem>) {
         WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
     }
 
@@ -607,13 +708,29 @@ mod tests {
     fn deliver_user_message_appends_user_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (rt, mut rx) = open_runtime(tmp.path());
-        let turn = rt.deliver_user_message("how goes it?".into());
+        let turn = rt.deliver_user_message("how goes it?".into(), MessageOp::Message);
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
         // The message landed in the inbox for the mind, id tied to its event.
-        let msg = rx.try_recv().expect("inbox message");
+        let InboxItem::Message(msg) = rx.try_recv().expect("inbox message") else {
+            panic!("expected a message inbox item");
+        };
         assert_eq!(msg.text, "how goes it?");
+        assert_eq!(msg.op, MessageOp::Message);
         assert_eq!(msg.id, MessageId(format!("msg-{}", turn_seq(&turn.id))));
+    }
+
+    #[test]
+    fn deliver_interrupt_is_a_control_item_not_a_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, mut rx) = open_runtime(tmp.path());
+        rt.deliver_interrupt();
+        assert!(matches!(
+            rx.try_recv().expect("inbox item"),
+            InboxItem::Interrupt
+        ));
+        // Nothing journaled, nothing in the thread.
+        assert!(rt.thread_snapshot().is_empty());
     }
 
     #[test]
@@ -728,8 +845,11 @@ mod tests {
     fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (rt, _rx) = open_runtime(tmp.path());
-        let (snapshot, mut frames) = rt.subscribe_with_snapshot();
-        assert!(snapshot.is_empty());
+        let sub = rt.subscribe_with_snapshot();
+        assert!(sub.turns.is_empty());
+        assert_eq!(sub.state, MindState::Idle);
+        let mut frames = sub.turn_rx;
+        let mut states = sub.state_rx;
 
         let mut sink = TurnSink::new(rt.clone());
         let mut adapter = EventAdapter::new();
@@ -771,5 +891,77 @@ mod tests {
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].status, Lifecycle::Completed);
         assert!(frames.try_recv().is_err(), "no extra frames");
+
+        // Every transition was broadcast: Idle → Turning → Idle.
+        assert!(matches!(
+            states.try_recv().expect("turning state frame"),
+            MindState::Turning { .. }
+        ));
+        assert_eq!(
+            states.try_recv().expect("idle state frame"),
+            MindState::Idle
+        );
+        assert!(states.try_recv().is_err(), "no extra state frames");
+    }
+
+    #[test]
+    fn force_finalize_open_turn_closes_journal_and_settles_idle() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, _rx) = open_runtime(tmp.path());
+        let mut sink = TurnSink::new(rt.clone());
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_text("half"));
+        assert!(rt.begin_interrupt("user interrupt"));
+        assert_eq!(rt.mind_state().name(), "interrupting");
+
+        assert!(rt.force_finalize_open_turn(Lifecycle::Interrupted, "deadline"));
+        assert_eq!(rt.mind_state(), MindState::Idle);
+        let thread = rt.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].status, Lifecycle::Interrupted);
+        assert_eq!(thread[0].text, "half");
+
+        // The journal is closed: a replay agrees, no open turn survives.
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let fold = crate::lfd::wave::journal::fold_thread(&events);
+        assert!(fold.open.is_empty());
+        assert_eq!(fold.turns.last().unwrap().status, Lifecycle::Interrupted);
+
+        // Nothing left to force a second time.
+        assert!(!rt.force_finalize_open_turn(Lifecycle::Interrupted, "again"));
+    }
+
+    #[test]
+    fn journal_steered_marks_consumption_only_while_turning() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, _rx) = open_runtime(tmp.path());
+        assert!(
+            !rt.journal_steered(vec![MessageId("msg-1".into())]),
+            "no turn to steer into while idle"
+        );
+
+        let mut sink = TurnSink::new(rt.clone());
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        assert!(rt.journal_steered(vec![MessageId("msg-1".into())]));
+        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let steered: Vec<_> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::TurnSteered { turn_id, answers } => {
+                    Some((turn_id.clone(), answers.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(steered.len(), 1);
+        assert_eq!(steered[0].1, vec![MessageId("msg-1".into())]);
+        // The marker names the turn that was open when the steer landed.
+        let open_turn_id = rt.thread_snapshot()[0].id.clone();
+        assert_eq!(steered[0].0, open_turn_id);
     }
 }

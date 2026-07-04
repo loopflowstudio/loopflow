@@ -4,9 +4,11 @@ import LoopflowCore
 
 /// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
-/// thread over SSE, and posts messages back through the composer. When the wave
-/// isn't running (no pointer file, or the server refuses), it shows a clear
-/// not-running state and keeps polling so it attaches the moment the wave comes up.
+/// thread over SSE, and posts messages back through the composer. The composer is
+/// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
+/// runs — keyed off the streamed mind state. When the wave isn't running (no
+/// pointer file, or the server refuses), it shows a clear not-running state and
+/// keeps polling so it attaches the moment the wave comes up.
 struct WaveChatView: View {
     let repoPath: String
     let waveName: String
@@ -135,11 +137,20 @@ struct WaveChatView: View {
     }
 
     // MARK: - Composer
+    //
+    // The composer is verb-aware: it keys off the streamed mind state.
+    // Idle + text → Send (op=message). Turning + text → Steer into the live
+    // turn, with Interrupt & Send one click away. Turning + empty → Interrupt.
+    // Verb selection lives in `composerVerbs` (LoopflowCore), tested there.
 
     private var isLive: Bool { connection?.phase == .live }
 
-    private var canSend: Bool {
-        isLive && !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var hasText: Bool {
+        !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var verbs: ComposerVerbs {
+        composerVerbs(state: connection?.mindState ?? .idle, hasText: hasText)
     }
 
     private var composer: some View {
@@ -157,7 +168,8 @@ struct WaveChatView: View {
     }
 
     private var composerRow: some View {
-        HStack(alignment: .bottom, spacing: Spacing.sm) {
+        let verbs = self.verbs
+        return HStack(alignment: .bottom, spacing: Spacing.sm) {
             TextField(composerPlaceholder, text: $composerText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Typography.body())
@@ -169,13 +181,21 @@ struct WaveChatView: View {
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 .focused($composerFocused)
                 .disabled(!isLive)
-                .onSubmit(send)
+                .onSubmit { perform(verbs.primary) }
                 .accessibilityIdentifier("wave-chat-composer")
 
-            Button("Send", action: send)
+            if let secondary = verbs.secondary {
+                Button(label(for: secondary)) { perform(secondary) }
+                    .buttonStyle(.bordered)
+                    .disabled(!isLive)
+                    .accessibilityIdentifier("wave-chat-secondary")
+            }
+
+            Button(label(for: verbs.primary)) { perform(verbs.primary) }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(DarkButtonStyle())
-                .disabled(!canSend)
+                .disabled(!isLive || !verbs.primaryEnabled)
+                .accessibilityIdentifier("wave-chat-primary")
         }
     }
 
@@ -183,18 +203,35 @@ struct WaveChatView: View {
         isLive ? "Message \(waveName)" : "Wave isn't running"
     }
 
-    private func send() {
+    private func label(for verb: ComposerVerb) -> String {
+        switch verb {
+        case .send: return "Send"
+        case .steer: return "Steer"
+        case .interrupt: return "Interrupt"
+        case .interruptAndSend: return "Interrupt & Send"
+        }
+    }
+
+    private func perform(_ verb: ComposerVerb) {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let connection, isLive else { return }
+        let op: WaveMessageOp
+        switch verb {
+        case .send: op = .message
+        case .steer: op = .steer
+        case .interrupt, .interruptAndSend: op = .interrupt
+        }
+        // A bare interrupt carries no text; everything else requires some.
+        guard verb == .interrupt || !text.isEmpty else { return }
+        guard let connection, isLive else { return }
         composerText = ""
         sendError = nil
         Task {
             do {
-                try await connection.send(text)
+                try await connection.send(text, op: op)
             } catch {
                 // Don't lose the message: put it back in the composer (unless the
                 // user already started typing something new) and say what failed.
-                if composerText.isEmpty {
+                if !text.isEmpty, composerText.isEmpty {
                     composerText = text
                 }
                 sendError = "Send failed: \(error.localizedDescription)"

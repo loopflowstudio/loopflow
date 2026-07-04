@@ -8,9 +8,10 @@
 //!
 //! `Failed` is produced by the mind's scheduler (consecutive-failure cap or a
 //! terminal harness error — see [`super::mind`]); `Failed → Idle` fires when
-//! a user message revives the mind. `Interrupting` has no production producer
-//! yet — interrupt ops land with a later phase; it is covered in the
-//! transition table and tests now so the table is complete when they arrive.
+//! a user message revives the mind. `Interrupting` is produced by a user
+//! interrupt op (`Turning → Interrupting`, cooperative cancel) and is
+//! deadline-bounded: the mind's janitor force-finalizes the turn if the
+//! harness never delivers its terminal event (see `mind::INTERRUPT_DEADLINE`).
 //!
 //! Transitions go through [`can_transition`]; an illegal move is a bug —
 //! logged and refused by the caller (see `WaveRuntime::transition`), never

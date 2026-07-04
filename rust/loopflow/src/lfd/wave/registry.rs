@@ -150,6 +150,11 @@ pub async fn ensure_wave_row(
             wave.goal = goal;
         }
     }
+    // Born paused: this row exists so the SERVER can register as the wave's
+    // brain — a legacy lfd daemon's loop_ticker (predating the one-brain
+    // guard) must never see it as loopable. Nothing in the server or lf q
+    // consults `paused`; it only silences legacy tickers.
+    wave.paused = true;
     store.create_wave(&wave).await?;
     tracing::info!(
         wave = name,

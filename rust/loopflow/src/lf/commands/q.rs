@@ -33,11 +33,12 @@ use crate::lfd::types::{
     tmux_session_name, Run, Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE,
 };
 
-/// One line appended to every dispatched worker's task: report back through
-/// the wave's thread when done (`lf chat` posts an attributed `say` emission
-/// to the worker's own wave — the mind reacts to it like any input).
-pub(crate) const WORKER_REPORT_INSTRUCTION: &str = "When you finish, report the outcome with \
-     `lf chat \"<report>\"` — one short paragraph: what landed, the PR link, anything surprising.";
+/// One line appended to every dispatched worker's task: the finish trigger.
+/// The vocabulary itself (what a report looks like) rides the shared
+/// `<lf:speak>` section in the worker's assembled prompt — this stays a
+/// pointer, not a second teaching site.
+pub(crate) const WORKER_REPORT_INSTRUCTION: &str =
+    "When you finish, report the outcome to the wave's thread with `lf chat`.";
 
 pub fn run(cmd: &QCommand) -> Result<()> {
     match cmd {

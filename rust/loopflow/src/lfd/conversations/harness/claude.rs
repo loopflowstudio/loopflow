@@ -13,7 +13,7 @@ use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::lfd::conversations::harness::claude_mapping::ReaderState;
 use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::conversations::harness::{claude_mapping, Capabilities, Harness, HarnessError};
-use crate::lfd::conversations::types::{ConversationEvent, Lifecycle};
+use crate::lfd::conversations::types::{ConversationEvent, Lifecycle, TurnUsage};
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
@@ -229,8 +229,12 @@ impl Harness for ClaudeHarness {
                     });
                 }
                 let _ = events.send(ConversationEvent::TurnCompleted {
-                    turn_id: reader_turn_id,
+                    turn_id: reader_turn_id.clone(),
                     status,
+                });
+                let _ = events.send(ConversationEvent::TurnUsage {
+                    turn_id: reader_turn_id,
+                    usage: TurnUsage::default(),
                 });
             }
 

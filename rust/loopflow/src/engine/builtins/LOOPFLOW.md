@@ -70,7 +70,8 @@ roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
 
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
-- `wave/<name>/MEMORY.md` - durable wave learnings (roadmap goes to Asana, above)
+- `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
+  server-owned, never edited directly (roadmap goes to Asana, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed

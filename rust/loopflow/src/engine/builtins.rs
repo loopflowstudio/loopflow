@@ -6,6 +6,12 @@
 /// Bundled LOOPFLOW.md - default loopflow operating guidance for agents.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
+/// Bundled SPEAK.md - the speech vocabulary (`lf chat`, `lf memory`) taught to
+/// every agent loopflow launches. One source: assembled prompts emit it via
+/// `format_system_sections`; the wave mind (whose prompt bypasses assembly)
+/// appends the same section in `mind_agent_config`.
+pub const SPEAK_DOC: &str = include_str!("builtins/SPEAK.md");
+
 /// Headless preamble — the only surface that needs one (no user is present).
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
 

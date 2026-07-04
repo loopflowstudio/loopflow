@@ -1655,6 +1655,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
             "<lf:loopflow>\n{}\n</lf:loopflow>",
             crate::engine::builtins::LOOPFLOW_DOC
         ));
+        parts.push(speak_section());
     }
 
     let instructions = components.surface.instructions();
@@ -1663,6 +1664,17 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     parts
+}
+
+/// The speech vocabulary as a prompt section — how any launched agent talks
+/// back (`lf chat`, `lf memory`). Emitted exactly once per prompt: assembled
+/// prompts get it from [`format_system_sections`]; the wave mind's prompt
+/// bypasses assembly and appends the same section itself.
+pub fn speak_section() -> String {
+    format!(
+        "<lf:speak>\n{}\n</lf:speak>",
+        crate::engine::builtins::SPEAK_DOC.trim_end()
+    )
 }
 
 /// The two ambient wave sections — `<lf:wave-memory>` and
@@ -1731,7 +1743,8 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
-             - Edit within sections. Don't rewrite the whole file.\n\
+             - Through the server: `lf memory add \"<fact>\"` for one entry, `lf memory update`\n\
+             (stdin) to rewrite — never edit the file directly.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
              - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
@@ -2239,6 +2252,24 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
         assert!(!prompt.contains("lf op commit"));
+        assert!(!prompt.contains("<lf:speak>"));
+    }
+
+    /// A bare flow/step run's assembled prompt teaches the speech vocabulary
+    /// — exactly once.
+    #[test]
+    fn assembled_prompt_carries_speech_vocabulary_once() {
+        let components = PromptComponents {
+            operate: true,
+            step: Some(Step::named("implement")),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert_eq!(prompt.matches("<lf:speak>").count(), 1);
+        assert!(prompt.contains("lf chat --parent"));
+        assert!(prompt.contains("lf memory add"));
+        assert!(prompt.contains("server-owned"));
     }
 
     #[test]
@@ -2372,6 +2403,39 @@ mod tests {
             "memory appears exactly once (inside the seed message)"
         );
         assert_eq!(prompt.matches("- one source of truth").count(), 1);
+    }
+
+    /// The wave agent's inline run: the render_goal seed rides as the task
+    /// message of an assembled prompt (operate on), and the speech section
+    /// lands exactly once — from assembly, not the seed.
+    #[test]
+    fn wave_agent_seed_carries_speech_vocabulary_once() {
+        let goal = crate::engine::flow::Goal {
+            prompt: "Ship the roadmap.".to_string(),
+        };
+        let seed = crate::engine::flow::render_goal(
+            &goal,
+            &crate::engine::flow::GoalRenderContext {
+                flows: vec![],
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: vec![],
+                in_flight: vec![],
+            },
+        );
+        assert!(
+            !seed.contains("<lf:speak>"),
+            "the seed itself carries no speech section"
+        );
+
+        let components = PromptComponents {
+            operate: true,
+            wave: Some("goals".to_string()),
+            message: Some(seed),
+            ..Default::default()
+        };
+        let prompt = render_full_prompt(components);
+        assert_eq!(prompt.matches("<lf:speak>").count(), 1);
     }
 
     #[test]

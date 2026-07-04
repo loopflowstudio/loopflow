@@ -309,10 +309,16 @@ fn opencode_trace_normal_turn() {
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
-        vec!["turn_started", "text_delta", "turn_completed"]
+        vec!["turn_started", "text_delta", "turn_completed", "turn_usage"]
     );
     assert!(matches!(
         events.last(),
+        Some(ConversationEvent::TurnUsage { .. })
+    ));
+    assert!(matches!(
+        events
+            .iter()
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
             status: Lifecycle::Completed,
             ..
@@ -330,11 +336,14 @@ fn opencode_trace_tool_lifecycle() {
             "turn_started",
             "item_started",
             "item_completed",
-            "turn_completed"
+            "turn_completed",
+            "turn_usage"
         ]
     );
     assert!(matches!(
-        events.last(),
+        events
+            .iter()
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
         Some(ConversationEvent::TurnCompleted {
             status: Lifecycle::Completed,
             ..
@@ -346,7 +355,10 @@ fn opencode_trace_tool_lifecycle() {
 fn opencode_trace_error_turn() {
     let events = replay_opencode_trace("opencode_error_turn.ndjson");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(event_types, vec!["turn_started", "turn_completed", "error"]);
+    assert_eq!(
+        event_types,
+        vec!["turn_started", "turn_completed", "turn_usage", "error"]
+    );
     assert!(matches!(
         events[1],
         ConversationEvent::TurnCompleted {
@@ -355,7 +367,7 @@ fn opencode_trace_error_turn() {
         }
     ));
     assert!(matches!(
-        events[2],
+        events[3],
         ConversationEvent::Error { ref code, .. } if code == "command_failed"
     ));
 }

@@ -132,11 +132,10 @@ fn complete_turn(
         turn_id: turn_id.clone(),
         status,
     });
-    if let Some(usage) = usage {
-        mapped
-            .events
-            .push(ConversationEvent::TurnUsage { turn_id, usage });
-    }
+    mapped.events.push(ConversationEvent::TurnUsage {
+        turn_id,
+        usage: usage.unwrap_or_default(),
+    });
 }
 
 fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
@@ -487,7 +486,7 @@ mod tests {
             }),
             &mut state,
         );
-        assert_eq!(completed.events.len(), 1);
+        assert_eq!(completed.events.len(), 2);
         match &completed.events[0] {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, &started_turn_id);
@@ -495,6 +494,10 @@ mod tests {
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
+        assert!(matches!(
+            completed.events[1],
+            ConversationEvent::TurnUsage { .. }
+        ));
     }
 
     #[test]
@@ -721,7 +724,7 @@ mod tests {
             &mut state,
         );
 
-        assert_eq!(mapped.events.len(), 2);
+        assert_eq!(mapped.events.len(), 3);
         assert!(matches!(
             mapped.events[0],
             ConversationEvent::TurnCompleted {
@@ -729,7 +732,11 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(mapped.events[1], ConversationEvent::Error { .. }));
+        assert!(matches!(
+            mapped.events[1],
+            ConversationEvent::TurnUsage { .. }
+        ));
+        assert!(matches!(mapped.events[2], ConversationEvent::Error { .. }));
     }
 
     #[test]

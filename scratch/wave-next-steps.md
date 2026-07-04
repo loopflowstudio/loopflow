@@ -7,6 +7,16 @@ produces: the ordered build list adapting the implementation to the day's design
 What exists (through the live shakedown) vs what today's higher-level
 decisions change. Each item: what to build, what it adapts, status.
 
+**PR scope (Jack, 2026-07-04): this PR is a FULL DEMO of the new system —
+massive is fine — and everything beyond the demo is deferred to the Asana
+goals roadmap.** In the PR: items 1–2, the minimal from-attribution
+rendering, gate-5 demo + demo script, learnings. Filed to the roadmap
+(2026-07-04): explicit invocation grammar (task 1216278880329941), lf sub
+(1216279128534503), close-the-loops (1216279016947731), ledger convergence
+(1216279128536074), speech-vs-activity rendering (1216278935227808).
+Items 5/6/8/9 and full-item-3 below are those filings; kept here for
+context until land.
+
 ## Where the implementation stands
 
 Built, committed, proven live: journal spine + folds + MindState machine;
@@ -96,6 +106,18 @@ disambiguation machinery with them. Touches: clap surface, bin/lf.rs
 dispatch, executor command builders (build_lf_dispatch_command,
 build_wave_agent_command), lf q worker run's spawned command, the mind's
 operating prompt, docs, python tests.
+
+### 9. `lf sub` — subscription as a verb  [queued — Jack, 2026-07-04]
+The read half of the speech vocabulary: any process runs `lf sub [--wave |
+--parent] [--json]` as a looping/background binary receiving the wave's
+chat + memory + state updates as they happen. Killer case: a worker
+subscribes in a background terminal and receives steering mid-task — live
+worker steering with nobody managing anybody; external agents in foreign
+toolchains ride along the same way. Follows until killed; NDJSON via
+--json; reconnect/backoff re-resolving the endpoint. Prerequisite it
+surfaces: the unified event stream — SSE grows MemoryUpdated (and later
+worker/decision) events; the review's "one /events stream" becomes needed,
+not speculative. Remote subscription later rides the lfd-serve gate.
 
 ## Done-when for this branch (revised)
 The MVP done-when (wave-agent-design.md §4) plus: a worker's `lf chat`

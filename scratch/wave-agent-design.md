@@ -236,6 +236,73 @@ claude drivers for the mind (codex first — the drivers stay, conformance-
 tested, as the vendor-spread seam); Python `chat_turn` mirror until the wire
 shape settles (carve-out noted in the fixture README).
 
+### Runtime data structures (settled 2026-07-04)
+
+```rust
+struct Event { seq: u64, at: Timestamp, kind: EventKind }   // one JSONL row
+
+enum EventKind {
+    // conversation
+    UserMessage    { id: MessageId, op: MessageOp, text: String },
+    TurnStarted    { turn_id: TurnId, answers: Vec<MessageId> },  // consumption marker
+    TurnItem       { turn_id: TurnId, item: ConversationItem },
+    TurnFinished   { turn_id: TurnId, status: TurnStatus, usage: Usage },
+    // mind lifecycle
+    ThreadStarted  { vendor: String, thread_id: String },  // borrowed handle; FIRST durable act
+    MindState      { from: MindState, to: MindState, reason: String },
+    // orchestration — observations, not commands (server tails lfd's event
+    // stream filtered by wave_id; the mind's lfq call is intent, recorded as
+    // a TurnItem; these are the confirmed facts)
+    WorkerDispatched { run_id: RunId, session_id: SessionId, flow: String, task: String },
+    WorkerFinished   { run_id: RunId, outcome: WorkerOutcome, summary: String },
+    // memory
+    MemoryUpdated  { summary: String },   // mind curated MEMORY.md; diff lives in git
+}
+```
+
+**Every projection is a fold.** Thread = conversation events. State = last
+`MindState`. **Queue = `UserMessage`s not yet named in any
+`TurnStarted.answers`** — the turn declares what it consumed, so "queued" is
+pure fold, no separate inbox to desync (the OpenCode lesson), and the UI can
+honestly render "queued, addressed next turn". (Decided.)
+
+```rust
+enum MindState {
+    Idle,                                  // thread alive, no turn in flight
+    Turning      { turn_id: TurnId },      // one turn generating / tool-calling
+    Interrupting { turn_id: TurnId },      // cancel fired; cooperative → grace → kill
+    Failed       { reason: String },       // thread dead, retries exhausted; algedonic
+}
+// WaitingInput joins when Decisions land — not before.
+```
+
+The machine is about the **mind only** (two-axes split: workers grinding is
+not a mind state; wave-level display = derived `(mind_state,
+workers_in_flight)`). A failed *turn* is `TurnFinished{status: Failed}` and
+the mind returns to Idle; `Failed` is reserved for the mind itself.
+Transitions go through a `can_transition` table (illegal = bug: logged,
+refused), every transition appends a `MindState` event, and the janitor
+bounds the transients (Interrupting past deadline → force kill → Idle;
+Turning with dead child → finalize failed → Idle). One screen, on purpose.
+
+```rust
+enum MessageOp {
+    Message,     // append; queued; next turn answers it
+    Steer,       // inject into the current turn (app-server pending_input);
+                 //   falls back to Message when idle
+    Interrupt,   // cancel current turn, finalize as `interrupted`;
+                 //   non-empty text → becomes the next turn ("interrupt & send")
+}
+```
+
+Explicit op at the API — no inference (OpenCode's unresolved ambiguity).
+Composer mapping: idle+text=Message; turning+text=Steer (Interrupt&Send one
+modifier away); turning+empty=Interrupt.
+
+Wire model stays `ChatTurn` + `ConversationItem` for the MVP, with one
+lifecycle enum (`pending | running | completed | failed | interrupted`)
+replacing the five-enum lattice.
+
 ### Done-when
 - `lf wave goals` survives a restart with its full thread intact (log replay).
 - Send a message mid-pass → it lands in the thread instantly, the mind
@@ -314,8 +381,12 @@ mechanics (as checkpoint writer), `opencode_runtime.rs` reaper (wire
   not a projection.** Cadence question dissolved: the mind curates memory as
   it learns; commits ride landings.
 
-**Open (Jack's remaining calls):**
-1. **Log location**: per-wave JSONL file (recommended for MVP; server-owned,
-   not IPC) vs an lfd store table (couples the wave server to the daemon).
-2. **`lf goal` fate**: fold into `lf wave` now, or keep as the lfd-less
-   Concerto launch primitive one more cycle?
+- **Journal location = per-wave JSONL under `.lf/`** (server-owned
+  persistence, not IPC; gitignored, per-machine).
+- **`lf goal` deleted this branch** (Jack, 2026-07-04). `lf wave` is the one
+  brain; goal *rendering* internals (`render_goal`, `load_goal`) stay — they
+  seed the mind's turns and the A2 cloud path.
+
+**Open:** none blocking. Decision point three (mind registers as an lfd
+`WaveAgent` session, best-effort) is design-accepted by use — the worker
+observation model and one-brain enforcement build on it.

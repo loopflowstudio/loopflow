@@ -4,6 +4,31 @@ produces: the live-vendor shakedown runbook — Claude-drivable, no daemon
 ---
 # Wave agent shakedown
 
+## Results (2026-07-04, first walk — gates 1–4, Claude-driven)
+
+**PASSED live:** worktree self-bootstrap; endpoint discovery; full codex
+handshake + real turns streaming item-by-item through the open-turn wire;
+message-while-idle answered immediately; **steer landed mid-turn**
+(`turn_steered` journaled, answers named); **interrupt finalized the partial
+as `interrupted`** with the state machine walking
+turning→interrupting→idle in <3s, vendor session surviving; **restart
+replayed all five turns intact** with statuses preserved; teardown left zero
+orphan processes. The mind adapted when dispatch failed (probed, then did
+trivial work inline) and committed real work (HAIKU.md).
+
+**FOUND (fix batch dispatched):** (1) mind's PATH resolves the system `lf`,
+not the running build → `lf q` unknown; (2) unregistered waves (no store
+row) skip one-brain entirely — two live brains observed; (3) second server
+clobbers then deletes `.wave-endpoint`, orphaning the first from discovery;
+(4) empty `thought` items on the wire; (5) operating prompt needs the
+triviality escape hatch (five probe commands before inlining a one-liner).
+Earlier same day: codex-cli 0.142.5 protocol drift (5 shapes) + two shutdown
+bugs (nvm-shim grandchild orphan; reader/writer deadlock) — all fixed,
+proven by a 3s live smoke turn.
+
+**Still to walk:** gate 5 (orchestration via `lf q worker run` — blocked on
+fix 1), gates 6–7 (Concerto + the real goals wave — Jack).
+
 Code-complete ≠ done. Everything past the conformance traces is untested
 against live vendors. No `lfd` anywhere in this runbook — the wave server is
 sovereign; the store is the registry. Gates 1–5 are Claude-drivable from the

@@ -4,9 +4,11 @@
 //! The shared local store (the same SQLite db lfd serves from — the db IS
 //! the registry) carries two facts this module owns:
 //!
-//! - **Registration.** On boot the server writes itself a `WaveAgent`
-//!   session row (source `wave_server`, endpoint + pid in `env`) so
-//!   Concerto's agent tree shows the mind and one-brain enforcement has a
+//! - **Registration.** On boot the server ensures the wave itself has a row
+//!   ([`ensure_wave_row`] — a reachable store with no row for the wave gets
+//!   a minimal one, never an unregistered run), then writes itself a
+//!   `WaveAgent` session row (source `wave_server`, endpoint + pid in `env`)
+//!   so Concerto's agent tree shows the mind and one-brain enforcement has a
 //!   fact to key on. Before writing, [`register`] probes the wave's live
 //!   WaveAgent rows: a `wave_server` row whose pid is dead is a crashed
 //!   server — closed on the spot; a surviving live brain is a refusal naming
@@ -30,6 +32,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::future::Future;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +40,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
+use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreResult};
 use crate::lfd::types::{
@@ -109,6 +113,50 @@ impl Registration {
         let registration = self.clone();
         block_on(async move { registration.deregister().await });
     }
+}
+
+/// The wave's registry row, created if the store has never seen this wave.
+///
+/// The db IS the registry: a reachable store with no row for the wave must
+/// not degrade to running unregistered (observed live — two brains on one
+/// wave because boot skipped registration entirely). The created row is
+/// minimal and mirrors wave creation from GOAL.md frontmatter
+/// ([`read_wave_config`]): mode/goal/primary-flow from the frontmatter when
+/// present, [`Wave::new`] defaults otherwise.
+///
+/// # Errors
+/// Store failures only; the caller treats them as soft (run unregistered).
+pub async fn ensure_wave_row(
+    store: &SharedStore,
+    main_repo: &Path,
+    name: &str,
+) -> StoreResult<Wave> {
+    if let Some(wave) = store.get_wave_by_name(name).await? {
+        return Ok(wave);
+    }
+    let mut wave = Wave::new(
+        LfdId::new(),
+        name.to_string(),
+        main_repo.display().to_string(),
+    );
+    if let Some(config) = read_wave_config(main_repo, name) {
+        if let Some(mode) = config.mode.as_deref().and_then(|mode| mode.parse().ok()) {
+            wave.mode = mode;
+        }
+        if let Some(flow) = config.primary_flow {
+            wave.primary_flow = flow;
+        }
+        if let Some(goal) = config.goal.filter(|goal| !goal.trim().is_empty()) {
+            wave.goal = goal;
+        }
+    }
+    store.create_wave(&wave).await?;
+    tracing::info!(
+        wave = name,
+        wave_id = %wave.id,
+        "wave was not in the session registry; created its row"
+    );
+    Ok(wave)
 }
 
 /// Register this server as the wave's one brain.
@@ -536,6 +584,70 @@ mod tests {
             repair_of: None,
             pr: None,
         }
+    }
+
+    /// Boot on a wave the store has never seen: the row is created (the db
+    /// IS the registry — no warn-and-run-unregistered), the server registers,
+    /// and a second boot is refused off the same row.
+    #[tokio::test]
+    async fn boot_with_no_wave_row_creates_it_and_registers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = tmp.path().join("repo");
+        let goal_dir = repo.join("wave/ship");
+        std::fs::create_dir_all(&goal_dir).expect("wave dir");
+        std::fs::write(
+            goal_dir.join("GOAL.md"),
+            "---\nmode: manual\ngoal: keep shipping\n---\nShip.\n",
+        )
+        .expect("GOAL.md");
+
+        let wave = ensure_wave_row(&store, &repo, "ship")
+            .await
+            .expect("row created");
+        let stored = store
+            .get_wave_by_name("ship")
+            .await
+            .expect("lookup")
+            .expect("row exists");
+        assert_eq!(stored.id, wave.id);
+        assert_eq!(stored.mode, WaveMode::Manual, "mode from GOAL.md");
+        assert_eq!(stored.goal, "keep shipping", "goal from GOAL.md");
+        assert_eq!(stored.repo(), repo.display().to_string());
+
+        // Registered against the created row; one-brain now has its fact.
+        let config = registry_config(store.clone(), wave.clone(), false);
+        let RegisterOutcome::Registered(_reg) =
+            register(&config, "127.0.0.1:4").await.expect("register")
+        else {
+            panic!("first boot registers");
+        };
+
+        // Second boot: same row (no duplicate), and the live brain refuses it.
+        let again = ensure_wave_row(&store, &repo, "ship")
+            .await
+            .expect("idempotent");
+        assert_eq!(again.id, wave.id, "ensure reuses the existing row");
+        let outcome = register(&registry_config(store, again, false), "127.0.0.1:5")
+            .await
+            .expect("attempt");
+        assert!(
+            matches!(outcome, RegisterOutcome::Refused { .. }),
+            "second boot refused"
+        );
+    }
+
+    /// No GOAL.md at all: the created row falls back to `Wave::new` defaults.
+    #[tokio::test]
+    async fn ensure_wave_row_without_goal_md_uses_defaults() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = ensure_wave_row(&store, tmp.path(), "ship")
+            .await
+            .expect("row created");
+        assert_eq!(wave.mode, WaveMode::Loop);
+        assert_eq!(wave.goal, "ship-roadmap");
+        assert_eq!(wave.primary_flow, "ship-roadmap");
     }
 
     #[tokio::test]

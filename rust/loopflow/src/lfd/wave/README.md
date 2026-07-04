@@ -36,11 +36,17 @@ a busy-loop.
   next boot's pid probe (and by lfd's reconciliation, when one runs). lfd's
   loop ticker and `run_wave` skip a wave with a live registered brain; a
   second `lf wave` refuses to start naming the live session unless `--force`
-  takes over (kill by recorded pid, cancel the row). No registry store on
-  the machine → warn once, run fully functional, no enforcement.
+  takes over (kill by recorded pid, cancel the row). A wave the store has
+  never seen gets its row created at boot — a reachable store always means a
+  registered server. No registry store on the machine → warn once, run fully
+  functional, with one file-level floor: a `.wave-endpoint` that answers
+  `GET /health` for this wave also refuses a second server (`--force`
+  overwrites); shutdown removes the pointer only while it still holds the
+  server's own address.
 
 Truth is the per-wave append-only journal —
-`.lf/journal/waves/<name>/journal.jsonl`, per-machine, never committed. The
+`.lf/journal/waves/<name>/journal.jsonl` under the **origin (main) repo**,
+per-machine, never committed. The
 in-process state (`WaveRuntime`) is a fold of it: the `thread` the user sees,
 the mind state, and the vendor thread id are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
@@ -53,12 +59,15 @@ IPC.
 `lf wave <name>` self-bootstraps its worktree: it ensures the wave's
 `<repo>.<wave>` sibling exists (creating it off main on first boot) and
 enters it before starting the server, so the mind always runs there — never
-the main checkout. Wave state (journal, discovery pointer, MEMORY.md) stays
-under the main repo.
+the main checkout. Wave state (the journal under `.lf/journal/`, the
+`wave/<name>/.wave-endpoint` pointer, MEMORY.md) deliberately stays under
+the origin repo, not the worktree: it survives worktree pruning, and
+Concerto and a restarted server agree on where it is.
 
 ## Wire contract (snake_case, stable)
 
-The server binds a loopback port. Concerto finds it via the discovery pointer:
+The server binds a loopback port. Concerto finds it via the discovery
+pointer, under the origin repo's `wave/<name>/`:
 
 ```
 wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed on shutdown)
@@ -69,7 +78,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 | `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
 | `GET /conversation/stream`| SSE; each event named `turn`, `data:` a `Turn` JSON. Replays the thread on connect, then streams live. |
-| `POST /messages {text}`   | Appends a user `Turn` and returns it. The mind answers it at its next turn boundary. |
+| `POST /messages {op, text}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), or `interrupt` (cancel the open turn; non-empty text becomes the next turn). Returns `{turn, state}`. |
 
 ### Turn
 
@@ -96,7 +105,8 @@ lf wave demo
 # → lf wave · demo · reactive server on http://127.0.0.1:52306 (Ctrl-C to stop)
 
 curl 127.0.0.1:52306/health
-curl -X POST 127.0.0.1:52306/messages -d '{"text":"status?"}'
+curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \
+     -d '{"op":"message","text":"status?"}'
 curl 127.0.0.1:52306/conversation
 curl -N 127.0.0.1:52306/conversation/stream
 ```

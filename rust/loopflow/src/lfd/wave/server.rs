@@ -212,6 +212,37 @@ pub fn endpoint_path(repo_root: &Path, wave: &str) -> PathBuf {
     repo_root.join("wave").join(wave).join(ENDPOINT_FILE)
 }
 
+/// How long the boot-time probe waits for an existing endpoint to answer.
+const ENDPOINT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Probe an existing discovery pointer: `Some(addr)` when a live wave server
+/// for `wave` answers `GET /health` at the recorded address. This is the
+/// file-level one-brain floor — it works with no registry store at all
+/// (observed live: a second unregistered server overwrote the pointer and,
+/// on shutdown, deleted it, leaving the first server undiscoverable). A
+/// missing/unreadable file, a dead address, or an answer for a different
+/// wave is a stale pointer — `None`, safe to overwrite.
+pub async fn live_endpoint(repo_root: &Path, wave: &str) -> Option<String> {
+    let addr = std::fs::read_to_string(endpoint_path(repo_root, wave)).ok()?;
+    let addr = addr.trim().to_string();
+    if addr.is_empty() {
+        return None;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(ENDPOINT_PROBE_TIMEOUT)
+        .build()
+        .ok()?;
+    let body: serde_json::Value = client
+        .get(format!("http://{addr}/health"))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    (body.get("wave").and_then(serde_json::Value::as_str) == Some(wave)).then_some(addr)
+}
+
 /// Publish the loopback endpoint so Concerto can find the server. Writes ONLY
 /// `127.0.0.1:<port>` — a pointer, never message content.
 pub fn write_endpoint(
@@ -226,9 +257,17 @@ pub fn write_endpoint(
     std::fs::write(path, addr.to_string())
 }
 
-/// Remove the discovery pointer on shutdown. Best-effort.
-pub fn remove_endpoint(repo_root: &Path, wave: &str) {
-    let _ = std::fs::remove_file(endpoint_path(repo_root, wave));
+/// Remove the discovery pointer on shutdown — only when it still holds this
+/// server's own address. A takeover that overwrote the file owns it now;
+/// deleting it here would leave that live server undiscoverable. Best-effort.
+pub fn remove_endpoint(repo_root: &Path, wave: &str, own_addr: &str) {
+    let path = endpoint_path(repo_root, wave);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if contents.trim() == own_addr => {
+            let _ = std::fs::remove_file(path);
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -244,7 +283,41 @@ mod tests {
         let path = endpoint_path(tmp.path(), "ship");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "127.0.0.1:54321");
 
-        remove_endpoint(tmp.path(), "ship");
+        remove_endpoint(tmp.path(), "ship", "127.0.0.1:54321");
         assert!(!path.exists());
+    }
+
+    /// A server taken over by `--force` must not delete the pointer the new
+    /// server wrote: remove only what still holds our own address.
+    #[test]
+    fn remove_endpoint_leaves_a_foreign_pointer_untouched() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let addr: std::net::SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        write_endpoint(tmp.path(), "ship", addr).expect("write endpoint");
+
+        remove_endpoint(tmp.path(), "ship", "127.0.0.1:50001");
+        let path = endpoint_path(tmp.path(), "ship");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "127.0.0.1:50000",
+            "foreign pointer survives our shutdown"
+        );
+    }
+
+    /// A pointer to a dead address is stale: the probe says no live server.
+    #[tokio::test]
+    async fn live_endpoint_is_none_for_a_stale_pointer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(live_endpoint(tmp.path(), "ship").await.is_none(), "no file");
+
+        // A port nothing listens on: bind, learn the address, drop it.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead = listener.local_addr().unwrap();
+        drop(listener);
+        write_endpoint(tmp.path(), "ship", dead).expect("write endpoint");
+        assert!(
+            live_endpoint(tmp.path(), "ship").await.is_none(),
+            "dead address is stale"
+        );
     }
 }

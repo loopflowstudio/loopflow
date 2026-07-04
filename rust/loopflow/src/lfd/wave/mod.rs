@@ -76,12 +76,17 @@ pub fn run(name: &str, force: bool) -> Result<()> {
         println!("lf wave · {wave} · worktree {}", mind_cwd.display());
     }
 
+    // Every child of this server — the mind's harness and anything it shells
+    // out to — must resolve `lf` to the binary running this server, not an
+    // installed one (observed live: the mind's `lf` predated `lf q`).
+    std::env::set_var("PATH", mind::path_for_children());
+
     let (events_tx, events_rx) = mpsc::unbounded_channel();
     let harness = default_create_harness("codex", ApprovalPolicy::AutoApprove, events_tx)?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let registry_config = resolve_registry(&wave, &mind_cwd, force).await;
+        let registry_config = resolve_registry(&main_repo, &wave, &mind_cwd, force).await;
         serve(
             main_repo,
             mind_cwd,
@@ -89,6 +94,7 @@ pub fn run(name: &str, force: bool) -> Result<()> {
             harness,
             events_rx,
             registry_config,
+            force,
             shutdown_signal(),
         )
         .await
@@ -103,11 +109,19 @@ fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
-/// Open the machine's shared registry and resolve this wave's row. `None`
-/// (with one warning) when there is no registry or the wave isn't in it:
-/// the server runs unregistered — no one-brain enforcement, no worker
-/// observations — which is exactly the pre-registry status quo.
-async fn resolve_registry(wave: &str, cwd: &Path, force: bool) -> Option<registry::RegistryConfig> {
+/// Open the machine's shared registry and resolve this wave's row, creating
+/// the row when the store has never seen the wave — the db IS the registry,
+/// so a reachable store always yields a registered boot (see
+/// [`registry::ensure_wave_row`]). `None` (with one warning) only when the
+/// store itself is missing or unusable: the server runs unregistered — no
+/// one-brain enforcement, no worker observations — the pre-registry status
+/// quo.
+async fn resolve_registry(
+    main_repo: &Path,
+    wave: &str,
+    cwd: &Path,
+    force: bool,
+) -> Option<registry::RegistryConfig> {
     let Some(store) = open_existing_store().await else {
         tracing::warn!(
             wave,
@@ -117,23 +131,16 @@ async fn resolve_registry(wave: &str, cwd: &Path, force: bool) -> Option<registr
         return None;
     };
     let store: SharedStore = Arc::new(store);
-    match store.get_wave_by_name(wave).await {
-        Ok(Some(row)) => Some(registry::RegistryConfig {
+    match registry::ensure_wave_row(&store, main_repo, wave).await {
+        Ok(row) => Some(registry::RegistryConfig {
             store,
             wave: row,
             cwd: cwd.display().to_string(),
             pid: std::process::id(),
             force,
         }),
-        Ok(None) => {
-            tracing::warn!(
-                wave,
-                "wave not in the session registry; running unregistered"
-            );
-            None
-        }
         Err(err) => {
-            tracing::warn!(wave, error = %err, "session registry unreadable; running unregistered");
+            tracing::warn!(wave, error = %err, "session registry unusable; running unregistered");
             None
         }
     }
@@ -142,7 +149,9 @@ async fn resolve_registry(wave: &str, cwd: &Path, force: bool) -> Option<registr
 /// Serve the wave until `shutdown` resolves. The harness and its event stream
 /// are parameters so tests can drive a mock instead of a real vendor process;
 /// `registry_config` is `None` in tests that exercise the server without a
-/// registry store.
+/// registry store. `force` rides separately because the endpoint-file floor
+/// must honor it even when there is no registry config at all.
+#[allow(clippy::too_many_arguments)]
 async fn serve(
     repo_root: PathBuf,
     mind_cwd: PathBuf,
@@ -150,8 +159,29 @@ async fn serve(
     harness: Box<dyn Harness>,
     events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     registry_config: Option<registry::RegistryConfig>,
+    force: bool,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
+    // File-level one-brain floor, before anything else: an existing pointer
+    // that answers /health for this wave is a live server — refuse (unless
+    // --force takes over and overwrites); a dead pointer is stale and gets
+    // overwritten below. Works with no registry store at all.
+    if let Some(live) = server::live_endpoint(&repo_root, &wave).await {
+        if !force {
+            return Err(anyhow!(
+                "refusing to start: wave '{wave}' already has a live server at \
+                 http://{live} (per wave/{wave}/{endpoint}). Stop that session (or let \
+                 it finish), or rerun with --force to take over.",
+                endpoint = server::ENDPOINT_FILE,
+            ));
+        }
+        tracing::warn!(
+            wave,
+            live,
+            "--force: taking over a live wave server endpoint"
+        );
+    }
+
     let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -234,11 +264,14 @@ async fn serve(
 
     server::write_endpoint(&repo_root, &wave, addr)?;
     // Ctrl+C exits the process before graceful shutdown runs, so remove the
-    // discovery pointer from the interrupt handler too.
+    // discovery pointer from the interrupt handler too. Both paths remove it
+    // only while it still holds OUR address — a takeover's pointer stays.
+    let own_addr = addr.to_string();
     let cleanup_repo = repo_root.clone();
     let cleanup_wave = wave.clone();
+    let cleanup_addr = own_addr.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        server::remove_endpoint(&cleanup_repo, &cleanup_wave);
+        server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
     });
     println!("lf wave · {wave} · reactive server on http://{addr} (Ctrl-C to stop)");
 
@@ -258,7 +291,7 @@ async fn serve(
         registration.deregister().await;
     }
     runtime.supervisor().shutdown_all();
-    server::remove_endpoint(&repo_root, &wave);
+    server::remove_endpoint(&repo_root, &wave, &own_addr);
 
     result.map_err(|err| anyhow!("wave server error: {err}"))
 }
@@ -838,6 +871,7 @@ mod tests {
                 Box::new(StubHarness),
                 events_rx,
                 None,
+                false,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -856,6 +890,132 @@ mod tests {
         shutdown_tx.send(()).unwrap();
         handle.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "pointer removed on shutdown");
+    }
+
+    /// No registry store on the machine: the boot degrades to unregistered
+    /// (warn-and-continue), never an error — the pre-registry status quo.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn resolve_registry_without_a_store_runs_unregistered() {
+        let _env = crate::lf::session::test_env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let previous = std::env::var_os("LFD_DB_PATH");
+        std::env::set_var("LFD_DB_PATH", tmp.path().join("absent.db"));
+        let config = resolve_registry(tmp.path(), "ship", tmp.path(), false).await;
+        match previous {
+            Some(value) => std::env::set_var("LFD_DB_PATH", value),
+            None => std::env::remove_var("LFD_DB_PATH"),
+        }
+        assert!(config.is_none(), "missing store boots unregistered");
+    }
+
+    /// A stale pointer (its server is gone) never blocks a boot: the probe
+    /// finds nothing live and the new server overwrites the file.
+    #[tokio::test]
+    async fn serve_overwrites_a_stale_endpoint_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+
+        // A dead address: bind, learn the port, drop the listener.
+        let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead_addr = dead.local_addr().unwrap();
+        drop(dead);
+        server::write_endpoint(&repo, "ship", dead_addr).expect("stale pointer");
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_events_tx, events_rx) = mpsc::unbounded_channel();
+        let repo2 = repo.clone();
+        let cwd = repo.clone();
+        let handle = tokio::spawn(async move {
+            serve(
+                repo2,
+                cwd,
+                "ship".into(),
+                Box::new(StubHarness),
+                events_rx,
+                None,
+                false,
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
+            .await
+        });
+
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| {
+            std::fs::read_to_string(&endpoint)
+                .is_ok_and(|contents| contents != dead_addr.to_string())
+        })
+        .await;
+
+        shutdown_tx.send(()).unwrap();
+        handle.await.unwrap().unwrap();
+    }
+
+    /// The file-level one-brain floor: a pointer answering /health for this
+    /// wave refuses a second server, registry store or not.
+    #[tokio::test]
+    async fn serve_refuses_to_start_over_a_live_endpoint_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+
+        // First server, unregistered (no store): boots and writes the pointer.
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_events_tx, events_rx) = mpsc::unbounded_channel();
+        let repo2 = repo.clone();
+        let cwd = repo.clone();
+        let first = tokio::spawn(async move {
+            serve(
+                repo2,
+                cwd,
+                "ship".into(),
+                Box::new(StubHarness),
+                events_rx,
+                None,
+                false,
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
+            .await
+        });
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        let first_addr = std::fs::read_to_string(&endpoint).unwrap();
+
+        // Second server: probed live, refused, pointer untouched.
+        let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
+        let (_events_tx2, events_rx2) = mpsc::unbounded_channel();
+        let err = serve(
+            repo.clone(),
+            repo.clone(),
+            "ship".into(),
+            Box::new(StubHarness),
+            events_rx2,
+            None,
+            false,
+            async {
+                let _ = shutdown_rx2.await;
+            },
+        )
+        .await
+        .expect_err("live endpoint refuses a second server");
+        assert!(
+            err.to_string().contains("--force"),
+            "error points at --force: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&endpoint).unwrap(),
+            first_addr,
+            "refused boot never touched the pointer"
+        );
+
+        shutdown_tx.send(()).unwrap();
+        first.await.unwrap().unwrap();
+        assert!(!endpoint.exists(), "first server still owns its shutdown");
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
@@ -927,6 +1087,7 @@ mod tests {
                 Box::new(StubHarness),
                 events_rx,
                 Some(config),
+                false,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1012,6 +1173,7 @@ mod tests {
                 pid: std::process::id(),
                 force: false,
             }),
+            false,
             async {
                 let _ = shutdown_rx.await;
             },

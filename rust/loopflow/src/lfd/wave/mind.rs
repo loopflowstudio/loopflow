@@ -65,6 +65,7 @@
 //! protection and worktree bootstrap are still to come.
 //! Approval policy is `AutoApprove` until Decisions land.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -159,6 +160,23 @@ impl Default for MindConfig {
     }
 }
 
+/// PATH for the mind's harness and every child the server spawns: this
+/// executable's directory first, so the discipline commands (`lf q worker
+/// run …`) resolve to the binary running this wave server, never whatever
+/// `lf` the user's shell happens to find (observed live: the mind's `lf`
+/// was an older installed build missing `lf q`).
+pub fn path_for_children() -> OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return inherited;
+    };
+    let paths = std::iter::once(exe_dir).chain(std::env::split_paths(&inherited));
+    std::env::join_paths(paths).unwrap_or(inherited)
+}
+
 /// The mind's operating prompt: the rendered goal seed plus the orchestration
 /// discipline. Rides the harness `AgentConfig` system prompt, which the codex
 /// driver prepends to the first turn of the thread.
@@ -216,6 +234,8 @@ fn orchestration_discipline(wave: &str) -> String {
          `--pool` to share the wave's worktree, `--stack <run-id>` to build on \
          an unlanded run), fold what you learn into wave/{wave}/MEMORY.md, and \
          answer the human.\n\
+         - Exception: trivial, single-file, sub-minute work is done inline \
+         without dispatch; dispatch is for real units of work.\n\
          - Keep turns short — decisions and dispatches, not implementation.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
@@ -271,6 +291,13 @@ impl EventAdapter {
             }
             ConversationEvent::ItemCompleted { item, .. } => {
                 self.flush_finished(&mut deltas, None);
+                // Codex reasoning streams as deltas; the completion item
+                // often carries no accumulated text. An empty Message/Thought
+                // would land on the wire as a blank row — drop it here, the
+                // one spot where harness items become wire items.
+                if is_empty_text_item(item) {
+                    return deltas;
+                }
                 let Some(open) = self.open.as_mut() else {
                     tracing::warn!("harness item outside a turn; dropped");
                     return deltas;
@@ -328,6 +355,16 @@ impl EventAdapter {
         if let Some(turn) = self.finished.take() {
             deltas.push(TurnDelta::Finished { turn, cost_usd });
         }
+    }
+}
+
+/// A Message/Thought whose text is empty says nothing — not a wire item.
+fn is_empty_text_item(item: &ConversationItem) -> bool {
+    match item {
+        ConversationItem::Message { text, .. } | ConversationItem::Thought { text, .. } => {
+            text.trim().is_empty()
+        }
+        _ => false,
     }
 }
 
@@ -922,6 +959,56 @@ mod tests {
     fn message_id(turn: &ChatTurn) -> MessageId {
         let seq = turn.id.strip_prefix("turn-").expect("user turn id");
         MessageId(format!("msg-{seq}"))
+    }
+
+    #[test]
+    fn path_for_children_starts_with_this_executables_dir() {
+        let exe_dir = std::env::current_exe()
+            .expect("current exe")
+            .parent()
+            .expect("exe has a dir")
+            .to_path_buf();
+        let path = path_for_children();
+        let first = std::env::split_paths(&path).next().expect("PATH non-empty");
+        assert_eq!(
+            first, exe_dir,
+            "the mind's PATH resolves `lf` to this build first"
+        );
+    }
+
+    #[test]
+    fn empty_reasoning_completion_yields_no_wire_item() {
+        let mut adapter = EventAdapter::new();
+        adapter.feed(&ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        // codex reasoning arrives as deltas; item/completed carries no text.
+        let deltas = adapter.feed(&ConversationEvent::ItemCompleted {
+            turn_id: "vt".into(),
+            item: ConversationItem::Thought {
+                id: "rsn_1".into(),
+                text: String::new(),
+            },
+        });
+        assert!(deltas.is_empty(), "empty thought produces no delta");
+
+        adapter.feed(&ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        let deltas = adapter.feed(&ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+        let finished = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                TurnDelta::Finished { turn, .. } => Some(turn.clone()),
+                _ => None,
+            })
+            .expect("turn finished");
+        assert!(finished.items.is_empty(), "no empty item on the wire");
+        assert!(finished.text.is_empty(), "no stray text from empty items");
     }
 
     #[tokio::test]

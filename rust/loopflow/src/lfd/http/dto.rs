@@ -300,6 +300,30 @@ pub struct CreateSessionRequestDto {
     pub agent: String,
 }
 
+/// Request body for `POST /v0/waves/{id}/workers`. Mirrored in the Python
+/// client (`client.run_worker`); not mirrored in Swift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunWorkerRequestDto {
+    pub flow: String,
+    pub task: String,
+    pub parent_session_id: Option<String>,
+    #[serde(flatten)]
+    pub placement: WorkerPlacementDto,
+}
+
+/// Worktree placement for a dispatched worker. Required on every dispatch —
+/// the CLI (not the wire) supplies the `fresh` default.
+///
+/// `stack` carries the parent run id as a sibling `parent_run_id` field:
+/// `{"placement": "stack", "parent_run_id": "..."}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "placement", rename_all = "snake_case")]
+pub enum WorkerPlacementDto {
+    Fresh,
+    Pool,
+    Stack { parent_run_id: String },
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSessionResponseDto {
     pub session: SessionDto,

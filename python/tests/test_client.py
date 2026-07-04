@@ -359,15 +359,59 @@ class TestClientResponses:
             "reduce",
             "implement",
             "Add the endpoint",
+            "fresh",
             parent_session_id="terminal-parent",
         )
         assert received == {
             "flow": "implement",
             "task": "Add the endpoint",
             "parent_session_id": "terminal-parent",
+            "placement": "fresh",
         }
         assert response.id == "terminal-1"
         assert response.session_use == "worker"
+        client.close()
+
+    def test_run_worker_encodes_stack_placement(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json=_session_payload(
+                    run_id="run-2",
+                    use="worker",
+                    source="wave_step_tmux",
+                    step="implement",
+                    tmux_name="lf-worker",
+                ),
+            )
+
+        client = _mock_client(handler)
+        client.run_worker(
+            "reduce",
+            "implement",
+            "Build on the parent",
+            "stack",
+            parent_run_id="run-1",
+        )
+        assert received == {
+            "flow": "implement",
+            "task": "Build on the parent",
+            "placement": "stack",
+            "parent_run_id": "run-1",
+        }
+        client.close()
+
+    def test_run_worker_rejects_bad_placement_combinations(self):
+        client = _mock_client(lambda request: httpx.Response(200, json={}))
+        with pytest.raises(ValueError):
+            client.run_worker("reduce", "implement", "task", "stack")
+        with pytest.raises(ValueError):
+            client.run_worker(
+                "reduce", "implement", "task", "fresh", parent_run_id="run-1"
+            )
         client.close()
 
     def test_get_session_returns_dict(self):

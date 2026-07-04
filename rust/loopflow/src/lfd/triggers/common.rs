@@ -6,7 +6,7 @@ use crate::lfd::attention::create_step_failure_attention;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::wave::classify_repair_flow;
 use crate::lfd::executor::WaveExecutor;
-pub use crate::lfd::executor::{create_parallel_run, create_run_with_id};
+pub use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::scheduler::SchedulerSlotGuard;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, Run, RunStatus, WaveStatus};

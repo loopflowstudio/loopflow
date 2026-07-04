@@ -7,7 +7,10 @@ use std::path::PathBuf;
 
 use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn};
 use loopflow::lfd::conversations::types::{ConversationItem, Lifecycle};
-use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
+use loopflow::lfd::http::dto::{
+    CreateSessionRequestDto, RunWorkerRequestDto, SessionDto, UsageReportDto, WaveDto,
+    WorkerPlacementDto,
+};
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -118,6 +121,49 @@ fn create_session_request_fixture_pins_required_fields() {
     assert_eq!(request.flow, "ship");
     assert_eq!(request.worktree, "/tmp/repo.Desktop");
     assert_eq!(request.agent, "codex");
+}
+
+#[test]
+fn run_worker_request_fixture_pins_placement_shape() {
+    let request: RunWorkerRequestDto =
+        serde_json::from_value(load_fixture("run_worker_request.json"))
+            .expect("run worker request fixture should parse");
+    assert_eq!(request.flow, "implement");
+    assert_eq!(request.task, "Add the workers endpoint.");
+    assert_eq!(
+        request.parent_session_id.as_deref(),
+        Some("lfdsession_01HNX7XYZ0AZ1B2C3D4E5F6G7H")
+    );
+    assert_eq!(
+        request.placement,
+        WorkerPlacementDto::Stack {
+            parent_run_id: "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6".to_string(),
+        }
+    );
+
+    // Round-trip keeps `stack` as a flat field pair: placement + parent_run_id.
+    let value = serde_json::to_value(&request).expect("serialize request");
+    assert_eq!(value["placement"], "stack");
+    assert_eq!(
+        value["parent_run_id"],
+        "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6"
+    );
+
+    // Unit placements are the bare tag; the field is required, never defaulted.
+    let fresh: RunWorkerRequestDto = serde_json::from_value(serde_json::json!({
+        "flow": "implement",
+        "task": "t",
+        "parent_session_id": null,
+        "placement": "fresh",
+    }))
+    .expect("fresh placement should parse");
+    assert_eq!(fresh.placement, WorkerPlacementDto::Fresh);
+
+    let missing = serde_json::from_value::<RunWorkerRequestDto>(serde_json::json!({
+        "flow": "implement",
+        "task": "t",
+    }));
+    assert!(missing.is_err(), "placement is required on the wire");
 }
 
 #[test]

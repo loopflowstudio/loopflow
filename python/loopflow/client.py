@@ -318,14 +318,43 @@ class Client:
         except httpx.RequestError as exc:
             raise ConnectionError(str(exc)) from exc
 
+    @staticmethod
+    def _run_worker_body(
+        flow: str,
+        task: str,
+        parent_session_id: Optional[str],
+        placement: str,
+        parent_run_id: Optional[str],
+    ) -> dict[str, Any]:
+        if placement == "stack" and not parent_run_id:
+            raise ValueError("stack placement requires parent_run_id")
+        if placement != "stack" and parent_run_id:
+            raise ValueError("parent_run_id only applies to stack placement")
+        body = _compact_dict(
+            flow=flow,
+            task=task,
+            parent_session_id=parent_session_id,
+            parent_run_id=parent_run_id,
+        )
+        body["placement"] = placement
+        return body
+
     def run_worker(
         self,
         name_or_id: str,
         flow: str,
         task: str,
+        placement: str,
         parent_session_id: Optional[str] = None,
+        parent_run_id: Optional[str] = None,
     ) -> Session:
-        body = _compact_dict(flow=flow, task=task, parent_session_id=parent_session_id)
+        body = self._run_worker_body(
+            flow=flow,
+            task=task,
+            parent_session_id=parent_session_id,
+            placement=placement,
+            parent_run_id=parent_run_id,
+        )
         payload = self._request_json("POST", f"/v0/waves/{name_or_id}/workers", json=body)
         return Session.model_validate(payload)
 

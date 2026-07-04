@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_parallel_run, create_run_with_id, spawn_run_task_with_slot};
+use super::common::{create_run_for_placement, spawn_run_task_with_slot, Placement};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -53,17 +53,14 @@ async fn pause_wave_after_activation_conflict(
     event_hub.send(Event::wave_updated(wave.id().clone()));
 }
 
-pub(crate) async fn create_run(
-    store: &SharedStore,
-    wave: &Wave,
-    run_id: &LfdId,
-    force_parallel: bool,
-    target_branch: Option<&str>,
-) -> anyhow::Result<Run> {
+/// Placement for trigger-driven activations: strictly-serial waves
+/// (workers == 1) pool in the shared wave worktree; everything else gets a
+/// fresh per-run worktree so concurrent dispatches never collide.
+pub(crate) fn activation_placement(wave: &Wave, force_parallel: bool) -> Placement {
     if force_parallel || wave.workers() != 1 {
-        create_parallel_run(store, wave, run_id, target_branch).await
+        Placement::Fresh
     } else {
-        create_run_with_id(store, wave, run_id, target_branch).await
+        Placement::Pool
     }
 }
 
@@ -304,7 +301,8 @@ pub async fn spawn_immediate_activation(
     }
 
     let target = target_branch_ref(&envelope.target_branch);
-    let mut run = match create_run(store, wave, &run_id, force_parallel, target).await {
+    let placement = activation_placement(wave, force_parallel);
+    let mut run = match create_run_for_placement(store, wave, &run_id, &placement, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -444,7 +442,8 @@ pub async fn dispatch_wave_if_ready(
     };
 
     let target = target_branch_ref(&activation.target_branch);
-    let mut run = match create_run(store, wave, &run_id, false, target).await {
+    let placement = activation_placement(wave, false);
+    let mut run = match create_run_for_placement(store, wave, &run_id, &placement, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");

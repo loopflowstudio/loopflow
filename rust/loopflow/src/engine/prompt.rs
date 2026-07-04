@@ -1651,11 +1651,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
-        parts.push(format!(
-            "<lf:loopflow>\n{}\n</lf:loopflow>",
-            crate::engine::builtins::LOOPFLOW_DOC
-        ));
-        parts.push(speak_section());
+        parts.push(loopflow_section());
     }
 
     let instructions = components.surface.instructions();
@@ -1666,14 +1662,14 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// The speech vocabulary as a prompt section — how any launched agent talks
-/// back (`lf chat`, `lf memory`). Emitted exactly once per prompt: assembled
-/// prompts get it from [`format_system_sections`]; the wave mind's prompt
-/// bypasses assembly and appends the same section itself.
-pub fn speak_section() -> String {
+/// The one loopflow operating document (including the Speak vocabulary) as a
+/// prompt section. Emitted exactly once per prompt: assembled prompts get it
+/// from [`format_system_sections`]; the wave mind's prompt bypasses assembly
+/// and appends the same section itself.
+pub fn loopflow_section() -> String {
     format!(
-        "<lf:speak>\n{}\n</lf:speak>",
-        crate::engine::builtins::SPEAK_DOC.trim_end()
+        "<lf:loopflow>\n{}\n</lf:loopflow>",
+        crate::engine::builtins::LOOPFLOW_DOC
     )
 }
 
@@ -2252,13 +2248,13 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
         assert!(!prompt.contains("lf op commit"));
-        assert!(!prompt.contains("<lf:speak>"));
+        assert!(!prompt.contains("lf chat"));
     }
 
-    /// A bare flow/step run's assembled prompt teaches the speech vocabulary
-    /// — exactly once.
+    /// A bare flow/step run's assembled prompt carries the one loopflow
+    /// operating document, including the speech vocabulary.
     #[test]
-    fn assembled_prompt_carries_speech_vocabulary_once() {
+    fn assembled_prompt_carries_loopflow_document_once() {
         let components = PromptComponents {
             operate: true,
             step: Some(Step::named("implement")),
@@ -2266,7 +2262,7 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:speak>").count(), 1);
+        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
         assert!(prompt.contains("lf chat --parent"));
         assert!(prompt.contains("lf memory add"));
         assert!(prompt.contains("server-owned"));
@@ -2406,10 +2402,10 @@ mod tests {
     }
 
     /// The wave agent's inline run: the render_goal seed rides as the task
-    /// message of an assembled prompt (operate on), and the speech section
+    /// message of an assembled prompt (operate on), and the loopflow document
     /// lands exactly once — from assembly, not the seed.
     #[test]
-    fn wave_agent_seed_carries_speech_vocabulary_once() {
+    fn wave_agent_seed_carries_loopflow_document_once() {
         let goal = crate::engine::flow::Goal {
             prompt: "Ship the roadmap.".to_string(),
         };
@@ -2424,8 +2420,8 @@ mod tests {
             },
         );
         assert!(
-            !seed.contains("<lf:speak>"),
-            "the seed itself carries no speech section"
+            !seed.contains("<lf:loopflow>"),
+            "the seed itself carries no loopflow section"
         );
 
         let components = PromptComponents {
@@ -2435,7 +2431,7 @@ mod tests {
             ..Default::default()
         };
         let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:speak>").count(), 1);
+        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
     }
 
     #[test]

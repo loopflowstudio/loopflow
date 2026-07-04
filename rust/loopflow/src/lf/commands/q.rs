@@ -35,7 +35,7 @@ use crate::lfd::types::{
 
 /// One line appended to every dispatched worker's task: the finish trigger.
 /// The vocabulary itself (what a report looks like) rides the shared
-/// `<lf:speak>` section in the worker's assembled prompt — this stays a
+/// `<lf:loopflow>` section in the worker's assembled prompt — this stays a
 /// pointer, not a second teaching site.
 pub(crate) const WORKER_REPORT_INSTRUCTION: &str =
     "When you finish, report the outcome to the wave's thread with `lf chat`.";

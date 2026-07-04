@@ -567,10 +567,12 @@ mod tests {
         assert!(seed.contains("lf op commit"));
         assert!(seed.contains("</lf:loopflow>"));
         assert_eq!(
-            seed.matches("<lf:speak>").count(),
+            seed.matches("<lf:loopflow>").count(),
             1,
-            "the skill seed teaches the speech vocabulary once"
+            "the skill seed carries the loopflow operating document once"
         );
+        assert!(seed.contains("lf chat --parent"));
+        assert!(seed.contains("lf memory add"));
     }
 
     #[test]

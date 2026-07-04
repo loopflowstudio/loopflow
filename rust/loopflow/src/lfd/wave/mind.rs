@@ -178,17 +178,17 @@ pub fn path_for_children() -> OsString {
 }
 
 /// The mind's operating prompt: the rendered goal seed, the orchestration
-/// discipline, and the shared speech vocabulary (the mind's prompt bypasses
-/// context assembly, so the `<lf:speak>` section is appended here). Rides the
-/// harness `AgentConfig` system prompt, which the codex driver prepends to
-/// the first turn of the thread.
+/// discipline, and the shared loopflow operating document (the mind's prompt
+/// bypasses context assembly, so the `<lf:loopflow>` section is appended here).
+/// Rides the harness `AgentConfig` system prompt, which the codex driver
+/// prepends to the first turn of the thread.
 pub fn mind_agent_config(runtime: &WaveRuntime, cwd: &Path) -> AgentConfig {
     let seed = build_goal_seed(runtime.repo_root(), runtime.name(), runtime.memory());
     AgentConfig {
         system_prompt: format!(
             "{seed}\n\n{}\n\n{}",
             orchestration_discipline(runtime.name()),
-            crate::engine::prompt::speak_section()
+            crate::engine::prompt::loopflow_section()
         ),
         task_prompt: String::new(),
         agent: None,
@@ -231,8 +231,7 @@ fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
 
 /// The coordinating-session discipline, promoted into the mind's system
 /// prompt: the mind orchestrates, it never grinds inline. Mind-specific rules
-/// only — the speech/memory vocabulary rides the shared `<lf:speak>` section
-/// ([`crate::engine::prompt::speak_section`]), appended in
+/// only — shared loopflow operating guidance is appended in
 /// [`mind_agent_config`], not duplicated here.
 fn orchestration_discipline(wave: &str) -> String {
     format!(
@@ -1147,20 +1146,23 @@ mod tests {
         assert_eq!(finished.text, "Hello from Codex");
     }
 
-    /// The mind's prompt teaches the speech/memory vocabulary through the one
-    /// shared `<lf:speak>` section — exactly once, and the mind-specific
-    /// discipline no longer duplicates it.
+    /// The mind's prompt carries the one shared loopflow operating document —
+    /// exactly once, and the mind-specific discipline no longer duplicates it.
     #[test]
-    fn mind_prompt_carries_the_shared_speech_vocabulary_once() {
+    fn mind_prompt_carries_the_shared_loopflow_document_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (runtime, _inbox) =
             WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
         let prompt = mind_agent_config(&runtime, tmp.path()).system_prompt;
 
         assert_eq!(
-            prompt.matches("<lf:speak>").count(),
+            prompt.matches("<lf:loopflow>").count(),
             1,
-            "speech section appears exactly once"
+            "loopflow section appears exactly once"
+        );
+        assert!(
+            prompt.contains("lf op commit"),
+            "loopflow operating guidance"
         );
         assert!(prompt.contains("lf chat --parent"), "parent escalation");
         assert!(

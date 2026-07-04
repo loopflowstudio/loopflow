@@ -47,6 +47,22 @@ Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
 sequencing, and reading results back.
 
+## Speak
+
+Answers return on the channel they came in: when a human's message reaches
+you, reply in your own turn text. Everything proactive goes through `lf`:
+
+- `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
+  thread. One short paragraph: what landed, links, anything surprising. Pipe
+  stdin for longer.
+- `lf chat --parent "<report>"` - escalate to the parent wave.
+- `lf memory add "<fact>"` - record a durable learning. `lf memory update`
+  rewrites the whole file from stdin.
+- `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
+
+Use these unconditionally. Outside a wave (or with no live server) they fail
+with a clear error; that is never a blocker - note it and move on.
+
 ## The Roadmap Lives in Asana
 
 A wave's roadmap is not in the repo — it lives in Asana, and `lf op pm` is the
@@ -98,24 +114,6 @@ When you learn something repo-specific, write it into `.lf/`: adapt a step
 the work so they stay transparent and reviewable.
 
 </lf:loopflow>
-
-<lf:speak>
-# Speak
-
-Answers return on the channel they came in: when a human's message reaches
-you, reply in your own turn text. Everything proactive goes through `lf`:
-
-- `lf chat "<note>"` — report outcomes, FYIs, and blockers to the wave's
-  thread. One short paragraph: what landed, links, anything surprising. Pipe
-  stdin for longer.
-- `lf chat --parent "<report>"` — escalate to the parent wave.
-- `lf memory add "<fact>"` — record a durable learning. `lf memory update`
-  rewrites the whole file from stdin.
-- MEMORY.md is server-owned — never edit the file directly.
-
-Use these unconditionally. Outside a wave (or with no live server) they fail
-with a clear error; that is never a blocker — note it and move on.
-</lf:speak>
 
 Run mode is headless. No user is present. Never ask questions or wait for input — no one will answer.
 

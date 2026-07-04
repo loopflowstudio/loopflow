@@ -134,7 +134,7 @@ fn build_run_command(
 ) -> Result<(Vec<String>, String)> {
     if let Some(task) = run.task.as_ref() {
         let mut cmd =
-            build_lf_step_command(&run.flow, true, &run.direction, &run.area, wave.name());
+            build_lf_step_command(&run.flow, true, &run.area, wave.name());
         let flow_arg = cmd
             .get_mut(1)
             .ok_or_else(|| anyhow!("lf dispatch command missing flow argument"))?;
@@ -143,13 +143,12 @@ fn build_run_command(
         return Ok((cmd, format!("dispatch:{}", run.flow)));
     }
 
-    build_wave_agent_command(wave, &run.worktree, &run.direction, &run.area, in_flight)
+    build_wave_agent_command(wave, &run.worktree, &run.area, in_flight)
 }
 
 fn build_wave_agent_command(
     wave: &Wave,
     worktree: &str,
-    direction: &[String],
     area: &[String],
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<(Vec<String>, String)> {
@@ -166,7 +165,7 @@ fn build_wave_agent_command(
             in_flight,
         },
     );
-    let cmd = build_lf_inline_command(&prompt, true, direction, area, wave.name());
+    let cmd = build_lf_inline_command(&prompt, true, area, wave.name());
     Ok((cmd, format!("goal:{}", wave.goal())))
 }
 
@@ -350,7 +349,7 @@ impl WaveExecutor {
         }
 
         let session_id = LfdId::new();
-        let mut cmd = build_lf_step_command(flow, false, &wave.direction, &wave.area, wave.name());
+        let mut cmd = build_lf_step_command(flow, false, &wave.area, wave.name());
         cmd.push("-m".to_string());
         cmd.push(agent.to_string());
 
@@ -401,7 +400,7 @@ impl WaveExecutor {
         let session_id = LfdId::new();
         let in_flight = list_in_flight_dispatches(&self.store, wave.id(), None).await?;
         let (cmd, terminal_step) =
-            build_wave_agent_command(&wave, &worktree, wave.direction(), wave.area(), in_flight)?;
+            build_wave_agent_command(&wave, &worktree, wave.area(), in_flight)?;
         let branch = infer_branch_name(&worktree)
             .unwrap_or_else(|| format!("{}-{}", wave.name(), session_id));
         let tmux_managed = !self.disable_tmux && tmux_available();
@@ -981,7 +980,6 @@ impl WaveExecutor {
             repo: failed_run.repo.clone(),
             flow: repair_flow.to_string(),
             task: None,
-            direction: failed_run.direction.clone(),
             area: failed_run.area.clone(),
             iteration: failed_run.iteration,
             step_index: 0,
@@ -1496,7 +1494,6 @@ mod tests {
                 cycle_start_iteration: 0,
                 position: 0,
             }],
-            direction: vec![],
             area: vec![],
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -1514,7 +1511,6 @@ mod tests {
             repo: repo.to_string_lossy().to_string(),
             flow: flow_name.to_string(),
             task: None,
-            direction: vec![],
             area: vec![],
             iteration: 0,
             step_index: 0,
@@ -1562,7 +1558,6 @@ mod tests {
                 cycle_start_iteration: 0,
                 position: 0,
             }],
-            direction: vec![],
             area: vec![],
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -1582,7 +1577,6 @@ mod tests {
             repo: repo_work.repo.clone(),
             flow: wave.primary_flow().clone(),
             task: None,
-            direction: wave.direction().clone(),
             area: wave.area().clone(),
             iteration: 0,
             step_index: 0,
@@ -1760,7 +1754,6 @@ mod tests {
                 cycle_start_iteration: 0,
                 position: 0,
             }],
-            direction: vec![],
             area: vec![],
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -2073,7 +2066,6 @@ mod tests {
             repo: worktree.to_string_lossy().to_string(),
             flow: "build".to_string(),
             task: None,
-            direction: vec![],
             area: vec![],
             iteration: 0,
             step_index: 0,

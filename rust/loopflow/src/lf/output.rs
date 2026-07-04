@@ -50,7 +50,6 @@ use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource};
 pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
     let mut lines = Vec::new();
     let step_tokens = breakdown.source_tokens(DocumentSource::Step);
-    let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
     let scratch_tokens = breakdown.source_tokens(DocumentSource::Scratch);
     let wave_tokens = breakdown.source_tokens(DocumentSource::Wave)
         + breakdown.source_tokens(DocumentSource::Summary);
@@ -72,15 +71,6 @@ pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
 
     if step_tokens > 0 {
         lines.push(format_row("step", step_tokens, ""));
-    }
-
-    if direction_tokens > 0 {
-        let dir_detail = if breakdown.direction_names.is_empty() {
-            "\u{2014}".to_string()
-        } else {
-            breakdown.direction_names.join(", ")
-        };
-        lines.push(format_row("direction", direction_tokens, &dir_detail));
     }
 
     if breakdown.system_tokens > 0 {
@@ -161,7 +151,6 @@ fn format_tokens(n: usize) -> String {
 /// Build a reproducible lf command from run parameters.
 pub fn format_reproducible_command(
     step: Option<&str>,
-    directions: &[String],
     wave: Option<&str>,
     docs: &[String],
     clipboard: bool,
@@ -171,9 +160,6 @@ pub fn format_reproducible_command(
     let mut parts = vec!["lf".to_string()];
     if let Some(s) = step {
         parts.push(s.to_string());
-    }
-    for d in directions {
-        parts.push(format!("-d {}", d));
     }
     if let Some(w) = wave {
         parts.push(format!("--wave {}", w));
@@ -221,13 +207,11 @@ mod tests {
         let breakdown = ContextBreakdown {
             source_tokens: std::collections::HashMap::from([
                 (DocumentSource::Step, 1000),
-                (DocumentSource::Direction, 500),
                 (DocumentSource::Diff, 5000),
                 (DocumentSource::Docs, 2000),
             ]),
             system_tokens: 3000,
             step_name: Some("implement".to_string()),
-            direction_names: vec!["security".to_string()],
             diff_tier: DiffTier::UnifiedDiff,
             diff_file_count: 8,
             source_counts: std::collections::HashMap::from([(DocumentSource::Docs, 1)]),
@@ -235,10 +219,9 @@ mod tests {
         };
         let header = format_context_header(&breakdown);
         assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
-        assert!(header.contains("security"));
         assert!(header.contains("unified (8 files)"));
         assert!(header.contains("1 files"));
-        assert!(header.contains("11,500"));
+        assert!(header.contains("11,000"));
     }
 
     #[test]
@@ -269,7 +252,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), &[], None, &[], false, false, None);
+        let cmd = format_reproducible_command(Some("debug"), None, &[], false, false, None);
         assert_eq!(cmd, "lf debug");
     }
 
@@ -277,7 +260,6 @@ mod tests {
     fn format_reproducible_command_full() {
         let cmd = format_reproducible_command(
             Some("implement"),
-            &["security".to_string()],
             Some("rust"),
             &["src/".to_string()],
             true,
@@ -286,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            "lf implement -d security --wave rust --docs src/ -c --no-loopflow -m claude:opus"
+            "lf implement --wave rust --docs src/ -c --no-loopflow -m claude:opus"
         );
     }
 }

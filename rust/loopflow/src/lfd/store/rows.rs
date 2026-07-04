@@ -103,7 +103,6 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 /// SELECT id, name, direction, area, paused, created_at, workers, mode,
 ///        primary_flow, goal, metrics, parent_wave_id
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
-    let direction = parse_json_vec(&row.text(2)?)?;
     let area = parse_json_vec(&row.text(3)?)?;
     let paused = row.int(4)? != 0;
     let created_at = unix_to_datetime(row.bigint(5)?);
@@ -124,7 +123,6 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         metrics,
         crons: Vec::new(),
         repos: Vec::new(),
-        direction,
         area,
         paused,
         created_at: Some(created_at),
@@ -186,7 +184,6 @@ pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
 pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
     let started_at = unix_to_datetime(row.bigint(7)?);
     let ended_at = row.opt_bigint(8)?;
-    let snapshot_direction = parse_json_vec(&row.text(13)?)?;
     let snapshot_area = parse_json_vec(&row.text(14)?)?;
     let snapshot_pr = parse_pr(row.opt_text(15)?)?;
     let flow_parents = parse_json_vec(&row.text(16)?)?;
@@ -207,7 +204,6 @@ pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
         repo: row.text(10)?,
         flow: row.text(11)?,
         task: row.opt_text(12)?,
-        direction: snapshot_direction,
         area: snapshot_area,
         iteration: row.int(2)? as u32,
         step_index: row.int(3)? as u32,

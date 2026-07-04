@@ -11,7 +11,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::engine::error::CoreError;
-use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
+use crate::engine::flow::{load_step, Step};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
@@ -24,7 +24,6 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSource {
     Step,
-    Direction,
     Scratch,
     Wave,
     WaveMemory,
@@ -38,7 +37,6 @@ pub enum DocumentSource {
 fn source_key(source: DocumentSource) -> &'static str {
     match source {
         DocumentSource::Step => "step",
-        DocumentSource::Direction => "direction",
         DocumentSource::Scratch => "scratch",
         DocumentSource::Wave => "wave",
         DocumentSource::WaveMemory => "wave_memory",
@@ -93,7 +91,6 @@ pub struct ContextBreakdown {
     pub system_tokens: usize,
     /// Display metadata
     pub step_name: Option<String>,
-    pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
     pub has_clipboard: bool,
@@ -213,7 +210,6 @@ pub struct GatherContextOpts {
     /// Include loopflow operating guidance.
     pub operate: bool,
     pub surface: Surface,
-    pub directions: Vec<String>,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
@@ -298,7 +294,6 @@ pub struct PromptComponents {
     pub step: Option<Step>,
     pub repo_root: String,
     pub clipboard: Option<String>,
-    pub directions: Vec<Direction>,
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
@@ -438,11 +433,6 @@ pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
         breakdown.step_name = Some(step.name.clone());
     }
 
-    for dir in &components.directions {
-        breakdown.add_source_tokens(DocumentSource::Direction, count_tokens(&dir.content));
-        breakdown.direction_names.push(dir.name.clone());
-    }
-
     if let Some(ref diff) = components.diff {
         let tokens = count_tokens(diff);
         breakdown.add_source_tokens(DocumentSource::Diff, tokens);
@@ -535,24 +525,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     };
     debug!(elapsed_ms = step_start.elapsed().as_millis(), "loaded step");
 
-    // Load directions
-    let directions_start = Instant::now();
-    let mut direction_names = Vec::new();
-    if let Some(ref step) = step {
-        direction_names.extend(step.directions.clone());
-    }
-    direction_names.extend(opts.directions.clone());
-    let expanded_names = expand_direction_names(&direction_names, repo_root);
-    let mut directions = Vec::new();
-    for name in &expanded_names {
-        directions.push(load_direction(name, repo_root)?);
-    }
-    debug!(
-        elapsed_ms = directions_start.elapsed().as_millis(),
-        count = directions.len(),
-        "loaded directions"
-    );
-
     let spec = opts.gather_spec();
 
     // Gather document sources through a single pipeline.
@@ -574,7 +546,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
-            DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
+            DocumentSource::Step | DocumentSource::Clipboard => {}
         }
     }
     dedup_documents(&mut diff_files);
@@ -615,7 +587,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         step,
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
-        directions,
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
@@ -1632,28 +1603,6 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
-/// Format direction tags as XML blocks.
-fn format_direction_tags(directions: &[Direction]) -> String {
-    if directions.len() == 1 {
-        let d = &directions[0];
-        format!(
-            "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-            d.name, d.content, d.name
-        )
-    } else {
-        let parts: Vec<String> = directions
-            .iter()
-            .map(|d| {
-                format!(
-                    "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                    d.name, d.content, d.name
-                )
-            })
-            .collect();
-        format!("<lf:directions>\n{}\n</lf:directions>", parts.join("\n"))
-    }
-}
-
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
@@ -1832,19 +1781,7 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
 
-            // Context sections: directions, clipboard
-            if !components.directions.is_empty() {
-                let label = if components.directions.len() == 1 {
-                    "Direction"
-                } else {
-                    "Directions"
-                };
-                parts.push(format!(
-                    "{label} for this work.\n\n{}",
-                    format_direction_tags(&components.directions)
-                ));
-            }
-
+            // Context sections: clipboard
             if let Some(ref clipboard) = components.clipboard {
                 parts.push(format!(
                     "Content from clipboard.\n\n\
@@ -1870,10 +1807,6 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
         }
         PromptFormatMode::Context => {
             let mut parts = format_reference_sections(components);
-
-            if !components.directions.is_empty() {
-                parts.push(format_direction_tags(&components.directions));
-            }
 
             if let Some(ref clipboard) = components.clipboard {
                 parts.push(format!(
@@ -1917,13 +1850,7 @@ pub fn format_task_prompt(components: &PromptComponents) -> String {
 /// Excludes docs, diffs, wave context, and clipboard — those go in the task
 /// prompt to avoid triggering third-party app classifiers.
 pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_system_sections(components);
-
-    if !components.directions.is_empty() {
-        parts.push(format_direction_tags(&components.directions));
-    }
-
-    parts.join("\n\n")
+    format_system_sections(components).join("\n\n")
 }
 
 /// Format task prompt for Claude (includes content sections + clipboard + step + message).
@@ -2042,13 +1969,12 @@ fn format_files(docs: &[Document]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{Direction, Step};
+    use crate::engine::flow::Step;
     use std::path::{Path, PathBuf};
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".lf/steps")).expect("create steps");
-        std::fs::create_dir_all(dir.path().join(".lf/directions")).expect("create directions");
         dir
     }
 
@@ -2333,52 +2259,6 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_single_direction() {
-        let components = PromptComponents {
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise and direct.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:direction:concise>"));
-        assert!(prompt.contains("Be concise and direct."));
-        assert!(prompt.contains("</lf:direction:concise>"));
-        assert!(prompt.contains("Direction for this work"));
-        // Should NOT use plural wrapper for single direction
-        assert!(!prompt.contains("<lf:directions>"));
-    }
-
-    #[test]
-    fn format_prompt_with_multiple_directions() {
-        let components = PromptComponents {
-            directions: vec![
-                Direction {
-                    name: "concise".to_string(),
-                    content: "Be concise.".to_string(),
-                    source: PathBuf::from(".lf/directions/concise.md"),
-                },
-                Direction {
-                    name: "architect".to_string(),
-                    content: "Think architecturally.".to_string(),
-                    source: PathBuf::from(".lf/directions/architect.md"),
-                },
-            ],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:directions>"));
-        assert!(prompt.contains("</lf:directions>"));
-        assert!(prompt.contains("<lf:direction:concise>"));
-        assert!(prompt.contains("<lf:direction:architect>"));
-        assert!(prompt.contains("Directions for this work"));
-    }
-
-    #[test]
     fn format_prompt_with_step() {
         let components = PromptComponents {
             step: Some(Step {
@@ -2386,7 +2266,6 @@ mod tests {
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -2409,7 +2288,6 @@ mod tests {
                 content: None,
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -2499,17 +2377,11 @@ mod tests {
                 content: "# Project".to_string(),
                 source: DocumentSource::Docs,
             }],
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -2526,15 +2398,13 @@ mod tests {
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:files>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
-        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
         let step_pos = prompt.find("<lf:step:implement>").unwrap();
 
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);
-        assert!(diff_pos < direction_pos);
-        assert!(direction_pos < clipboard_pos);
+        assert!(diff_pos < clipboard_pos);
         assert!(clipboard_pos < step_pos);
     }
 
@@ -2898,59 +2768,6 @@ mod tests {
     }
 
     #[test]
-    fn gather_context_with_directions() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let repo = temp.path();
-
-        // Create direction
-        std::fs::create_dir_all(repo.join(".lf/directions")).expect("create directions");
-        std::fs::write(repo.join(".lf/directions/concise.md"), "Be concise.")
-            .expect("write direction");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.to_path_buf(),
-            directions: vec!["concise".to_string()],
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert_eq!(components.directions.len(), 1);
-        assert_eq!(components.directions[0].name, "concise");
-        assert!(components.directions[0].content.contains("Be concise"));
-    }
-
-    #[test]
-    fn directions_from_step_and_cli_combined() {
-        let repo = init_repo();
-        write_file(
-            repo.path(),
-            ".lf/steps/impl.md",
-            r#"---
-directions:
-  - thorough
----
-# Implement
-"#,
-        );
-        write_file(repo.path(), ".lf/directions/thorough.md", "Be thorough.");
-        write_file(repo.path(), ".lf/directions/fast.md", "Be fast.");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.path().to_path_buf(),
-            step: Some("impl".to_string()),
-            directions: vec!["fast".to_string()],
-            ..Default::default()
-        };
-        let ctx = gather_context(&opts).expect("gather context");
-
-        assert_eq!(ctx.directions.len(), 2);
-        assert_eq!(ctx.directions[0].name, "thorough");
-        assert_eq!(ctx.directions[1].name, "fast");
-    }
-
-    #[test]
     fn gather_context_surface_preserved() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let repo = temp.path();
@@ -3102,7 +2919,6 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -3127,18 +2943,12 @@ directions:
                 content: "# Project".to_string(),
                 source: DocumentSource::Docs,
             }],
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
             clipboard: Some("Error message".to_string()),
             step: Some(Step {
                 name: "debug".to_string(),
                 content: Some("Fix the error.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -3151,9 +2961,6 @@ directions:
         assert!(context.contains("<lf:files>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
-        // Should include directions (context, not task)
-        assert!(context.contains("<lf:direction:concise>"));
-        assert!(context.contains("Be concise."));
         // Should NOT include step (goes in task prompt)
         assert!(!context.contains("<lf:step:debug>"));
         assert!(!context.contains("Fix the error."));
@@ -3183,7 +2990,6 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -3222,7 +3028,6 @@ directions:
                 content: Some("Debug the error.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,
@@ -3243,7 +3048,6 @@ directions:
                 content: None,
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 interactive: None,
                 fast_path: None,

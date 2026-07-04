@@ -219,7 +219,6 @@ impl SqliteStore {
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let direction_json = serde_json::to_string(wave.direction())?;
         let area_json = serde_json::to_string(wave.area())?;
         let metrics_json = serde_json::to_string(wave.metrics())?;
         let created_at = wave
@@ -232,7 +231,7 @@ impl SqliteStore {
             params![
                 wave.id(),
                 wave.name(),
-                direction_json,
+                "[]",
                 area_json,
                 if wave.status() == WaveStatus::Paused {
                     1i64
@@ -955,7 +954,7 @@ impl SqliteStore {
                 run.repo,
                 run.flow,
                 run.task,
-                serde_json::to_string(&run.direction)?,
+                "[]",
                 serde_json::to_string(&run.area)?,
                 serialize_pr(&run.pr)?,
                 flow_parents_json,
@@ -992,7 +991,7 @@ impl SqliteStore {
                 run.repo,
                 run.flow,
                 run.task,
-                serde_json::to_string(&run.direction)?,
+                "[]",
                 serde_json::to_string(&run.area)?,
                 serialize_pr(&run.pr)?,
                 flow_parents_json,

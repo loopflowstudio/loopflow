@@ -329,7 +329,6 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
         content: Some(content),
         agent: None,
         default_agent: None,
-        directions: Vec::new(),
         action_style: None,
         interactive: Some(true),
         fast_path: None,
@@ -611,51 +610,6 @@ pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
 // Direction discovery
 // =============================================================================
 
-/// List builtin + repo directions for display.
-pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
-    let mut directions: HashSet<String> = crate::engine::builtins::builtin_direction_names()
-        .into_iter()
-        .map(|name| name.to_string())
-        .collect();
-    directions.extend(
-        crate::engine::builtins::builtin_direction_group_names()
-            .into_iter()
-            .map(|name| name.to_string()),
-    );
-
-    if let Some(repo) = repo {
-        directions.extend(list_user_direction_names(repo));
-    }
-
-    let mut list: Vec<_> = directions.into_iter().collect();
-    list.sort();
-    list
-}
-
-fn list_user_direction_names(repo: &Path) -> HashSet<String> {
-    let directions_dir = repo.join(".lf/directions");
-    let mut names: HashSet<String> = list_md_stems(std::slice::from_ref(&directions_dir))
-        .into_iter()
-        .collect();
-    let Ok(entries) = std::fs::read_dir(&directions_dir) else {
-        return names;
-    };
-
-    let mut group_dirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(group_name) = path.file_name() {
-                names.insert(group_name.to_string_lossy().to_string());
-            }
-            group_dirs.push(path);
-        }
-    }
-
-    names.extend(list_md_stems(&group_dirs));
-    names
-}
-
 // =============================================================================
 // Built-in flow metadata for formatted listing
 // =============================================================================
@@ -879,14 +833,13 @@ mod tests {
         fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
         fs::write(
             steps_dir.join("office-hours.md"),
-            "---\ninteractive: false\ndirections: [gstack]\n---\n# user override\n",
+            "---\ninteractive: false\n---\n# user override\n",
         )
         .expect("write step");
 
         let step = discover_step(tmp.path(), "gstack/office-hours").expect("discover step");
 
         assert_eq!(step.interactive, Some(false));
-        assert_eq!(step.directions, vec!["gstack".to_string()]);
         assert!(step
             .content
             .as_deref()
@@ -901,11 +854,4 @@ mod tests {
         assert!(err.to_string().contains("not found"));
     }
 
-    #[test]
-    fn list_directions_includes_imported_builtin_directions() {
-        let directions = list_directions(None);
-
-        assert!(directions.contains(&"gstack".to_string()));
-        assert!(directions.contains(&"openclaw".to_string()));
-    }
 }

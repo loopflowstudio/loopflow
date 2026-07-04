@@ -4,7 +4,6 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::{parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
-use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
     format_prompt, gather_context, measure_context, ContextBreakdown, Document, DocumentSource,
@@ -27,7 +26,6 @@ pub struct LaunchPromptInput {
     pub step: Option<String>,
     pub resolved_step: Option<Step>,
     pub surface: Surface,
-    pub directions: Vec<String>,
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
@@ -36,7 +34,6 @@ pub struct LaunchPromptInput {
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
     pub yolo_mode: bool,
-    pub include_config_directions: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     pub client_context: ClientContext,
@@ -63,7 +60,6 @@ pub fn prepare_launch_prompt(
         step,
         resolved_step,
         surface,
-        directions: mut requested_directions,
         docs: requested_docs,
         wave,
         message,
@@ -72,23 +68,11 @@ pub fn prepare_launch_prompt(
         cwd,
         max_turns,
         yolo_mode,
-        include_config_directions,
         source_overrides,
         summary,
         client_context,
         related_repos,
     } = input;
-
-    if let Some(step) = resolved_step.as_ref() {
-        requested_directions = merge_directions(&step.directions, &requested_directions);
-    }
-
-    let config_directions: &[String] = if include_config_directions {
-        config.direction.as_deref().unwrap_or_default()
-    } else {
-        &[]
-    };
-    let directions = merge_directions(config_directions, &requested_directions);
 
     let mut docs = config.docs.clone();
     docs.extend(requested_docs);
@@ -102,7 +86,6 @@ pub fn prepare_launch_prompt(
         message,
         operate: !no_loopflow,
         surface,
-        directions,
         docs,
         files: Vec::new(),
         wave,
@@ -190,7 +173,6 @@ pub fn prepare_goal_launch(
             agent,
             cwd: Some(repo_root),
             yolo_mode,
-            include_config_directions: true,
             ..LaunchPromptInput::default()
         },
     )
@@ -415,64 +397,6 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_merges_config_directions_when_enabled() {
-        let tmp = create_repo_fixture();
-        let config = Config {
-            direction: Some(vec!["config".to_string()]),
-            ..default_test_config()
-        };
-
-        let prepared = prepare_launch_prompt(
-            &config,
-            LaunchPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
-                directions: vec!["thorough".to_string()],
-                include_config_directions: true,
-                ..LaunchPromptInput::default()
-            },
-        )
-        .expect("prepare launch prompt");
-
-        let names: Vec<String> = prepared
-            .components
-            .directions
-            .iter()
-            .map(|direction| direction.name.clone())
-            .collect();
-        assert_eq!(names, vec!["config".to_string(), "thorough".to_string()]);
-    }
-
-    #[test]
-    fn prepare_launch_prompt_omits_config_directions_when_disabled() {
-        let tmp = create_repo_fixture();
-        let config = Config {
-            direction: Some(vec!["config".to_string()]),
-            ..default_test_config()
-        };
-
-        let prepared = prepare_launch_prompt(
-            &config,
-            LaunchPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
-                directions: vec!["thorough".to_string()],
-                include_config_directions: false,
-                ..LaunchPromptInput::default()
-            },
-        )
-        .expect("prepare launch prompt");
-
-        let names: Vec<String> = prepared
-            .components
-            .directions
-            .iter()
-            .map(|direction| direction.name.clone())
-            .collect();
-        assert_eq!(names, vec!["thorough".to_string()]);
-    }
-
-    #[test]
     fn prepare_launch_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
@@ -548,7 +472,6 @@ Test step body.
                     name: "npx/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
-                    directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
                     content: Some("Skill body".to_string()),
@@ -569,11 +492,6 @@ Test step body.
             Some("npx/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
-        assert!(prepared
-            .components
-            .directions
-            .iter()
-            .any(|direction| direction.name == "thorough"));
     }
 
     #[test]

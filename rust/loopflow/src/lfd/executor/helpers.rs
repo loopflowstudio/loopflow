@@ -62,7 +62,6 @@ pub async fn create_parallel_run(
         repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
-        direction: wave.direction().clone(),
         area: wave.area().clone(),
         iteration,
         step_index: 0,
@@ -153,7 +152,6 @@ pub async fn create_run_with_id(
         repo: repo_work.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
-        direction: wave.direction().clone(),
         area: wave.area().clone(),
         iteration,
         step_index: 0,
@@ -367,7 +365,6 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 pub(crate) fn build_lf_step_command(
     step_name: &str,
     batch: bool,
-    directions: &[String],
     docs: &[String],
     wave_name: &str,
 ) -> Vec<String> {
@@ -375,19 +372,18 @@ pub(crate) fn build_lf_step_command(
         resolve_lf_binary().to_string_lossy().to_string(),
         step_name.to_string(),
     ];
-    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
+    append_lf_run_options(&mut cmd, batch, docs, wave_name);
     cmd
 }
 
 pub(crate) fn build_lf_inline_command(
     prompt: &str,
     batch: bool,
-    directions: &[String],
     docs: &[String],
     wave_name: &str,
 ) -> Vec<String> {
     let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
-    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
+    append_lf_run_options(&mut cmd, batch, docs, wave_name);
     cmd.push(":".to_string());
     cmd.push(prompt.to_string());
     cmd
@@ -396,17 +392,11 @@ pub(crate) fn build_lf_inline_command(
 fn append_lf_run_options(
     cmd: &mut Vec<String>,
     batch: bool,
-    directions: &[String],
     docs: &[String],
     wave_name: &str,
 ) {
     if batch {
         cmd.push("-b".to_string());
-    }
-    cmd.push("--no-direction".to_string());
-    for direction in directions {
-        cmd.push("-d".to_string());
-        cmd.push(direction.clone());
     }
     for target in docs {
         cmd.push("--docs".to_string());

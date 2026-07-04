@@ -328,23 +328,16 @@ fn every_builtin_flow_is_categorized_and_loadable() {
     }
 }
 
-/// Bare-name fallback: a step in a namespaced builtin must also resolve by its
-/// short name when no core step / other namespaced step shares that short name.
-#[test]
-fn namespaced_steps_resolve_by_bare_name_when_unique() {
-    let tmp = TempDir::new().expect("tempdir");
-    // office-hours lives only in gstack; it must also work as a bare name.
-    let bare = load_step("office-hours", tmp.path()).expect("bare name resolves");
-    let qualified = load_step("gstack/office-hours", tmp.path()).expect("qualified resolves");
-    assert_eq!(bare.name, qualified.name);
-}
-
 /// A bare name that matches a core builtin must resolve to the core one, not
 /// to any namespaced sibling.
 #[test]
 fn bare_name_prefers_core_over_namespaced() {
     let tmp = TempDir::new().expect("tempdir");
-    // `debug` exists in core (build/) and in gstack/. Bare name → core.
+    // Create a user-namespaced `debug` that collides with the core builtin.
+    let ns_dir = tmp.path().join(".lf/steps/acme");
+    std::fs::create_dir_all(&ns_dir).expect("create ns dir");
+    std::fs::write(ns_dir.join("debug.md"), "# namespaced debug\n").expect("write step");
+
     let step = discover_step(tmp.path(), "debug").expect("debug resolves");
     assert_eq!(step.name, "debug");
     match discover_target(tmp.path(), "debug").expect("debug resolves via target") {

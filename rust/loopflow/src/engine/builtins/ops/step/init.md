@@ -99,8 +99,8 @@ chose. If they skip everything, don't create the file.
 ## Phase 5: Optional extras
 
 **External skills via npx:** mention that any Claude Skills package can be run as
-`lf npx/<owner>/<repo>` — fetched live, no install step. `gstack` and core loopflow
-workflows are built in; npx covers everything else.
+`lf npx/<owner>/<repo>` — fetched live, no install step. Core loopflow workflows
+are built in; npx covers everything else.
 
 ## Phase 6: Next steps
 

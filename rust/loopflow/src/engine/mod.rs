@@ -36,9 +36,9 @@ pub use execution::{
     LoopCursorPhase, NestedCursor, StepExecutor, StepOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 pub use flow::{
-    available_flow_names, expand_flow, load_direction, load_flow, load_goal, load_step,
+    available_flow_names, expand_flow, load_flow, load_goal, load_step,
     next_action, render_goal, ConcreteAnd, ConcreteAndBranch, ConcreteItem, ConcreteLoop,
-    ConcreteOp, ConcreteOr, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, FlowItem, Goal,
+    ConcreteOp, ConcreteOr, ConcreteStep, ConcreteXor, Flow, FlowAction, FlowItem, Goal,
     GoalRenderContext, InFlightDispatch, Op, OrDef, Step, XorDef, XorPath,
 };
 pub use launch::{

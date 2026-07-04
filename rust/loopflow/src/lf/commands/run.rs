@@ -127,7 +127,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             step: step.map(|value| value.to_string()),
             resolved_step: discovered_step.clone(),
             surface,
-            directions: cli.direction.clone(),
             docs: cli.docs.clone(),
             wave: cli.wave.clone(),
             message: message.map(|value| value.to_string()),
@@ -136,7 +135,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             cwd: Some(repo_root.clone()),
             max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
-            include_config_directions: !cli.no_direction,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
@@ -282,12 +280,6 @@ fn skill_launch_seed(
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
     let header = format_context_header(&built.breakdown);
-    let direction_names: Vec<String> = built
-        .components
-        .directions
-        .iter()
-        .map(|d| d.name.clone())
-        .collect();
     let cli_model = if cli.model.is_some() {
         built.agent_config.agent.as_deref()
     } else {
@@ -295,7 +287,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     };
     let command = format_reproducible_command(
         built.step_name.as_deref(),
-        &direction_names,
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,

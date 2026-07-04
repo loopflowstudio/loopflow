@@ -18,7 +18,6 @@ pub struct ForkManifest {
 pub struct ForkManifestBranch {
     pub index: usize,
     pub steps: Vec<ForkManifestStep>,
-    pub direction: String,
     pub worktree: String,
     pub branch: String,
     pub exit_code: i32,
@@ -36,7 +35,6 @@ pub struct ForkBranchExecutionPlan {
     pub index: usize,
     pub label: String,
     pub steps: Vec<ConcreteStep>,
-    pub directions: Vec<String>,
 }
 
 /// Compute sibling worktree path for a fork branch.
@@ -48,23 +46,8 @@ pub fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// Merge base directions with extra directions, preserving order and deduplicating.
-pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
-    if extra.is_empty() {
-        return base.to_vec();
-    }
-    let mut combined = base.to_vec();
-    for direction in extra {
-        if !combined.contains(direction) {
-            combined.push(direction.clone());
-        }
-    }
-    combined
-}
-
 pub fn plan_fork_execution(
     branches: &[ConcreteAndBranch],
-    base_directions: &[String],
 ) -> Result<Vec<ForkBranchExecutionPlan>, String> {
     if branches.is_empty() {
         return Err("fork has no branches".to_string());
@@ -82,7 +65,6 @@ pub fn plan_fork_execution(
         Ok(ForkBranchExecutionPlan {
             index,
             label: format!("fork-{index}"),
-            directions: merge_directions(base_directions, &branch.directions),
             steps: branch.steps.clone(),
         })
     };
@@ -102,25 +84,6 @@ mod tests {
         assert_eq!(fork, PathBuf::from("/tmp/loopflow.remote.feature-fork-2"));
     }
 
-    #[test]
-    fn merge_directions_preserves_order_and_deduplicates() {
-        let merged = merge_directions(
-            &["security".to_string(), "ceo".to_string()],
-            &["ceo".to_string(), "ux".to_string()],
-        );
-        assert_eq!(
-            merged,
-            vec!["security".to_string(), "ceo".to_string(), "ux".to_string()]
-        );
-    }
-
-    #[test]
-    fn merge_directions_returns_base_when_extra_empty() {
-        let base = vec!["security".to_string()];
-        let merged = merge_directions(&base, &[]);
-        assert_eq!(merged, base);
-    }
-
     fn single_step_branch(name: &str) -> ConcreteAndBranch {
         ConcreteAndBranch {
             steps: vec![ConcreteStep {
@@ -129,11 +92,10 @@ mod tests {
             }],
             flow_parents: Vec::new(),
             label: name.to_string(),
-            directions: Vec::new(),
         }
     }
 
-    fn multi_step_branch(names: &[&str], directions: Vec<String>) -> ConcreteAndBranch {
+    fn multi_step_branch(names: &[&str]) -> ConcreteAndBranch {
         ConcreteAndBranch {
             steps: names
                 .iter()
@@ -144,18 +106,15 @@ mod tests {
                 .collect(),
             flow_parents: Vec::new(),
             label: names.first().unwrap_or(&"branch").to_string(),
-            directions,
         }
     }
 
     #[test]
     fn plan_fork_execution_returns_labeled_branches() {
         let branches = vec![single_step_branch("a"), single_step_branch("b")];
-        let base = vec!["base".to_string()];
-        let planned = plan_fork_execution(&branches, &base).expect("planned");
+        let planned = plan_fork_execution(&branches).expect("planned");
         assert_eq!(planned.len(), 2);
         assert_eq!(planned[0].label, "fork-0");
-        assert_eq!(planned[0].directions, vec!["base".to_string()]);
         assert_eq!(planned[0].steps.len(), 1);
         assert_eq!(planned[0].steps[0].step.name, "a");
     }
@@ -163,15 +122,12 @@ mod tests {
     #[test]
     fn plan_fork_execution_multi_step_branches() {
         let branches = vec![
-            multi_step_branch(&["impl", "compress", "gate"], vec!["infra".to_string()]),
-            multi_step_branch(&["impl", "compress", "gate"], vec!["ux".to_string()]),
+            multi_step_branch(&["impl", "compress", "gate"]),
+            multi_step_branch(&["impl", "compress", "gate"]),
         ];
-        let base = vec!["base".to_string()];
-        let planned = plan_fork_execution(&branches, &base).expect("planned");
+        let planned = plan_fork_execution(&branches).expect("planned");
         assert_eq!(planned.len(), 2);
         assert_eq!(planned[0].steps.len(), 3);
-        assert_eq!(planned[0].directions, vec!["base", "infra"]);
-        assert_eq!(planned[1].directions, vec!["base", "ux"]);
     }
 
     #[test]
@@ -185,15 +141,14 @@ mod tests {
             }],
             flow_parents: Vec::new(),
             label: "a".to_string(),
-            directions: Vec::new(),
         }];
-        let err = plan_fork_execution(&branches, &[]).expect_err("interactive branch should fail");
+        let err = plan_fork_execution(&branches).expect_err("interactive branch should fail");
         assert_eq!(err, "interactive fork branches are not supported");
     }
 
     #[test]
     fn plan_fork_execution_rejects_empty_branches() {
-        let err = plan_fork_execution(&[], &[]).expect_err("empty branches should fail");
+        let err = plan_fork_execution(&[]).expect_err("empty branches should fail");
         assert_eq!(err, "fork has no branches");
     }
 
@@ -206,7 +161,6 @@ mod tests {
                     name: "reduce".to_string(),
                     exit_code: 0,
                 }],
-                direction: "ux".to_string(),
                 worktree: "/tmp/repo-fork-0".to_string(),
                 branch: "main-fork-0".to_string(),
                 exit_code: 0,
@@ -217,7 +171,6 @@ mod tests {
                     name: "reduce".to_string(),
                     exit_code: 42,
                 }],
-                direction: "infra".to_string(),
                 worktree: "/tmp/repo-fork-1".to_string(),
                 branch: "main-fork-1".to_string(),
                 exit_code: 42,
@@ -245,7 +198,6 @@ mod tests {
                         exit_code: 1,
                     },
                 ],
-                direction: "infra".to_string(),
                 worktree: "/tmp/repo-fork-0".to_string(),
                 branch: "run-1-fork-0".to_string(),
                 exit_code: 1,

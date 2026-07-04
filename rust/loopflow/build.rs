@@ -6,20 +6,14 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Category directories whose step/flow names are registered flat (no prefix).
-/// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
-/// Core categories share one flat namespace and must not collide with each other.
-const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
-
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    // Builtins live at `<cat>/<kind>/*.ext`. Steps and flows from CORE_CATEGORIES
-    // are registered flat; steps and flows from other categories are registered
-    // as `<cat>/<name>` and are also reachable by bare name when unambiguous.
+    // Builtins live at `<cat>/<kind>/*.ext`. All categories share one flat
+    // namespace — duplicate stems across categories panic.
     generate_kind_map(
         &builtins_dir,
         "step",
@@ -59,18 +53,6 @@ fn main() {
     );
 
     generate_map(
-        &builtins_dir.join("directions"),
-        "md",
-        "BUILTIN_DIRECTIONS",
-        &out_dir.join("builtin_directions.rs"),
-    );
-    assert_unique_direction_node_names(&builtins_dir.join("directions"));
-    generate_direction_groups(
-        &builtins_dir.join("directions"),
-        &out_dir.join("builtin_direction_groups.rs"),
-    );
-
-    generate_map(
         &builtins_dir.join("ops/prompt"),
         "md",
         "BUILTIN_OPS_PROMPTS",
@@ -91,9 +73,8 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
 }
 
 /// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
-/// for each top-level category directory. Core categories (build/govern/ops)
-/// share one flat namespace — duplicate stems across cores panic. Non-core
-/// categories get their name as a prefix: `gstack/office-hours`.
+/// for each top-level category directory. All categories share one flat
+/// namespace — duplicate stems across categories panic.
 fn generate_kind_map(
     builtins_dir: &Path,
     kind: &str,
@@ -104,25 +85,9 @@ fn generate_kind_map(
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     if let Ok(cats) = fs::read_dir(builtins_dir) {
         for cat in cats.flatten() {
-            let cat_path = cat.path();
-            let kind_dir = cat_path.join(kind);
-            if !kind_dir.is_dir() {
-                continue;
-            }
-            let cat_name = cat_path
-                .file_name()
-                .expect("dir has no name")
-                .to_string_lossy()
-                .to_string();
-            let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
-            let mut files: Vec<(String, PathBuf)> = Vec::new();
-            collect_files(&kind_dir, extension, &mut files);
-            if is_core {
-                entries.extend(files);
-            } else {
-                for (stem, path) in files {
-                    entries.push((format!("{cat_name}/{stem}"), path));
-                }
+            let kind_dir = cat.path().join(kind);
+            if kind_dir.is_dir() {
+                collect_files(&kind_dir, extension, &mut entries);
             }
         }
     }
@@ -170,9 +135,8 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
 }
 
 /// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
-/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased. Names
-/// for core categories stay bare; names for non-core categories get the
-/// `<cat>/` prefix so they match the keys in BUILTIN_STEPS / BUILTIN_FLOWS.
+/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased; names
+/// stay bare so they match the keys in BUILTIN_STEPS / BUILTIN_FLOWS.
 fn generate_category_map(
     builtins_dir: &Path,
     kind: &str,
@@ -206,7 +170,6 @@ fn generate_category_map(
             .expect("dir has no name")
             .to_string_lossy()
             .to_string();
-        let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
         let category = title_case(&cat_name);
 
         let mut names = Vec::new();
@@ -225,12 +188,7 @@ fn generate_category_map(
                         .expect("file has no stem")
                         .to_string_lossy()
                         .to_string();
-                    let name = if is_core {
-                        stem
-                    } else {
-                        format!("{cat_name}/{stem}")
-                    };
-                    names.push(name);
+                    names.push(stem);
                 }
             }
         }
@@ -250,129 +208,6 @@ fn generate_category_map(
     writeln!(code, "];").expect("write to String");
 
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
-}
-
-/// Generate `BUILTIN_DIRECTION_GROUPS` from immediate subdirectories under
-/// builtins/directions. Top-level files are excluded from groups.
-fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
-    let mut groups: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-
-    let Ok(entries) = fs::read_dir(directions_dir) else {
-        fs::write(
-            out_path,
-            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| std::collections::HashMap::new());\n",
-        )
-        .expect("write empty direction groups");
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let group_name = path
-            .file_name()
-            .expect("group dir has no name")
-            .to_string_lossy()
-            .to_string();
-
-        let mut members = Vec::new();
-        if let Ok(files) = fs::read_dir(&path) {
-            for file in files.flatten() {
-                let file_path = file.path();
-                if file_path.extension().is_some_and(|e| e == "md") {
-                    let member = file_path
-                        .file_stem()
-                        .expect("direction file has no stem")
-                        .to_string_lossy()
-                        .to_string();
-                    members.push(member);
-                }
-            }
-        }
-        members.sort();
-        if !members.is_empty() {
-            groups.insert(group_name, members);
-        }
-    }
-
-    let mut code = String::new();
-    writeln!(
-        code,
-        "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| {{"
-    )
-    .expect("write to String");
-    writeln!(code, "    let mut m = std::collections::HashMap::new();").expect("write to String");
-    for (group, members) in &groups {
-        let member_list = members
-            .iter()
-            .map(|member| format!("\"{member}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(code, "    m.insert(\"{group}\", vec![{member_list}]);").expect("write to String");
-    }
-    writeln!(code, "    m").expect("write to String");
-    writeln!(code, "}});").expect("write to String");
-
-    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
-}
-
-fn assert_unique_direction_node_names(directions_dir: &Path) {
-    let mut leaves: Vec<(String, PathBuf)> = Vec::new();
-    collect_files(directions_dir, "md", &mut leaves);
-
-    let mut groups = Vec::new();
-    if let Ok(entries) = fs::read_dir(directions_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let name = path
-                .file_name()
-                .expect("group dir has no name")
-                .to_string_lossy()
-                .to_string();
-            groups.push((name, path));
-        }
-    }
-
-    let mut origins: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-
-    for (name, path) in groups {
-        origins
-            .entry(name)
-            .or_default()
-            .push(format!("group {}", path.display()));
-    }
-    for (name, path) in leaves {
-        origins
-            .entry(name)
-            .or_default()
-            .push(format!("direction {}", path.display()));
-    }
-
-    let collisions: Vec<String> = origins
-        .into_iter()
-        .filter_map(|(name, paths)| {
-            if paths.len() > 1 {
-                Some(format!("{name}: {}", paths.join(", ")))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if !collisions.is_empty() {
-        panic!(
-            "duplicate builtin direction node names detected (groups + leaves share one namespace):\n{}",
-            collisions.join("\n")
-        );
-    }
 }
 
 fn title_case(s: &str) -> String {

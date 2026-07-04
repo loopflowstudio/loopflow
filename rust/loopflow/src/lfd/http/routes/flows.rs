@@ -30,7 +30,6 @@ struct FlowSummary {
 struct FlowsResult {
     flows: Vec<FlowSummary>,
     steps: Vec<StepSummary>,
-    directions: Vec<String>,
     supported_harnesses: Vec<String>,
 }
 
@@ -46,7 +45,6 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
 
     let flows = list_flows(&repo_path);
     let steps = list_steps(&repo_path);
-    let directions = crate::lf::discovery::list_directions(Some(&repo_path));
     let supported_harnesses =
         crate::engine::config::load_config_or_default(Some(&repo_path)).supported_harnesses;
 
@@ -55,7 +53,6 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
         result: FlowsResult {
             flows,
             steps,
-            directions,
             supported_harnesses,
         },
     }))

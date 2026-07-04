@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,8 +14,6 @@ pub struct Step {
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_agent: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub directions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,7 +30,6 @@ impl Step {
             name: name.to_string(),
             agent: None,
             default_agent: None,
-            directions: Vec::new(),
             action_style: None,
             interactive: None,
             content: None,
@@ -102,8 +99,6 @@ pub struct XorPath {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,
     pub description: String,
-    #[serde(default)]
-    pub direction: Vec<String>,
 }
 
 /// Multi-select branch: router picks 1+ paths, which run sequentially.
@@ -215,7 +210,6 @@ pub struct ConcreteAndBranch {
     pub steps: Vec<ConcreteStep>,
     pub flow_parents: Vec<String>,
     pub label: String,
-    pub directions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,13 +247,6 @@ pub enum ConcreteItem {
     Xor(ConcreteXor),
     Or(ConcreteOr),
     Loop(ConcreteLoop),
-}
-
-#[derive(Debug, Clone)]
-pub struct Direction {
-    pub name: String,
-    pub content: String,
-    pub source: PathBuf,
 }
 
 pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
@@ -463,7 +450,6 @@ pub(crate) fn load_step_from_path(name: &str, step_path: &Path) -> Result<Step, 
 struct StepFrontmatter {
     agent: Option<String>,
     default_agent: Option<String>,
-    directions: Vec<String>,
     action_style: Option<String>,
     interactive: Option<bool>,
     fast_path: Option<String>,
@@ -485,7 +471,6 @@ fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
         name: name.to_string(),
         agent: frontmatter.agent,
         default_agent: frontmatter.default_agent,
-        directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
         content: Some(body),
@@ -522,100 +507,12 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
     StepFrontmatter {
         agent,
         default_agent,
-        directions: parse_directions_field(map),
         action_style,
         interactive,
         fast_path,
     }
 }
 
-fn parse_directions_field(map: &serde_yaml_ng::Mapping) -> Vec<String> {
-    let directions = parse_string_list(map.get(key("directions")));
-    if directions.is_empty() {
-        parse_string_list(map.get(key("direction")))
-    } else {
-        directions
-    }
-}
-
-pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
-    let (content, source) = match find_direction_path(name, repo) {
-        Ok(direction_path) => (fs::read_to_string(&direction_path)?, direction_path),
-        Err(LoadError::DirectionNotFound(_)) => {
-            if let Some(builtin) = crate::engine::builtins::get_builtin_direction(name) {
-                (
-                    builtin.to_string(),
-                    PathBuf::from(format!("builtin:{name}")),
-                )
-            } else if let Some(content) = load_agent_skill(name, repo) {
-                (
-                    content,
-                    repo.join(format!(".agents/skills/{name}/SKILL.md")),
-                )
-            } else {
-                return Err(LoadError::DirectionNotFound(name.to_string()));
-            }
-        }
-        Err(err) => return Err(err),
-    };
-    Ok(Direction {
-        name: name.to_string(),
-        content,
-        source,
-    })
-}
-
-/// Expand direction names, resolving groups to their member directions.
-/// User groups (.lf/directions/{name}/ directory) are checked first, then builtin groups.
-/// Non-group names pass through unchanged. Deduplicates while preserving order.
-pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
-    let mut expanded = Vec::new();
-    let mut seen = HashSet::new();
-    let mut queue: VecDeque<String> = names.iter().cloned().collect();
-    while let Some(name) = queue.pop_front() {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        match resolve_direction_group(&name, repo) {
-            Some(members) => {
-                for member in members {
-                    queue.push_back(member);
-                }
-            }
-            None => expanded.push(name),
-        }
-    }
-    expanded
-}
-
-/// Check whether `name` is a direction group (user-defined directory or builtin group).
-fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
-    let user_members = markdown_stems_in_dir(&repo.join(".lf/directions").join(name));
-    if !user_members.is_empty() {
-        return Some(user_members);
-    }
-
-    crate::engine::builtins::builtin_direction_group(name)
-        .map(|members| members.iter().map(|member| (*member).to_string()).collect())
-}
-
-fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-
-    let mut stems = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "md") {
-            if let Some(stem) = path.file_stem() {
-                stems.push(stem.to_string_lossy().to_string());
-            }
-        }
-    }
-    stems.sort();
-    stems
-}
 
 fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     paths.into_iter().find(|path| path.exists())
@@ -776,28 +673,6 @@ fn exact_path_exists(path: &Path) -> bool {
     })
 }
 
-fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let path = repo.join(".lf/directions").join(format!("{name}.md"));
-    if path.exists() {
-        return Ok(path);
-    }
-
-    let directions_dir = repo.join(".lf/directions");
-    if let Ok(entries) = fs::read_dir(&directions_dir) {
-        for entry in entries.flatten() {
-            let dir_path = entry.path();
-            if dir_path.is_dir() {
-                let candidate = dir_path.join(format!("{name}.md"));
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-
-    Err(LoadError::DirectionNotFound(name.to_string()))
-}
-
 /// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
 fn load_agent_skill(name: &str, repo: &Path) -> Option<String> {
     let skill_path = repo.join(".agents/skills").join(name).join("SKILL.md");
@@ -924,12 +799,10 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
             let default_agent = parse_optional_string(map, "default_agent");
             let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
-            let directions = parse_directions_field(map);
             Ok(Step {
                 name,
                 agent,
                 default_agent,
-                directions,
                 action_style,
                 interactive,
                 content: None,
@@ -1006,40 +879,27 @@ fn parse_and_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<Flow
 
     let mut branches = Vec::new();
     for draft in drafts_seq {
-        let draft_map = draft
+        let _ = draft
             .as_mapping()
             .ok_or_else(|| LoadError::InvalidFlow("and draft must be mapping".to_string()))?;
-        let directions = parse_directions_field(draft_map);
-        branches.push(FlowItem::Step(Step {
-            directions,
-            ..Step::named(name)
-        }));
+        branches.push(FlowItem::Step(Step::named(name)));
     }
     Ok(branches)
 }
 
-/// Parse an and-branch item. Unlike `parse_flow_item`, this handles
-/// `direction:` as a sibling key for both `step:` and `flow:` branches.
+/// Parse an and-branch item: a bare name, or a mapping with `step:`/`flow:`.
 fn parse_and_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
     match value {
         Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
         Value::Mapping(map) => {
-            let directions = parse_directions_field(map);
             if let Some(step_value) = map.get(key("step")) {
-                let mut step = parse_step_value(step_value)?;
-                if !directions.is_empty() && step.directions.is_empty() {
-                    step.directions = directions;
-                }
-                return Ok(FlowItem::Step(step));
+                return Ok(FlowItem::Step(parse_step_value(step_value)?));
             }
             if let Some(flow_value) = map.get(key("flow")) {
                 let name = flow_value.as_str().ok_or_else(|| {
                     LoadError::InvalidFlow("and branch flow must be string".to_string())
                 })?;
-                return Ok(FlowItem::Step(Step {
-                    directions,
-                    ..Step::named(name)
-                }));
+                return Ok(FlowItem::Step(Step::named(name)));
             }
             if map.get(key("and")).is_some() {
                 return Err(LoadError::InvalidFlow(
@@ -1114,8 +974,6 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
             ))
         })?;
 
-        let direction = parse_directions_field(path_map);
-
         paths.insert(
             key_str.to_string(),
             XorPath {
@@ -1123,7 +981,6 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
                 step,
                 steps,
                 description,
-                direction,
             },
         );
     }
@@ -1298,16 +1155,6 @@ fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::FlowRef(name.to_string()))
 }
 
-fn parse_string_list(value: Option<&Value>) -> Vec<String> {
-    match value {
-        Some(Value::String(value)) => vec![value.to_string()],
-        Some(Value::Sequence(seq)) => seq
-            .iter()
-            .filter_map(|val| val.as_str().map(|item| item.to_string()))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
 
 fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<String> {
     map.get(key(field))
@@ -1329,9 +1176,6 @@ fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
     }
     if let Some(default_agent) = &step.default_agent {
         resolved.default_agent = Some(default_agent.clone());
-    }
-    if !step.directions.is_empty() {
-        resolved.directions = step.directions.clone();
     }
     if let Some(action_style) = &step.action_style {
         resolved.action_style = Some(action_style.clone());
@@ -1480,12 +1324,11 @@ fn expand_and_branch(
                 }],
                 flow_parents,
                 label: step.name.clone(),
-                directions: step.directions.clone(),
             })
         }
         FlowItem::FlowRef(name) => {
             let nested = load_flow(name, repo)?;
-            expand_flow_ref_branch(name, &[], &nested, repo, chain, depth)
+            expand_flow_ref_branch(name, &nested, repo, chain, depth)
         }
         FlowItem::Op(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain ops items".to_string(),
@@ -1548,14 +1391,13 @@ fn try_expand_step_as_flow(
     let Some(nested) = try_load_multi_step_flow(step, repo, chain) else {
         return Ok(None);
     };
-    let branch = expand_flow_ref_branch(&step.name, &step.directions, &nested, repo, chain, depth)?;
+    let branch = expand_flow_ref_branch(&step.name, &nested, repo, chain, depth)?;
     Ok(Some(branch))
 }
 
 /// Expand a flow reference into a multi-step fork branch.
 fn expand_flow_ref_branch(
     name: &str,
-    directions: &[String],
     nested: &Flow,
     repo: &Path,
     chain: &[String],
@@ -1569,7 +1411,6 @@ fn expand_flow_ref_branch(
         steps,
         flow_parents,
         label: name.to_string(),
-        directions: directions.to_vec(),
     })
 }
 
@@ -1916,9 +1757,7 @@ Design the feature.
         fs::write(
             steps_dir.join("careful.md"),
             r#"---
-directions:
-  - thorough
-  - tested
+interactive: false
 ---
 # Careful Step
 Be careful.
@@ -1927,7 +1766,7 @@ Be careful.
         .unwrap();
 
         let step = load_step("careful", tmp.path()).unwrap();
-        assert_eq!(step.directions, vec!["thorough", "tested"]);
+        assert_eq!(step.interactive, Some(false));
     }
 
     #[test]
@@ -1954,26 +1793,6 @@ Be careful.
     }
 
     #[test]
-    fn load_direction_finds_builtin_direction() {
-        let tmp = TempDir::new().unwrap();
-        let result = load_direction("focus", tmp.path());
-        assert!(
-            result.is_ok(),
-            "builtin direction should be found: {:?}",
-            result.err()
-        );
-    }
-
-    #[test]
-    fn load_direction_not_found_error() {
-        let tmp = TempDir::new().unwrap();
-
-        let result = load_direction("nonexistent", tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("nonexistent"));
-    }
-
-    #[test]
     fn load_step_falls_back_to_agent_skills() {
         let tmp = TempDir::new().unwrap();
         let skill_dir = tmp.path().join(".agents/skills/my-tool");
@@ -1990,22 +1809,6 @@ Be careful.
     }
 
     #[test]
-    fn load_direction_falls_back_to_agent_skills() {
-        let tmp = TempDir::new().unwrap();
-        let skill_dir = tmp.path().join(".agents/skills/empathy");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: empathy\n---\nDesign with empathy.",
-        )
-        .unwrap();
-
-        let direction = load_direction("empathy", tmp.path()).unwrap();
-        assert_eq!(direction.name, "empathy");
-        assert!(direction.content.contains("Design with empathy."));
-    }
-
-    #[test]
     fn next_action_marks_interactive_steps_as_wait() {
         let flow = Flow {
             name: "demo".to_string(),
@@ -2013,7 +1816,6 @@ Be careful.
                 name: "design".to_string(),
                 agent: None,
                 default_agent: None,
-                directions: Vec::new(),
                 action_style: None,
                 interactive: Some(true),
                 content: None,
@@ -2169,60 +1971,6 @@ Be careful.
     }
 
     #[test]
-    fn parse_and_step_drafts_shorthand() {
-        let yaml = r#"
-- review
-- and:
-    step: reduce
-    drafts:
-      - direction: infra
-      - direction: ux
-      - direction: ceo
-- publish
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 3);
-
-        // Second item should be a Fork with 3 branches
-        match &items[1] {
-            FlowItem::And { branches, .. } => {
-                assert_eq!(branches.len(), 3);
-                for branch in branches {
-                    match branch {
-                        FlowItem::Step(step) => {
-                            assert_eq!(step.name, "reduce");
-                            assert_eq!(step.directions.len(), 1);
-                        }
-                        _ => panic!("expected Step branch"),
-                    }
-                }
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn parse_step_mapping_accepts_plural_directions_key() {
-        let yaml = r#"
-- step:
-    name: implement
-    directions: [designer, product-engineer]
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            FlowItem::Step(step) => {
-                assert_eq!(step.name, "implement");
-                assert_eq!(step.directions, vec!["designer", "product-engineer"]);
-            }
-            other => panic!("expected Step, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn parse_ops_mapping_accepts_command_and_args() {
         let yaml = r#"
 - op: land --create-pr
@@ -2255,105 +2003,6 @@ Be careful.
             matches!(action, FlowAction::RunOps { .. }),
             "expected RunOps action, got {action:?}"
         );
-    }
-
-    #[test]
-    fn expand_direction_names_passes_through_non_groups() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["security".to_string()], tmp.path());
-        assert_eq!(result, vec!["security"]);
-    }
-
-    #[test]
-    fn expand_direction_names_expands_ceo_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["ceo".to_string()], tmp.path());
-        assert!(result.contains(&"focus".to_string()));
-        assert!(result.contains(&"immediacy".to_string()));
-        assert!(result.contains(&"truth".to_string()));
-    }
-
-    #[test]
-    fn expand_direction_names_expands_user_group() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("alpha.md"), "Alpha direction").unwrap();
-        fs::write(group_dir.join("beta.md"), "Beta direction").unwrap();
-
-        let result = expand_direction_names(&["mygroup".to_string()], tmp.path());
-        assert_eq!(result, vec!["alpha", "beta"]);
-    }
-
-    #[test]
-    fn expand_direction_names_user_group_overrides_builtin_group() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/craft");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("custom.md"), "Custom craft").unwrap();
-
-        let result = expand_direction_names(&["craft".to_string()], tmp.path());
-        assert_eq!(result, vec!["custom"]);
-    }
-
-    #[test]
-    fn expand_direction_names_deduplicates() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("alpha.md"), "Alpha").unwrap();
-
-        let result =
-            expand_direction_names(&["alpha".to_string(), "mygroup".to_string()], tmp.path());
-        assert_eq!(result, vec!["alpha"]);
-    }
-
-    #[test]
-    fn expand_direction_names_expands_builtin_craft_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["craft".to_string()], tmp.path());
-        assert!(result.contains(&"care".to_string()));
-        assert!(result.contains(&"clarity".to_string()));
-        assert!(!result.contains(&"scale".to_string()));
-        assert!(result.contains(&"simplicity".to_string()));
-    }
-
-    #[test]
-    fn expand_direction_names_expands_builtin_creativity_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["creativity".to_string()], tmp.path());
-        assert!(result.contains(&"alive".to_string()));
-        assert!(result.contains(&"musical".to_string()));
-    }
-
-    #[test]
-    fn expand_direction_names_recursive_group() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/quality");
-        fs::create_dir_all(&group_dir).unwrap();
-        // "craft" is a builtin group — should expand recursively
-        fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
-        fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
-
-        let result = expand_direction_names(&["quality".to_string()], tmp.path());
-        // "craft" should NOT appear — it should expand to its members
-        assert!(!result.contains(&"craft".to_string()));
-        // But its members should be present
-        assert!(result.contains(&"care".to_string()));
-        assert!(result.contains(&"clarity".to_string()));
-        // And the non-group member should be present
-        assert!(result.contains(&"extra".to_string()));
-    }
-
-    #[test]
-    fn find_direction_path_searches_subdirectories() {
-        let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&sub_dir).unwrap();
-        fs::write(sub_dir.join("nested.md"), "Nested direction").unwrap();
-
-        let result = find_direction_path("nested", tmp.path());
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -2390,7 +2039,6 @@ Be careful.
                     match branch {
                         FlowItem::Step(step) => {
                             assert_eq!(step.name, "build");
-                            assert_eq!(step.directions.len(), 1);
                         }
                         _ => panic!("expected Step branch at index {i}"),
                     }
@@ -2465,7 +2113,6 @@ Be careful.
                 match &branches[0] {
                     FlowItem::Step(step) => {
                         assert_eq!(step.name, "build");
-                        assert_eq!(step.directions, vec!["infra"]);
                     }
                     _ => panic!("expected Step branch"),
                 }
@@ -2473,7 +2120,6 @@ Be careful.
                 match &branches[1] {
                     FlowItem::Step(step) => {
                         assert_eq!(step.name, "review");
-                        assert_eq!(step.directions, vec!["ux"]);
                     }
                     _ => panic!("expected Step branch"),
                 }
@@ -2506,12 +2152,10 @@ Be careful.
                 branches: vec![
                     FlowItem::Step(Step {
                         name: "multi".to_string(),
-                        directions: vec!["infra".to_string()],
                         ..Step::named("multi")
                     }),
                     FlowItem::Step(Step {
                         name: "multi".to_string(),
-                        directions: vec!["ux".to_string()],
                         ..Step::named("multi")
                     }),
                 ],
@@ -2532,8 +2176,6 @@ Be careful.
                     assert_eq!(branch.steps[2].step.name, "step-c");
                     assert_eq!(branch.label, "multi");
                 }
-                assert_eq!(fork.branches[0].directions, vec!["infra"]);
-                assert_eq!(fork.branches[1].directions, vec!["ux"]);
             }
             _ => panic!("expected And item"),
         }
@@ -2552,12 +2194,10 @@ Be careful.
                 branches: vec![
                     FlowItem::Step(Step {
                         name: "reduce".to_string(),
-                        directions: vec!["infra".to_string()],
                         ..Step::named("reduce")
                     }),
                     FlowItem::Step(Step {
                         name: "reduce".to_string(),
-                        directions: vec!["ux".to_string()],
                         ..Step::named("reduce")
                     }),
                 ],
@@ -2609,7 +2249,6 @@ Be careful.
             items: vec![FlowItem::And {
                 branches: vec![FlowItem::Step(Step {
                     name: "has-and".to_string(),
-                    directions: vec!["infra".to_string()],
                     ..Step::named("has-and")
                 })],
                 synthesize: None,
@@ -2701,8 +2340,7 @@ Be careful.
 
         match &items[0] {
             FlowItem::Xor(branch) => {
-                let careful = &branch.paths["careful"];
-                assert_eq!(careful.direction, vec!["care", "clarity"]);
+                let _careful = &branch.paths["careful"];
             }
             other => panic!("expected Xor, got {other:?}"),
         }
@@ -2824,7 +2462,6 @@ Be careful.
                                 step: None,
                                 steps: Vec::new(),
                                 description: "Fix it".to_string(),
-                                direction: Vec::new(),
                             },
                         );
                         m
@@ -2857,7 +2494,6 @@ Be careful.
                         step: None,
                         steps: Vec::new(),
                         description: "Path A".to_string(),
-                        direction: Vec::new(),
                     },
                 );
                 m
@@ -2882,7 +2518,6 @@ Be careful.
                 step: None,
                 steps: Vec::new(),
                 description: "Last".to_string(),
-                direction: Vec::new(),
             },
         );
         paths.insert(
@@ -2892,7 +2527,6 @@ Be careful.
                 step: None,
                 steps: Vec::new(),
                 description: "First".to_string(),
-                direction: Vec::new(),
             },
         );
 
@@ -2921,7 +2555,6 @@ Be careful.
                 step: None,
                 steps: Vec::new(),
                 description: "Known".to_string(),
-                direction: Vec::new(),
             },
         );
         let err = read_xor_verdict(
@@ -2946,7 +2579,6 @@ Be careful.
                 step: None,
                 steps: Vec::new(),
                 description: "Silence".to_string(),
-                direction: Vec::new(),
             },
             tmp.path(),
         )
@@ -2967,7 +2599,6 @@ Be careful.
                 step: None,
                 steps: vec![Step::named("design"), Step::named("gate")],
                 description: "Inline steps".to_string(),
-                direction: Vec::new(),
             },
             tmp.path(),
         )
@@ -3048,7 +2679,6 @@ Be careful.
                                 step: Some("implement".to_string()),
                                 steps: vec![],
                                 description: "Fix it".to_string(),
-                                direction: vec![],
                             },
                         );
                         m

@@ -27,10 +27,6 @@ struct Args {
     #[arg(long = "no-loopflow")]
     no_loopflow: bool,
 
-    /// Directions to apply (repeatable)
-    #[arg(long = "direction")]
-    directions: Vec<String>,
-
     /// Docs paths, globs, or directories to include
     #[arg(long = "docs", value_delimiter = ',')]
     docs: Vec<String>,
@@ -61,7 +57,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         message: None,
         operate: !args.no_loopflow,
         surface: args.surface.unwrap_or_default(),
-        directions: args.directions,
         docs: args.docs,
         files: Vec::new(),
         include_diff: args.diff,

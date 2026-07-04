@@ -1,4 +1,3 @@
-use crate::engine::flow::expand_direction_names;
 use crate::engine::flow::load_xor_path_items;
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
@@ -453,15 +452,12 @@ impl Drop for TempStepGuard {
 struct ForkBranchTask {
     index: usize,
     step_names: Vec<String>,
-    directions: Vec<String>,
     worktree: PathBuf,
     branch_name: String,
 }
 
 fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    let expanded_cli_directions = expand_direction_names(&cli.direction, repo);
-    let planned = plan_fork_execution(&fork.branches, &expanded_cli_directions)
-        .map_err(|err| anyhow!(err))?;
+    let planned = plan_fork_execution(&fork.branches).map_err(|err| anyhow!(err))?;
 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;
@@ -487,7 +483,6 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         tasks.push(ForkBranchTask {
             index,
             step_names: branch.steps.iter().map(|s| s.step.name.clone()).collect(),
-            directions: branch.directions.clone(),
             worktree,
             branch_name,
         });
@@ -497,17 +492,10 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
     for task in tasks.iter().cloned() {
         let worktree = task.worktree.clone();
         let step_names = task.step_names.clone();
-        let directions = task.directions.clone();
         let branch_label = format!("fork-{}", task.index);
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
-            run_fork_branch_steps(
-                &worktree,
-                &step_names,
-                &directions,
-                msg.as_deref(),
-                &branch_label,
-            )
+            run_fork_branch_steps(&worktree, &step_names, msg.as_deref(), &branch_label)
         });
         handles.push((task, handle));
     }
@@ -547,7 +535,6 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         outcomes.push(ForkManifestBranch {
             index: task.index,
             steps: step_results,
-            direction: task.directions.join(","),
             worktree: task.worktree.to_string_lossy().to_string(),
             branch: task.branch_name.clone(),
             exit_code,
@@ -605,14 +592,12 @@ fn cleanup_fork_worktrees(worktrees: &[PathBuf]) {
 fn run_fork_branch_steps(
     worktree: &Path,
     step_names: &[String],
-    directions: &[String],
     message: Option<&str>,
     branch_label: &str,
 ) -> Result<(i32, Vec<ForkManifestStep>)> {
     let mut step_results = Vec::new();
     for step_name in step_names {
-        let exit_code =
-            run_fork_branch_step(worktree, step_name, directions, message, branch_label)?;
+        let exit_code = run_fork_branch_step(worktree, step_name, message, branch_label)?;
         step_results.push(ForkManifestStep {
             name: step_name.clone(),
             exit_code,
@@ -627,15 +612,11 @@ fn run_fork_branch_steps(
 fn run_fork_branch_step(
     worktree: &Path,
     step: &str,
-    directions: &[String],
     message: Option<&str>,
     branch_label: &str,
 ) -> Result<i32> {
     let mut cmd = build_lf_command();
     cmd.arg(step).arg("-b");
-    for direction in directions {
-        cmd.arg("-d").arg(direction);
-    }
     if let Some(message) = message {
         cmd.arg(message);
     }
@@ -766,7 +747,6 @@ mod tests {
                                 step: None,
                                 steps: Vec::new(),
                                 description: "Adjust the chord".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                         (
@@ -776,7 +756,6 @@ mod tests {
                                 step: None,
                                 steps: Vec::new(),
                                 description: "No-op".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                     ]

@@ -16,19 +16,6 @@ pub struct Cli {
     #[arg(short, long)]
     pub list: bool,
 
-    /// Direction(s) to apply (repeatable or comma-separated)
-    #[arg(
-        short = 'd',
-        long = "direction",
-        value_delimiter = ',',
-        short_alias = 'D'
-    )]
-    pub direction: Vec<String>,
-
-    /// Exclude config default directions
-    #[arg(long = "no-direction")]
-    pub no_direction: bool,
-
     /// Docs paths, globs, or directories to include in context
     #[arg(long = "docs", value_delimiter = ',')]
     pub docs: Vec<String>,

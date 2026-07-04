@@ -215,7 +215,6 @@ impl PostgresStore {
 
     async fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let direction_json = serde_json::to_string(wave.direction())?;
             let area_json = serde_json::to_string(wave.area())?;
             let metrics_json = serde_json::to_string(wave.metrics())?;
             let paused: i32 = if wave.status() == WaveStatus::Paused {
@@ -237,7 +236,7 @@ impl PostgresStore {
                     &[
                         &wave.id().as_str(),
                         &wave.name().as_str(),
-                        &direction_json.as_str(),
+                        &"[]",
                         &area_json.as_str(),
                         &paused,
                         &created_at,
@@ -1019,7 +1018,7 @@ impl PostgresStore {
                         &run.repo,
                         &run.flow,
                         &run.task,
-                        &serde_json::to_string(&run.direction)?,
+                        &"[]",
                         &serde_json::to_string(&run.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
@@ -1060,7 +1059,7 @@ impl PostgresStore {
                         &run.repo,
                         &run.flow,
                         &run.task,
-                        &serde_json::to_string(&run.direction)?,
+                        &"[]",
                         &serde_json::to_string(&run.area)?,
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,

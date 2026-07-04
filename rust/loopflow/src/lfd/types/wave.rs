@@ -241,7 +241,6 @@ pub struct Wave {
     /// identity plus the wave-level `paused` flag.
     #[serde(default)]
     pub repos: Vec<RepoWork>,
-    pub direction: Vec<String>,
     pub area: Vec<String>,
     /// Wave-level pause flag. Rolled into `status()` (a paused wave reports
     /// `Paused` regardless of per-repo state).
@@ -277,7 +276,6 @@ impl Wave {
                 cycle_start_iteration: 0,
                 position: 0,
             }],
-            direction: Vec::new(),
             area: Vec::new(),
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -325,10 +323,6 @@ impl Wave {
 
     pub fn metrics(&self) -> &Vec<String> {
         &self.metrics
-    }
-
-    pub fn direction(&self) -> &Vec<String> {
-        &self.direction
     }
 
     pub fn area(&self) -> &Vec<String> {
@@ -426,7 +420,6 @@ pub struct Run {
     pub repo: String,
     pub flow: String,
     pub task: Option<String>,
-    pub direction: Vec<String>,
     pub area: Vec<String>,
     pub iteration: u32,
     pub step_index: u32,
@@ -514,7 +507,6 @@ impl Run {
             repo: String::new(),
             flow: String::new(),
             task: None,
-            direction: Vec::new(),
             area: Vec::new(),
             iteration: 0,
             step_index: 0,

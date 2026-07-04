@@ -109,7 +109,6 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     goal: Option<String>,
     crons: Option<Vec<WaveCronDef>>,
-    direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     workers: Option<u32>,
     status: Option<String>,
@@ -137,7 +136,6 @@ pub struct UpdateWaveRequest {
     flow: Option<String>,
     goal: Option<String>,
     crons: Option<Vec<WaveCronDef>>,
-    direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     workers: Option<u32>,
     status: Option<String>,
@@ -149,7 +147,6 @@ pub struct UpdateWaveRequest {
 #[derive(Debug, Deserialize, Default)]
 pub struct RunWaveRequest {
     area: Option<Vec<String>>,
-    direction: Option<Vec<String>>,
     flow: Option<String>,
     goal: Option<String>,
     roadmap_item: Option<String>,
@@ -285,7 +282,6 @@ pub async fn create_wave_handler(
             cycle_start_iteration: 0,
             position: 0,
         }],
-        direction,
         area,
         paused: false,
         created_at: Some(OffsetDateTime::now_utc()),
@@ -653,9 +649,6 @@ pub async fn update_wave_handler(
     if let Some(goal) = trimmed_non_empty(payload.goal.as_deref()) {
         wave.goal = goal;
     }
-    if let Some(direction) = payload.direction {
-        wave.direction = direction;
-    }
     if let Some(area) = payload.area {
         wave.area = area;
     }
@@ -895,9 +888,6 @@ async fn apply_run_wave_overrides(
         if let Some(goal) = trimmed_non_empty(overrides.goal.as_deref()) {
             wave.goal = goal;
         }
-        if let Some(direction) = overrides.direction {
-            wave.direction = direction;
-        }
         if let Some(area) = overrides.area {
             wave.area = area;
         }
@@ -1073,9 +1063,6 @@ async fn start_run(
         roadmap_item = overrides.roadmap_item;
         if let Some(goal) = trimmed_non_empty(overrides.goal.as_deref()) {
             wave.goal = goal;
-        }
-        if let Some(direction) = overrides.direction {
-            wave.direction = direction;
         }
         if let Some(area) = overrides.area {
             wave.area = area;

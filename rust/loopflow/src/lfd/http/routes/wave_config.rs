@@ -37,7 +37,6 @@ pub(crate) struct WaveConfig {
     pub serialized: Option<bool>,
     pub area: Option<Vec<String>>,
     pub triggers: Option<TriggerDef>,
-    pub direction: Option<Vec<String>>,
     pub metrics: Option<Vec<String>>,
     pub roadmap: Option<String>,
     pub agent: Option<String>,
@@ -72,7 +71,6 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     config.triggers = None;
     config.serialized = None;
     config.area = None;
-    config.direction = None;
     Some(config)
 }
 

@@ -72,8 +72,11 @@ thread + a composer.
   progress state, but it does **not** directly steer progress — no writing
   MEMORY, reprioritizing, or spawning/killing subagents from chat yet. Chat
   observes and replies; steering comes later (likely mediated through MEMORY).
-- **Progress is autonomous (default, not yet confirmed).** The server keeps
-  progress moving on its own — spawn a bounded subagent run, narrate it, spawn
-  the next — like #778's outer loop, but as a reaction inside the server rather
-  than a standalone loop. Chat runs independently alongside it. Revisit if Jack
-  wants progress gated on something.
+- **Progress is a constantly-looping progress subagent.** There is always a
+  progress subagent running — it grinds autonomously. It may **spawn its own
+  child subagents, which can outlive it.** So subagents form a **supervision
+  tree with independent lifetimes**, not one flat bounded run.
+- **Two spawn sources.** Subagents come from (a) the constant progress arm and
+  (b) the reactive server itself, which can start a subagent in response to an
+  event. The server tracks all of them; a parent finishing does not kill its
+  still-working children.

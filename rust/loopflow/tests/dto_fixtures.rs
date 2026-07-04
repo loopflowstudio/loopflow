@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 
+use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn, ChatTurnStatus};
+use loopflow::lfd::conversations::types::ConversationItem;
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, WaveDto};
 use serde_json::Value;
 
@@ -68,6 +70,24 @@ fn session_fixture_pins_palette_shape() {
     assert_eq!(session.run_id, None);
     assert_eq!(session.parent_session_id, None);
     assert!(session.argv.contains(&"-m".to_string()));
+}
+
+#[test]
+fn chat_turn_fixture_pins_wave_chat_shape() {
+    // The same fixture Concerto's ContractTests decodes; if the wire shape drifts
+    // between Rust and Swift, one of the two fails.
+    let turn: ChatTurn =
+        serde_json::from_value(load_fixture("chat_turn.json")).expect("chat turn should parse");
+
+    assert_eq!(turn.id, "turn-3");
+    assert_eq!(turn.role, ChatRole::Assistant);
+    assert_eq!(turn.status, ChatTurnStatus::InProgress);
+    assert_eq!(turn.items.len(), 5);
+    assert!(matches!(turn.items[0], ConversationItem::Command { .. }));
+    assert!(matches!(turn.items[1], ConversationItem::File { .. }));
+    assert!(matches!(turn.items[2], ConversationItem::Message { .. }));
+    assert!(matches!(turn.items[3], ConversationItem::Thought { .. }));
+    assert!(matches!(turn.items[4], ConversationItem::Tool { .. }));
 }
 
 #[test]

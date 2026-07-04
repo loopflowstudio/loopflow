@@ -81,6 +81,66 @@ struct ContractTests {
         #expect(trigger.sourceWaveId == "wave_upstream")
     }
 
+    @Test("chat_turn.json decodes through the wave chat models")
+    func chatTurnFixtureParses() throws {
+        let data = try fixtureData("dto/chat_turn.json")
+        let turn = try JSONDecoder().decode(ChatTurn.self, from: data)
+
+        #expect(turn.id == "turn-3")
+        #expect(turn.sequence == 3)
+        #expect(turn.role == .assistant)
+        #expect(turn.status == .inProgress)
+        #expect(turn.isInProgress)
+        #expect(turn.createdAtDate != nil)
+        #expect(turn.items.count == 5)
+
+        guard case let .command(id, command, cwd, status, output, exitCode, durationMs) = turn.items[0] else {
+            Issue.record("item 0 should be a command")
+            return
+        }
+        #expect(id == "item-0")
+        #expect(command == ["cargo", "test"])
+        #expect(cwd == "/home/user/project")
+        #expect(status == .completed)
+        #expect(output == "test result: ok. 42 passed")
+        #expect(exitCode == 0)
+        #expect(durationMs == 1234)
+
+        guard case let .file(_, changes, _) = turn.items[1] else {
+            Issue.record("item 1 should be a file")
+            return
+        }
+        #expect(changes.first?.path == "src/main.rs")
+        #expect(changes.first?.kind == "modified")
+        #expect(changes.first?.diff?.contains("+new") == true)
+
+        guard case let .message(_, text, phase) = turn.items[2] else {
+            Issue.record("item 2 should be a message")
+            return
+        }
+        #expect(text == "Narrating progress")
+        #expect(phase == "progress")
+
+        guard case let .thought(_, thoughtText) = turn.items[3] else {
+            Issue.record("item 3 should be a thought")
+            return
+        }
+        #expect(thoughtText.contains("run the tests"))
+
+        guard case let .tool(_, name, _, input, toolOutput) = turn.items[4] else {
+            Issue.record("item 4 should be a tool")
+            return
+        }
+        #expect(name == "Grep")
+        #expect(input == "TODO")
+        #expect(toolOutput == "3 matches")
+
+        // Round-trips: re-encode and decode again yields an identical turn.
+        let reencoded = try JSONEncoder().encode(turn)
+        let roundTripped = try JSONDecoder().decode(ChatTurn.self, from: reencoded)
+        #expect(roundTripped == turn)
+    }
+
     @Test("activation_log.json has expected shape")
     func activationLogFixtureShape() throws {
         let json = try fixtureJSON("activation_log.json")

@@ -53,6 +53,12 @@ jobs:
           key: test
       - uses: taiki-e/install-action@nextest
       - name: Run Rust tests
+        # debug=0 drops debug-info generation for the test build. This job is
+        # ~95% test-binary compile of the monolithic loopflow crate, and CI
+        # never symbolicates. Panic/assertion locations come from
+        # #[track_caller] line info, not DWARF, so failure output is preserved.
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "0"
         run: cargo nextest run --all
 
   python-test:

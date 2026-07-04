@@ -4,6 +4,33 @@ produces: the wave agent design — product frame, forks, vision, MVP, reshape p
 ---
 # The Wave Agent
 
+**The governing principle — waves outward (Jack, 2026-07-04).** This is a
+radically decentralized, pubsub-everywhere vision: zero centralized control,
+as a matter of spirit and integrity, and because the world it serves is one
+where people are committed to their own workflows. The wave is the unit of
+sovereignty; nothing sits above the waves. Coordination is shared fact (the
+registry) and notification (pubsub), never command: the human steers by
+messaging through the same doors as any process (`lf chat`), children
+escalate upward by speech, Concerto observes without participating, and
+`lfd serve` may only notify and gate — the moment it reimplements behavior
+it has become a headquarters. Consistency is observational (facts + probes);
+races are fixed with better facts, never with a coordinator. Every new
+feature answers one question first: does this create a center?
+
+**The mechanics of the principle: the wave process is the LISTENER; `lf`
+runs are PUBLISHERS/CREATORS (Jack, 2026-07-04).** The server unifies the
+wave by listening — the mind's stream, workers' rows and `lf chat` posts,
+human messages — folding them into one timeline (journal → thread) and one
+context field that flows back into every new publisher at birth (ambient
+context). Publishing to no subscriber drops the message (`lf chat` outside a
+wave exits 0 — correct pubsub semantics, not degraded mode). The mind is
+just a publisher whose stream the listener supervises directly. Listener
+downtime never stops publishers; the restarted listener reconciles from the
+substrate (snapshot-then-delta, already built). Concerto is a second
+listener; remote lfd-serve a relay listener. Durability gap, small: a
+publication addressed to a down listener errors today — future: store-queued
+publications drained at boot.
+
 Loopflow's evolution: from a way of launching agents into a toolset used by
 higher-level agents to execute progress through lower-level agents. The Wave —
 a continuous stream of ongoing work, attached to an Asana roadmap — gets its

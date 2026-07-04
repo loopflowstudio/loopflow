@@ -164,21 +164,29 @@ public final class WaveChatConnection {
         }
     }
 
-    private func handle(event: String, data: String) {
+    /// One SSE frame. The server re-sends an in-progress turn whole under the
+    /// same id as it grows, then a terminal frame at finalization — every frame
+    /// replaces the previous state of its id. Internal for tests.
+    func handle(event: String, data: String) {
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
         guard let turn = try? decoder.decode(ChatTurn.self, from: json) else { return }
         upsert(turn)
     }
 
-    /// Replace a turn already in the thread (an in-progress turn re-sent as its
-    /// text grows), or append a new one. Ordered by monotonic sequence so replay
-    /// and live turns interleave cleanly.
-    private func upsert(_ turn: ChatTurn) {
+    /// Replace a turn already in the thread (an in-progress turn re-sent as it
+    /// grows, then finalized under the same id), or append a new one. Ordered
+    /// by monotonic sequence, id as tie-break: `sort` isn't guaranteed stable
+    /// and unparseable ids share a `.max` sentinel sequence, so the tie-break
+    /// keeps the order deterministic. Internal for tests.
+    func upsert(_ turn: ChatTurn) {
         if let index = turns.firstIndex(where: { $0.id == turn.id }) {
             turns[index] = turn
         } else {
             turns.append(turn)
         }
-        turns.sort { $0.sequence < $1.sequence }
+        turns.sort { a, b in
+            if a.sequence != b.sequence { return a.sequence < b.sequence }
+            return a.id < b.id
+        }
     }
 }

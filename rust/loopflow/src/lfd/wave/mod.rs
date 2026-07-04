@@ -107,8 +107,10 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
+    use crate::engine::stream::{ResultSubtype, StreamEvent};
+    use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnBuilder};
     use crate::lfd::conversations::types::Lifecycle;
+    use crate::lfd::wave::runtime::TurnSink;
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
@@ -258,6 +260,244 @@ mod tests {
         assert!(
             acc.contains("live turn"),
             "streams turns narrated after connect"
+        );
+    }
+
+    /// Raw-TCP SSE client that decodes the chunked body and parses every
+    /// `data:` line into a [`ChatTurn`], in arrival order.
+    struct SseClient {
+        stream: tokio::net::TcpStream,
+        raw: Vec<u8>,
+    }
+
+    impl SseClient {
+        async fn connect(base: &str) -> Self {
+            let host = base.strip_prefix("http://").unwrap();
+            let mut stream = tokio::net::TcpStream::connect(host).await.unwrap();
+            stream
+                .write_all(
+                    b"GET /conversation/stream HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            Self {
+                stream,
+                raw: Vec::new(),
+            }
+        }
+
+        /// Read until `pred` holds over every turn frame received so far
+        /// (panics after 5s). Returns the frames, in order.
+        async fn frames_until(&mut self, pred: impl Fn(&[ChatTurn]) -> bool) -> Vec<ChatTurn> {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let mut buf = [0u8; 4096];
+            loop {
+                let frames = parse_turn_frames(&dechunk(&self.raw));
+                if pred(&frames) {
+                    return frames;
+                }
+                match tokio::time::timeout_at(deadline, self.stream.read(&mut buf)).await {
+                    Ok(Ok(0)) | Err(_) => {
+                        panic!("SSE ended before condition; {} frames so far", frames.len())
+                    }
+                    Ok(Ok(n)) => self.raw.extend_from_slice(&buf[..n]),
+                    Ok(Err(err)) => panic!("SSE read error: {err}"),
+                }
+            }
+        }
+    }
+
+    /// Strip the HTTP response head and chunked transfer framing, tolerating a
+    /// partial tail (the connection stays open). Test traffic is ASCII.
+    fn dechunk(raw: &[u8]) -> String {
+        let text = String::from_utf8_lossy(raw);
+        let Some(head_end) = text.find("\r\n\r\n") else {
+            return String::new();
+        };
+        let mut body = &text[head_end + 4..];
+        let mut out = String::new();
+        while let Some(size_end) = body.find("\r\n") {
+            let Ok(size) = usize::from_str_radix(body[..size_end].trim(), 16) else {
+                break;
+            };
+            let start = size_end + 2;
+            if size == 0 || body.len() < start + size {
+                break;
+            }
+            out.push_str(&body[start..start + size]);
+            body = &body[(start + size + 2).min(body.len())..];
+        }
+        out
+    }
+
+    fn parse_turn_frames(sse_body: &str) -> Vec<ChatTurn> {
+        sse_body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .filter_map(|data| serde_json::from_str(data.trim()).ok())
+            .collect()
+    }
+
+    /// Feed one stream event through the production delta pipeline.
+    fn feed(builder: &mut TurnBuilder, sink: &mut TurnSink, event: StreamEvent) {
+        for delta in builder.feed(&event) {
+            sink.on_delta(delta);
+        }
+    }
+
+    #[tokio::test]
+    async fn sse_late_subscriber_watches_the_open_turn_grow_and_finalize() {
+        let (base, runtime, _tmp) = boot().await;
+        narrate(&runtime, "already finalized");
+
+        // A turn is mid-flight before the client connects.
+        let mut sink = TurnSink::new(runtime.clone());
+        let mut builder = TurnBuilder::new();
+        feed(
+            &mut builder,
+            &mut sink,
+            StreamEvent::Text("thinking".into()),
+        );
+
+        // Late subscriber: replay carries the finalized thread AND the open turn.
+        let mut client = SseClient::connect(&base).await;
+        let frames = client
+            .frames_until(|f| f.iter().any(|t| t.status == Lifecycle::Running))
+            .await;
+        assert!(
+            frames
+                .iter()
+                .any(|t| t.text == "already finalized" && t.status == Lifecycle::Completed),
+            "replay carries the finalized thread"
+        );
+        let open = frames
+            .iter()
+            .find(|t| t.status == Lifecycle::Running)
+            .unwrap()
+            .clone();
+        assert_eq!(open.text, "thinking");
+
+        // Re-broadcast: the same id grows in place.
+        feed(&mut builder, &mut sink, StreamEvent::Text("more".into()));
+        client
+            .frames_until(|f| {
+                f.iter().any(|t| {
+                    t.id == open.id && t.text == "thinking\nmore" && t.status == Lifecycle::Running
+                })
+            })
+            .await;
+
+        // Finalization replaces it terminally, same id.
+        feed(
+            &mut builder,
+            &mut sink,
+            StreamEvent::Result {
+                subtype: ResultSubtype::Success,
+                cost_usd: None,
+                duration_secs: None,
+            },
+        );
+        let frames = client
+            .frames_until(|f| {
+                f.iter()
+                    .any(|t| t.id == open.id && t.status == Lifecycle::Completed)
+            })
+            .await;
+        let last = frames.iter().rfind(|t| t.id == open.id).unwrap();
+        assert_eq!(last.status, Lifecycle::Completed, "terminal frame is last");
+        assert_eq!(last.text, "thinking\nmore");
+    }
+
+    #[tokio::test]
+    async fn conversation_includes_the_open_running_turn() {
+        let (base, runtime, _tmp) = boot().await;
+        let mut sink = TurnSink::new(runtime.clone());
+        let mut builder = TurnBuilder::new();
+        feed(
+            &mut builder,
+            &mut sink,
+            StreamEvent::Text("half a thought".into()),
+        );
+
+        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let turns = body["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["status"], "running");
+        assert_eq!(turns[0]["text"], "half a thought");
+
+        // After finalization the same id is served exactly once, terminal.
+        feed(
+            &mut builder,
+            &mut sink,
+            StreamEvent::Result {
+                subtype: ResultSubtype::Success,
+                cost_usd: None,
+                duration_secs: None,
+            },
+        );
+        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let turns = body["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn restart_mid_turn_never_serves_a_stale_running_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // First life crashes mid-turn: started + text journaled, never finished.
+        {
+            let (runtime, _rx) =
+                WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+            let mut sink = TurnSink::new(runtime.clone());
+            let mut builder = TurnBuilder::new();
+            feed(
+                &mut builder,
+                &mut sink,
+                StreamEvent::Text("half a thought".into()),
+            );
+        }
+
+        // Second life: journal replay + boot janitor close the crash tail.
+        let (runtime, _rx) =
+            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = server::router(runtime.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let base = format!("http://{addr}");
+
+        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let turns = body["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["status"], "failed", "janitor closed the turn");
+        assert_eq!(turns[0]["text"], "half a thought");
+
+        // SSE replay agrees: the turn arrives failed, never running.
+        let mut client = SseClient::connect(&base).await;
+        let frames = client
+            .frames_until(|f| f.iter().any(|t| t.status == Lifecycle::Failed))
+            .await;
+        assert!(
+            frames.iter().all(|t| t.status != Lifecycle::Running),
+            "no stale running turn in replay"
         );
     }
 

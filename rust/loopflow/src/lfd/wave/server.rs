@@ -9,9 +9,14 @@
 //! Wire contract (snake_case, stable — a Concerto worker builds against it):
 //! - `GET /health` → `{status, wave, turns, subagents, uptime_seconds}`;
 //!   `status` is the mind state (`idle | turning | interrupting | failed`).
-//! - `GET /conversation` → `{turns: [Turn]}`
+//! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
+//!   `running`), if one is in progress, after the finalized thread.
 //! - `GET /conversation/stream` → SSE; each event named `turn`, data a `Turn`
-//!   JSON; replays the thread on connect, then streams live.
+//!   JSON; replays the thread on connect (including the open turn), then
+//!   streams live. Turn ids repeat: an in-progress turn is re-sent whole as it
+//!   grows and finalization sends the terminal turn under the same id — each
+//!   frame replaces the client's previous state for that id (upsert, never
+//!   append-if-seen).
 //! - `POST /messages {text}` → appends a user `Turn` and returns it.
 //!
 //! `Turn` is [`crate::lfd::conversations::turns::ChatTurn`].
@@ -99,21 +104,21 @@ async fn messages_handler(
     Json(state.runtime.deliver_user_message(body.text))
 }
 
-/// SSE: replay the thread on connect, then stream live turns. Subscribe before
-/// snapshotting to avoid a gap; dedupe live turns already in the snapshot by
-/// id (turn ids are minted at `TurnStarted` but committed at `TurnFinished`,
-/// so commit order is not id order — a max-seq watermark would drop turns).
+/// SSE: replay the thread on connect (open turn included, status `running`),
+/// then stream live frames as-is. Ids repeat by design — every frame replaces
+/// the client's state for that id, so an in-progress turn updates in place and
+/// its terminal frame lands under the same id. Snapshot and subscription are
+/// atomic in the runtime (broadcasts share the append lock), so no live frame
+/// is ever older than the replayed snapshot.
 async fn conversation_stream_handler(
     State(state): State<ServerState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = state.runtime.subscribe();
-    let snapshot = state.runtime.thread_snapshot();
-    let seen: std::collections::HashSet<String> = snapshot.iter().map(|t| t.id.clone()).collect();
+    let (snapshot, rx) = state.runtime.subscribe_with_snapshot();
 
     let replay = stream::iter(snapshot.into_iter().map(|t| Ok(turn_event(&t))));
     let live = BroadcastStream::new(rx).filter_map(move |res| {
         let out = match res {
-            Ok(turn) => (!seen.contains(&turn.id)).then(|| Ok(turn_event(&turn))),
+            Ok(turn) => Some(Ok(turn_event(&turn))),
             // Lagged: the client fell behind. Skip; it resyncs from /conversation.
             Err(_) => None,
         };

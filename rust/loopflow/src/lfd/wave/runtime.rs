@@ -7,6 +7,9 @@
 //! - the `thread` (`Vec<ChatTurn>`) is the fold of conversation events —
 //!   rebuilt from the journal on boot, so a restart keeps the full thread and
 //!   turn ids continue monotonically (they derive from the journal seq);
+//! - the open turn is a live snapshot grown from the same deltas the journal
+//!   records — served after the finalized thread and re-broadcast as it grows,
+//!   so subscribers watch a turn stream instead of minutes of silence;
 //! - the mind state is the last `MindState` event;
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
@@ -43,11 +46,17 @@ pub struct UserMessage {
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
-/// thread cache (fold of it), and the mind state (last transition).
+/// thread cache (fold of it), the open-turn snapshot, and the mind state
+/// (last transition).
 #[derive(Debug)]
 struct Inner {
     journal: Journal,
     thread: Vec<ChatTurn>,
+    /// The turn currently in progress, grown delta by delta (status
+    /// `Running`). Served after the finalized thread and re-broadcast on every
+    /// content delta so subscribers watch it grow; cleared at finalization,
+    /// when the terminal turn commits to `thread` under the same id.
+    open_turn: Option<ChatTurn>,
     state: MindState,
 }
 
@@ -59,7 +68,8 @@ pub struct WaveRuntime {
     /// Journal + materialized thread + mind state, behind one lock so their
     /// orders never diverge.
     inner: Mutex<Inner>,
-    /// Fans committed turns out to live SSE subscribers.
+    /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
+    /// turn grows, then the terminal turn under the same id.
     turn_tx: broadcast::Sender<ChatTurn>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
     memory: Memory,
@@ -117,6 +127,7 @@ impl WaveRuntime {
             inner: Mutex::new(Inner {
                 journal,
                 thread: fold.turns,
+                open_turn: None,
                 state,
             }),
             turn_tx,
@@ -147,9 +158,10 @@ impl WaveRuntime {
         self.inner.lock().expect("wave runtime lock poisoned")
     }
 
-    /// Snapshot of the whole thread, for replay-on-connect and `/conversation`.
+    /// Snapshot of the whole thread — finalized turns plus the open turn
+    /// (status `Running`), if one is in progress — for `/conversation`.
     pub fn thread_snapshot(&self) -> Vec<ChatTurn> {
-        self.inner().thread.clone()
+        snapshot_locked(&self.inner())
     }
 
     /// Current mind state, for `/health` and the composer.
@@ -157,10 +169,15 @@ impl WaveRuntime {
         self.inner().state.clone()
     }
 
-    /// Subscribe to live turns. Subscribe *before* snapshotting to avoid a gap;
-    /// callers dedupe by id against the snapshot.
-    pub fn subscribe(&self) -> broadcast::Receiver<ChatTurn> {
-        self.turn_tx.subscribe()
+    /// Atomically snapshot the thread (including the open turn) and subscribe
+    /// to live frames. Every broadcast happens under the same lock as the
+    /// append it reflects, so the receiver sees exactly the frames sent after
+    /// this snapshot — no gap, no overlap, no frame older than the snapshot.
+    /// A live frame's id may match a snapshot turn: it is that turn, newer;
+    /// consumers replace by id.
+    pub fn subscribe_with_snapshot(&self) -> (Vec<ChatTurn>, broadcast::Receiver<ChatTurn>) {
+        let inner = self.inner();
+        (snapshot_locked(&inner), self.turn_tx.subscribe())
     }
 
     /// Attempt a mind-state transition. Legal moves append a `MindState` event
@@ -284,6 +301,13 @@ impl WaveRuntime {
     }
 
     // -- TurnSink internals (same lock discipline as everything above) --
+    //
+    // Every content delta (opened / text / item) re-broadcasts the open-turn
+    // snapshot under the same id. No debounce: deltas are item-granular from
+    // the vendor stream (one per completed item, not per token), so the
+    // natural rate is well under any flood threshold, and a suppressed
+    // trailing frame would leave subscribers stale through a long tool call.
+    // A throttle earns its place with the part-grained wire, not before.
 
     fn sink_turn_started(&self) -> Event {
         let mut inner = self.inner();
@@ -302,6 +326,16 @@ impl WaveRuntime {
             },
             "turn opened",
         );
+        let open = ChatTurn {
+            id: turn_id,
+            role: ChatRole::Assistant,
+            text: String::new(),
+            status: Lifecycle::Running,
+            items: Vec::new(),
+            created_at: event.at_rfc3339(),
+        };
+        let _ = self.turn_tx.send(open.clone());
+        inner.open_turn = Some(open);
         event
     }
 
@@ -309,8 +343,23 @@ impl WaveRuntime {
         let mut inner = self.inner();
         inner.journal.append(|_| EventKind::TurnItem {
             turn_id: turn_id.to_string(),
-            item,
+            item: item.clone(),
         });
+        // Grow the open-turn snapshot exactly as the fold does (`Message`
+        // items join into text, the rest append to items) and re-broadcast it
+        // so live subscribers watch the turn in progress.
+        let Some(open) = inner.open_turn.as_mut() else {
+            return;
+        };
+        if let ConversationItem::Message { text, .. } = &item {
+            if !open.text.is_empty() {
+                open.text.push('\n');
+            }
+            open.text.push_str(text);
+        } else {
+            open.items.push(item);
+        }
+        let _ = self.turn_tx.send(open.clone());
     }
 
     fn sink_turn_finished(&self, turn: ChatTurn, usage: Usage) -> ChatTurn {
@@ -321,8 +370,18 @@ impl WaveRuntime {
             usage,
         });
         self.transition_locked(&mut inner, MindState::Idle, "turn finalized");
+        // The terminal turn replaces the open snapshot under the same id.
+        inner.open_turn = None;
         self.commit_locked(&mut inner, turn)
     }
+}
+
+/// The thread plus the open turn, in one clone. The open turn rides last:
+/// clients order by the sequence in the turn id, not array position.
+fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
+    let mut turns = inner.thread.clone();
+    turns.extend(inner.open_turn.clone());
+    turns
 }
 
 /// Folds a subagent pass's [`TurnDelta`]s into journal events and committed
@@ -626,6 +685,68 @@ mod tests {
         assert_eq!(turn.status, Lifecycle::Completed);
         // The id comes from the journal seq domain (turn_seq panics otherwise).
         turn_seq(&turn.id);
+    }
+
+    #[test]
+    fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
+        use crate::engine::stream::{ResultSubtype, StreamEvent};
+        use crate::lfd::conversations::turns::TurnBuilder;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, _rx) = open_runtime(tmp.path());
+        let (snapshot, mut frames) = rt.subscribe_with_snapshot();
+        assert!(snapshot.is_empty());
+
+        let mut sink = TurnSink::new(rt.clone());
+        let mut builder = TurnBuilder::new();
+        let mut feed = |event: &StreamEvent| {
+            for delta in builder.feed(event) {
+                sink.on_delta(delta);
+            }
+        };
+
+        // First content delta: an empty running turn opens and broadcasts,
+        // then the text lands in a second frame under the same id.
+        feed(&StreamEvent::Text("thinking".into()));
+        let opened = frames.try_recv().expect("opened frame");
+        assert_eq!(opened.status, Lifecycle::Running);
+        assert_eq!(opened.text, "");
+        let grown = frames.try_recv().expect("text frame");
+        assert_eq!(grown.id, opened.id);
+        assert_eq!(grown.text, "thinking");
+        assert_eq!(grown.status, Lifecycle::Running);
+
+        // Mid-turn, the open turn rides the snapshot after the thread.
+        let mid = rt.thread_snapshot();
+        assert_eq!(mid.len(), 1);
+        assert_eq!(mid[0].id, opened.id);
+        assert_eq!(mid[0].status, Lifecycle::Running);
+
+        // An item delta grows the same snapshot.
+        feed(&StreamEvent::ToolUse {
+            name: "Bash".into(),
+            summary: "cargo test".into(),
+        });
+        let with_item = frames.try_recv().expect("item frame");
+        assert_eq!(with_item.id, opened.id);
+        assert_eq!(with_item.items.len(), 1);
+        assert_eq!(with_item.text, "thinking");
+
+        // Finalization replaces the running turn under the same id.
+        feed(&StreamEvent::Result {
+            subtype: ResultSubtype::Success,
+            cost_usd: None,
+            duration_secs: None,
+        });
+        let terminal = frames.try_recv().expect("terminal frame");
+        assert_eq!(terminal.id, opened.id);
+        assert_eq!(terminal.status, Lifecycle::Completed);
+
+        // No stale running turn remains anywhere.
+        let after = rt.thread_snapshot();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].status, Lifecycle::Completed);
+        assert!(frames.try_recv().is_err(), "no extra frames");
     }
 
     #[tokio::test]

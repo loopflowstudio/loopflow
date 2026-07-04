@@ -883,15 +883,6 @@ async fn apply_run_wave_overrides(
         if let Some(flow) = trimmed_non_empty(overrides.flow.as_deref()) {
             wave.primary_flow = flow;
         }
-        if let Some(roadmap_item) = trimmed_non_empty(overrides.roadmap_item.as_deref()) {
-            let roadmap_path = FsPath::new(wave.repo())
-                .join("wave")
-                .join(wave.name())
-                .join(&roadmap_item);
-            if !roadmap_path.is_file() {
-                return Err(api_error(StatusCode::BAD_REQUEST, "roadmap item not found"));
-            }
-        }
         if let Some(goal) = trimmed_non_empty(overrides.goal.as_deref()) {
             wave.goal = goal;
         }

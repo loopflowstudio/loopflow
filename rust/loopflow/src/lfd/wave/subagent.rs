@@ -52,8 +52,9 @@ pub struct SubagentSpec {
 
 impl SubagentSpec {
     /// A real codex progress pass: `codex exec --json --full-auto <prompt>`,
-    /// run in the wave's worktree. `--full-auto` keeps it sandboxed to
-    /// workspace-write with safe auto-approval — the server drives it headless.
+    /// run in the repo root (TODO: worktree isolation is planned but not built).
+    /// `--full-auto` keeps it sandboxed to workspace-write with safe
+    /// auto-approval — the server drives it headless.
     pub fn codex_progress(cwd: &Path, prompt: &str) -> Self {
         Self {
             label: "progress".to_string(),
@@ -90,6 +91,8 @@ where
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        // Aborting the task that drives this run must not leak a live child.
+        .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("failed to spawn subagent `{}`", spec.program))?;
 
@@ -179,5 +182,35 @@ mod tests {
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].status, ChatTurnStatus::Failed);
         assert!(turns[0].text.contains("half a thought"));
+    }
+
+    #[tokio::test]
+    async fn aborting_the_run_kills_the_child_process() {
+        // The child touches a flag file after a short sleep. Aborting the task
+        // that drives run_subagent drops the Child; kill_on_drop must take the
+        // shell down before the sleep finishes, so the flag never appears.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let flag = tmp.path().join("survived");
+        let spec = SubagentSpec {
+            label: "abort-test".to_string(),
+            program: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!("sleep 1 && touch {}", flag.display()),
+            ],
+            cwd: std::env::temp_dir(),
+        };
+
+        let task = tokio::spawn(async move {
+            let _ = run_subagent(&spec, |_| {}).await;
+        });
+        // Let the child spawn, then abort mid-sleep.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        task.abort();
+        let _ = task.await;
+
+        // Past the child's sleep: if it leaked, the flag would exist by now.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert!(!flag.exists(), "child process outlived the aborted run");
     }
 }

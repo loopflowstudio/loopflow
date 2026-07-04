@@ -24,9 +24,10 @@ use crate::lfd::wave::subagent::{run_subagent, SubagentSpec};
 /// this, so it adds no real latency to steady-state progress.
 const PASS_BACKOFF: Duration = Duration::from_secs(2);
 
-/// Run the progress arm until the runtime is shut down (the arm is a supervised
-/// task; `Supervisor::shutdown_all` aborts it). Passes run back-to-back so
-/// there is always one progress subagent grinding.
+/// Run the progress arm until the runtime is shut down (the server spawns the
+/// arm as a plain tokio task and aborts it directly; only the passes it spawns
+/// live in the [`Supervisor`]). Passes run back-to-back so there is always one
+/// progress subagent grinding.
 pub async fn run_progress_arm(runtime: Arc<WaveRuntime>) {
     loop {
         let prompt = build_progress_prompt(runtime.repo_root(), runtime.name(), runtime.memory());
@@ -35,7 +36,7 @@ pub async fn run_progress_arm(runtime: Arc<WaveRuntime>) {
         let rt = runtime.clone();
         let (done_tx, done_rx) = oneshot::channel();
         // The pass is its own tracked run. It narrates each turn as it lands.
-        runtime.supervisor().spawn("progress-pass", async move {
+        runtime.supervisor().spawn(async move {
             if let Err(err) = run_subagent(&spec, |turn| {
                 rt.narrate_progress(turn);
             })

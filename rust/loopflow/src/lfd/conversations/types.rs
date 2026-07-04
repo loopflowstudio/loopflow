@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource, Surface};
+use crate::engine::prompt::Surface;
 use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,22 +14,6 @@ pub enum ConversationStatus {
     Ending,
     Ended,
     Failed,
-}
-
-impl ConversationStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Active => "active",
-            Self::Ending => "ending",
-            Self::Ended => "ended",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Ended | Self::Failed)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,97 +126,6 @@ pub struct TurnUsage {
     pub cost_usd: Option<f64>,
 }
 
-/// Prompt composition snapshot at session start.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DocumentEntry {
-    pub path: String,
-    pub source: String,
-    pub tokens: u64,
-}
-
-/// Prompt composition snapshot at session start.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ContextSnapshot {
-    /// Tokens per source category ("step", "direction", "diff", "docs", etc.)
-    #[serde(default)]
-    pub sources: HashMap<String, u64>,
-    /// Document counts per source category.
-    #[serde(default)]
-    pub source_counts: HashMap<String, u64>,
-    /// Per-document entries for file-level breakdown.
-    #[serde(default)]
-    pub documents: Vec<DocumentEntry>,
-    /// Total tokens used.
-    pub total: u64,
-    /// Diff representation tier ("UnifiedDiff", "StatOnly", "None").
-    pub diff_tier: String,
-    #[serde(default)]
-    pub step_name: Option<String>,
-    #[serde(default)]
-    pub direction_names: Vec<String>,
-    pub wave_name: Option<String>,
-    #[serde(default)]
-    pub has_clipboard: bool,
-}
-
-impl From<&ContextBreakdown> for ContextSnapshot {
-    fn from(breakdown: &ContextBreakdown) -> Self {
-        let mut sources: HashMap<String, u64> = breakdown
-            .source_tokens
-            .iter()
-            .map(|(source, tokens)| (source_key(*source), *tokens as u64))
-            .collect();
-        sources.insert("system".to_string(), breakdown.system_tokens as u64);
-
-        Self {
-            sources,
-            source_counts: breakdown
-                .source_counts
-                .iter()
-                .map(|(source, count)| (source_key(*source), *count as u64))
-                .collect(),
-            documents: breakdown
-                .documents
-                .iter()
-                .map(|d| DocumentEntry {
-                    path: d.path.clone(),
-                    source: source_key(d.source),
-                    tokens: d.tokens as u64,
-                })
-                .collect(),
-            total: breakdown.total() as u64,
-            diff_tier: diff_tier_key(&breakdown.diff_tier).to_string(),
-            step_name: breakdown.step_name.clone(),
-            direction_names: breakdown.direction_names.clone(),
-            wave_name: breakdown.wave_name.clone(),
-            has_clipboard: breakdown.has_clipboard,
-        }
-    }
-}
-
-fn source_key(source: DocumentSource) -> String {
-    match source {
-        DocumentSource::Step => "step",
-        DocumentSource::Direction => "direction",
-        DocumentSource::Diff => "diff",
-        DocumentSource::Docs => "docs",
-        DocumentSource::Scratch => "scratch",
-        DocumentSource::Wave => "wave",
-        DocumentSource::WaveMemory => "wave_memory",
-        DocumentSource::Summary => "summary",
-        DocumentSource::Clipboard => "clipboard",
-    }
-    .to_string()
-}
-
-fn diff_tier_key(diff_tier: &DiffTier) -> &'static str {
-    match diff_tier {
-        DiffTier::UnifiedDiff => "UnifiedDiff",
-        DiffTier::StatOnly => "StatOnly",
-        DiffTier::None => "None",
-    }
-}
-
 // -- Event stream --
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,10 +144,6 @@ pub enum ConversationEvent {
     TurnUsage {
         turn_id: String,
         usage: TurnUsage,
-    },
-    /// Prompt composition snapshot. Emitted once at session start, before first TurnStarted.
-    ContextSnapshot {
-        snapshot: ContextSnapshot,
     },
 
     // Item lifecycle
@@ -315,7 +202,6 @@ impl ConversationEvent {
             Self::TurnStarted { .. } => "turn_started",
             Self::TurnCompleted { .. } => "turn_completed",
             Self::TurnUsage { .. } => "turn_usage",
-            Self::ContextSnapshot { .. } => "context_snapshot",
             Self::ItemStarted { .. } => "item_started",
             Self::ItemUpdated { .. } => "item_updated",
             Self::ItemCompleted { .. } => "item_completed",
@@ -383,70 +269,9 @@ pub struct Conversation {
     pub ended_at: Option<OffsetDateTime>,
 }
 
-#[derive(Debug, Clone)]
-pub struct PersistedConversationEvent {
-    pub conversation_id: LfdId,
-    pub seq: i64,
-    pub event: ConversationEvent,
-    pub created_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateConversationParams {
-    pub harness: String,
-    pub run_id: Option<String>,
-    pub config: ConversationConfig,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn context_snapshot_from_breakdown_preserves_source_tokens() {
-        let breakdown = ContextBreakdown {
-            source_tokens: HashMap::from([
-                (DocumentSource::Step, 120),
-                (DocumentSource::Direction, 80),
-                (DocumentSource::Diff, 450),
-            ]),
-            source_counts: HashMap::from([(DocumentSource::Diff, 8), (DocumentSource::Docs, 2)]),
-            documents: vec![crate::engine::prompt::DocumentEntry {
-                path: "README.md".to_string(),
-                source: DocumentSource::Docs,
-                tokens: 100,
-            }],
-            system_tokens: 25,
-            diff_tier: DiffTier::StatOnly,
-            step_name: Some("implement".to_string()),
-            direction_names: vec!["clarity".to_string(), "care".to_string()],
-            wave_name: Some("context-ui".to_string()),
-            has_clipboard: true,
-            ..ContextBreakdown::default()
-        };
-
-        let snapshot = ContextSnapshot::from(&breakdown);
-        assert_eq!(snapshot.sources.get("step"), Some(&120));
-        assert_eq!(snapshot.sources.get("direction"), Some(&80));
-        assert_eq!(snapshot.sources.get("diff"), Some(&450));
-        assert_eq!(snapshot.sources.get("system"), Some(&25));
-        assert_eq!(snapshot.source_counts.get("diff"), Some(&8));
-        assert_eq!(snapshot.source_counts.get("docs"), Some(&2));
-        assert_eq!(
-            snapshot.documents,
-            vec![DocumentEntry {
-                path: "README.md".to_string(),
-                source: "docs".to_string(),
-                tokens: 100,
-            }]
-        );
-        assert_eq!(snapshot.total, 675);
-        assert_eq!(snapshot.diff_tier, "StatOnly");
-        assert_eq!(snapshot.step_name.as_deref(), Some("implement"));
-        assert_eq!(snapshot.direction_names, vec!["clarity", "care"]);
-        assert_eq!(snapshot.wave_name.as_deref(), Some("context-ui"));
-        assert!(snapshot.has_clipboard);
-    }
 
     #[test]
     fn turn_usage_round_trips_through_json() {
@@ -463,28 +288,5 @@ mod tests {
         let value = serde_json::to_value(&usage).expect("serialize usage");
         let decoded: TurnUsage = serde_json::from_value(value).expect("deserialize usage");
         assert_eq!(decoded, usage);
-    }
-
-    #[test]
-    fn context_snapshot_round_trips_through_json() {
-        let snapshot = ContextSnapshot {
-            sources: HashMap::from([("step".to_string(), 200), ("direction".to_string(), 50)]),
-            source_counts: HashMap::from([("docs".to_string(), 3)]),
-            documents: vec![DocumentEntry {
-                path: "README.md".to_string(),
-                source: "docs".to_string(),
-                tokens: 180,
-            }],
-            total: 250,
-            diff_tier: "UnifiedDiff".to_string(),
-            step_name: Some("implement".to_string()),
-            direction_names: vec!["clarity".to_string()],
-            wave_name: Some("context-ui".to_string()),
-            has_clipboard: false,
-        };
-
-        let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
-        let decoded: ContextSnapshot = serde_json::from_value(value).expect("deserialize snapshot");
-        assert_eq!(decoded, snapshot);
     }
 }

@@ -27,18 +27,11 @@ impl std::fmt::Display for SubagentId {
     }
 }
 
-#[derive(Debug)]
-struct Entry {
-    id: SubagentId,
-    label: String,
-    handle: JoinHandle<()>,
-}
-
 /// Tracks every live subagent run, independent of who spawned it.
 #[derive(Debug)]
 pub struct Supervisor {
     next_id: AtomicU64,
-    running: Mutex<Vec<Entry>>,
+    running: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Supervisor {
@@ -53,7 +46,7 @@ impl Supervisor {
     /// stable for the life of the run. The task's lifetime is independent of
     /// its spawner — dropping or finishing whoever called `spawn` does not
     /// touch this task.
-    pub fn spawn<F>(&self, label: impl Into<String>, fut: F) -> SubagentId
+    pub fn spawn<F>(&self, fut: F) -> SubagentId
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -62,18 +55,14 @@ impl Supervisor {
         self.running
             .lock()
             .expect("supervisor lock poisoned")
-            .push(Entry {
-                id,
-                label: label.into(),
-                handle,
-            });
+            .push(handle);
         id
     }
 
     /// Drop finished runs from the registry. Returns the count still alive.
     pub fn reap(&self) -> usize {
         let mut running = self.running.lock().expect("supervisor lock poisoned");
-        running.retain(|e| !e.handle.is_finished());
+        running.retain(|handle| !handle.is_finished());
         running.len()
     }
 
@@ -82,22 +71,12 @@ impl Supervisor {
         self.running.lock().expect("supervisor lock poisoned").len()
     }
 
-    /// Labels of the tracked runs, for status reporting.
-    pub fn labels(&self) -> Vec<String> {
-        self.running
-            .lock()
-            .expect("supervisor lock poisoned")
-            .iter()
-            .map(|e| format!("{}:{}", e.id, e.label))
-            .collect()
-    }
-
     /// Abort every run. Called on server shutdown — the one place a run's
     /// lifetime is ended from outside itself.
     pub fn shutdown_all(&self) {
         let mut running = self.running.lock().expect("supervisor lock poisoned");
-        for entry in running.drain(..) {
-            entry.handle.abort();
+        for handle in running.drain(..) {
+            handle.abort();
         }
     }
 }
@@ -110,8 +89,8 @@ mod tests {
     #[tokio::test]
     async fn tracks_and_reaps_runs() {
         let sup = Supervisor::new();
-        sup.spawn("quick", async {});
-        let slow = sup.spawn("slow", async {
+        sup.spawn(async {});
+        let slow = sup.spawn(async {
             tokio::time::sleep(Duration::from_secs(30)).await;
         });
         assert_eq!(slow, SubagentId(2));
@@ -134,8 +113,8 @@ mod tests {
 
         // Parent spawns a child, then returns immediately. The child keeps
         // running and completes on its own — proving lifetimes are independent.
-        sup.spawn("parent", async move {
-            sup2.spawn("child", async move {
+        sup.spawn(async move {
+            sup2.spawn(async move {
                 tokio::time::sleep(Duration::from_millis(30)).await;
                 child_done.store(true, Ordering::SeqCst);
             });

@@ -6,11 +6,8 @@
 /// Bundled LOOPFLOW.md - default loopflow operating guidance for agents.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
-/// Surface instruction prompts, one per surface variant.
+/// Headless preamble — the only surface that needs one (no user is present).
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
-pub const SURFACE_CLI: &str = include_str!("builtins/surfaces/cli.md");
-pub const SURFACE_CONCERTO_MAC: &str = include_str!("builtins/surfaces/concerto_mac.md");
-pub const SURFACE_CONCERTO_IPHONE: &str = include_str!("builtins/surfaces/concerto_iphone.md");
 
 /// Returns the content of a built-in step, if it exists.
 pub fn get_builtin_step(name: &str) -> Option<&'static str> {

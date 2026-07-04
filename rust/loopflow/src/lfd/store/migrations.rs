@@ -198,6 +198,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "046_run_token_usage_repo",
         sql: include_str!("migrations/046_run_token_usage_repo.sql"),
     },
+    Migration {
+        version: "047_run_events",
+        sql: include_str!("migrations/047_run_events.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations
@@ -225,6 +229,18 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         }
         conn.execute_batch("BEGIN EXCLUSIVE")?;
         let result = (|| -> StoreResult<()> {
+            // Another connection may have applied this migration between the
+            // `applied` read above and taking the exclusive lock (lf and lfd
+            // can open a fresh store concurrently) — re-check inside it.
+            let already: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
+                rusqlite::params![migration.version],
+                |row| row.get(0),
+            )?;
+            if already {
+                conn.execute_batch("COMMIT")?;
+                return Ok(());
+            }
             // An additive `ADD COLUMN` migration that fails only because the
             // column already exists is effectively already applied — this
             // happens when a migration's version id was renamed, so a db that

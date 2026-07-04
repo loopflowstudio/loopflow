@@ -38,7 +38,14 @@ re-derive what these already record.
 
 6. **Make choices.** Given all this thinking, what's the right approach? Be bold. Commit to a direction.
 
-7. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable design.
+7. **Name the demo.** Before writing the design, state the demo: the moment a
+   developer sees the win working — the command they run and what appears, the
+   interaction that now works. If you can't describe the demo, the slice is
+   usually scoped one step short — carry it to where it shows itself. The one
+   exception: work explicitly commissioned as infrastructure-only. Then say so
+   in the doc instead of inventing a demo.
+
+8. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable design.
 
 ## Output format
 
@@ -50,6 +57,11 @@ Update `scratch/<slug>.md`:
 ## Problem
 
 <What we're solving. Who benefits. Why now.>
+
+## The demo
+
+<The moment that proves the win: what the developer runs and what they see.
+One or two sentences, concrete enough to perform at the end of the build.>
 
 ## Approach
 

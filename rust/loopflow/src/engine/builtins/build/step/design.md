@@ -83,7 +83,7 @@ This is the natural session exit point. The user's answer determines what to run
 
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
-   - frontmatter: `primary_flow` (default `ship-wave` unless the user asks for
+   - frontmatter: `primary_flow` (default `ship` unless the user asks for
      something else) and, once connected, `pm.asana_project`
    - body (the loop prompt): what this wave is and why it exists (scope
      boundaries as natural qualifiers), how it judges progress (numeric metrics
@@ -103,7 +103,7 @@ This is the natural session exit point. The user's answer determines what to run
 6. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
 7. End session and tell the user what to run next:
    - `lf implement` (for the immediate item)
-   - `lf ship-wave`
+   - `lf ship`
 
 Once breaking things up, be aggressive about commit boundaries—each roadmap item should be independently shippable.
 
@@ -126,11 +126,18 @@ def create_user(email: str) -> User:
 
 **Specify "done when."** A command to run, output to expect. The implementing session needs to know when to stop.
 
+**Name the demo.** Every design states the moment that proves the win: what
+the developer runs and what they see. If no demo can be described, the slice
+is usually scoped one step short — carry it to where it shows itself. The one
+exception: work explicitly commissioned as infrastructure-only. Then say so
+in the doc instead of inventing a demo.
+
 ## Design doc sections
 
 When the idea fits in one commit (~1000 words max):
 
 - **What to build** — One sentence. What exists after this that doesn't exist now.
+- **The demo** — What the developer runs and what they see when this ships. One or two sentences, concrete enough to perform.
 - **Data structures** — Core types, sketched in code.
 - **Key functions** — Signatures with one-line intent.
 - **Constraints** — What would require rewriting if guessed wrong.

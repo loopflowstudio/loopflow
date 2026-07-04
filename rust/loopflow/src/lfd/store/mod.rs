@@ -47,6 +47,32 @@ pub struct ForkRun {
     pub worktree: String,
 }
 
+/// One row of the machine-grain run ledger (`run_events`): a lifecycle event
+/// for a run, flow, or step, written directly by `lf` (and by `lfd`) into the
+/// local store. Token/cost fields are populated on terminal run events when
+/// the stream reported them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunEventRow {
+    pub run_id: String,
+    pub seq: i64,
+    pub ts: i64,
+    pub repo: Option<String>,
+    pub worktree: Option<String>,
+    pub wave: Option<String>,
+    pub node: String,
+    pub event: String,
+    pub command: Option<String>,
+    pub flow: Option<String>,
+    pub step: Option<String>,
+    pub step_index: Option<i64>,
+    pub error: Option<String>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub duration_secs: Option<f64>,
+}
+
 /// Token usage recorded for a single run, tagged with the wave and repo it
 /// belongs to and the provider (agent) that generated it. `repo` is optional
 /// because rows recorded before migration 043 carry no repo.

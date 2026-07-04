@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crate::engine::config::parse_agent;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
-use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
+use crate::engine::stream::{format_event, ParseResult, StreamEvent, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -658,6 +658,23 @@ fn launch_interactive(
     })
 }
 
+/// Feed token/cost stream events into the run ledger for the current run.
+fn record_stream_usage(event: &StreamEvent) {
+    match event {
+        StreamEvent::Usage {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+        } => crate::journal::record_usage(*input_tokens, *output_tokens, *cache_read_tokens),
+        StreamEvent::Result {
+            cost_usd,
+            duration_secs,
+            ..
+        } => crate::journal::record_result(*cost_usd, *duration_secs),
+        _ => {}
+    }
+}
+
 fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
@@ -734,6 +751,7 @@ fn launch_streaming(
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {
                                     for event in &events {
+                                        record_stream_usage(event);
                                         format_event(event, color);
                                     }
                                 }

@@ -156,6 +156,13 @@ pub enum Commands {
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,
+    /// Show recent loopflow runs from the local ledger (all repos, local-only)
+    Runs,
+    /// Reconstruct one run from the local ledger: steps, durations, tokens, prompt logs
+    Trace {
+        /// Run id from `lf runs` (a unique prefix is enough)
+        run_id: String,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

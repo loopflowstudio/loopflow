@@ -23,14 +23,14 @@ public enum JSONValue: Sendable, Hashable {
     }
 }
 
-public enum ItemStatus: String, Sendable, Hashable {
+public enum ItemStatus: String, Sendable, Hashable, Codable {
     case inProgress = "in_progress"
     case completed
     case failed
     case declined
 }
 
-public struct FileEdit: Sendable, Hashable {
+public struct FileEdit: Sendable, Hashable, Codable {
     public let path: String
     public let kind: String?
     public let diff: String?

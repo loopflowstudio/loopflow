@@ -88,6 +88,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSPrincipalClass: ConcertoTestsPrincipal
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Concerto.app/Contents/MacOS/Concerto
 
   ConcertoUITests:

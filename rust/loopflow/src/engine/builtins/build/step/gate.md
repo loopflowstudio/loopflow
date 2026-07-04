@@ -54,7 +54,8 @@ Make the implementation as clean as possible.
    Run the project's test suite and all required lint checks.
    - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
    - Use the repo's standard command entrypoints and CI definitions.
-   - Run everything CI enforces for the files you touched.
+   - In the iterative loop, run only what the branch touched: `uv run python scripts/test.py` maps changed files to CI suites and runs just those, fast first, skipping the slow bottlenecks (concerto, e2e, docker) with a note on why. That's the loop to tighten against.
+   - Before final ship, run the full matrix once: `uv run python scripts/test.py --all` (or the CI checks directly). Run everything CI enforces for the files you touched—nothing that would go red on the merge gate should be skipped on the last pass.
    Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**

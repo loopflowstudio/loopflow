@@ -83,6 +83,7 @@ pub(crate) enum Query {
     ListChildWaves,
     RecordRunTokenUsage,
     AggregateTokenUsageByWaveProvider,
+    AggregateTokenUsageByRepoProvider,
 }
 
 impl Query {
@@ -161,10 +162,11 @@ impl Query {
         Self::ListChildWaves,
         Self::RecordRunTokenUsage,
         Self::AggregateTokenUsageByWaveProvider,
+        Self::AggregateTokenUsageByRepoProvider,
     ];
 }
 
-const QUERY_COUNT: usize = Query::AggregateTokenUsageByWaveProvider as usize + 1;
+const QUERY_COUNT: usize = Query::AggregateTokenUsageByRepoProvider as usize + 1;
 
 #[derive(Debug, Clone, Copy)]
 struct QueryDef {
@@ -558,7 +560,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // RecordRunTokenUsage — one row per run, replaced if re-recorded.
     QueryDef {
-        template: "INSERT INTO run_token_usage (\n                run_id, wave, provider, model, input_tokens, output_tokens, cache_read_tokens, recorded_at\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8})\n            ON CONFLICT(run_id) DO UPDATE SET\n                wave = excluded.wave,\n                provider = excluded.provider,\n                model = excluded.model,\n                input_tokens = excluded.input_tokens,\n                output_tokens = excluded.output_tokens,\n                cache_read_tokens = excluded.cache_read_tokens,\n                recorded_at = excluded.recorded_at",
+        template: "INSERT INTO run_token_usage (\n                run_id, wave, provider, model, input_tokens, output_tokens, cache_read_tokens, recorded_at, repo\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9})\n            ON CONFLICT(run_id) DO UPDATE SET\n                wave = excluded.wave,\n                provider = excluded.provider,\n                model = excluded.model,\n                input_tokens = excluded.input_tokens,\n                output_tokens = excluded.output_tokens,\n                cache_read_tokens = excluded.cache_read_tokens,\n                recorded_at = excluded.recorded_at,\n                repo = excluded.repo",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -566,6 +568,14 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     // CAST keeps postgres SUM(BIGINT) (NUMERIC) readable as i64, matching sqlite.
     QueryDef {
         template: "SELECT wave, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT)\n             FROM run_token_usage\n             GROUP BY wave, provider\n             ORDER BY wave, provider",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // AggregateTokenUsageByRepoProvider — totals grouped by repo and provider.
+    // repo is nullable (rows recorded before migration 043 have NULL); NULLs
+    // group together. CAST mirrors the wave/provider aggregate above.
+    QueryDef {
+        template: "SELECT repo, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT)\n             FROM run_token_usage\n             GROUP BY repo, provider\n             ORDER BY repo, provider",
         sqlite_override: None,
         postgres_override: None,
     },

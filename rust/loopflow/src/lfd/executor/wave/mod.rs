@@ -714,6 +714,7 @@ impl WaveExecutor {
         let usage = RunTokenUsage {
             run_id: run.id.clone(),
             wave: run.wave_id.clone(),
+            repo: Some(run.repo.clone()),
             provider: provider.to_string(),
             model: None,
             input_tokens: totals.input_tokens,

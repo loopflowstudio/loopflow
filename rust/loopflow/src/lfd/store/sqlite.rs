@@ -12,8 +12,9 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_row, map_run_row, map_summary_row, map_trigger_row, map_wave_cron_row,
-    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row, map_trigger_row,
+    map_wave_cron_row, map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix,
+    serialize_pr,
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{
@@ -1852,6 +1853,7 @@ impl SqliteStore {
                 usage.output_tokens as i64,
                 usage.cache_read_tokens as i64,
                 usage.recorded_at,
+                usage.repo,
             ],
         )?;
         Ok(())
@@ -1859,12 +1861,24 @@ impl SqliteStore {
 
     pub fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByWaveProvider))?;
-        let rows = stmt.query_map([], |row| Ok(map_wave_provider_usage_row(row)))?;
+
+        let mut repo_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
+        let repo_rows = repo_stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
+        let mut by_repo_provider = Vec::new();
+        for row in repo_rows {
+            by_repo_provider.push(row??);
+        }
+
+        let mut wave_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByWaveProvider))?;
+        let wave_rows = wave_stmt.query_map([], |row| Ok(map_wave_provider_usage_row(row)))?;
         let mut by_wave_provider = Vec::new();
-        for row in rows {
+        for row in wave_rows {
             by_wave_provider.push(row??);
         }
-        Ok(TokenUsageReport::from_wave_provider(by_wave_provider))
+
+        Ok(TokenUsageReport::from_grouped(
+            by_repo_provider,
+            by_wave_provider,
+        ))
     }
 }

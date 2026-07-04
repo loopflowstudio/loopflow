@@ -3,14 +3,16 @@ primary_flow: ship-roadmap
 mode: manual
 workers: 0
 metrics:
-  - Billing stays bounded and visible — infra and agent spend has a budget and no surprises
-  - Prod uptime holds — the self-hosted lfd host and services stay up
-  - Main stays green — the merge gate is trusted and rarely red
-  - Tests finish fast — local and GitHub test time trends down, never up
-  - Releases are boring — verified before shipped, shipped on a schedule, run on infrastructure the repo owns
-  - Anything done by hand twice becomes automation; flaky or hanging machinery gets fixed, not tolerated
-  - Local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise
-  - Agents run unattended — every human-in-the-loop step a CLI or API could do (credential fetch, discovery, setup, approval) is automated away
+- Billing stays bounded and visible — infra and agent spend has a budget and no surprises
+- Prod uptime holds — the self-hosted lfd host and services stay up
+- Main stays green — the merge gate is trusted and rarely red
+- Tests finish fast — local and GitHub test time trends down, never up
+- Releases are boring — verified before shipped, shipped on a schedule, run on infrastructure the repo owns
+- Anything done by hand twice becomes automation; flaky or hanging machinery gets fixed, not tolerated
+- Local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise
+- Agents run unattended — every human-in-the-loop step a CLI or API could do (credential fetch, discovery, setup, approval) is automated away
+pm:
+  asana_project: '1216278115228408'
 ---
 
 Run one loop iteration for the Systems wave.

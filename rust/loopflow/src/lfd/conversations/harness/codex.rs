@@ -375,6 +375,9 @@ impl CodexHarness {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            // Dropping the harness (e.g. the wave mind's task is aborted)
+            // must not leak a live app-server.
+            .kill_on_drop(true)
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex --app-server: {err}"))?;
 

@@ -1,74 +1,96 @@
 //! `lf wave <name>` — the wave runtime as a long-lived REACTIVE SERVER.
 //!
 //! A wave is not a loop. `lf wave <name>` starts a server that stays up until
-//! stopped and reacts to events from two INDEPENDENT sources — one firing never
-//! blocks the other:
+//! stopped. Its brain is THE MIND ([`mind`]): one persistent vendor thread
+//! (codex app-server, driven through the conversations [`Harness`]) that
+//! handles progress and chat as one context. Turns are scheduled by events —
+//! a user message, a turn boundary with a non-empty queue, or a heartbeat
+//! tick when quiet — never a busy-loop:
 //!
 //! ```text
-//!                 ┌─ subagent progress events ──┐
-//!   Wave server ──┤                             ├──▶ react
-//!                 └─ user messages ─────────────┘
+//!                 ┌─ user messages (HTTP inbox) ─┐
+//!   Wave server ──┤                              ├──▶ the mind (one thread)
+//!                 └─ heartbeat when idle ────────┘
 //! ```
-//!
-//! - **subagent progress events** — the work. The [`progress`] arm keeps a
-//!   subagent grinding at all times; every turn increment is appended to the
-//!   wave's journal and each finalized turn commits to the thread.
-//! - **user messages** — chat over HTTP. Answered TALK-ONLY from memory and
-//!   current progress state; chat observes, it does not steer progress.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
 //! waves/<name>/`); the in-process state ([`runtime::WaveRuntime`]) — the
-//! `thread` the user sees, the mind [`state`] — is a fold of it, rebuilt on
-//! boot so a restart keeps the whole conversation. The journal is server-owned
-//! persistence, not IPC; the only coordination file is a dumb discovery
-//! pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
+//! `thread` the user sees, the mind [`state`], the vendor thread id — is a
+//! fold of it, rebuilt on boot so a restart keeps the whole conversation. The
+//! journal is server-owned persistence, not IPC; the only coordination file
+//! is a dumb discovery pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
 
 pub mod journal;
 pub mod memory;
-pub mod progress;
+pub mod mind;
 pub mod runtime;
 pub mod server;
 pub mod state;
-pub mod subagent;
 pub mod supervisor;
 
 use std::future::Future;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
+use tokio::sync::mpsc;
 
 use crate::engine::worktrees::main_repo_root;
 use crate::lf::commands::util::find_repo_root;
-use crate::lfd::wave::runtime::{run_chat_consumer, WaveRuntime};
+use crate::lfd::conversations::harness::{default_create_harness, ApprovalPolicy, Harness};
+use crate::lfd::conversations::types::ConversationEvent;
+use crate::lfd::wave::mind::MindConfig;
+use crate::lfd::wave::runtime::WaveRuntime;
 use crate::ops::util::resolve_wave_name;
 
 /// Start the reactive wave server for `name` and block until it is stopped
 /// (Ctrl-C). Binds a loopback port, publishes the discovery pointer, and runs
-/// both reactions until shutdown.
+/// the mind on a codex app-server session. The mind's cwd is the repo root
+/// the server was started from (run `lf wave` from the wave's worktree);
+/// wave state (journal, discovery pointer, MEMORY.md) lives under the main
+/// repo so Concerto and a restarted server agree on where it is.
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root).unwrap_or(repo_root);
+    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
 
+    let (events_tx, events_rx) = mpsc::unbounded_channel();
+    let harness = default_create_harness("codex", ApprovalPolicy::AutoApprove, events_tx)?;
+
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(serve(main_repo, wave, shutdown_signal()))
+    rt.block_on(serve(
+        main_repo,
+        repo_root,
+        wave,
+        harness,
+        events_rx,
+        shutdown_signal(),
+    ))
 }
 
-/// Serve the wave until `shutdown` resolves. Factored out so tests can drive a
-/// deterministic shutdown instead of Ctrl-C.
+/// Serve the wave until `shutdown` resolves. The harness and its event stream
+/// are parameters so tests can drive a mock instead of a real vendor process.
 async fn serve(
     repo_root: PathBuf,
+    mind_cwd: PathBuf,
     wave: String,
+    harness: Box<dyn Harness>,
+    events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
 
-    // Reaction 2 (chat) and the autonomous progress arm run as independent
-    // top-level tasks so neither blocks the other. Each progress *pass* is
-    // tracked in the supervisor, so `/health` reflects live subagents.
-    let chat = tokio::spawn(run_chat_consumer(runtime.clone(), inbox_rx));
-    let progress = tokio::spawn(progress::run_progress_arm(runtime.clone()));
+    // The mind is the wave's one brain: it owns the vendor thread and reacts
+    // to user messages and heartbeats. It runs as its own task so the HTTP
+    // surface never blocks on a turn.
+    let mind = tokio::spawn(mind::run_mind(
+        runtime.clone(),
+        inbox_rx,
+        harness,
+        events_rx,
+        mind_cwd,
+        MindConfig::default(),
+    ));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -87,9 +109,9 @@ async fn serve(
         .with_graceful_shutdown(shutdown)
         .await;
 
-    // Shutdown: stop the arms and every live subagent, drop the pointer.
-    progress.abort();
-    chat.abort();
+    // Shutdown: stop the mind (its harness child dies with it — kill_on_drop)
+    // and every live subagent, drop the pointer.
+    mind.abort();
     runtime.supervisor().shutdown_all();
     server::remove_endpoint(&repo_root, &wave);
 
@@ -107,10 +129,41 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::engine::stream::{ResultSubtype, StreamEvent};
-    use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnBuilder};
-    use crate::lfd::conversations::types::Lifecycle;
+    use crate::engine::agent::AgentConfig;
+    use crate::lfd::conversations::harness::Capabilities;
+    use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
+    use crate::lfd::conversations::types::{ConversationItem, Lifecycle, TurnUsage};
+    use crate::lfd::wave::mind::EventAdapter;
     use crate::lfd::wave::runtime::TurnSink;
+
+    /// A harness that never speaks: `serve` tests exercise the HTTP shell,
+    /// not a vendor process.
+    struct StubHarness;
+
+    #[async_trait::async_trait]
+    impl Harness for StubHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
+            Ok(())
+        }
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn interrupt(&mut self) -> Result<()> {
+            Ok(())
+        }
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                supports_steer: false,
+                supports_interrupt: false,
+            }
+        }
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
@@ -123,23 +176,22 @@ mod tests {
         }
     }
 
-    /// Inject a finalized progress turn, as the progress arm's sink would.
+    /// Inject a finalized assistant turn, as a completed mind turn would land.
     fn narrate(runtime: &WaveRuntime, text: &str) {
         runtime.append_finalized_turn(progress_turn(text), Vec::new());
     }
 
-    /// Boot just the HTTP surface + chat consumer over a runtime we control,
-    /// without the real-codex progress arm. Returns the bound address and the
-    /// runtime so the test can inject progress turns directly.
+    /// Boot just the HTTP surface over a runtime we control, without a mind.
+    /// Returns the bound address and the runtime so the test can inject turns
+    /// directly.
     async fn boot() -> (String, std::sync::Arc<WaveRuntime>, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("wave/ship");
         std::fs::create_dir_all(&dir).expect("dir");
         std::fs::write(dir.join("MEMORY.md"), "Goal: ship the reactive server.\n").expect("mem");
 
-        let (runtime, inbox_rx) =
+        let (runtime, _inbox_rx) =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        tokio::spawn(run_chat_consumer(runtime.clone(), inbox_rx));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -161,7 +213,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subagent_turn_appears_in_conversation() {
+    async fn finalized_turn_appears_in_conversation() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "Implemented the reactive server.");
 
@@ -176,9 +228,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn posted_message_appears_as_user_turn_and_gets_a_reply() {
+    async fn posted_message_appears_as_user_turn() {
         let (base, runtime, _tmp) = boot().await;
-        narrate(&runtime, "wired the SSE stream");
 
         let client = reqwest::Client::new();
         let posted: ChatTurn = client
@@ -193,13 +244,11 @@ mod tests {
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
 
-        // The chat consumer appends exactly one reply, drawn from progress+memory.
-        wait_for(|| runtime.thread_snapshot().len() >= 3).await;
+        // The message is in the thread; the mind answers it at its next turn
+        // (mind scheduling is covered in mind.rs tests).
         let thread = runtime.thread_snapshot();
-        let reply = thread.last().unwrap();
-        assert_eq!(reply.role, ChatRole::Assistant);
-        assert!(reply.text.contains("wired the SSE stream"));
-        assert!(reply.text.contains("ship the reactive server"));
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].role, ChatRole::User);
     }
 
     #[tokio::test]
@@ -338,10 +387,49 @@ mod tests {
             .collect()
     }
 
-    /// Feed one stream event through the production delta pipeline.
-    fn feed(builder: &mut TurnBuilder, sink: &mut TurnSink, event: StreamEvent) {
-        for delta in builder.feed(&event) {
+    /// Feed one harness event through the production delta pipeline.
+    fn feed(adapter: &mut EventAdapter, sink: &mut TurnSink, event: ConversationEvent) {
+        for delta in adapter.feed(&event) {
             sink.on_delta(delta);
+        }
+    }
+
+    fn ev_started() -> ConversationEvent {
+        ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        }
+    }
+
+    fn ev_text(text: &str) -> ConversationEvent {
+        ConversationEvent::ItemCompleted {
+            turn_id: "vt".into(),
+            item: ConversationItem::Message {
+                id: "m".into(),
+                text: text.into(),
+                phase: None,
+            },
+        }
+    }
+
+    fn ev_completed() -> ConversationEvent {
+        ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        }
+    }
+
+    fn ev_usage() -> ConversationEvent {
+        ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
         }
     }
 
@@ -352,12 +440,9 @@ mod tests {
 
         // A turn is mid-flight before the client connects.
         let mut sink = TurnSink::new(runtime.clone());
-        let mut builder = TurnBuilder::new();
-        feed(
-            &mut builder,
-            &mut sink,
-            StreamEvent::Text("thinking".into()),
-        );
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_text("thinking"));
 
         // Late subscriber: replay carries the finalized thread AND the open turn.
         let mut client = SseClient::connect(&base).await;
@@ -372,13 +457,12 @@ mod tests {
         );
         let open = frames
             .iter()
-            .find(|t| t.status == Lifecycle::Running)
+            .find(|t| t.status == Lifecycle::Running && t.text == "thinking")
             .unwrap()
             .clone();
-        assert_eq!(open.text, "thinking");
 
         // Re-broadcast: the same id grows in place.
-        feed(&mut builder, &mut sink, StreamEvent::Text("more".into()));
+        feed(&mut adapter, &mut sink, ev_text("more"));
         client
             .frames_until(|f| {
                 f.iter().any(|t| {
@@ -388,15 +472,8 @@ mod tests {
             .await;
 
         // Finalization replaces it terminally, same id.
-        feed(
-            &mut builder,
-            &mut sink,
-            StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: None,
-            },
-        );
+        feed(&mut adapter, &mut sink, ev_completed());
+        feed(&mut adapter, &mut sink, ev_usage());
         let frames = client
             .frames_until(|f| {
                 f.iter()
@@ -412,12 +489,9 @@ mod tests {
     async fn conversation_includes_the_open_running_turn() {
         let (base, runtime, _tmp) = boot().await;
         let mut sink = TurnSink::new(runtime.clone());
-        let mut builder = TurnBuilder::new();
-        feed(
-            &mut builder,
-            &mut sink,
-            StreamEvent::Text("half a thought".into()),
-        );
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_text("half a thought"));
 
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
@@ -431,15 +505,8 @@ mod tests {
         assert_eq!(turns[0]["text"], "half a thought");
 
         // After finalization the same id is served exactly once, terminal.
-        feed(
-            &mut builder,
-            &mut sink,
-            StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: None,
-            },
-        );
+        feed(&mut adapter, &mut sink, ev_completed());
+        feed(&mut adapter, &mut sink, ev_usage());
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
@@ -460,12 +527,9 @@ mod tests {
             let (runtime, _rx) =
                 WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
             let mut sink = TurnSink::new(runtime.clone());
-            let mut builder = TurnBuilder::new();
-            feed(
-                &mut builder,
-                &mut sink,
-                StreamEvent::Text("half a thought".into()),
-            );
+            let mut adapter = EventAdapter::new();
+            feed(&mut adapter, &mut sink, ev_started());
+            feed(&mut adapter, &mut sink, ev_text("half a thought"));
         }
 
         // Second life: journal replay + boot janitor close the crash tail.
@@ -509,10 +573,21 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
+        let cwd = repo.clone();
+        // Keep the events sender alive so the stub mind doesn't see a closed
+        // stream.
+        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
-            serve(repo2, "ship".into(), async {
-                let _ = shutdown_rx.await;
-            })
+            serve(
+                repo2,
+                cwd,
+                "ship".into(),
+                Box::new(StubHarness),
+                events_rx,
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
             .await
         });
 

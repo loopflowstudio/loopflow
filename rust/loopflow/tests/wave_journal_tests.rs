@@ -5,37 +5,71 @@ use std::path::Path;
 use std::sync::Arc;
 
 use loopflow::lfd::conversations::turns::ChatRole;
-use loopflow::lfd::conversations::types::Lifecycle;
+use loopflow::lfd::conversations::types::{
+    ConversationEvent, ConversationItem, Lifecycle, TurnUsage,
+};
 use loopflow::lfd::wave::journal::{fold_thread, journal_path, Journal};
+use loopflow::lfd::wave::mind::EventAdapter;
 use loopflow::lfd::wave::runtime::{TurnSink, WaveRuntime};
 use loopflow::lfd::wave::server;
 use loopflow::lfd::wave::state::MindState;
-use loopflow::lfd::wave::subagent::{run_subagent, SubagentSpec};
 
-/// Canned codex `exec --json` output replayed via `printf` — the same
-/// replay-binary fixture the subagent unit tests use.
-fn replay_spec(lines: &[&str]) -> SubagentSpec {
-    SubagentSpec {
-        label: "replay".to_string(),
-        program: "printf".to_string(),
-        args: vec!["%s\\n".to_string(), lines.join("\n")],
-        cwd: std::env::temp_dir(),
-    }
+/// One complete harness turn, as the codex driver would emit it: a command
+/// item, the final agent message, the turn completion, then trailing usage.
+fn codex_turn_events() -> Vec<ConversationEvent> {
+    vec![
+        ConversationEvent::TurnStarted {
+            turn_id: "vt-1".into(),
+        },
+        ConversationEvent::ItemCompleted {
+            turn_id: "vt-1".into(),
+            item: ConversationItem::Command {
+                id: "item-0".into(),
+                command: vec!["cargo test".into()],
+                cwd: String::new(),
+                status: Lifecycle::Completed,
+                output: None,
+                exit_code: Some(0),
+                duration_ms: None,
+            },
+        },
+        ConversationEvent::ItemCompleted {
+            turn_id: "vt-1".into(),
+            item: ConversationItem::Message {
+                id: "item-1".into(),
+                text: "Implemented the feature.".into(),
+                phase: None,
+            },
+        },
+        ConversationEvent::TurnCompleted {
+            turn_id: "vt-1".into(),
+            status: Lifecycle::Completed,
+        },
+        ConversationEvent::TurnUsage {
+            turn_id: "vt-1".into(),
+            usage: TurnUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: None,
+            },
+        },
+    ]
 }
 
-const CODEX_FIXTURE: &[&str] = &[
-    r#"{"type":"item.started","item":{"type":"command_execution","command":"cargo test"}}"#,
-    r#"{"type":"item.completed","item":{"type":"agent_message","text":"Implemented the feature."}}"#,
-    r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#,
-];
-
-/// Run one replay pass through the production pipeline (parser → TurnBuilder
-/// deltas → TurnSink → journal + thread).
-async fn run_replay_pass(runtime: Arc<WaveRuntime>, lines: &[&str]) {
+/// Run one harness turn through the production pipeline (EventAdapter →
+/// TurnDeltas → TurnSink → journal + thread).
+fn run_harness_turn(runtime: Arc<WaveRuntime>, events: &[ConversationEvent]) {
     let mut sink = TurnSink::new(runtime);
-    run_subagent(&replay_spec(lines), |delta| sink.on_delta(delta))
-        .await
-        .expect("run replay pass");
+    let mut adapter = EventAdapter::new();
+    for event in events {
+        for delta in adapter.feed(event) {
+            sink.on_delta(delta);
+        }
+    }
 }
 
 fn turn_seq(id: &str) -> u64 {
@@ -58,7 +92,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     let before = {
         let rt = open_wave(tmp.path());
         rt.deliver_user_message("please build the feature".into());
-        run_replay_pass(rt.clone(), CODEX_FIXTURE).await;
+        run_harness_turn(rt.clone(), &codex_turn_events());
         let before = rt.thread_snapshot();
         assert_eq!(before.len(), 2);
         before
@@ -87,7 +121,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
 async fn fold_of_journal_equals_the_turns_the_live_pipeline_built() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
-    run_replay_pass(rt.clone(), CODEX_FIXTURE).await;
+    run_harness_turn(rt.clone(), &codex_turn_events());
     let live = rt.thread_snapshot();
 
     // Independent fold of the raw journal — no runtime involved.
@@ -96,7 +130,6 @@ async fn fold_of_journal_equals_the_turns_the_live_pipeline_built() {
     assert!(fold.open.is_empty());
     assert_eq!(fold.turns, live, "fold(journal) == live thread");
 
-    // And both match what the old in-memory path produced for this fixture.
     assert_eq!(live.len(), 1);
     let turn = &live[0];
     assert_eq!(turn.role, ChatRole::Assistant);
@@ -108,12 +141,9 @@ async fn fold_of_journal_equals_the_turns_the_live_pipeline_built() {
 #[tokio::test]
 async fn crashed_open_turn_is_finalized_failed_on_reboot() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    // A pass that dies mid-turn: content but no terminating result. The
-    // subagent driver finalizes it Failed — now also simulate the server
-    // crashing before that, by writing the started/item events only.
+    // A server that dies mid-turn leaves started/item events with no finish.
     {
         let (mut journal, _) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open");
-        use loopflow::lfd::conversations::types::ConversationItem;
         use loopflow::lfd::wave::journal::EventKind;
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
@@ -172,6 +202,19 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
     // The journal still appends cleanly after truncation.
     rt.deliver_user_message("after the crash".into());
     assert_eq!(rt.thread_snapshot().len(), 2);
+}
+
+#[tokio::test]
+async fn thread_started_survives_a_restart() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    {
+        let rt = open_wave(tmp.path());
+        assert_eq!(rt.last_thread_id(), None);
+        rt.journal_thread_started("codex", "thread-abc");
+    }
+    // The resume handle is a fold of the journal, like everything else.
+    let rt = open_wave(tmp.path());
+    assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
 }
 
 #[tokio::test]

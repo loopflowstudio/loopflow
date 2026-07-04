@@ -1,28 +1,44 @@
 # wave — the reactive wave server
 
-`lf wave <name>` starts a long-lived server for a wave. It is **not** a loop: it
-stays up until stopped and reacts to two independent event sources — neither
-blocks the other.
+`lf wave <name>` starts a long-lived server for a wave. It is **not** a loop:
+its brain is **the mind** — one persistent codex app-server thread, driven
+through the conversations harness — and turns are scheduled by events, never
+a busy-loop.
 
 ```
-                ┌─ subagent progress events ──┐
-  Wave server ──┤                             ├──▶ react
-                └─ user messages ─────────────┘
+                ┌─ user messages (HTTP inbox) ─┐
+  Wave server ──┤                              ├──▶ the mind (one vendor thread)
+                └─ heartbeat when idle ────────┘
 ```
 
-- **Progress** (autonomous): the [`progress`] arm keeps a `codex exec --json`
-  subagent grinding. Every turn increment is appended to the wave's journal;
-  each finalized turn commits to the thread.
-- **Chat** (over HTTP): a user message is answered **talk-only** from memory and
-  current progress state. Chat observes; it does not steer progress.
+- **One mind, two inputs.** Chat and progress share the same context. A
+  message while idle starts a turn immediately; messages during a turn queue
+  (append-and-coalesce, never rejected) and one boundary turn drains them
+  all — its journal `TurnStarted.answers` names every consumed message. Quiet
+  for 5 minutes with an empty queue → a heartbeat turn nudges the next
+  orchestration step.
+- **The mind orchestrates, never grinds.** Its operating prompt is the
+  rendered `GOAL.md` seed plus the coordinating-session discipline; heavy
+  work is dispatched to subagents (`lfq worker run`, arriving with the
+  lfd-observation phase).
+- **Failure is bounded.** A failed turn returns the mind to idle; three
+  consecutive failures (or a dead vendor session) mark the mind `failed` and
+  stop the heartbeat. The next user message revives it.
 
 Truth is the per-wave append-only journal —
 `.lf/journal/waves/<name>/journal.jsonl`, per-machine, never committed. The
-in-process state (`WaveRuntime`) is a fold of it: the `thread` the user sees
-and the mind state are rebuilt from the journal on boot, so a restart keeps
-the full conversation and turn ids continue monotonically. `wave/<name>/
-MEMORY.md` is read-only here (seeds prompts and chat); the journal carries the
-raw history. The journal is server-owned persistence, not IPC.
+in-process state (`WaveRuntime`) is a fold of it: the `thread` the user sees,
+the mind state, and the vendor thread id are rebuilt from the journal on
+boot, so a restart keeps the full conversation and turn ids continue
+monotonically. The vendor thread itself cold-starts on codex (the app-server
+driver takes no resume id); the new `ThreadStarted` is journaled so the break
+is explicit. `wave/<name>/MEMORY.md` is read-only here (seeds the mind); the
+journal carries the raw history. The journal is server-owned persistence, not
+IPC.
+
+The mind runs in the repo root the server was started from — run `lf wave`
+from the wave's worktree. Main-checkout protection and worktree bootstrap
+arrive with the lfd-registration phase.
 
 ## Wire contract (snake_case, stable)
 
@@ -37,7 +53,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 | `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
 | `GET /conversation/stream`| SSE; each event named `turn`, `data:` a `Turn` JSON. Replays the thread on connect, then streams live. |
-| `POST /messages {text}`   | Appends a user `Turn` and returns it. The reply lands as a later `assistant` turn. |
+| `POST /messages {text}`   | Appends a user `Turn` and returns it. The mind answers it at its next turn boundary. |
 
 ### Turn
 
@@ -52,9 +68,9 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 }
 ```
 
-`items` are the tool/command/file/message artifacts a subagent produced, in
-order (`ConversationItem` — see `lfd/conversations/types.rs`). User and reply
-turns carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
+`items` are the tool/command/file/message artifacts the mind produced, in
+order (`ConversationItem` — see `lfd/conversations/types.rs`). User turns
+carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
 across all sources.
 
 ## Demo

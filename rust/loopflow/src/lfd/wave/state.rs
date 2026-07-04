@@ -6,9 +6,11 @@
 //! and the mind returns to `Idle`; [`MindState::Failed`] is reserved for the
 //! mind itself (thread dead, retries exhausted).
 //!
-//! `Interrupting` and `Failed` have no production producers yet — interrupt
-//! lands with the mind-on-harness phase. They are covered in the transition
-//! table and tests now so the table is complete when those producers arrive.
+//! `Failed` is produced by the mind's scheduler (consecutive-failure cap or a
+//! terminal harness error — see [`super::mind`]); `Failed → Idle` fires when
+//! a user message revives the mind. `Interrupting` has no production producer
+//! yet — interrupt ops land with a later phase; it is covered in the
+//! transition table and tests now so the table is complete when they arrive.
 //!
 //! Transitions go through [`can_transition`]; an illegal move is a bug —
 //! logged and refused by the caller (see `WaveRuntime::transition`), never

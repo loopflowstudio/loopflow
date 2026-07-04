@@ -13,13 +13,13 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! Several kinds have no producers yet: `ThreadStarted` arrives with the
-//! mind-on-harness phase (the vendor thread id is the mind's first durable
-//! act); `WorkerDispatched`/`WorkerFinished` arrive with the lfd-observation
-//! phase (the server tails lfd's event stream — these are confirmed facts,
-//! not commands); `MemoryUpdated` arrives when the mind starts curating
-//! MEMORY.md deliberately. They are defined now so the log format is settled
-//! before its producers land.
+//! Two kinds have no producers yet: `WorkerDispatched`/`WorkerFinished`
+//! arrive with the lfd-observation phase (the server tails lfd's event
+//! stream — these are confirmed facts, not commands); `MemoryUpdated`
+//! arrives when the mind starts curating MEMORY.md deliberately. They are
+//! defined now so the log format is settled before its producers land.
+//! `ThreadStarted` is produced by the mind: the vendor thread id is its
+//! first durable act, journaled before the first turn.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -300,19 +300,23 @@ pub struct ThreadFold {
     pub open: Vec<ChatTurn>,
     /// Last `MindState` transition's destination; `Idle` if none.
     pub state: MindState,
+    /// Last `ThreadStarted`'s vendor thread id — the resume handle for the
+    /// mind's persistent vendor session.
+    pub thread_id: Option<String>,
 }
 
 /// Fold journal events into the thread — the pure function the in-memory
 /// `Vec<ChatTurn>` cache materializes.
 ///
 /// `Message` items are prose fragments: they join into `ChatTurn.text` with
-/// `'\n'`, exactly as `TurnBuilder` accumulates live text. All other items
-/// land in `ChatTurn.items`.
+/// `'\n'`, exactly as the live open-turn snapshot accumulates text. All other
+/// items land in `ChatTurn.items`.
 pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut turns: Vec<ChatTurn> = Vec::new();
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
     let mut state = MindState::Idle;
+    let mut thread_id: Option<String> = None;
 
     for event in events {
         match &event.kind {
@@ -367,14 +371,23 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MindState { to, .. } => {
                 state = to.clone();
             }
-            EventKind::ThreadStarted { .. }
-            | EventKind::WorkerDispatched { .. }
+            EventKind::ThreadStarted {
+                thread_id: started, ..
+            } => {
+                thread_id = Some(started.clone());
+            }
+            EventKind::WorkerDispatched { .. }
             | EventKind::WorkerFinished { .. }
             | EventKind::MemoryUpdated { .. } => {}
         }
     }
 
-    ThreadFold { turns, open, state }
+    ThreadFold {
+        turns,
+        open,
+        state,
+        thread_id,
+    }
 }
 
 #[cfg(test)]
@@ -561,9 +574,14 @@ mod tests {
             status: Lifecycle::Completed,
             usage: Usage::empty(),
         }));
+        events.push(journal.append(|_| EventKind::ThreadStarted {
+            vendor: "codex".into(),
+            thread_id: "thread-abc".into(),
+        }));
 
         let fold = fold_thread(&events);
         assert!(fold.open.is_empty());
+        assert_eq!(fold.thread_id.as_deref(), Some("thread-abc"));
         assert_eq!(fold.turns.len(), 2);
         assert_eq!(fold.turns[0].role, ChatRole::User);
         assert_eq!(fold.turns[0].id, "turn-1");

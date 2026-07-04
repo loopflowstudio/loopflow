@@ -11,13 +11,16 @@
 //!   records — served after the finalized thread and re-broadcast as it grows,
 //!   so subscribers watch a turn stream instead of minutes of silence;
 //! - the mind state is the last `MindState` event;
+//! - the vendor thread id is the last `ThreadStarted` event — the mind's
+//!   resume handle;
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
 //!
-//! Two independent event sources feed the journal: subagent progress deltas
-//! (via [`TurnSink`]) and user messages (HTTP → inbox channel). All appends
-//! go through one lock, so journal order, cache order, and broadcast order
-//! agree — one writer appends and broadcasts.
+//! Two independent inputs feed the journal: the mind's harness events (via
+//! [`TurnSink`], driven by the mind's scheduler in [`super::mind`]) and user
+//! messages (HTTP → inbox channel). All appends go through one lock, so
+//! journal order, cache order, and broadcast order agree — one writer appends
+//! and broadcasts.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -38,7 +41,7 @@ use crate::lfd::wave::supervisor::Supervisor;
 /// of truth, so a dropped live turn is never lost.
 const TURN_BROADCAST_CAPACITY: usize = 256;
 
-/// A user message pulled from the inbox, awaiting a reply.
+/// A user message pulled from the inbox, awaiting a turn that answers it.
 #[derive(Debug, Clone)]
 pub struct UserMessage {
     pub id: MessageId,
@@ -46,8 +49,8 @@ pub struct UserMessage {
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
-/// thread cache (fold of it), the open-turn snapshot, and the mind state
-/// (last transition).
+/// thread cache (fold of it), the open-turn snapshot, the mind state (last
+/// transition), and the vendor thread id (last `ThreadStarted`).
 #[derive(Debug)]
 struct Inner {
     journal: Journal,
@@ -58,6 +61,7 @@ struct Inner {
     /// when the terminal turn commits to `thread` under the same id.
     open_turn: Option<ChatTurn>,
     state: MindState,
+    thread_id: Option<String>,
 }
 
 /// The whole live state of one running wave server.
@@ -75,7 +79,7 @@ pub struct WaveRuntime {
     memory: Memory,
     /// In-process user-message inbox (a channel, not a file).
     inbox_tx: mpsc::UnboundedSender<UserMessage>,
-    /// Tracks all live subagent runs.
+    /// Tracks all live subagent runs (the worker-dispatch phase spawns here).
     supervisor: Arc<Supervisor>,
 }
 
@@ -129,6 +133,7 @@ impl WaveRuntime {
                 thread: fold.turns,
                 open_turn: None,
                 state,
+                thread_id: fold.thread_id,
             }),
             turn_tx,
             memory,
@@ -167,6 +172,22 @@ impl WaveRuntime {
     /// Current mind state, for `/health` and the composer.
     pub fn mind_state(&self) -> MindState {
         self.inner().state.clone()
+    }
+
+    /// The last journaled vendor thread id, if any — the mind's resume handle.
+    pub fn last_thread_id(&self) -> Option<String> {
+        self.inner().thread_id.clone()
+    }
+
+    /// Journal the vendor thread the mind runs on. The borrowed-handle rule:
+    /// this is the mind's first durable act, appended before its first turn.
+    pub fn journal_thread_started(&self, vendor: &str, thread_id: &str) {
+        let mut inner = self.inner();
+        inner.journal.append(|_| EventKind::ThreadStarted {
+            vendor: vendor.to_string(),
+            thread_id: thread_id.to_string(),
+        });
+        inner.thread_id = Some(thread_id.to_string());
     }
 
     /// Atomically snapshot the thread (including the open turn) and subscribe
@@ -217,11 +238,11 @@ impl WaveRuntime {
     }
 
     /// Deliver a user message: append its `UserMessage` event, commit the user
-    /// turn (id from the event's seq), and hand it to the inbox for the chat
-    /// consumer. Returns the stored user turn so the HTTP handler can echo it.
+    /// turn (id from the event's seq), and hand it to the inbox for the mind's
+    /// scheduler. Returns the stored user turn so the HTTP handler can echo it.
     ///
     /// Wire body is `{text}` for now, so the op is always `Message`; steering
-    /// ops land with the mind phase.
+    /// ops land with a later phase.
     pub fn deliver_user_message(&self, text: String) -> ChatTurn {
         let (turn, id) = {
             let mut inner = self.inner();
@@ -235,7 +256,7 @@ impl WaveRuntime {
             turn.created_at = event.at_rfc3339();
             (self.commit_locked(&mut inner, turn), id)
         };
-        // Unbounded inbox: delivering a message never blocks progress.
+        // Unbounded inbox: delivering a message never blocks the mind.
         let _ = self.inbox_tx.send(UserMessage { id, text });
         turn
     }
@@ -243,8 +264,8 @@ impl WaveRuntime {
     /// Record an already-finalized turn as its full event triple
     /// (`TurnStarted` + `TurnItem`s + `TurnFinished`) and commit it. Text
     /// becomes a `Message` item so the fold reproduces it. Does not touch the
-    /// mind state — this is for instantaneous turns (chat replies, injected
-    /// narration), not mind turns.
+    /// mind state — this is for instantaneous turns (injected narration), not
+    /// mind turns.
     pub fn append_finalized_turn(&self, turn: ChatTurn, answers: Vec<MessageId>) -> ChatTurn {
         let mut inner = self.inner();
         let started = inner.journal.append(|seq| EventKind::TurnStarted {
@@ -281,25 +302,6 @@ impl WaveRuntime {
         self.commit_locked(&mut inner, committed)
     }
 
-    /// Reaction 2 (chat): compose a TALK-ONLY reply from memory + current
-    /// progress state and record it as a turn answering `message`. Chat
-    /// observes; it does not steer progress (no memory writes, no spawning,
-    /// no reprioritizing).
-    pub fn reply_to(&self, message: &UserMessage) -> ChatTurn {
-        let reply = compose_reply(message, &self.thread_snapshot(), &self.memory);
-        self.append_finalized_turn(
-            ChatTurn {
-                id: String::new(),
-                role: ChatRole::Assistant,
-                text: reply,
-                status: Lifecycle::Completed,
-                items: Vec::new(),
-                created_at: String::new(),
-            },
-            vec![message.id.clone()],
-        )
-    }
-
     // -- TurnSink internals (same lock discipline as everything above) --
     //
     // Every content delta (opened / text / item) re-broadcasts the open-turn
@@ -309,14 +311,11 @@ impl WaveRuntime {
     // trailing frame would leave subscribers stale through a long tool call.
     // A throttle earns its place with the part-grained wire, not before.
 
-    fn sink_turn_started(&self) -> Event {
+    fn sink_turn_started(&self, answers: Vec<MessageId>) -> Event {
         let mut inner = self.inner();
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
-            // TODO(mind phase): name the queued MessageIds the pass's prompt
-            // consumed. build_progress_prompt doesn't read the inbox yet, so
-            // claiming answers here would be a lie.
-            answers: Vec::new(),
+            answers,
         });
         let turn_id = format!("turn-{}", event.seq);
         self.transition_locked(
@@ -384,14 +383,19 @@ fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
     turns
 }
 
-/// Folds a subagent pass's [`TurnDelta`]s into journal events and committed
-/// turns: `Opened` → `TurnStarted` (+ `Idle → Turning`), text/items →
-/// `TurnItem`s, usage accrues, `Finished` → `TurnFinished` (+ `Turning →
-/// Idle`) and the turn commits to the thread. One sink per pass.
+/// Folds the mind's [`TurnDelta`]s into journal events and committed turns:
+/// `Opened` → `TurnStarted` (+ `Idle → Turning`, claiming any expected
+/// answers), text/items → `TurnItem`s, usage accrues, `Finished` →
+/// `TurnFinished` (+ `Turning → Idle`) and the turn commits to the thread.
+/// One sink spans the mind's whole life; it resets itself at each `Finished`.
 #[derive(Debug)]
 pub struct TurnSink {
     runtime: Arc<WaveRuntime>,
     open: Option<OpenTurn>,
+    /// The queued `MessageId`s the next `Opened` claims as
+    /// `TurnStarted.answers` — the consumption marker. Set by the scheduler
+    /// before it sends a turn's input; taken when the turn opens.
+    pending_answers: Vec<MessageId>,
 }
 
 #[derive(Debug)]
@@ -408,13 +412,21 @@ impl TurnSink {
         Self {
             runtime,
             open: None,
+            pending_answers: Vec::new(),
         }
+    }
+
+    /// Declare which queued messages the next turn answers. The next `Opened`
+    /// delta journals them in its `TurnStarted.answers`.
+    pub fn expect_answers(&mut self, answers: Vec<MessageId>) {
+        self.pending_answers = answers;
     }
 
     pub fn on_delta(&mut self, delta: TurnDelta) {
         match delta {
             TurnDelta::Opened => {
-                let event = self.runtime.sink_turn_started();
+                let answers = std::mem::take(&mut self.pending_answers);
+                let event = self.runtime.sink_turn_started(answers);
                 self.open = Some(OpenTurn {
                     turn_id: format!("turn-{}", event.seq),
                     started_at: event.at_rfc3339(),
@@ -480,58 +492,11 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     }
 }
 
-/// Drain the inbox, replying to each user message. One reply per message,
-/// TALK-ONLY. Runs until the inbox closes (server shutdown).
-pub async fn run_chat_consumer(
-    runtime: Arc<WaveRuntime>,
-    mut inbox_rx: mpsc::UnboundedReceiver<UserMessage>,
-) {
-    while let Some(message) = inbox_rx.recv().await {
-        runtime.reply_to(&message);
-    }
-}
-
-/// Build a talk-only reply purely by observing state: what progress has
-/// narrated so far, and the head of memory. Deterministic — this is where a
-/// chat LLM would slot in later, but even now it must only read, never steer.
-fn compose_reply(message: &UserMessage, thread: &[ChatTurn], memory: &Memory) -> String {
-    let progress: Vec<&ChatTurn> = thread
-        .iter()
-        .filter(|t| t.role == ChatRole::Assistant && !t.text.trim().is_empty())
-        .collect();
-    let latest = progress
-        .last()
-        .map(|t| snippet(&t.text, 200))
-        .unwrap_or_else(|| "no progress narrated yet".to_string());
-
-    let mut reply = format!(
-        "You asked: \"{}\".\n\nProgress so far: {} update(s). Latest: {}.",
-        snippet(&message.text, 200),
-        progress.len(),
-        latest,
-    );
-
-    let mem = memory.head(6);
-    if !mem.trim().is_empty() {
-        reply.push_str("\n\nFrom memory:\n");
-        reply.push_str(&mem);
-    }
-    reply
-}
-
-fn snippet(text: &str, max: usize) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        return flat;
-    }
-    let truncated: String = flat.chars().take(max).collect();
-    format!("{truncated}…")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::conversations::types::Lifecycle;
+    use crate::lfd::conversations::types::{ConversationEvent, Lifecycle, TurnUsage};
+    use crate::lfd::wave::mind::EventAdapter;
 
     /// Parse the sequence out of a `"turn-<n>"` id; panics on a malformed one
     /// (ids are always minted from journal seqs).
@@ -556,6 +521,66 @@ mod tests {
         repo: &std::path::Path,
     ) -> (Arc<WaveRuntime>, mpsc::UnboundedReceiver<UserMessage>) {
         WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
+    }
+
+    /// Feed one harness event through the production pipeline
+    /// (adapter → deltas → sink).
+    fn feed(adapter: &mut EventAdapter, sink: &mut TurnSink, event: ConversationEvent) {
+        for delta in adapter.feed(&event) {
+            sink.on_delta(delta);
+        }
+    }
+
+    fn ev_started() -> ConversationEvent {
+        ConversationEvent::TurnStarted {
+            turn_id: "vendor-turn".into(),
+        }
+    }
+
+    fn ev_text(text: &str) -> ConversationEvent {
+        ConversationEvent::ItemCompleted {
+            turn_id: "vendor-turn".into(),
+            item: ConversationItem::Message {
+                id: "item".into(),
+                text: text.into(),
+                phase: None,
+            },
+        }
+    }
+
+    fn ev_tool() -> ConversationEvent {
+        ConversationEvent::ItemCompleted {
+            turn_id: "vendor-turn".into(),
+            item: ConversationItem::Tool {
+                id: "item-tool".into(),
+                name: "Bash".into(),
+                status: Lifecycle::Completed,
+                input: None,
+                output: Some("cargo test".into()),
+            },
+        }
+    }
+
+    fn ev_completed(status: Lifecycle) -> ConversationEvent {
+        ConversationEvent::TurnCompleted {
+            turn_id: "vendor-turn".into(),
+            status,
+        }
+    }
+
+    fn ev_usage(input: u64, output: u64) -> ConversationEvent {
+        ConversationEvent::TurnUsage {
+            turn_id: "vendor-turn".into(),
+            usage: TurnUsage {
+                input_tokens: input,
+                output_tokens: output,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: None,
+                cost_usd: Some(0.02),
+            },
+        }
     }
 
     #[test]
@@ -585,31 +610,24 @@ mod tests {
         let turn = rt.deliver_user_message("how goes it?".into());
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
-        // The message landed in the inbox for the consumer, id tied to its event.
+        // The message landed in the inbox for the mind, id tied to its event.
         let msg = rx.try_recv().expect("inbox message");
         assert_eq!(msg.text, "how goes it?");
         assert_eq!(msg.id, MessageId(format!("msg-{}", turn_seq(&turn.id))));
     }
 
     #[test]
-    fn reply_reflects_progress_and_memory_without_steering() {
+    fn thread_id_round_trips_through_the_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(tmp.path().join("wave/ship")).expect("dir");
-        std::fs::write(tmp.path().join("wave/ship/MEMORY.md"), "Goal: ship it.\n").expect("mem");
+        {
+            let (rt, _rx) = open_runtime(tmp.path());
+            assert_eq!(rt.last_thread_id(), None);
+            rt.journal_thread_started("codex", "thread-abc");
+            assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
+        }
+        // A restarted runtime folds the resume handle back out of the log.
         let (rt, _rx) = open_runtime(tmp.path());
-        rt.append_finalized_turn(progress_turn("wired the reactive server"), Vec::new());
-        let mem_before = rt.memory().read();
-
-        let reply = rt.reply_to(&UserMessage {
-            id: MessageId("msg-99".into()),
-            text: "status?".into(),
-        });
-
-        assert_eq!(reply.role, ChatRole::Assistant);
-        assert!(reply.text.contains("1 update"));
-        assert!(reply.text.contains("wired the reactive server"));
-        // Talk-only: replying didn't write memory.
-        assert_eq!(rt.memory().read(), mem_before);
+        assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
     }
 
     #[test]
@@ -644,37 +662,22 @@ mod tests {
     }
 
     #[test]
-    fn turn_sink_journals_a_pass_and_commits_the_turn() {
-        use crate::engine::stream::{ResultSubtype, StreamEvent};
-        use crate::lfd::conversations::turns::TurnBuilder;
-
+    fn turn_sink_journals_a_harness_turn_and_commits_it() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (rt, _rx) = open_runtime(tmp.path());
         let mut sink = TurnSink::new(rt.clone());
-        let mut builder = TurnBuilder::new();
+        let mut adapter = EventAdapter::new();
 
-        for event in [
-            StreamEvent::Text("hello".into()),
-            StreamEvent::ToolUse {
-                name: "Bash".into(),
-                summary: "cargo test".into(),
-            },
-            StreamEvent::Usage {
-                input_tokens: Some(10),
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-            },
-            StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: Some(0.02),
-                duration_secs: None,
-            },
-        ] {
-            // Mid-pass the mind is Turning.
-            for delta in builder.feed(&event) {
-                sink.on_delta(delta);
-            }
-        }
+        feed(&mut adapter, &mut sink, ev_started());
+        assert_eq!(
+            rt.mind_state().name(),
+            "turning",
+            "mid-turn the mind is Turning"
+        );
+        feed(&mut adapter, &mut sink, ev_text("hello"));
+        feed(&mut adapter, &mut sink, ev_tool());
+        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+        feed(&mut adapter, &mut sink, ev_usage(10, 4));
 
         assert_eq!(rt.mind_state(), MindState::Idle, "back to idle after turn");
         let thread = rt.thread_snapshot();
@@ -688,29 +691,56 @@ mod tests {
     }
 
     #[test]
-    fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
-        use crate::engine::stream::{ResultSubtype, StreamEvent};
-        use crate::lfd::conversations::turns::TurnBuilder;
+    fn turn_started_claims_the_expected_answers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, _rx) = open_runtime(tmp.path());
+        let mut sink = TurnSink::new(rt.clone());
+        let mut adapter = EventAdapter::new();
 
+        sink.expect_answers(vec![MessageId("msg-1".into()), MessageId("msg-2".into())]);
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+
+        // The journal's TurnStarted carries the consumption marker; a second
+        // turn without expect_answers claims nothing.
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen journal");
+        let answers: Vec<Vec<MessageId>> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::TurnStarted { answers, .. } => Some(answers.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(answers.len(), 2);
+        assert_eq!(
+            answers[0],
+            vec![MessageId("msg-1".into()), MessageId("msg-2".into())]
+        );
+        assert!(answers[1].is_empty());
+    }
+
+    #[test]
+    fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (rt, _rx) = open_runtime(tmp.path());
         let (snapshot, mut frames) = rt.subscribe_with_snapshot();
         assert!(snapshot.is_empty());
 
         let mut sink = TurnSink::new(rt.clone());
-        let mut builder = TurnBuilder::new();
-        let mut feed = |event: &StreamEvent| {
-            for delta in builder.feed(event) {
-                sink.on_delta(delta);
-            }
-        };
+        let mut adapter = EventAdapter::new();
 
-        // First content delta: an empty running turn opens and broadcasts,
-        // then the text lands in a second frame under the same id.
-        feed(&StreamEvent::Text("thinking".into()));
+        // The turn opens empty and running, then the text lands in a second
+        // frame under the same id.
+        feed(&mut adapter, &mut sink, ev_started());
         let opened = frames.try_recv().expect("opened frame");
         assert_eq!(opened.status, Lifecycle::Running);
         assert_eq!(opened.text, "");
+        feed(&mut adapter, &mut sink, ev_text("thinking"));
         let grown = frames.try_recv().expect("text frame");
         assert_eq!(grown.id, opened.id);
         assert_eq!(grown.text, "thinking");
@@ -723,21 +753,15 @@ mod tests {
         assert_eq!(mid[0].status, Lifecycle::Running);
 
         // An item delta grows the same snapshot.
-        feed(&StreamEvent::ToolUse {
-            name: "Bash".into(),
-            summary: "cargo test".into(),
-        });
+        feed(&mut adapter, &mut sink, ev_tool());
         let with_item = frames.try_recv().expect("item frame");
         assert_eq!(with_item.id, opened.id);
         assert_eq!(with_item.items.len(), 1);
         assert_eq!(with_item.text, "thinking");
 
         // Finalization replaces the running turn under the same id.
-        feed(&StreamEvent::Result {
-            subtype: ResultSubtype::Success,
-            cost_usd: None,
-            duration_secs: None,
-        });
+        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+        feed(&mut adapter, &mut sink, ev_usage(10, 5));
         let terminal = frames.try_recv().expect("terminal frame");
         assert_eq!(terminal.id, opened.id);
         assert_eq!(terminal.status, Lifecycle::Completed);
@@ -747,34 +771,5 @@ mod tests {
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].status, Lifecycle::Completed);
         assert!(frames.try_recv().is_err(), "no extra frames");
-    }
-
-    #[tokio::test]
-    async fn chat_consumer_replies_to_each_message() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, rx) = open_runtime(tmp.path());
-        let consumer = tokio::spawn(run_chat_consumer(rt.clone(), rx));
-
-        rt.deliver_user_message("first".into());
-        rt.deliver_user_message("second".into());
-
-        // Wait for both replies to land: 2 user turns + 2 replies = 4.
-        for _ in 0..50 {
-            if rt.thread_snapshot().len() >= 4 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        let thread = rt.thread_snapshot();
-        assert_eq!(thread.len(), 4, "each message gets exactly one reply");
-        let users = thread.iter().filter(|t| t.role == ChatRole::User).count();
-        let replies = thread
-            .iter()
-            .filter(|t| t.role == ChatRole::Assistant)
-            .count();
-        assert_eq!(users, 2, "both user messages appear as turns");
-        assert_eq!(replies, 2, "each message gets exactly one reply");
-
-        consumer.abort();
     }
 }

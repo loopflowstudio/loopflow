@@ -39,8 +39,25 @@ healed by migration 049 after a full fresh-vs-live schema diff), and the
 SIGHUP teardown gap (tmux kill-session bypassed SIGINT-only cleanup,
 orphaning the mind's codex pair — fix in the wrap pass).
 
-**Still to walk:** gates 6–7 (Concerto + the real goals wave — Jack), with
-`scripts/demo_wave.sh` as the guided runner.
+**Gates 6–7 (first walk, same evening — Jack driving the REAL goals wave):
+chat through Concerto WORKS** ("that worked. at least the chat worked
+fine"). The walk found five more live bugs, all fixed same-session: the SSE
+blackout (URLSession's AsyncBytes.lines silently drops the empty line that
+terminates an SSE frame — no streamed frame ever dispatched; replaced with a
+real incremental parser, pinned by a verbatim captured frame); Concerto
+launched at a worktree reading wave state there instead of the origin
+(WaveOrigin.resolve mirrors Rust wave_origin); the Start button resolving a
+stale system lf (capability probe `lf help wave` — `lf wave --help` exits 0
+on stale builds); server-created wave rows born loopable under legacy
+tickers (born paused now); and the near-silent console (narration pass).
+Meanwhile the wave itself worked the whole time: read the live roadmap,
+autonomously dispatched a kickoff-design worker then a well-briefed build
+worker for "Prove the language" (falsification framing, write-gaps-back-to-
+Asana, owned worktree), answered chat with live status. Bonus find at
+teardown: YESTERDAY'S old-style goals agent was still alive in the shared
+worktree — two brain generations on one tree, the class one-brain now
+prevents. Remaining judgment gates: steer + interrupt from the composer
+mid-turn, and the leave-it-running-overnight call.
 
 Code-complete ≠ done. Everything past the conformance traces is untested
 against live vendors. No `lfd` anywhere in this runbook — the wave server is

@@ -261,6 +261,7 @@ fn main() -> anyhow::Result<()> {
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
     // survive as an orphan.
     ctrlc::set_handler(|| {
+        loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
         std::process::exit(130);
     })
@@ -300,9 +301,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Goal { name, once, tmux }) => in_repo_runtime(&args, |_| {
             loopflow::lf::commands::goal::run(name, *once, *tmux, &cli)
         }),
-        Some(Commands::Wave { name }) => {
-            in_repo_runtime(&args, |_| loopflow::lf::commands::r#loop::run(name))
-        }
+        Some(Commands::Wave { name }) => in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name)),
         Some(Commands::External(external_args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
             let message = join_args(&step_args);

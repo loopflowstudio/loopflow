@@ -1,0 +1,188 @@
+//! The wave server's HTTP surface — a thin view over in-process state.
+//!
+//! Every endpoint reads or nudges [`WaveRuntime`]; none of them own logic. The
+//! timeline is served as-is, live turns stream over SSE, and a POSTed message
+//! is dropped into the in-process inbox. Discovery is a dumb pointer file, not
+//! a transport: `wave/<name>/.wave-endpoint` holds `127.0.0.1:<port>` and
+//! nothing else.
+//!
+//! Wire contract (snake_case, stable — a Concerto worker builds against it):
+//! - `GET /health` → `{status, wave, turns, subagents, uptime_seconds}`
+//! - `GET /conversation` → `{turns: [Turn]}`
+//! - `GET /conversation/stream` → SSE; each event named `turn`, data a `Turn`
+//!   JSON; replays the thread on connect, then streams live.
+//! - `POST /messages {text}` → appends a user `Turn` and returns it.
+//!
+//! `Turn` is [`crate::lfd::conversations::turns::ChatTurn`].
+
+use std::convert::Infallible;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use axum::extract::State;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use futures_util::stream::{self, Stream, StreamExt};
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use tokio_stream::wrappers::BroadcastStream;
+
+use crate::lfd::conversations::turns::ChatTurn;
+use crate::lfd::wave::runtime::WaveRuntime;
+
+/// Basename of the discovery pointer under `wave/<name>/`.
+pub const ENDPOINT_FILE: &str = ".wave-endpoint";
+
+#[derive(Debug, Serialize)]
+struct HealthBody {
+    status: String,
+    wave: String,
+    turns: usize,
+    subagents: usize,
+    uptime_seconds: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationBody {
+    turns: Vec<ChatTurn>,
+}
+
+/// `POST /messages` request body.
+#[derive(Debug, Deserialize)]
+struct PostMessage {
+    text: String,
+}
+
+/// Server state: the runtime plus when it started (for uptime).
+#[derive(Clone)]
+struct ServerState {
+    runtime: Arc<WaveRuntime>,
+    started_at: OffsetDateTime,
+}
+
+/// Build the router over a running [`WaveRuntime`].
+pub fn router(runtime: Arc<WaveRuntime>) -> Router {
+    let state = ServerState {
+        runtime,
+        started_at: OffsetDateTime::now_utc(),
+    };
+    Router::new()
+        .route("/health", get(health_handler))
+        .route("/conversation", get(conversation_handler))
+        .route("/conversation/stream", get(conversation_stream_handler))
+        .route("/messages", post(messages_handler))
+        .with_state(state)
+}
+
+async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
+    Json(HealthBody {
+        status: "ok".to_string(),
+        wave: state.runtime.name().to_string(),
+        turns: state.runtime.thread_snapshot().len(),
+        subagents: state.runtime.supervisor().reap(),
+        uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
+    })
+}
+
+async fn conversation_handler(State(state): State<ServerState>) -> Json<ConversationBody> {
+    Json(ConversationBody {
+        turns: state.runtime.thread_snapshot(),
+    })
+}
+
+async fn messages_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<PostMessage>,
+) -> Json<ChatTurn> {
+    Json(state.runtime.deliver_user_message(body.text))
+}
+
+/// SSE: replay the thread on connect, then stream live turns. Subscribe before
+/// snapshotting to avoid a gap; dedupe live turns already in the snapshot by
+/// their monotonic sequence.
+async fn conversation_stream_handler(
+    State(state): State<ServerState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.runtime.subscribe();
+    let snapshot = state.runtime.thread_snapshot();
+    let max_seq = snapshot.iter().filter_map(|t| turn_seq(&t.id)).max();
+
+    let replay = stream::iter(snapshot.into_iter().map(|t| Ok(turn_event(&t))));
+    let live = BroadcastStream::new(rx).filter_map(move |res| {
+        let out = match res {
+            Ok(turn) => {
+                let fresh = match (turn_seq(&turn.id), max_seq) {
+                    (Some(seq), Some(max)) => seq > max,
+                    _ => true,
+                };
+                fresh.then(|| Ok(turn_event(&turn)))
+            }
+            // Lagged: the client fell behind. Skip; it resyncs from /conversation.
+            Err(_) => None,
+        };
+        async move { out }
+    });
+
+    Sse::new(replay.chain(live)).keep_alive(KeepAlive::default())
+}
+
+fn turn_event(turn: &ChatTurn) -> Event {
+    Event::default()
+        .event("turn")
+        .data(serde_json::to_string(turn).unwrap_or_default())
+}
+
+/// Parse the sequence out of a `"turn-<n>"` id.
+fn turn_seq(id: &str) -> Option<u64> {
+    id.strip_prefix("turn-").and_then(|n| n.parse().ok())
+}
+
+/// Path to the discovery pointer for a wave.
+pub fn endpoint_path(repo_root: &Path, wave: &str) -> PathBuf {
+    repo_root.join("wave").join(wave).join(ENDPOINT_FILE)
+}
+
+/// Publish the loopback endpoint so Concerto can find the server. Writes ONLY
+/// `127.0.0.1:<port>` — a pointer, never message content.
+pub fn write_endpoint(
+    repo_root: &Path,
+    wave: &str,
+    addr: std::net::SocketAddr,
+) -> std::io::Result<()> {
+    let path = endpoint_path(repo_root, wave);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, addr.to_string())
+}
+
+/// Remove the discovery pointer on shutdown. Best-effort.
+pub fn remove_endpoint(repo_root: &Path, wave: &str) {
+    let _ = std::fs::remove_file(endpoint_path(repo_root, wave));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn turn_seq_parses_turn_ids() {
+        assert_eq!(turn_seq("turn-7"), Some(7));
+        assert_eq!(turn_seq("turn-"), None);
+        assert_eq!(turn_seq("user-3"), None);
+    }
+
+    #[test]
+    fn write_and_remove_endpoint_roundtrips() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
+        write_endpoint(tmp.path(), "ship", addr).expect("write endpoint");
+
+        let path = endpoint_path(tmp.path(), "ship");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "127.0.0.1:54321");
+
+        remove_endpoint(tmp.path(), "ship");
+        assert!(!path.exists());
+    }
+}

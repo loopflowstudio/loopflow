@@ -2245,6 +2245,17 @@ pub async fn open_existing_store() -> Option<Store> {
         if !path.exists() {
             return None;
         }
+        // lf-direct openers can meet a db created by an older lfd (the daemon
+        // migrates only at its own boot). Apply pending migrations here so a
+        // direct writer never hits schema drift; versioned migrations make a
+        // concurrent second applier a no-op, and sqlite locking serializes
+        // them. A failed migration means the db is unusable for us: warn and
+        // report "not instrumented" rather than limping on a wrong schema.
+        let conn = rusqlite::Connection::open(path).ok()?;
+        if let Err(err) = migrations::apply_sqlite(&conn) {
+            tracing::warn!(?path, %err, "registry store migration failed; running uninstrumented");
+            return None;
+        }
     }
     open_store(&cfg).await.ok()
 }

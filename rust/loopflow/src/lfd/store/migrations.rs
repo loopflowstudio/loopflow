@@ -202,7 +202,23 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "047_run_events",
         sql: include_str!("migrations/047_run_events.sql"),
     },
+    Migration {
+        version: "048_terminal_sessions_run_id",
+        sql: include_str!("migrations/048_terminal_sessions_run_id.sql"),
+    },
 ];
+
+/// Per-migration failures that mean "the db is already in the target state":
+/// record the migration as applied and converge instead of crashing.
+fn is_tolerated_migration_error(version: &str, message: &str) -> bool {
+    // Additive ADD COLUMN re-runs after a version-id rename.
+    if message.contains("duplicate column name") || message.contains("already exists") {
+        return true;
+    }
+    // 048 renames a column that fresh dbs (post-collapse CREATE) never had.
+    version == "048_terminal_sessions_run_id"
+        && (message.contains("no such column") || message.contains("does not exist"))
+}
 
 /// Migrations applicable to a backend. Currently returns all migrations
 /// since everything is portable SQL. Override resolution would go here
@@ -241,14 +257,13 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
                 conn.execute_batch("COMMIT")?;
                 return Ok(());
             }
-            // An additive `ADD COLUMN` migration that fails only because the
-            // column already exists is effectively already applied — this
-            // happens when a migration's version id was renamed, so a db that
-            // recorded the old id re-runs it. Record it and converge rather
-            // than crashing every store that predates the rename.
+            // A migration that fails only because the db is already in its
+            // target state (column already added, column already renamed) is
+            // effectively applied — record it and converge rather than
+            // crashing every store whose history diverged.
             match conn.execute_batch(migration.sql) {
                 Ok(()) => {}
-                Err(e) if e.to_string().contains("duplicate column name") => {}
+                Err(e) if is_tolerated_migration_error(migration.version, &e.to_string()) => {}
                 Err(e) => return Err(e.into()),
             }
             conn.execute(
@@ -309,14 +324,29 @@ pub async fn apply_postgres(client: &mut tokio_postgres::Client) -> StoreResult<
             continue;
         }
         let transaction = client.transaction().await?;
-        transaction.batch_execute(migration.sql).await?;
-        transaction
-            .execute(
-                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
-                &[&migration.version, &now_unix()],
-            )
-            .await?;
-        transaction.commit().await?;
+        match transaction.batch_execute(migration.sql).await {
+            Ok(()) => {
+                transaction
+                    .execute(
+                        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                        &[&migration.version, &now_unix()],
+                    )
+                    .await?;
+                transaction.commit().await?;
+            }
+            Err(e) if is_tolerated_migration_error(migration.version, &e.to_string()) => {
+                // The failed transaction is poisoned; record the version in a
+                // fresh one.
+                transaction.rollback().await?;
+                client
+                    .execute(
+                        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                        &[&migration.version, &now_unix()],
+                    )
+                    .await?;
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
 
     Ok(())
@@ -477,5 +507,57 @@ mod tests {
             applied.contains("035_session_tmux_name"),
             "migration should be recorded again after convergence"
         );
+    }
+}
+
+#[cfg(test)]
+mod drift_tests {
+    use super::*;
+
+    #[test]
+    fn rename_migration_converges_an_old_schema_db() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Old-world db: pre-collapse column name, all prior migrations recorded.
+        conn.execute_batch(
+            "CREATE TABLE terminal_sessions (id TEXT PRIMARY KEY, wave_id TEXT NOT NULL, wave_run_id TEXT);
+             CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        for m in migrations() {
+            if m.version != "048_terminal_sessions_run_id" {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![m.version],
+                )
+                .unwrap();
+            }
+        }
+        apply_sqlite(&conn).unwrap();
+        let has_run_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('terminal_sessions') WHERE name='run_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_run_id, "wave_run_id should be renamed to run_id");
+    }
+
+    #[test]
+    fn rename_migration_is_tolerated_on_a_fresh_db() {
+        // Fresh db: full migration chain creates run_id directly; 048's rename
+        // fails benignly and must still be recorded as applied.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+        let recorded: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM schema_migrations WHERE version='048_terminal_sessions_run_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(recorded);
+        // Idempotent on re-run.
+        apply_sqlite(&conn).unwrap();
     }
 }

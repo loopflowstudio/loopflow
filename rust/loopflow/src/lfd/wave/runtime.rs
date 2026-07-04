@@ -30,8 +30,8 @@ use tokio::sync::{broadcast, mpsc};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 use crate::lfd::wave::journal::{
-    fold_thread, fold_workers, journal_path, Event, EventKind, Journal, MessageId, MessageOp,
-    PendingMessage, Usage, WorkerOutcome, WorkerRecord,
+    fold_thread, fold_workers, journal_path, Attribution, Event, EventKind, Journal, MessageId,
+    MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::lfd::wave::memory::Memory;
 use crate::lfd::wave::state::{can_transition, MindState};
@@ -53,6 +53,8 @@ pub struct UserMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
+    /// Attribution for `Say` emissions; `None` for plain user messages.
+    pub from: Option<Attribution>,
 }
 
 /// One item from the HTTP surface to the mind's scheduler.
@@ -234,6 +236,7 @@ impl WaveRuntime {
                 id: message.id.clone(),
                 op: message.op,
                 text: message.text.clone(),
+                from: message.from.clone(),
             })
             .collect()
     }
@@ -314,6 +317,45 @@ impl WaveRuntime {
             .filter(|w| w.finished.is_none())
             .cloned()
             .collect()
+    }
+
+    // -- Memory (the server holds MEMORY.md's pen) --
+    //
+    // Both writes go to the ORIGIN repo's wave/<name>/MEMORY.md (the runtime
+    // opens against the main repo root — the file seeds read) and journal
+    // `MemoryUpdated` under the same lock as every other append, so the
+    // journal order and the file's history agree. Nothing else writes the
+    // file while a server is live.
+
+    /// Replace MEMORY.md wholesale and journal `MemoryUpdated {summary}`.
+    ///
+    /// # Errors
+    /// File I/O only; the journal append is best-effort like every append.
+    pub fn update_memory(&self, content: &str, summary: &str) -> std::io::Result<()> {
+        let mut inner = self.inner();
+        self.memory.write(content)?;
+        inner.journal.append(|_| EventKind::MemoryUpdated {
+            summary: summary.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Append one curated fact as a Markdown bullet and journal it.
+    ///
+    /// # Errors
+    /// File I/O only.
+    pub fn append_memory(&self, fact: &str, summary: &str) -> std::io::Result<()> {
+        let mut inner = self.inner();
+        let mut content = self.memory.read();
+        if !content.is_empty() && !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str(&format!("- {fact}\n"));
+        self.memory.write(&content)?;
+        inner.journal.append(|_| EventKind::MemoryUpdated {
+            summary: summary.to_string(),
+        });
+        Ok(())
     }
 
     /// Journal the vendor thread the mind runs on. The borrowed-handle rule:
@@ -432,22 +474,35 @@ impl WaveRuntime {
     /// it to the inbox for the mind's scheduler. Returns the stored user turn
     /// so the HTTP handler can echo it.
     pub fn deliver_user_message(&self, text: String, op: MessageOp) -> ChatTurn {
+        self.deliver_message(text, op, None)
+    }
+
+    /// Deliver an attributed emission (`lf chat` — a worker report, child-wave
+    /// escalation, or CLI FYI). Same journal row, thread commit, and inbox
+    /// path as any user message; the byline rides along.
+    pub fn deliver_say(&self, text: String, from: Attribution) -> ChatTurn {
+        self.deliver_message(text, MessageOp::Say, Some(from))
+    }
+
+    fn deliver_message(&self, text: String, op: MessageOp, from: Option<Attribution>) -> ChatTurn {
         let (turn, id) = {
             let mut inner = self.inner();
             let event = inner.journal.append(|seq| EventKind::UserMessage {
                 id: MessageId(format!("msg-{seq}")),
                 op,
                 text: text.clone(),
+                from: from.clone(),
             });
             let id = MessageId(format!("msg-{}", event.seq));
             let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
             turn.created_at = event.at_rfc3339();
+            turn.from = from.as_ref().map(|from| from.label.clone());
             (self.commit_locked(&mut inner, turn), id)
         };
         // Unbounded inbox: delivering a message never blocks the mind.
         let _ = self
             .inbox_tx
-            .send(InboxItem::Message(UserMessage { id, op, text }));
+            .send(InboxItem::Message(UserMessage { id, op, text, from }));
         turn
     }
 
@@ -529,6 +584,7 @@ impl WaveRuntime {
             status: Lifecycle::Running,
             items: Vec::new(),
             created_at: event.at_rfc3339(),
+            from: None,
         };
         let _ = self.turn_tx.send(open.clone());
         inner.open_turn = Some(open);
@@ -719,6 +775,7 @@ mod tests {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: String::new(),
+            from: None,
         }
     }
 
@@ -822,6 +879,74 @@ mod tests {
         assert_eq!(msg.text, "how goes it?");
         assert_eq!(msg.op, MessageOp::Message);
         assert_eq!(msg.id, MessageId(format!("msg-{}", turn_seq(&turn.id))));
+    }
+
+    #[test]
+    fn deliver_say_journals_attribution_and_queues_for_the_mind() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, mut rx) = open_runtime(tmp.path());
+        let from = Attribution {
+            session_id: Some("sess-9".into()),
+            label: "worker".into(),
+        };
+        let turn = rt.deliver_say("PR landed; one surprise in the fold".into(), from.clone());
+        assert_eq!(turn.role, ChatRole::User);
+        assert_eq!(turn.from.as_deref(), Some("worker"));
+
+        // Inbox: an attributed Say message the mind reacts to like any input.
+        let InboxItem::Message(msg) = rx.try_recv().expect("inbox item") else {
+            panic!("expected a message inbox item");
+        };
+        assert_eq!(msg.op, MessageOp::Say);
+        assert_eq!(msg.from, Some(from.clone()));
+
+        // Journal: the UserMessage row carries the attribution, and a
+        // restarted runtime folds it back into the pending queue.
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let EventKind::UserMessage {
+            op, from: stored, ..
+        } = &events[0].kind
+        else {
+            panic!("expected UserMessage");
+        };
+        assert_eq!(*op, MessageOp::Say);
+        assert_eq!(stored.as_ref(), Some(&from));
+        let (rt2, _rx2) = open_runtime(tmp.path());
+        let pending = rt2.pending_messages();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].from, Some(from));
+        assert_eq!(rt2.thread_snapshot()[0].from.as_deref(), Some("worker"));
+    }
+
+    #[test]
+    fn update_memory_writes_the_origin_file_and_journals() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, _rx) = open_runtime(tmp.path());
+        rt.update_memory("# Ship\n\n- fold is truth\n", "fold is truth")
+            .expect("update");
+        assert_eq!(rt.memory().read(), "# Ship\n\n- fold is truth\n");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("wave/ship/MEMORY.md")).expect("origin file"),
+            "# Ship\n\n- fold is truth\n",
+            "the ORIGIN repo's file is the one written"
+        );
+
+        rt.append_memory("bullets append", "bullets append")
+            .expect("append");
+        assert_eq!(
+            rt.memory().read(),
+            "# Ship\n\n- fold is truth\n- bullets append\n"
+        );
+
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let summaries: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::MemoryUpdated { summary } => Some(summary.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(summaries, vec!["fold is truth", "bullets append"]);
     }
 
     #[test]

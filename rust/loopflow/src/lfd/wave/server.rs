@@ -20,16 +20,27 @@
 //!     in-progress turn is re-sent whole as it grows and finalization sends
 //!     the terminal turn under the same id — each frame replaces the client's
 //!     previous state for that id (upsert, never append-if-seen).
-//! - `POST /messages {op, text}` → `{turn, state}`. `op` is required —
+//! - `POST /messages {op, text, from?}` → `{turn, state}`. `op` is required —
 //!   `"message"` (queued; the next turn answers it), `"steer"` (into the live
 //!   turn when the harness supports it, else degrades to a queued message),
-//!   or `"interrupt"` (cancel the open turn; non-empty text becomes the next
-//!   turn — "interrupt & send"; while idle, an interrupt is a no-op success).
-//!   `text` may be empty only for `interrupt` (400 otherwise). `turn` is the
-//!   appended user `Turn`, or null for a bare interrupt (nothing was said);
-//!   `state` is the mind-state name when the request was accepted — ops are
-//!   applied by the mind asynchronously, so watch the stream's `state` events
-//!   for the outcome.
+//!   `"interrupt"` (cancel the open turn; non-empty text becomes the next
+//!   turn — "interrupt & send"; while idle, an interrupt is a no-op success),
+//!   or `"say"` (an attributed emission — `lf chat`: a worker report,
+//!   child-wave escalation, or CLI FYI; lands in the thread with its byline
+//!   AND queues for the mind like a message). `text` may be empty only for
+//!   `interrupt` (400 otherwise). `from {session_id?, label}` is required for
+//!   `say` and rejected for every other op (400) — human turns are
+//!   unattributed by convention. `turn` is the appended user `Turn`, or null
+//!   for a bare interrupt (nothing was said); `state` is the mind-state name
+//!   when the request was accepted — ops are applied by the mind
+//!   asynchronously, so watch the stream's `state` events for the outcome.
+//! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
+//!   origin repo.
+//! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
+//!   (full replacement) or `"add"` (append one curated bullet; `content` must
+//!   be non-empty). `summary` is explicitly Optional — null falls back to the
+//!   content's first non-empty line. The server is the sole writer of the
+//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`.
 //!
 //! `Turn` is [`crate::lfd::conversations::turns::ChatTurn`].
 
@@ -48,7 +59,7 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::conversations::turns::ChatTurn;
-use crate::lfd::wave::journal::MessageOp;
+use crate::lfd::wave::journal::{Attribution, MessageOp};
 use crate::lfd::wave::runtime::WaveRuntime;
 use crate::lfd::wave::state::MindState;
 
@@ -70,11 +81,42 @@ struct ConversationBody {
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
-/// (no serde default; an op-less body is a 422).
+/// (no serde default; an op-less body is a 422). `from` is explicitly
+/// Optional: required for `say`, rejected otherwise.
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
     text: String,
+    from: Option<Attribution>,
+}
+
+/// `GET /memory` response.
+#[derive(Debug, Serialize)]
+struct MemoryBody {
+    content: String,
+}
+
+/// `POST /memory` op — full replacement or one appended bullet.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MemoryOp {
+    Update,
+    Add,
+}
+
+/// `POST /memory` request body. `summary` is explicitly Optional — null falls
+/// back to the content's first non-empty line.
+#[derive(Debug, Deserialize)]
+struct PostMemory {
+    op: MemoryOp,
+    content: String,
+    summary: Option<String>,
+}
+
+/// `POST /memory` response: the summary that was journaled.
+#[derive(Debug, Serialize)]
+struct PostMemoryResponse {
+    summary: String,
 }
 
 /// `POST /messages` response. `turn` is the appended user turn; null for a
@@ -104,6 +146,7 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
         .route("/conversation", get(conversation_handler))
         .route("/conversation/stream", get(conversation_stream_handler))
         .route("/messages", post(messages_handler))
+        .route("/memory", get(memory_handler).post(memory_write_handler))
         .with_state(state)
 }
 
@@ -128,7 +171,28 @@ async fn messages_handler(
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
     let empty = body.text.trim().is_empty();
+    if body.from.is_some() && !matches!(body.op, MessageOp::Say) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "`from` is only valid for the say op".to_string(),
+        ));
+    }
     let turn = match body.op {
+        MessageOp::Say => {
+            if empty {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "text is required for the say op".to_string(),
+                ));
+            }
+            let Some(from) = body.from else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "`from` is required for the say op".to_string(),
+                ));
+            };
+            Some(state.runtime.deliver_say(body.text, from))
+        }
         MessageOp::Message | MessageOp::Steer => {
             if empty {
                 return Err((
@@ -159,6 +223,51 @@ async fn messages_handler(
         turn,
         state: state.runtime.mind_state().name().to_string(),
     }))
+}
+
+async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
+    Json(MemoryBody {
+        content: state.runtime.memory().read(),
+    })
+}
+
+async fn memory_write_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<PostMemory>,
+) -> Result<Json<PostMemoryResponse>, (StatusCode, String)> {
+    let summary = body
+        .summary
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| first_line(&body.content))
+        .unwrap_or_else(|| "memory cleared".to_string());
+    let result = match body.op {
+        MemoryOp::Update => state.runtime.update_memory(&body.content, &summary),
+        MemoryOp::Add => {
+            let fact = body.content.trim();
+            if fact.is_empty() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "content is required for the add op".to_string(),
+                ));
+            }
+            state.runtime.append_memory(fact, &summary)
+        }
+    };
+    match result {
+        Ok(()) => Ok(Json(PostMemoryResponse { summary })),
+        Err(err) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory write failed: {err}"),
+        )),
+    }
+}
+
+fn first_line(content: &str) -> Option<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 /// SSE: send the mind state, replay the thread on connect (open turn

@@ -139,19 +139,24 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let status: Lifecycle
     public let items: [ConversationItem]
     public let createdAt: String
+    /// Speaker label for attributed emissions (`lf chat` — worker reports,
+    /// child-wave escalations). Absent (`nil`) for the mind's own turns and
+    /// plain user turns; mirrors Rust `ChatTurn.from`.
+    public let from: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, status, items
+        case id, role, text, status, items, from
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String) {
+    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?) {
         self.id = id
         self.role = role
         self.text = text
         self.status = status
         self.items = items
         self.createdAt = createdAt
+        self.from = from
     }
 
     /// Monotonic sequence parsed from a `"turn-<n>"` id; used to order the thread.

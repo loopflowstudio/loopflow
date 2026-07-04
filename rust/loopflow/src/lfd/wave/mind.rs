@@ -232,10 +232,16 @@ fn orchestration_discipline(wave: &str) -> String {
          - Never grind inline. Read state, decide, dispatch work to subagents \
          via `lf q worker run {wave} --flow <flow> --task \"<task>\"` (add \
          `--pool` to share the wave's worktree, `--stack <run-id>` to build on \
-         an unlanded run), fold what you learn into wave/{wave}/MEMORY.md, and \
-         answer the human.\n\
+         an unlanded run), curate what you learn into memory, and answer the \
+         human.\n\
          - Exception: trivial, single-file, sub-minute work is done inline \
          without dispatch; dispatch is for real units of work.\n\
+         - Speak through `lf chat`: replies to a human message stay normal \
+         turn text, but proactive FYIs go through `lf chat \"<note>\"`, and \
+         `lf chat --parent \"<report>\"` escalates to this wave's parent.\n\
+         - Curate memory with `lf memory update` (full replacement from \
+         stdin) or `lf memory add \"<fact>\"` — wave/{wave}/MEMORY.md is \
+         server-owned now; never edit the file directly.\n\
          - Keep turns short — decisions and dispatches, not implementation.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
@@ -286,6 +292,7 @@ impl EventAdapter {
                     status: Lifecycle::Running,
                     items: Vec::new(),
                     created_at: String::new(),
+                    from: None,
                 });
                 deltas.push(TurnDelta::Opened);
             }
@@ -507,7 +514,9 @@ impl Mind {
     async fn on_inbox(&mut self, item: InboxItem) {
         match item {
             InboxItem::Message(message) => match message.op {
-                MessageOp::Message => self.on_message(message).await,
+                // A say emission (worker report, child-wave escalation) wakes
+                // the mind exactly like a message: queued, coalesced, answered.
+                MessageOp::Message | MessageOp::Say => self.on_message(message).await,
                 MessageOp::Steer => self.on_steer(message).await,
                 MessageOp::Interrupt => self.on_interrupt(Some(message)).await,
             },
@@ -692,9 +701,14 @@ impl Mind {
         self.refresh_observations().await;
         let messages = std::mem::take(&mut self.queue);
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+        // Attributed emissions carry their byline into the prompt so the mind
+        // can tell a worker report from the human.
         let content = messages
             .iter()
-            .map(|m| m.text.as_str())
+            .map(|m| match &m.from {
+                Some(from) => format!("[{}] {}", from.label, m.text),
+                None => m.text.clone(),
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
         if !self.send_turn(content, answers).await {
@@ -1011,6 +1025,58 @@ mod tests {
         assert!(finished.text.is_empty(), "no stray text from empty items");
     }
 
+    /// The operating prompt teaches the speech/memory vocabulary: `lf chat`
+    /// for proactive FYIs and escalation, `lf memory` for curation (the file
+    /// is server-owned now).
+    #[test]
+    fn operating_prompt_teaches_chat_and_memory_vocabulary() {
+        let prompt = orchestration_discipline("ship");
+        assert!(prompt.contains("lf chat"), "prompt names lf chat");
+        assert!(
+            prompt.contains("lf chat --parent"),
+            "prompt names parent escalation"
+        );
+        assert!(
+            prompt.contains("lf memory update") && prompt.contains("lf memory add"),
+            "prompt names memory curation"
+        );
+        assert!(
+            prompt.contains("server-owned"),
+            "prompt says the file is server-owned"
+        );
+    }
+
+    /// A say emission wakes the mind like a message: the next turn's input
+    /// carries the byline and its `TurnStarted.answers` consumes the id.
+    #[tokio::test]
+    async fn say_wakes_the_mind_and_is_consumed_by_the_next_turn() {
+        let mind = boot(Duration::from_secs(600));
+        let turn = mind.runtime.deliver_say(
+            "implement run-1 finished: PR #7, one surprise".into(),
+            crate::lfd::wave::journal::Attribution {
+                session_id: Some("sess-1".into()),
+                label: "worker".into(),
+            },
+        );
+        wait_for("input sent", || mind.input_count() == 1).await;
+        assert_eq!(
+            mind.inputs.lock().unwrap()[0],
+            "[worker] implement run-1 finished: PR #7, one surprise",
+            "the turn input carries the byline"
+        );
+
+        mind.emit_turn("noted", Lifecycle::Completed);
+        wait_for("turn journaled", || {
+            !started_answers(&mind.journal_events()).is_empty()
+        })
+        .await;
+        assert_eq!(
+            started_answers(&mind.journal_events())[0],
+            vec![message_id(&turn)],
+            "the say emission is consumed like any queued message"
+        );
+    }
+
     #[tokio::test]
     async fn message_while_idle_starts_a_turn_answering_it() {
         let mind = boot(Duration::from_secs(600));
@@ -1236,6 +1302,7 @@ mod tests {
                     status: Lifecycle::Completed,
                     items: Vec::new(),
                     created_at: String::new(),
+                    from: None,
                 },
                 Vec::new(),
             );

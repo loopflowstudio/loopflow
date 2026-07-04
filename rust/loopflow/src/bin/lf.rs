@@ -319,6 +319,12 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
             Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
+            Some(Commands::Chat { text, target }) => {
+                loopflow::lf::commands::chat::run(text, target)
+            }
+            Some(Commands::Memory { cmd, target }) => {
+                loopflow::lf::commands::memory::run(cmd.as_ref(), target)
+            }
             Some(Commands::External(external_args)) => {
                 match loopflow::lf::commands::run::split_step_args(external_args) {
                     Ok((name, step_args)) => {
@@ -341,9 +347,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf op`, `lf q`, `lf usage`, `lf -l`) and `lf wave`, which never
-/// self-register (`lf q` creates the worker's row itself; `lf wave` registers
-/// as the wave's agent session).
+/// (`lf op`, `lf q`, `lf usage`, `lf chat`, `lf memory`, `lf -l`) and
+/// `lf wave`, which never self-register (`lf q` creates the worker's row
+/// itself; `lf wave` registers as the wave's agent session; chat/memory are
+/// one-shot POSTs attributed via the env they inherit).
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
         return None;
@@ -357,7 +364,9 @@ fn run_label(cli: &Cli) -> Option<String> {
         Some(Commands::Op { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Usage)
-        | Some(Commands::Q { .. }) => None,
+        | Some(Commands::Q { .. })
+        | Some(Commands::Chat { .. })
+        | Some(Commands::Memory { .. }) => None,
     }
 }
 

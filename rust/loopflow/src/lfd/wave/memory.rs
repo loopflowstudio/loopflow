@@ -3,14 +3,18 @@
 //! The server reads it to answer chat and to seed each progress pass. It is
 //! deliberately curated — the mind updates it when it learns something, not
 //! mechanically per turn (the journal carries the raw history; see
-//! [`super::journal`]). Nothing in the server writes it today; the write side
-//! arrives with the mind phase, as `MemoryUpdated` journal events alongside
-//! the file edit. It is a plain Markdown file — not an IPC channel. Concerto
-//! never reads it; the thread is the live surface.
+//! [`super::journal`]). The live server holds the pen: writes go through
+//! `lf memory update`/`add` → the server's memory routes →
+//! [`super::runtime::WaveRuntime::update_memory`], which journals
+//! `MemoryUpdated` alongside the file edit. Direct file edits are for
+//! serverless waves only (the mind's file tools editing a worktree copy while
+//! seeds read the origin's was a live bug). It is a plain Markdown file — not
+//! an IPC channel. Concerto never reads it; the thread is the live surface.
 
 use std::path::{Path, PathBuf};
 
-/// Read handle to a wave's `MEMORY.md`.
+/// Handle to a wave's `MEMORY.md`. Reads are free; writes belong to the
+/// runtime (one pen, under its lock).
 #[derive(Debug)]
 pub struct Memory {
     path: PathBuf,
@@ -31,6 +35,18 @@ impl Memory {
     /// Current contents, or empty string if the file doesn't exist yet.
     pub fn read(&self) -> String {
         std::fs::read_to_string(&self.path).unwrap_or_default()
+    }
+
+    /// Replace the file's contents, creating `wave/<name>/` if needed. Called
+    /// only by the runtime, which journals `MemoryUpdated` under its lock.
+    ///
+    /// # Errors
+    /// File I/O.
+    pub fn write(&self, content: &str) -> std::io::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&self.path, content)
     }
 
     /// A short head of memory for chat context — the first `max_lines`

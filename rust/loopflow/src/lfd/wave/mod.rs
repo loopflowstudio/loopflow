@@ -351,6 +351,7 @@ mod tests {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
+            from: None,
         }
     }
 
@@ -429,6 +430,113 @@ mod tests {
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
+    }
+
+    /// The say op: an attributed emission lands in the thread with its byline
+    /// on the wire (`from`), and the attribution rules are enforced — say
+    /// requires `from`, every other op rejects it.
+    #[tokio::test]
+    async fn posted_say_is_attributed_on_the_wire() {
+        let (base, runtime, _tmp) = boot().await;
+        let client = reqwest::Client::new();
+
+        let body: serde_json::Value = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({
+                "op": "say",
+                "text": "run-7 landed: PR #12",
+                "from": { "session_id": "sess-7", "label": "worker" },
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["turn"]["from"], "worker");
+        assert_eq!(body["turn"]["role"], "user");
+
+        // The wire thread carries the byline; the mind's queue has the input.
+        let conversation: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(conversation["turns"][0]["from"], "worker");
+        // The queue fold treats the emission as consumable input.
+        let (_, events) =
+            journal::Journal::open(&journal::journal_path(runtime.repo_root(), "ship"))
+                .expect("journal");
+        assert_eq!(journal::fold_thread(&events).pending_messages.len(), 1);
+
+        // Say without from, and from on a non-say op, are both refused.
+        let missing_from = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "op": "say", "text": "anon" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing_from.status(), reqwest::StatusCode::BAD_REQUEST);
+        let stray_from = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({
+                "op": "message",
+                "text": "hello",
+                "from": { "session_id": null, "label": "cli" },
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stray_from.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    /// The memory routes: GET serves the origin file; POST update/add write
+    /// it and journal `MemoryUpdated` (covered in depth by the runtime and
+    /// `lf memory` tests — this pins the HTTP shape).
+    #[tokio::test]
+    async fn memory_routes_read_and_write_through_the_server() {
+        let (base, runtime, _tmp) = boot().await;
+        let body: serde_json::Value = reqwest::get(format!("{base}/memory"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["content"], "Goal: ship the reactive server.\n");
+
+        let client = reqwest::Client::new();
+        let body: serde_json::Value = client
+            .post(format!("{base}/memory"))
+            .json(&serde_json::json!({
+                "op": "update",
+                "content": "Rewritten.\n",
+                "summary": null,
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["summary"], "Rewritten.");
+        assert_eq!(runtime.memory().read(), "Rewritten.\n");
+
+        // An empty add is refused; a real one appends a bullet.
+        let empty = client
+            .post(format!("{base}/memory"))
+            .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(empty.status(), reqwest::StatusCode::BAD_REQUEST);
+        client
+            .post(format!("{base}/memory"))
+            .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(runtime.memory().read(), "Rewritten.\n- one fact\n");
     }
 
     #[tokio::test]

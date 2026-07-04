@@ -806,5 +806,114 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         .contains("keep tests focused on behavior"));
 
     let prompt = render_prompt(components);
-    assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
+    assert!(prompt.contains("<lf:wave-memory>"));
+    assert!(prompt.contains("keep tests focused on behavior"));
+}
+
+// =============================================================================
+// Ambient wave context
+// =============================================================================
+
+#[test]
+fn run_in_wave_context_assembles_chat_and_memory_sections() {
+    use loopflow::lfd::wave::journal::{journal_path, EventKind, Journal, MessageId, MessageOp};
+
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    fs::create_dir_all(repo.join("wave/goals")).unwrap();
+    fs::write(
+        repo.join("wave/goals/MEMORY.md"),
+        "- workers report via lf chat",
+    )
+    .unwrap();
+    make_commit(repo, "initial");
+
+    // The wave's journal, as its server would have written it.
+    let (mut journal, _) = Journal::open(&journal_path(repo, "goals")).unwrap();
+    journal.append(|seq| EventKind::UserMessage {
+        id: MessageId(format!("msg-{seq}")),
+        op: MessageOp::Message,
+        text: "how goes the build?".to_string(),
+        from: None,
+    });
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        wave: Some("goals".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let prompt = render_prompt(components);
+    assert!(prompt.contains("<lf:wave-chat-recent>"));
+    assert!(prompt.contains("user: how goes the build?"));
+    assert!(prompt.contains("<lf:wave-memory>"));
+    assert!(prompt.contains("workers report via lf chat"));
+}
+
+#[test]
+fn run_outside_any_wave_assembles_neither_section() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let prompt = render_prompt(components);
+    assert!(!prompt.contains("<lf:wave-chat-recent>"));
+    assert!(!prompt.contains("<lf:wave-memory>"));
+}
+
+#[test]
+fn worktree_reads_the_origin_repos_wave_memory() {
+    let temp = TempDir::new().unwrap();
+    let origin = temp.path().join("repo");
+    fs::create_dir_all(&origin).unwrap();
+    init_repo(&origin);
+    fs::create_dir_all(origin.join("wave/goals")).unwrap();
+    fs::write(
+        origin.join("wave/goals/MEMORY.md"),
+        "- origin memory is the truth",
+    )
+    .unwrap();
+    make_commit(&origin, "initial");
+
+    // A sibling worktree, as `lf wave` bootstraps: <repo>.goals.
+    let worktree = temp.path().join("repo.goals");
+    std::process::Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            worktree.to_str().unwrap(),
+            "-b",
+            "goals-branch",
+        ])
+        .current_dir(&origin)
+        .output()
+        .expect("git worktree add");
+    // The worktree's committed copy lags the origin: the origin must win.
+    fs::write(
+        worktree.join("wave/goals/MEMORY.md"),
+        "- stale worktree copy",
+    )
+    .unwrap();
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: worktree.clone(),
+        wave: Some("goals".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let memory = components.wave_memory.as_ref().expect("memory resolved");
+    assert!(memory.content.contains("origin memory is the truth"));
+    assert!(!memory.content.contains("stale worktree copy"));
 }

@@ -17,10 +17,10 @@
 //! `WorkerDispatched`/`WorkerFinished` are produced by the registry observer
 //! ([`crate::lfd::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryUpdated` has no producer
-//! until the mind starts curating MEMORY.md deliberately. `ThreadStarted`
-//! is produced by the mind: the vendor thread id is its first durable act,
-//! journaled before the first turn.
+//! view is their fold ([`fold_workers`]). `MemoryUpdated` is produced by the
+//! server's memory routes (`lf memory update`/`add` — the server holds
+//! MEMORY.md's pen). `ThreadStarted` is produced by the mind: the vendor
+//! thread id is its first durable act, journaled before the first turn.
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -64,6 +64,20 @@ pub enum MessageOp {
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
+    /// An attributed emission (`lf chat`): a worker report, child-wave
+    /// escalation, or CLI FYI. Lands in the thread as an attributed statement
+    /// AND queues for the mind exactly like `Message` — same consumption
+    /// machinery, `TurnStarted.answers` can name it.
+    Say,
+}
+
+/// Who spoke, for `Say` emissions. `session_id` is the sender's registry
+/// session when it has one (`LFD_SESSION_ID`); `label` is the human-readable
+/// byline the thread renders ("worker", "wave goals", "cli").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attribution {
+    pub session_id: Option<String>,
+    pub label: String,
 }
 
 /// Token usage accrued over one turn. Providers report different subsets, so
@@ -123,6 +137,7 @@ pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
+    pub from: Option<Attribution>,
 }
 
 /// One journal row.
@@ -156,6 +171,12 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
+        /// Attribution for `Say` emissions; `None` for plain user messages.
+        /// Attribution rides the existing `UserMessage` row (an emission is a
+        /// user message with a byline), so the queue fold — `UserMessage`s
+        /// not named in any `answers` — stays untouched: no new event kind,
+        /// no second inbox to desync.
+        from: Option<Attribution>,
     },
     TurnStarted {
         turn_id: String,
@@ -220,6 +241,39 @@ pub fn journal_path(repo_root: &Path, wave: &str) -> PathBuf {
         .join("waves")
         .join(wave)
         .join("journal.jsonl")
+}
+
+/// Read a journal's events without becoming a writer.
+///
+/// The ambient-context read path (every `lf` run inside a wave) folds over
+/// this from arbitrary processes, so it must never create the file or
+/// truncate a torn tail — the running wave server owns the pen. Missing or
+/// unreadable file, a torn tail, or a line from another format version all
+/// yield whatever parsed cleanly before the fault (possibly nothing).
+pub fn read_events(path: &Path) -> Vec<Event> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Event>(trimmed) {
+            Ok(event) if event.v == FORMAT_VERSION => events.push(event),
+            Ok(event) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    version = event.v,
+                    "journal line from another format version; stopping read-only fold"
+                );
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    events
 }
 
 /// Append-only writer over one wave's JSONL log.
@@ -366,15 +420,17 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
 
     for event in events {
         match &event.kind {
-            EventKind::UserMessage { id, op, text } => {
+            EventKind::UserMessage { id, op, text, from } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
+                turn.from = from.as_ref().map(|from| from.label.clone());
                 turns.push(turn);
                 if !consumed_messages.contains(id) {
                     pending_messages.push(PendingMessage {
                         id: id.clone(),
                         op: *op,
                         text: text.clone(),
+                        from: from.clone(),
                     });
                 }
             }
@@ -387,6 +443,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     status: Lifecycle::Running,
                     items: Vec::new(),
                     created_at: event.at_rfc3339(),
+                    from: None,
                 });
             }
             EventKind::TurnItem { turn_id, item } => {
@@ -523,6 +580,7 @@ mod tests {
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Message,
             text: text.to_string(),
+            from: None,
         }
     }
 
@@ -567,6 +625,29 @@ mod tests {
     }
 
     #[test]
+    fn read_events_never_touches_the_file() {
+        let (_tmp, path) = open_tmp();
+        {
+            let (mut journal, _) = Journal::open(&path).expect("open");
+            journal.append(|seq| user_message(seq, "kept"));
+        }
+        // A torn tail: read_events returns the clean prefix and leaves the
+        // file byte-identical — the wave server owns the pen.
+        let mut raw = std::fs::read_to_string(&path).expect("read");
+        raw.push_str(r#"{"v":1,"seq":2,"at":"2026-"#);
+        std::fs::write(&path, &raw).expect("corrupt");
+
+        let events = read_events(&path);
+        assert_eq!(events.len(), 1);
+        assert_eq!(std::fs::read_to_string(&path).expect("reread"), raw);
+
+        // Missing file: empty, and still not created.
+        let ghost = path.parent().unwrap().join("ghost.jsonl");
+        assert!(read_events(&ghost).is_empty());
+        assert!(!ghost.exists());
+    }
+
+    #[test]
     fn unknown_format_version_is_an_error() {
         let (_tmp, path) = open_tmp();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -582,6 +663,15 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::UserMessage {
+                id: MessageId("msg-9".into()),
+                op: MessageOp::Say,
+                text: "worker report: PR landed".into(),
+                from: Some(Attribution {
+                    session_id: Some("sess-42".into()),
+                    label: "worker".into(),
+                }),
+            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
@@ -718,6 +808,57 @@ mod tests {
                 turn_id: turn_id.clone()
             }
         );
+    }
+
+    /// A `Say` emission is a user message with a byline: the fold puts its
+    /// attribution on the wire turn and queues it as consumable input, and a
+    /// `TurnStarted.answers` naming it consumes it like any other message.
+    #[test]
+    fn fold_treats_say_as_attributed_consumable_input() {
+        let say = |seq: u64| EventKind::UserMessage {
+            id: MessageId(format!("msg-{seq}")),
+            op: MessageOp::Say,
+            text: "landed the parser PR".to_string(),
+            from: Some(Attribution {
+                session_id: Some("sess-7".into()),
+                label: "worker".into(),
+            }),
+        };
+        let events = vec![Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: say(1),
+        }];
+        let fold = fold_thread(&events);
+        assert_eq!(fold.turns.len(), 1);
+        assert_eq!(fold.turns[0].role, ChatRole::User);
+        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
+        assert_eq!(fold.pending_messages.len(), 1, "say queues for the mind");
+        assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
+        assert_eq!(
+            fold.pending_messages[0]
+                .from
+                .as_ref()
+                .map(|f| f.label.as_str()),
+            Some("worker")
+        );
+
+        // Consumption: a turn answering it drains the queue.
+        let consumed = vec![
+            events[0].clone(),
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::TurnStarted {
+                    turn_id: "turn-2".into(),
+                    answers: vec![MessageId("msg-1".into())],
+                },
+            },
+        ];
+        let fold = fold_thread(&consumed);
+        assert!(fold.pending_messages.is_empty(), "answered say is consumed");
     }
 
     #[test]

@@ -160,9 +160,61 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: QCommand,
     },
+    /// Post a message into a wave's thread (worker reports, child-wave
+    /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
+    Chat {
+        /// Message text (reads stdin when omitted — heredoc-friendly)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
+    /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
+    Memory {
+        #[command(subcommand)]
+        cmd: Option<MemoryCommand>,
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+/// Wave targeting shared by `lf chat` and `lf memory`: default is the
+/// invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+#[derive(Args, Debug, Clone, Default)]
+pub struct WaveTargetArgs {
+    /// Target wave by name
+    #[arg(short = 'w', long = "wave", conflicts_with = "parent")]
+    pub wave: Option<String>,
+    /// Target the invoking wave's parent (escalation up the wave tree)
+    #[arg(long)]
+    pub parent: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MemoryCommand {
+    /// Print the wave's MEMORY.md
+    Show {
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
+    /// Replace MEMORY.md from stdin (written by the live server, journaled)
+    Update {
+        /// One-line summary journaled with the update (default: first line)
+        #[arg(long)]
+        summary: Option<String>,
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
+    /// Append one curated fact as a bullet
+    Add {
+        /// The fact to append
+        fact: String,
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -667,6 +719,68 @@ mod tests {
         assert_eq!(id.as_deref(), Some("123"));
         assert_eq!(status.as_deref(), Some("done"));
         assert_eq!(pr.as_deref(), Some("https://github.com/acme/repo/pull/7"));
+    }
+
+    #[test]
+    fn chat_parses_text_and_targeting() {
+        let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
+        let Some(Commands::Chat { text, target }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(text, vec!["shipped", "the", "parser"]);
+        assert_eq!(target.wave, None);
+        assert!(!target.parent);
+
+        // No text: stdin is the body. Flags come before the trailing text.
+        let cli = Cli::try_parse_from(["lf", "chat", "--parent"]).expect("parse");
+        let Some(Commands::Chat { text, target }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert!(text.is_empty());
+        assert!(target.parent);
+
+        let cli = Cli::try_parse_from(["lf", "chat", "--wave", "goals", "hi"]).expect("parse");
+        let Some(Commands::Chat { text, target }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(text, vec!["hi"]);
+        assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        // --wave and --parent are mutually exclusive.
+        assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
+    }
+
+    #[test]
+    fn memory_parses_bare_show_update_and_add() {
+        let cli = Cli::try_parse_from(["lf", "memory", "--wave", "goals"]).expect("parse");
+        let Some(Commands::Memory { cmd, target }) = cli.command else {
+            panic!("expected memory command");
+        };
+        assert!(cmd.is_none(), "bare memory is show");
+        assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        let cli =
+            Cli::try_parse_from(["lf", "memory", "update", "--summary", "learned"]).expect("parse");
+        let Some(Commands::Memory {
+            cmd: Some(MemoryCommand::Update { summary, .. }),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected memory update");
+        };
+        assert_eq!(summary.as_deref(), Some("learned"));
+
+        let cli =
+            Cli::try_parse_from(["lf", "memory", "add", "one fact", "--parent"]).expect("parse");
+        let Some(Commands::Memory {
+            cmd: Some(MemoryCommand::Add { fact, target }),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected memory add");
+        };
+        assert_eq!(fact, "one fact");
+        assert!(target.parent);
     }
 
     #[test]

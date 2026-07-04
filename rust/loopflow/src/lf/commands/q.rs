@@ -33,6 +33,12 @@ use crate::lfd::types::{
     tmux_session_name, Run, Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE,
 };
 
+/// One line appended to every dispatched worker's task: report back through
+/// the wave's thread when done (`lf chat` posts an attributed `say` emission
+/// to the worker's own wave — the mind reacts to it like any input).
+pub(crate) const WORKER_REPORT_INSTRUCTION: &str = "When you finish, report the outcome with \
+     `lf chat \"<report>\"` — one short paragraph: what landed, the PR link, anything surprising.";
+
 pub fn run(cmd: &QCommand) -> Result<()> {
     match cmd {
         QCommand::Worker {
@@ -146,6 +152,12 @@ pub(crate) async fn dispatch(
     run.task = Some(task.to_string());
     store.update_run(&run).await?;
 
+    // The worker's prompt closes the reporting loop through the one door
+    // every process has — exec: it finishes by posting an `lf chat` report
+    // into the wave's thread (attributed via LFD_SESSION_ID from its env).
+    // The Run row keeps the raw task; only the dispatched prompt grows.
+    let dispatch_task = format!("{task}\n\n{WORKER_REPORT_INSTRUCTION}");
+
     let session_id = LfdId::new();
     let env = BTreeMap::from([
         ("LFD_WAVE_ID".to_string(), wave.id().to_string()),
@@ -158,8 +170,13 @@ pub(crate) async fn dispatch(
         ),
         // LFD_SESSION_INHERITED deliberately absent: the child owns this row.
     ]);
-    let cmd =
-        build_lf_dispatch_command(flow, task, run.direction.as_slice(), &run.area, wave.name());
+    let cmd = build_lf_dispatch_command(
+        flow,
+        &dispatch_task,
+        run.direction.as_slice(),
+        &run.area,
+        wave.name(),
+    );
     let session = Session {
         id: session_id.clone(),
         wave_id: wave.id().clone(),
@@ -341,9 +358,13 @@ mod tests {
         assert_eq!(session.cwd, run.worktree);
         assert!(session.tmux_name.contains(session.id.as_str()));
         assert_eq!(session.argv[1], "implement:");
-        assert_eq!(
-            session.argv.last().map(String::as_str),
-            Some("Add the thing.")
+        // The dispatched prompt is the task plus the report-back instruction
+        // (the Run row keeps the raw task).
+        let prompt = session.argv.last().expect("task arg");
+        assert!(prompt.starts_with("Add the thing."));
+        assert!(
+            prompt.contains("lf chat"),
+            "worker prompt closes the loop with an lf chat report: {prompt}"
         );
 
         // The env contract, pinned: the child sees its own session id with

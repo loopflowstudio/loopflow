@@ -31,6 +31,14 @@ struct MessageRow: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
+            // Attributed emissions (`lf chat` — worker reports, child-wave
+            // escalations) carry a speaker byline; plain turns don't.
+            if let from = turn.from {
+                Text(from)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+
             if turn.role == .assistant {
                 assistantBody
             } else {

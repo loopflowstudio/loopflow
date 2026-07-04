@@ -92,6 +92,7 @@ struct ContractTests {
         #expect(turn.status == .running)
         #expect(turn.isInProgress)
         #expect(turn.createdAtDate != nil)
+        #expect(turn.from == "worker")
         #expect(turn.items.count == 6)
 
         guard case let .command(id, command, cwd, status, output, exitCode, durationMs) = turn.items[0] else {
@@ -150,6 +151,16 @@ struct ContractTests {
         let reencoded = try JSONEncoder().encode(turn)
         let roundTripped = try JSONDecoder().decode(ChatTurn.self, from: reencoded)
         #expect(roundTripped == turn)
+
+        // `from` is explicitly Optional: a payload without the key decodes as
+        // nil — no default masking (mirrored in Rust's dto_fixtures).
+        var json = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        json.removeValue(forKey: "from")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+        let unattributed = try JSONDecoder().decode(ChatTurn.self, from: stripped)
+        #expect(unattributed.from == nil)
     }
 
     @Test("activation_log.json has expected shape")

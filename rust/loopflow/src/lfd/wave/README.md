@@ -52,9 +52,18 @@ the mind state, and the vendor thread id are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The vendor thread itself cold-starts on codex (the app-server
 driver takes no resume id); the new `ThreadStarted` is journaled so the break
-is explicit. `wave/<name>/MEMORY.md` is read-only here (seeds the mind); the
-journal carries the raw history. The journal is server-owned persistence, not
-IPC.
+is explicit. `wave/<name>/MEMORY.md` seeds the mind, and the live server
+holds its pen: `lf memory update`/`add` POST to the memory routes, which
+write the origin file and journal `MemoryUpdated` — the journal carries the
+raw history. The journal is server-owned persistence, not IPC.
+
+The speech surface is `lf chat` — the same verb for minds, workers, humans,
+and scripts (the one-door exec convention). It resolves its target wave from
+context (`LFD_WAVE_ID`, else the worktree name; `--parent` walks
+`parent_wave_id` through the registry; `--wave <name>` is explicit), finds
+the live endpoint via the target's WaveAgent session row (falling back to
+`.wave-endpoint`), and POSTs a `say` op. Dispatched workers are instructed to
+finish with an `lf chat` report, closing the loop through the same door.
 
 `lf wave <name>` self-bootstraps its worktree: it ensures the wave's
 `<repo>.<wave>` sibling exists (creating it off main on first boot) and
@@ -78,7 +87,9 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 | `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
 | `GET /conversation/stream`| SSE; each event named `turn`, `data:` a `Turn` JSON. Replays the thread on connect, then streams live. |
-| `POST /messages {op, text}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), or `interrupt` (cancel the open turn; non-empty text becomes the next turn). Returns `{turn, state}`. |
+| `POST /messages {op, text, from?}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). Returns `{turn, state}`. |
+| `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
+| `POST /memory {op, content, summary}` | `op`: `update` (full replacement) or `add` (append one bullet). `summary` null → first non-empty content line. The server holds MEMORY.md's pen and journals `MemoryUpdated`. Returns `{summary}`. |
 
 ### Turn
 
@@ -89,14 +100,16 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
   "text": "…",
   "status": "pending | running | completed | failed | interrupted",
   "items": [ ConversationItem, … ],
-  "created_at": "2026-07-04T00:42:03.412861Z"
+  "created_at": "2026-07-04T00:42:03.412861Z",
+  "from": "worker"
 }
 ```
 
 `items` are the tool/command/file/message artifacts the mind produced, in
 order (`ConversationItem` — see `lfd/conversations/types.rs`). User turns
 carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
-across all sources.
+across all sources. `from` is the speaker byline of an attributed emission
+(`lf chat`); null for the mind's own turns and plain user turns.
 
 ## Demo
 

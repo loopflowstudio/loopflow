@@ -85,6 +85,7 @@ fn chat_turn_fixture_pins_wave_chat_shape() {
     assert_eq!(turn.id, "turn-3");
     assert_eq!(turn.role, ChatRole::Assistant);
     assert_eq!(turn.status, Lifecycle::Running);
+    assert_eq!(turn.from.as_deref(), Some("worker"));
     assert_eq!(turn.items.len(), 6);
     assert!(matches!(turn.items[0], ConversationItem::Command { .. }));
     assert!(matches!(turn.items[1], ConversationItem::File { .. }));
@@ -111,6 +112,13 @@ fn chat_turn_fixture_pins_wave_chat_shape() {
         .as_object()
         .expect("object")
         .contains_key("output"));
+
+    // `from` is explicitly Optional: a fixture without the key decodes as
+    // None — no default masking (mirrored in Swift's ContractTests).
+    let mut without_from = load_fixture("chat_turn.json");
+    without_from.as_object_mut().expect("object").remove("from");
+    let turn: ChatTurn = serde_json::from_value(without_from).expect("absent from parses");
+    assert_eq!(turn.from, None);
 }
 
 #[test]

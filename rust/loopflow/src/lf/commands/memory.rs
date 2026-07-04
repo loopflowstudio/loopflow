@@ -1,0 +1,226 @@
+//! `lf memory` — read or curate a wave's MEMORY.md through its live server.
+//!
+//! The live server holds the pen: `update` (full replacement from stdin) and
+//! `add "fact"` (append one curated bullet) POST to the wave server, which is
+//! the sole writer of the ORIGIN repo's `wave/<name>/MEMORY.md` and journals
+//! `MemoryUpdated {summary}`. `show` (the bare default) reads through the
+//! server when one is live and falls back to the origin file otherwise —
+//! reads don't need the pen. Targeting (`--wave`, `--parent`) matches
+//! `lf chat` ([`super::chat`]).
+
+use std::io::Read;
+
+use anyhow::{anyhow, Result};
+
+use crate::lf::commands::chat::{get_json, post_json, resolve_target, CliContext, ResolvedWave};
+use crate::lf::{MemoryCommand, WaveTargetArgs};
+use crate::lfd::wave::memory::Memory;
+
+pub fn run(cmd: Option<&MemoryCommand>, default_target: &WaveTargetArgs) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        match cmd {
+            None => show(default_target).await,
+            Some(MemoryCommand::Show { target }) => show(target).await,
+            Some(MemoryCommand::Update { summary, target }) => {
+                let mut content = String::new();
+                std::io::stdin().read_to_string(&mut content)?;
+                let resolved = resolve(target).await?;
+                let summary =
+                    write_memory(&resolved, "update", &content, summary.as_deref()).await?;
+                println!("memory updated for wave '{}': {summary}", resolved.name);
+                Ok(())
+            }
+            Some(MemoryCommand::Add { fact, target }) => {
+                let resolved = resolve(target).await?;
+                let summary = write_memory(&resolved, "add", fact, None).await?;
+                println!("memory fact added for wave '{}': {summary}", resolved.name);
+                Ok(())
+            }
+        }
+    })
+}
+
+async fn resolve(target: &WaveTargetArgs) -> Result<ResolvedWave> {
+    let context = CliContext::detect().await;
+    resolve_target(
+        target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+    )
+    .await
+}
+
+async fn show(target: &WaveTargetArgs) -> Result<()> {
+    let resolved = resolve(target).await?;
+    print!("{}", read_memory(&resolved).await?);
+    Ok(())
+}
+
+/// The wave's MEMORY.md: through the live server when one answers, else a
+/// direct read of the origin file (reads don't need the pen).
+pub(crate) async fn read_memory(resolved: &ResolvedWave) -> Result<String> {
+    if let Some(endpoint) = &resolved.endpoint {
+        let body = get_json(endpoint, "/memory").await?;
+        return Ok(body["content"].as_str().unwrap_or_default().to_string());
+    }
+    let root = resolved.repo_root.as_deref().ok_or_else(|| {
+        anyhow!(
+            "wave '{}' has no live server and no local wave directory to read",
+            resolved.name
+        )
+    })?;
+    Ok(Memory::for_wave(root, &resolved.name).read())
+}
+
+/// Write through the live server (the sole holder of MEMORY.md's pen).
+/// Returns the summary the server journaled. No live server is an error —
+/// there is deliberately no offline write path.
+pub(crate) async fn write_memory(
+    resolved: &ResolvedWave,
+    op: &str,
+    content: &str,
+    summary: Option<&str>,
+) -> Result<String> {
+    let endpoint = resolved.require_endpoint()?;
+    let body = post_json(
+        &endpoint,
+        "/memory",
+        &serde_json::json!({ "op": op, "content": content, "summary": summary }),
+    )
+    .await?;
+    Ok(body["summary"].as_str().unwrap_or_default().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
+    use crate::lfd::wave::runtime::WaveRuntime;
+    use crate::lfd::wave::server;
+
+    fn resolved(name: &str, endpoint: Option<String>, root: Option<&Path>) -> ResolvedWave {
+        ResolvedWave {
+            name: name.to_string(),
+            endpoint,
+            repo_root: root.map(Path::to_path_buf),
+            own_name: None,
+        }
+    }
+
+    async fn boot_server(origin: &Path, wave: &str) -> (String, Arc<WaveRuntime>) {
+        let (runtime, _inbox_rx) =
+            WaveRuntime::open(wave.to_string(), origin.to_path_buf()).expect("open runtime");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = server::router(runtime.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        (addr.to_string(), runtime)
+    }
+
+    fn memory_summaries(origin: &Path, wave: &str) -> Vec<String> {
+        let (_, events) = Journal::open(&journal_path(origin, wave)).expect("journal");
+        events
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::MemoryUpdated { summary } => Some(summary),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `update` replaces the ORIGIN repo's file through the server and
+    /// journals `MemoryUpdated` (summary = first line, or the --summary flag);
+    /// `add` appends a bullet.
+    #[tokio::test]
+    async fn update_and_add_write_the_origin_file_and_journal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path();
+        let (addr, _runtime) = boot_server(origin, "ship").await;
+        let target = resolved("ship", Some(addr), None);
+
+        let summary = write_memory(&target, "update", "# Ship\n\nfold is truth\n", None)
+            .await
+            .expect("update");
+        assert_eq!(summary, "# Ship", "summary defaults to the first line");
+        assert_eq!(
+            std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
+            "# Ship\n\nfold is truth\n",
+            "the ORIGIN file is the one replaced"
+        );
+
+        let summary = write_memory(&target, "update", "# Ship v2\n", Some("rewrote the plan"))
+            .await
+            .expect("update with summary");
+        assert_eq!(summary, "rewrote the plan");
+
+        let summary = write_memory(&target, "add", "workers report via lf chat", None)
+            .await
+            .expect("add");
+        assert_eq!(summary, "workers report via lf chat");
+        assert_eq!(
+            std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
+            "# Ship v2\n- workers report via lf chat\n",
+            "add appends a curated bullet"
+        );
+
+        assert_eq!(
+            memory_summaries(origin, "ship"),
+            vec![
+                "# Ship".to_string(),
+                "rewrote the plan".to_string(),
+                "workers report via lf chat".to_string(),
+            ]
+        );
+    }
+
+    /// `show` works with no server at all: a direct read of the origin file.
+    #[tokio::test]
+    async fn show_reads_the_origin_file_without_a_server() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("MEMORY.md"), "offline read\n").unwrap();
+
+        let content = read_memory(&resolved("ship", None, Some(tmp.path())))
+            .await
+            .expect("read");
+        assert_eq!(content, "offline read\n");
+    }
+
+    /// `show` prefers the live server's view when one answers.
+    #[tokio::test]
+    async fn show_reads_through_the_server_when_live() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("MEMORY.md"), "served content\n").unwrap();
+        let (addr, _runtime) = boot_server(tmp.path(), "ship").await;
+
+        let content = read_memory(&resolved("ship", Some(addr), None))
+            .await
+            .expect("read");
+        assert_eq!(content, "served content\n");
+    }
+
+    /// Writes have no offline path: no live server is an error.
+    #[tokio::test]
+    async fn update_without_a_server_errors() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let err = write_memory(
+            &resolved("ship", None, Some(tmp.path())),
+            "update",
+            "x",
+            None,
+        )
+        .await
+        .expect_err("no server");
+        assert!(err.to_string().contains("no live server"), "{err}");
+    }
+}

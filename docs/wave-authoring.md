@@ -65,6 +65,19 @@ Run `lf goal <wave>` to launch that wave's goal directly. Builtin goals resolve 
 lf goal s3 --once    # the s3 (control) charter, one loop
 ```
 
+Use `greenfield` when the goal is the whole product brief and there is no
+existing repo scaffold:
+
+```bash
+lf -b greenfield
+```
+
+The flow runs `scaffold → implement → run → gate`. It deliberately skips the
+interactive `design` step: `GOAL.md` is the design conversation for this path.
+`scaffold` creates the runnable skeleton, initializes git if needed, and seeds
+`scratch/<branch>.md`; `run` executes the built artifact and writes
+`scratch/run-observations.md`.
+
 ### Memory
 
 `MEMORY.md` is durable working context the wave agent writes as it goes — decisions, dead ends, what a downstream task should know. Workers inherit it as read-only context so they build with the wave's history in view; only the wave agent writes it.

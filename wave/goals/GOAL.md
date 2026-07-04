@@ -2,6 +2,8 @@
 primary_flow: ship-roadmap
 mode: manual
 workers: 0
+pm:
+  asana_project: 1216257471889000
 metrics:
   - A wave is authored in one file (GOAL.md) — no yaml, no local roadmap mirror
   - The roadmap is live in Asana, read and written by the loop

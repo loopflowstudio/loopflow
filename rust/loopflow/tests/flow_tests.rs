@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use loopflow::engine::flow::{ConcreteItem, FlowItem, Step};
-use loopflow::engine::{expand_flow, load_flow};
+use loopflow::engine::{expand_flow, load_flow, load_step};
 use tempfile::TempDir;
 
 fn write_step(repo: &Path, name: &str, content: &str) {
@@ -256,6 +256,31 @@ fn expand_flow_resolves_plain_string_as_subflow() {
             assert_eq!(s.flow_parents, vec!["parent", "publish"]);
         }
         _ => panic!("expected step from publish sub-flow"),
+    }
+}
+
+#[test]
+fn greenfield_flow_is_registered_and_headless() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let scaffold = load_step("scaffold", repo).expect("scaffold builtin resolves");
+    let run = load_step("run", repo).expect("run builtin resolves");
+    let flow = load_flow("greenfield", repo).expect("greenfield builtin resolves");
+    let items = expand_flow(&flow, repo).expect("greenfield expands");
+
+    assert_eq!(scaffold.interactive, None);
+    assert_eq!(run.interactive, None);
+    assert_step_sequence(&items, &["scaffold", "implement", "run", "gate"]);
+    for item in items {
+        match item {
+            ConcreteItem::Step(step) => assert!(
+                !step.step.interactive.unwrap_or(false),
+                "greenfield step {} must not be interactive",
+                step.step.name
+            ),
+            other => panic!("greenfield should expand only to steps, got {other:?}"),
+        }
     }
 }
 

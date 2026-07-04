@@ -92,6 +92,11 @@ def _worker_launch_response(flow: str = "implement") -> Session:
     )
 
 
+def _clear_agent_identity_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("LFD_SESSION_ID", "LFD_WAVE_ID", "LFD_RUN_ID", "LFD_AGENT_ROLE"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_wave_table_includes_worktree_and_branch_columns() -> None:
     wave = Wave.model_validate(WAVE_MINIMAL)
     rendered = _render_table(wave)
@@ -216,6 +221,7 @@ def test_whoami_renders_current_session(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_worker_run_dispatches_and_prints_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_agent_identity_env(monkeypatch)
     monkeypatch.setattr(
         "loopflow.cli.api.run_worker",
         lambda wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
@@ -233,6 +239,7 @@ def test_worker_run_dispatches_and_prints_session(monkeypatch: pytest.MonkeyPatc
 
 
 def test_worker_run_json_includes_session_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_agent_identity_env(monkeypatch)
     monkeypatch.setattr(
         "loopflow.cli.api.run_worker",
         lambda _wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
@@ -260,6 +267,7 @@ def test_worker_run_json_includes_session_connection(monkeypatch: pytest.MonkeyP
 
 
 def test_worker_run_infers_wave_from_current_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_agent_identity_env(monkeypatch)
     received: dict[str, object] = {}
 
     monkeypatch.setattr(

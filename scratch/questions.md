@@ -37,11 +37,7 @@ Made these executive calls against the code; a human should sanity-check them:
   team is fine losing the "gap count = 2" narrative in favor of the observable
   empty-directory proof.
 
-## Blocker — roadmap write-back deferred
+## Roadmap write-back
 
-`lf op pm show --wave goals` fails: `wave/goals/GOAL.md has no pm.asana_project`
-(needs `lf op pm init --wave goals`). The design's roadmap write-back (record CLI
-result on 1216257471904678; file server-probe + mobile-probe) is owed but blocked
-on connecting the project — a setup + external write, out of kickoff scope in a
-headless run. Next pass: connect the project, then `lf op pm update` per the
-design's "Done when".
+The goals wave now carries the canonical Asana project id from wave memory:
+`1216257471889000`. Write-back should use `lf op pm update --wave goals`.

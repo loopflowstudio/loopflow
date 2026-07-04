@@ -137,6 +137,8 @@ Manual work — you invoke these, often interactively.
 | `demo` | Experience-first walkthrough of observable changes |
 | `code-review` | Walk through structural and architectural decisions |
 | `review-design` | Reshape AI-elaborated design into user intent |
+| `scaffold` | Stand up a greenfield product skeleton from `GOAL.md` |
+| `run` | Build and execute the artifact, recording observed behavior |
 | `refine` | Refine existing work |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 
@@ -204,6 +206,7 @@ Flows can include mechanical ops items directly:
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
 | `build-or-silent` | xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
+| `greenfield` | scaffold → implement → run → gate |
 | `queue` | compress → update-wave → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |

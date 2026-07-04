@@ -546,4 +546,37 @@ names out of committed docs. MCP stays the maximum-compliance rendering of
 the emission vocabulary if posture tightens; the 1c API-key seam remains the
 always-compliant escape hatch.
 
+**Named question — is the socket essential? (Jack, 2026-07-04.)** The wave
+*process* is non-negotiable — it is the mind's KEEPER: keeps the vendor
+thread alive, keeps it accountable (journaled turns, coalesced queue with
+real answers, bounded interrupt, failure cap + revival), holds the two pens
+(journal, MEMORY.md), and watches the store. The HTTP *surface* is
+contingent: every route has a substrate-only equivalent (speech via a
+watched store/spool; reads via journal folds — ambient context already does
+them; push via file watching; one-brain via registry row + pid probe).
+Kept for now: it buys one canonical fold (dropping it makes the fold a
+cross-language contract — the split-brain class the DTO rules kill), ack'd
+writes, and it's built and demoed. Governing rule: **the server is an ear,
+not an organ** — nothing may depend on HTTP specifically; the lf-language
+item designs the unified stream so a journal tail could replace it without
+touching the vocabulary. Corollary (the wave spectrum): a wave exists as
+data with nobody home — **dormant** (substrate only; lf chat drops,
+correctly) → **observed** (viewers reading) → **minded** (`lf wave`
+running). The process adds animation, not existence.
+
+**The doorman, not the daemon (Jack, 2026-07-04 — "are we coming back to
+lfd as global server?").** Old lfd was a center because it OWNED things
+(executor, ticker, dispatch) — traffic had no way around it, not because it
+had a port. What remote Concerto needs is an **aggregating doorman**: one
+optional per-machine viewer-with-a-socket that reads store + tails journals,
+re-publishes one HTTPS/SSE surface (fleet + threads), and forwards inbound
+speech by exec'ing `lf chat`. Four constitutional tests keep it a doorman
+forever: (1) **route-around** — locally everything it serves is readable
+from substrate without it; (2) **writes only through the doors** — every
+mutation execs `lf`, no privileged channel; (3) **crash-harmless** — derived
+state only, stateless restart, no work changes course; (4) **non-exclusive**
+— two can run; centers are things there can only be one of. If per-wave
+sockets are ever dropped, the doorman becomes the machine's only socket —
+exactly when these tests matter most.
+
 **Open:** none blocking.

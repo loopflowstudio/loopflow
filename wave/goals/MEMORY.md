@@ -33,7 +33,6 @@ The four `priority: high` Asana items (01–04) were assessed/designed this loop
 ## Next (not yet built)
 
 - **Wave one level out** — split singular wave *identity* (GOAL/MEMORY/agent) from per-repo *execution* (`repos: [RepoWork]`); repo becomes a filter, not a container (item `3-wave-repo-split`). Forks with the tree-spanning cross-repo model in `2-wave-ancestry`.
-- **`lf goal` thin-call cleanup** — the local `lf goal` command still renders (`render_goal`) and launches the session locally; reduce it to a thin call into the lfd-backed wave-agent session API (`lfq wave run`) so the runtime owns rendering/launch. Minor.
 - Close-the-loop: feed in-flight worker runs + PR state into re-measure.
 - Attention as the loop's human-escalation channel for parked interactive steps.
 - The canonical always-on wave-agent session; supervisor + heartbeat.

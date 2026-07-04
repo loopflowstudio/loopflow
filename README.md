@@ -33,16 +33,16 @@ lfq sessions                 # every live session — the wave agent and its wor
 lfq attach <session-id>      # jump into one over tmux
 ```
 
-Run the outer loop in your terminal:
+Run the wave in your terminal:
 
 ```bash
-lf wave designer             # repeat lf -b goal designer --once until Ctrl-C
+lf wave designer             # reactive server: progress loop + chat, until Ctrl-C
 ```
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash
-lf goal s3 --once    # the s3 (control) charter, one loop
+lf wave s3           # the s3 (control) charter
 ```
 
 The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:

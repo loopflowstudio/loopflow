@@ -59,10 +59,10 @@ move, dispatch a worker to build it, watch the PR, and fold what shipped into
 memory.
 ```
 
-Run `lf goal <wave>` to launch that wave's goal directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
+Run `lf wave <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
 
 ```bash
-lf goal s3 --once    # the s3 (control) charter, one loop
+lf wave s3           # the s3 (control) charter
 ```
 
 ### Memory

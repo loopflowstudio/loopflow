@@ -6,8 +6,8 @@ pm:
 ---
 
 Collapse the three binaries — `lf`, `lfd`, `lfq` — toward **one workhorse plus one
-thin server**. `lf` already does the real behavior (run steps/flows, `lf goal`
-runs a wave loop) and needs shell/binary/ssh access; that is the only access
+thin server**. `lf` already does the real behavior (run steps/flows, `lf wave`
+runs a wave) and needs shell/binary/ssh access; that is the only access
 model. Everything lfd and lfq do that is *exec-behavior* moves into `lf` (`lf d`
 for store reads/writes + tmux/docker launch, `lf q` for queue/worker). `lfd`
 shrinks to a **guarded subscription server** whose sole justification is push —

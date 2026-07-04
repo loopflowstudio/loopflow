@@ -134,19 +134,6 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
-    /// Launch a wave's goal as a looping top-level agent
-    Goal {
-        /// Wave name (matches wave/<name>/)
-        name: String,
-        /// Cap the loop to a single iteration
-        #[arg(long)]
-        once: bool,
-        /// Spawn the loop in a detached tmux session and print its handle,
-        /// instead of running it in the foreground. Clients (e.g. Concerto)
-        /// attach to the printed session with `tmux attach`.
-        #[arg(long)]
-        tmux: bool,
-    },
     /// Start a wave's reactive server: a long-lived process that autonomously
     /// runs progress subagents and serves the live conversation + chat over a
     /// loopback HTTP port (discovery via `wave/<name>/.wave-endpoint`).

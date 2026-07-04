@@ -126,11 +126,17 @@ def create_user(email: str) -> User:
 
 **Specify "done when."** A command to run, output to expect. The implementing session needs to know when to stop.
 
+**Name the demo.** Every design states the moment that proves the win: what
+the developer runs and what they see. If no demo can be described, the scope
+is wrong — an infrastructure-only slice should be carried one step further,
+to where it shows itself.
+
 ## Design doc sections
 
 When the idea fits in one commit (~1000 words max):
 
 - **What to build** — One sentence. What exists after this that doesn't exist now.
+- **The demo** — What the developer runs and what they see when this ships. One or two sentences, concrete enough to perform.
 - **Data structures** — Core types, sketched in code.
 - **Key functions** — Signatures with one-line intent.
 - **Constraints** — What would require rewriting if guessed wrong.

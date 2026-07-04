@@ -104,6 +104,31 @@ prefix prune that can't touch human trees. Implementation notes: worktree
 recognition + `lf op wt prune` + land rotation must learn the three-segment
 form, and tmux name derivation keeps its `.`→`-` sanitization.
 
+**Placement is a per-dispatch decision (Jack, 2026-07-04).** Wrong-cwd
+launches aren't the worry; first-class worktree management from `lf wave`
+down is. Replace the executor's `workers == 1` shared-vs-per-run heuristic
+with an explicit placement on every dispatch:
+
+- `fresh` (default) — new `<repo>.<wave>.<id>` worktree off main;
+  independent PR, independent land.
+- `pool` — run in an existing worktree (the mind's, or a sibling's); a
+  *conscious* opt-in to tightly-coupled parallel edits; the pooler owns the
+  collision risk.
+- `stack <run>` — new worktree whose branch forks from the parent run's
+  branch, for dependent series. Stacking is branch lineage, not directory
+  lineage — the filesystem stays flat, git carries the DAG.
+
+Mostly promotion, not construction: runs already carry `parent_run_id`,
+`stack_position/group/status`, `target_branch`, and the queue
+reconciler/`advance_branch` handle landing; per-run worktree creation exists
+behind the workers>1 path. Surface as `lfq worker run --pool | --stack
+<run-id>`; record placement on the `WorkerDispatched` journal event; give the
+mind placement guidance in its operating prompt (default fresh; pool only
+when workers must see each other's edits live; stack when the task names a
+dependency). MVP tension, held: **stacks are serial by default** — the mind
+dispatches level N+1 only after N lands; restack-cascade automation for
+parallel stacks is deliberately deferred.
+
 ### Fork 3 — one mind or two
 - **3a** one mind, two input streams: the same agent context handles progress
   and chat; chat *is* steering.
@@ -221,6 +246,14 @@ it, and its workers land PRs.**
    its consumer); SSE dedupe becomes id-replace so in-progress turns update
    in place — the Swift client already handles this. Un-disable the composer;
    phase-dependent verb (Send / Queue / Interrupt); failed sends restore text.
+   *Named divergence (built 2026-07-04):* the SSE carries full whole-turn
+   snapshots per delta, not notify+refetch (the HumanLayer-conservative call
+   wavechat-review recommended). Snapshot + id-replace semantics make a lossy
+   bus self-healing — a dropped frame is corrected by the next one — except
+   the terminal frame of a turn, which has no successor; a lagged client can
+   show `running` until reconnect. Accepted for latency + client simplicity;
+   backstop (idle keepalive re-send or client refetch-on-quiet) is future
+   work.
 7. **One brain per wave, enforced.** `lf wave` is THE wave brain. Kill the
    loop_ticker path for served waves (pause-on-serve or mode gate) — the
    split-brain is a live bug today, not a hypothesis.

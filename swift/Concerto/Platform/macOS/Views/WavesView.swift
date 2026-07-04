@@ -362,10 +362,13 @@ struct WavesView: View {
         }
     }
 
-    /// On-disk repo root for the wave, where its `wave/<name>/.wave-endpoint`
-    /// discovery pointer lives.
+    /// On-disk repo root for the wave's state, where its
+    /// `wave/<name>/.wave-endpoint` discovery pointer lives. Wave state is
+    /// published at the ORIGIN repo, so a worktree rail path resolves here
+    /// (memoized) — chat discovery, the launcher, and the tmux-attach hint all
+    /// inherit the same origin path.
     private func waveRepoPath(for wave: WaveViewModel) -> String {
-        repoState(for: wave)?.repo.path ?? wave.repo
+        WaveOrigin.resolve(repoState(for: wave)?.repo.path ?? wave.repo)
     }
 
     private func repoState(for wave: WaveViewModel) -> PortfolioRepoState? {

@@ -110,7 +110,101 @@ struct WaveChatConnectionTests {
         #expect(WaveMessageOp.steer.rawValue == "steer")
         #expect(WaveMessageOp.interrupt.rawValue == "interrupt")
     }
+
+    // MARK: - Real wire frame
+
+    @Test("a captured real assistant-turn SSE frame decodes and renders")
+    func realAssistantFrameDecodes() throws {
+        // Captured verbatim from a live `lf wave goals` server
+        // (GET /conversation/stream, 2026-07-04): a completed assistant turn
+        // with four command items, one failed.
+        let conn = connection()
+        var parser = SSEFrameParser()
+        var frames: [SSEFrameParser.Frame] = []
+        let stream = "event: state\ndata: turning\n\nevent: turn\ndata: \(realTurnFrame)\n\n"
+        for byte in stream.utf8 {
+            if let frame = parser.consume(byte) { frames.append(frame) }
+        }
+
+        #expect(frames.count == 2)
+        for frame in frames {
+            conn.handle(event: frame.event, data: frame.data)
+        }
+
+        #expect(conn.mindState == .turning)
+        #expect(conn.turns.count == 1)
+        let turn = try #require(conn.turns.first)
+        #expect(turn.id == "turn-101")
+        #expect(turn.role == .assistant)
+        #expect(turn.status == .completed)
+        #expect(turn.text.hasPrefix("This supersedes the kickoff design"))
+        #expect(turn.createdAtDate != nil)
+        #expect(turn.from == nil, "explicit null decodes as absent")
+        #expect(turn.items.count == 4)
+        guard case let .command(_, command, cwd, status, output, exitCode, _) = turn.items[3] else {
+            Issue.record("expected a command item")
+            return
+        }
+        #expect(command.count == 1)
+        #expect(cwd == "/Users/jack/src/loopflow.goals")
+        #expect(status == .failed)
+        #expect(output?.contains("worker capacity") == true)
+        #expect(exitCode == 1)
+    }
 }
+
+// SSE framing. Hand-rolled line splitting is the point under test:
+// `AsyncBytes.lines` drops the empty lines that terminate SSE frames, which is
+// exactly the bug that left the pane blank against a healthy server. The
+// parser must emit a frame per blank line, join multi-line data, strip CRs,
+// and swallow keep-alive comments.
+@Suite("SSE frame parsing")
+struct SSEFrameParserTests {
+    private func frames(_ raw: String) -> [SSEFrameParser.Frame] {
+        var parser = SSEFrameParser()
+        var out: [SSEFrameParser.Frame] = []
+        for byte in raw.utf8 {
+            if let frame = parser.consume(byte) { out.append(frame) }
+        }
+        return out
+    }
+
+    @Test("blank lines delimit frames; event names and data come through")
+    func framesSplitOnBlankLines() {
+        let out = frames("event: state\ndata: turning\n\nevent: turn\ndata: {\"id\":1}\n\n")
+        #expect(out == [
+            .init(event: "state", data: "turning"),
+            .init(event: "turn", data: "{\"id\":1}"),
+        ])
+    }
+
+    @Test("CRLF line endings parse identically")
+    func crlfLineEndings() {
+        let out = frames("event: state\r\ndata: idle\r\n\r\n")
+        #expect(out == [.init(event: "state", data: "idle")])
+    }
+
+    @Test("multi-line data joins with newlines")
+    func multiLineData() {
+        let out = frames("event: turn\ndata: first\ndata: second\n\n")
+        #expect(out == [.init(event: "turn", data: "first\nsecond")])
+    }
+
+    @Test("comment keep-alives and dataless blank lines emit nothing")
+    func commentsAndEmptyFramesDrop() {
+        let out = frames(": ping\n\n: ping\n\nevent: state\ndata: idle\n\n")
+        #expect(out == [.init(event: "state", data: "idle")])
+    }
+
+    @Test("an unterminated frame stays pending")
+    func unterminatedFramePends() {
+        let out = frames("event: turn\ndata: {\"id\":1}\n")
+        #expect(out.isEmpty, "no blank line yet — the turn may still be streaming")
+    }
+}
+
+/// A complete, unedited `turn` frame payload from a live wave server.
+private let realTurnFrame = #"{"id":"turn-101","role":"assistant","text":"This supersedes the kickoff design in an important way: the flow must avoid interactive `design` or it will park headlessly. I’m recording the corrected shape and writing it back to Asana from the wave root, then I’ll try the stacked implementation dispatch again.\nMemory and Asana are updated; the worker session still exists, but the registry may have cleared if the process exited inside tmux. I’m using the queue as the authority for whether the stacked implementation can start.\nCaptured the corrected review-design result in memory and wrote it back to Asana.\n\nThe important correction is now durable: `greenfield` must be `scaffold -> implement -> run -> gate`, not `scaffold -> design -> ...`, because interactive `design` parks in headless flow execution.\n\nTried to start the stacked implementation worker on commit `7c64bcef1`, but the queue still reports `goals` at worker capacity `1/1`. No new worker launched.","status":"completed","items":[{"type":"command","id":"call_KgomG7XIADii2YrIuFuCY8nL","command":["/bin/zsh -lc \"tmux list-sessions | rg 'lf-jack-heart-goals|148e0e02|68a936f3'\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"lf-jack-heart-goals-20260704_1626-68a936f3-25ac-4daf-9579-6206602def88: 1 windows (created Sat Jul  4 16:26:19 2026)\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_YgukOJma1DKNLCnfcKXxjQgU","command":["/bin/zsh -lc 'lf memory add \"2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive steps (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/steps/ must stay empty.\"'"],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"memory fact added for wave 'goals': 2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive steps (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/steps/ must stay empty.\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_EeLYzG54t0Z7M3fiEuqw96TA","command":["/bin/zsh -lc \"lf op pm update --wave goals --id 1216257471904678 --title \\\"Prove the language — three reference builds from goals\\\" --notes \\\"Review-design landed in worker run 148e0e02 at commit 7c64bcef1. It corrected the implementation plan against actual flow behavior: headless flows park on interactive design steps, so the greenfield flow must be scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md from GOAL. Deterministic gate: registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps. Manual one-shot probe remains outside cargo test. Binary metric: the probe dir's .lf/steps/ stays empty.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"goals: updated task 1216257471904678\n","exit_code":0,"duration_ms":1186},{"type":"command","id":"call_dTTuy9oEf1I3oPAhYs4W3NSw","command":["/bin/zsh -lc \"lf q worker run goals --flow build --stack 148e0e02-06c3-4657-9040-68c02249dc9f --task \\\"Implement the accepted review-design plan for Asana 1216257471904678 from scratch/prove-the-language.md, building on commit 7c64bcef1. Scope: add first-class builtin scaffold and run prompt steps registered through build.rs; add a greenfield flow that expands to scaffold -> implement -> run -> gate with zero interactive steps; add the deterministic registry test proving scaffold/run/greenfield resolve and greenfield contains no WaitInteractive steps; add scripts/prove_language_cli.sh as a manual one-shot probe from an empty temp dir and a tiny GOAL.md, with the binary success metric that the probe dir's .lf/steps/ remains empty. Do not include the interactive design step. Keep integrate/server and platform-build/rams/mobile probes deferred. Use lf op pm update --wave goals for write-back.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"failed","output":"Error: wave 'goals' already at worker capacity (1/1)\n","exit_code":1,"duration_ms":0}],"created_at":"2026-07-04T23:35:42.657239Z","from":null}"#
 
 // Composer verb selection: the smallest honest mapping from (mind state, has
 // text) to what the primary/secondary buttons do. The view renders this

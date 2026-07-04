@@ -11,15 +11,15 @@ import LoopflowCore
 
 enum WaveLaunchError: LocalizedError, Equatable {
     case alreadyRunning(String)
-    case lfNotFound
+    case noUsableLf(String)
     case launchFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .alreadyRunning(let reason):
             return reason
-        case .lfNotFound:
-            return "Can't find the lf binary — not bundled with Concerto and not on PATH."
+        case .noUsableLf(let detail):
+            return detail
         case .launchFailed(let detail):
             return detail
         }
@@ -42,25 +42,29 @@ enum LocalWaveAgentLauncher {
     /// Start `lf wave <name>` in a detached tmux session so it outlives Concerto.
     /// Refuses when the wave already has a tmux session or a live endpoint —
     /// the server enforces one brain per wave; we just avoid the doomed spawn.
+    ///
+    /// Wave state lives at the wave's ORIGIN repo (`WaveOrigin`), so a worktree
+    /// `repoPath` resolves once up front and that one path feeds everything:
+    /// the session name, the endpoint guard, the launch cwd, and the dev-tree
+    /// lf candidate. Guard and discovery read the same file by construction.
     static func launchWave(repoPath: String, waveName: String) throws {
-        let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName)
+        let origin = WaveOrigin.resolve(repoPath)
+        let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: origin, waveName: waveName)
         if let reason = launchBlockReason(
             sessionName: sessionName,
-            sessionExists: sessionExists(repoPath: repoPath, waveName: waveName),
-            endpoint: WaveEndpoint.read(repoPath: repoPath, waveName: waveName)
+            sessionExists: sessionExists(repoPath: origin, waveName: waveName),
+            endpoint: WaveEndpoint.read(repoPath: origin, waveName: waveName)
         ) {
             throw WaveLaunchError.alreadyRunning(reason)
         }
-        guard let lfPath = resolveLfBinary() else {
-            throw WaveLaunchError.lfNotFound
-        }
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
         let args = waveLaunchCommand(
             lfPath: lfPath,
             sessionName: sessionName,
-            repoPath: repoPath,
+            repoPath: origin,
             waveName: waveName
         )
-        try runChecked(args, cwd: repoPath)
+        try runChecked(args, cwd: origin)
     }
 
     /// Why a launch must not happen, or nil when the way is clear.
@@ -85,23 +89,74 @@ enum LocalWaveAgentLauncher {
         ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "wave", waveName]
     }
 
-    /// Resolution order: the lf bundled inside Concerto.app (shipped next to the
-    /// bundled lfd), then `lf` on the enriched PATH. Nil means nothing to run.
-    static func resolveLfBinary(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
-        isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
-    ) -> String? {
+    /// Candidate lf binaries in trust order: the lf bundled inside Concerto.app
+    /// (shipped next to the bundled lfd), each `lf` on the enriched PATH, then
+    /// `<origin>/target/release/lf` — the dev-tree build, for a Concerto pointed
+    /// at a loopflow checkout where the freshest lf is the one just compiled.
+    static func lfCandidates(
+        originRepo: String,
+        bundled: URL?,
+        pathEnv: String,
+        isExecutableFile: (String) -> Bool
+    ) -> [String] {
+        var candidates: [String] = []
         if let bundled {
-            return bundled.path
+            candidates.append(bundled.path)
         }
         for dir in pathEnv.split(separator: ":") where !dir.isEmpty {
             let candidate = "\(dir)/lf"
-            if isExecutableFile(candidate) {
-                return candidate
+            if isExecutableFile(candidate), !candidates.contains(candidate) {
+                candidates.append(candidate)
             }
         }
-        return nil
+        let devBuild = "\(originRepo)/target/release/lf"
+        if isExecutableFile(devBuild), !candidates.contains(devBuild) {
+            candidates.append(devBuild)
+        }
+        return candidates
+    }
+
+    /// First candidate that actually has the `wave` subcommand. Resolving `lf`
+    /// from PATH can find a build that predates `lf wave`; it launches fine,
+    /// exits instantly, and the UI sits on a dead 20s wait (observed live) —
+    /// so every candidate is capability-probed before it's trusted.
+    ///
+    /// The probe is `lf help wave`, NOT `lf wave --help`: lf's arg reorderer
+    /// treats an unknown `wave` as a step name, so `lf wave --help` prints the
+    /// root help and exits 0 even on a build without the subcommand. `lf help
+    /// wave` exits 0 only when the subcommand exists (verified against both a
+    /// stale and a wave-capable build), and clap answers it without touching
+    /// any wave state.
+    static func resolveWaveCapableLf(
+        originRepo: String,
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
+        pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
+        isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        probe: (String) -> Bool = hasWaveCommand
+    ) throws -> String {
+        let candidates = lfCandidates(
+            originRepo: originRepo,
+            bundled: bundled,
+            pathEnv: pathEnv,
+            isExecutableFile: isExecutableFile
+        )
+        guard !candidates.isEmpty else {
+            throw WaveLaunchError.noUsableLf(
+                "Can't find an lf binary — not bundled with Concerto and not on PATH."
+            )
+        }
+        for candidate in candidates where probe(candidate) {
+            return candidate
+        }
+        throw WaveLaunchError.noUsableLf(
+            "No lf with the wave command. Rejected (each failed `lf help wave`, "
+                + "so it predates `lf wave`): " + candidates.joined(separator: ", ")
+        )
+    }
+
+    /// `lf help wave` exits 0 only when this build knows the subcommand.
+    static func hasWaveCommand(lfPath: String) -> Bool {
+        run([lfPath, "help", "wave"])?.status == 0
     }
 
     // MARK: - Process plumbing

@@ -14,11 +14,17 @@ public enum WaveChatError: Error, Sendable {
 }
 
 /// Reads the discovery pointer a running wave writes under its `wave/<name>/` dir.
+///
+/// Wave state lives at the wave's ORIGIN repo: a running wave publishes its
+/// endpoint to the main checkout even when Concerto was pointed at a worktree,
+/// so `repoPath` goes through `WaveOrigin.resolve` before the read. Every
+/// consumer (chat discovery, the launcher's double-launch guard) shares this
+/// one resolution — guard and reader can't disagree.
 public enum WaveEndpoint {
     public static let fileName = ".wave-endpoint"
 
     public static func path(repoPath: String, waveName: String) -> URL {
-        URL(fileURLWithPath: repoPath)
+        URL(fileURLWithPath: WaveOrigin.resolve(repoPath))
             .appendingPathComponent("wave", isDirectory: true)
             .appendingPathComponent(waveName, isDirectory: true)
             .appendingPathComponent(fileName)
@@ -30,6 +36,54 @@ public enum WaveEndpoint {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Incremental SSE frame parser, fed raw bytes. Line splitting is hand-rolled
+/// because `URLSession.AsyncBytes.lines` silently drops empty lines — and the
+/// empty line is precisely what terminates an SSE frame. (Observed live: with
+/// `.lines`, no frame boundary ever fired, so nothing the server streamed —
+/// replay, turns, mind state — reached the UI.) Comment lines (`:` keep-alive
+/// pings) drop; `event:` names the pending frame; `data:` lines accumulate,
+/// joined by `\n`; a blank line emits the frame when it carries data.
+struct SSEFrameParser {
+    struct Frame: Equatable {
+        let event: String
+        let data: String
+    }
+
+    private var line: [UInt8] = []
+    private var event = ""
+    private var data = ""
+
+    /// Feed one byte; the completed frame comes back on the blank line that ends it.
+    mutating func consume(_ byte: UInt8) -> Frame? {
+        guard byte == UInt8(ascii: "\n") else {
+            line.append(byte)
+            return nil
+        }
+        if line.last == UInt8(ascii: "\r") { line.removeLast() }
+        let text = String(decoding: line, as: UTF8.self)
+        line.removeAll(keepingCapacity: true)
+        return consumeLine(text)
+    }
+
+    private mutating func consumeLine(_ line: String) -> Frame? {
+        if line.isEmpty {
+            defer {
+                event = ""
+                data = ""
+            }
+            return data.isEmpty ? nil : Frame(event: event, data: data)
+        }
+        if line.hasPrefix(":") { return nil }
+        if line.hasPrefix("event:") {
+            event = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("data:") {
+            let chunk = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+            data += data.isEmpty ? chunk : "\n" + chunk
+        }
+        return nil
     }
 }
 
@@ -219,22 +273,14 @@ public final class WaveChatConnection {
         mindState = .idle
         phase = .live
 
-        var event = ""
-        var payload = ""
-        for try await line in bytes.lines {
+        // Raw bytes, not `bytes.lines`: AsyncLineSequence drops the empty
+        // lines that delimit SSE frames (see SSEFrameParser). Cancellation
+        // still propagates — a cancelled task makes the byte iterator throw.
+        var parser = SSEFrameParser()
+        for try await byte in bytes {
+            guard let frame = parser.consume(byte) else { continue }
             if Task.isCancelled { return }
-            if line.isEmpty {
-                if !payload.isEmpty { handle(event: event, data: payload) }
-                event = ""
-                payload = ""
-            } else if line.hasPrefix(":") {
-                continue // SSE comment / keep-alive ping
-            } else if line.hasPrefix("event:") {
-                event = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("data:") {
-                let chunk = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
-                payload += payload.isEmpty ? chunk : "\n" + chunk
-            }
+            handle(event: frame.event, data: frame.data)
         }
     }
 
@@ -242,7 +288,9 @@ public final class WaveChatConnection {
     /// name (sent on subscribe and on every transition); `turn` carries a
     /// whole turn — re-sent under the same id as it grows, then a terminal
     /// frame at finalization, every frame replacing the previous state of its
-    /// id. Unknown events and unparseable payloads drop. Internal for tests.
+    /// id. Unknown events drop. A turn payload that fails to decode is a hole
+    /// in the transcript: logged always, asserted in debug — never silent.
+    /// Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveMindState(rawValue: data) else { return }
@@ -250,8 +298,12 @@ public final class WaveChatConnection {
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
-        guard let turn = try? decoder.decode(ChatTurn.self, from: json) else { return }
-        upsert(turn)
+        do {
+            upsert(try decoder.decode(ChatTurn.self, from: json))
+        } catch {
+            LoggingService.lfd("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
+            assertionFailure("wave chat turn frame failed to decode: \(error)")
+        }
     }
 
     /// Replace a turn already in the thread (an in-progress turn re-sent as it

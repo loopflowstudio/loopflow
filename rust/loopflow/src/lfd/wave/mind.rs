@@ -62,7 +62,7 @@
 //! # cwd
 //! The mind runs in the repo root the server was started from (run `lf wave`
 //! from the wave's worktree, per loopflow discipline). Main-checkout
-//! protection and worktree bootstrap arrive with the lfd-registration phase.
+//! protection and worktree bootstrap are still to come.
 //! Approval policy is `AutoApprove` until Decisions land.
 
 use std::path::{Path, PathBuf};
@@ -104,6 +104,38 @@ pub const INTERRUPT_DEADLINE: Duration = Duration::from_secs(10);
 /// never re-send the seed — the first turn carried it.
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration step. If nothing needs doing, say so in one line.";
+
+/// Longest task excerpt carried per worker in the `<in_flight>` section —
+/// enough to recognize the dispatch, token-lean by design.
+const IN_FLIGHT_TASK_CHARS: usize = 80;
+
+/// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
+/// grinding: one line per dispatched-not-finished worker (run id, flow, task
+/// excerpt, status), folded from the journal's lfd observations — the mind's
+/// orchestration turns see their workers without re-reading transcripts.
+pub fn heartbeat_prompt(runtime: &WaveRuntime) -> String {
+    let workers = runtime.in_flight_workers();
+    if workers.is_empty() {
+        return HEARTBEAT_PROMPT.to_string();
+    }
+    let mut prompt = String::from(HEARTBEAT_PROMPT);
+    prompt.push_str("\n\n<in_flight>\n");
+    for worker in &workers {
+        let task: String = if worker.task.chars().count() > IN_FLIGHT_TASK_CHARS {
+            let mut excerpt: String = worker.task.chars().take(IN_FLIGHT_TASK_CHARS).collect();
+            excerpt.push('…');
+            excerpt
+        } else {
+            worker.task.clone()
+        };
+        prompt.push_str(&format!(
+            "- run {} · {}: {} · running\n",
+            worker.run_id, worker.flow, task
+        ));
+    }
+    prompt.push_str("</in_flight>");
+    prompt
+}
 
 /// Scheduler knobs. `Default` is production: codex vendor, 5-minute
 /// heartbeat, 10-second interrupt deadline.
@@ -590,8 +622,8 @@ impl Mind {
     }
 
     async fn on_heartbeat(&mut self) {
-        self.send_turn(HEARTBEAT_PROMPT.to_string(), Vec::new())
-            .await;
+        let prompt = heartbeat_prompt(&self.runtime);
+        self.send_turn(prompt, Vec::new()).await;
     }
 
     /// Drain the whole queue into one turn; its `TurnStarted.answers` names
@@ -973,6 +1005,40 @@ mod tests {
             },
         });
         wait_for("next heartbeat", || mind.input_count() >= 2).await;
+    }
+
+    #[tokio::test]
+    async fn heartbeat_carries_in_flight_workers_when_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Journal the observations before the mind boots so the first
+        // heartbeat deterministically sees them.
+        {
+            let (runtime, _rx) =
+                WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+            assert!(runtime.journal_worker_dispatched(
+                "run-7",
+                "sess-7",
+                "implement",
+                "wire the observation tail",
+            ));
+            assert!(runtime.journal_worker_dispatched("run-8", "sess-8", "design", "next item"));
+            assert!(runtime.journal_worker_finished(
+                "run-8",
+                crate::lfd::wave::journal::WorkerOutcome::Completed,
+                "landed",
+            ));
+        }
+
+        let mind = boot_in(tmp, Duration::from_millis(50));
+        wait_for("heartbeat turn", || mind.input_count() == 1).await;
+        let prompt = mind.inputs.lock().unwrap()[0].clone();
+        assert!(prompt.starts_with(HEARTBEAT_PROMPT));
+        assert!(prompt.contains("<in_flight>"), "in-flight section present");
+        assert!(prompt.contains("run run-7 · implement: wire the observation tail · running"));
+        assert!(
+            !prompt.contains("run-8"),
+            "finished workers are not in flight"
+        );
     }
 
     #[tokio::test]

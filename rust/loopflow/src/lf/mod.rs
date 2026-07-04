@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand};
 pub mod commands;
 pub mod discovery;
 pub mod output;
+pub mod session;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf")]
@@ -141,6 +142,9 @@ pub enum Commands {
     Wave {
         /// Wave name (matches wave/<name>/)
         name: String,
+        /// Take over even if lfd reports another live wave-agent session
+        #[arg(long)]
+        force: bool,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,

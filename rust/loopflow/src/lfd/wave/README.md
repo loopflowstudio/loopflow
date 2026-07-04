@@ -19,11 +19,20 @@ a busy-loop.
   orchestration step.
 - **The mind orchestrates, never grinds.** Its operating prompt is the
   rendered `GOAL.md` seed plus the coordinating-session discipline; heavy
-  work is dispatched to subagents (`lfq worker run`, arriving with the
-  lfd-observation phase).
+  work is dispatched to subagents (`lfq worker run`). The server tails lfd's
+  event stream and journals `WorkerDispatched`/`WorkerFinished` observations
+  (it is never in the dispatch path); dispatched-not-finished workers ride
+  each heartbeat as a compact `<in_flight>` section.
 - **Failure is bounded.** A failed turn returns the mind to idle; three
   consecutive failures (or a dead vendor session) mark the mind `failed` and
   stop the heartbeat. The next user message revives it.
+- **One brain per wave.** On boot the server registers with a running lfd as
+  the wave's `WaveAgent` session (`POST /v0/waves/{wave}/agent/register`,
+  source `wave_server`; deregistered on shutdown, pid-probed by lfd's
+  reconciliation after a crash). lfd's loop ticker and `run_wave` skip a
+  wave with a live registered brain; a second `lf wave` refuses to start
+  unless `--force` takes over. lfd unreachable → warn once, run fully
+  functional, retry lazily; no daemon means no enforcement (status quo).
 
 Truth is the per-wave append-only journal —
 `.lf/journal/waves/<name>/journal.jsonl`, per-machine, never committed. The
@@ -38,7 +47,7 @@ IPC.
 
 The mind runs in the repo root the server was started from — run `lf wave`
 from the wave's worktree. Main-checkout protection and worktree bootstrap
-arrive with the lfd-registration phase.
+are still to come.
 
 ## Wire contract (snake_case, stable)
 

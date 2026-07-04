@@ -708,6 +708,23 @@ impl Store {
         ControlSessionStore::list_sessions(self, wave_id, statuses).await
     }
 
+    /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
+    /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
+    /// `lf wave` server. One-brain enforcement (run_wave idempotency, the
+    /// loop-ticker skip, wave-server registration conflicts) keys on this
+    /// single fact.
+    pub async fn live_wave_agent_session(&self, wave_id: &LfdId) -> StoreResult<Option<Session>> {
+        let sessions = self
+            .list_control_sessions(
+                Some(wave_id),
+                Some(crate::lfd::types::LIVE_SESSION_STATUSES),
+            )
+            .await?;
+        Ok(sessions
+            .into_iter()
+            .find(|session| session.session_use == crate::lfd::types::SessionUse::WaveAgent))
+    }
+
     pub async fn get_active_control_session_for_run(
         &self,
         run_id: &LfdId,

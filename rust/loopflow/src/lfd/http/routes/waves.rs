@@ -39,8 +39,9 @@ use crate::lfd::triggers::{
     ActivationEnvelope, ImmediateActivation,
 };
 use crate::lfd::types::{
-    Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionUse, Signal, Trigger,
-    Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
+    Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionStatus, SessionUse,
+    Signal, Trigger, Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
+    WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +148,20 @@ pub struct RunWaveRequest {
     flow: Option<String>,
     goal: Option<String>,
     roadmap_item: Option<String>,
+}
+
+/// Body of `POST /v0/waves/{wave_id}/agent/register`. Rust-internal wire (the
+/// `lf wave` server is the only client); every field required, no defaults.
+#[derive(Debug, Deserialize)]
+pub struct RegisterWaveAgentRequest {
+    /// The server's loopback `host:port` (the `.wave-endpoint` address).
+    pub endpoint: String,
+    /// The server's pid, for crash reconciliation.
+    pub pid: u32,
+    /// The repo root the server runs in.
+    pub cwd: String,
+    /// Take over from an existing live wave-agent session instead of 409ing.
+    pub force: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1034,14 +1049,103 @@ async fn active_wave_agent_session(
     state: &HttpState,
     wave_id: &LfdId,
 ) -> Result<Option<Session>, ApiError> {
-    let sessions = state
+    state
         .store
-        .list_control_sessions(Some(wave_id), Some(LIVE_SESSION_STATUSES))
+        .live_wave_agent_session(wave_id)
+        .await
+        .map_err(map_store_error)
+}
+
+/// Register a running `lf wave` server as the wave's WaveAgent session.
+///
+/// The server is its own process (not launched by lfd): the session row is a
+/// record of a live external brain — endpoint + pid in `env`, source
+/// `wave_server` — so Concerto's agent tree shows the mind and one-brain
+/// enforcement (this handler, `run_wave_handler`, the loop ticker) keys on
+/// one fact. A live WaveAgent session already existing is a 409 naming it;
+/// `force: true` retires the existing session and takes over. Deregistration
+/// reuses `POST /sessions/{id}/complete` — the response session's id doubles
+/// as its completion token (the non-tmux session convention).
+pub async fn register_wave_agent_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+    Json(payload): Json<RegisterWaveAgentRequest>,
+) -> ApiResult<SessionDto> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let endpoint = required_trimmed(&payload.endpoint, "endpoint is required")?;
+    let cwd = required_trimmed(&payload.cwd, "cwd is required")?;
+
+    if let Some(mut existing) = active_wave_agent_session(&state, &wave_id).await? {
+        if !payload.force {
+            return Err(api_error(
+                StatusCode::CONFLICT,
+                ApiMessage::Safe(format!(
+                    "wave '{}' already has a live wave-agent session {} (source '{}')",
+                    wave.name(),
+                    existing.id,
+                    existing.source
+                )),
+            ));
+        }
+        // Force takeover: the registering server is the brain now.
+        if existing.cancel() {
+            state
+                .store
+                .update_control_session(&existing)
+                .await
+                .map_err(map_store_error)?;
+            state
+                .event_hub
+                .send(Event::session_updated(existing.clone()));
+            if existing.is_tmux_backed() {
+                let _ = TokioCommand::new("tmux")
+                    .args(["kill-session", "-t", &existing.tmux_name])
+                    .status()
+                    .await;
+            }
+        }
+    }
+
+    let session_id = LfdId::new();
+    let now = OffsetDateTime::now_utc();
+    let session = Session {
+        id: session_id.clone(),
+        wave_id: wave.id().clone(),
+        run_id: None,
+        parent_session_id: None,
+        session_use: SessionUse::WaveAgent,
+        step: "mind".to_string(),
+        agent: "lf".to_string(),
+        cwd,
+        argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+        env: std::collections::BTreeMap::from([
+            (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint),
+            (WAVE_SERVER_PID_ENV.to_string(), payload.pid.to_string()),
+        ]),
+        source: WAVE_SERVER_SOURCE.to_string(),
+        tmux_name: String::new(),
+        status: SessionStatus::Running,
+        attached_at: None,
+        started_at: Some(now),
+        completed_at: None,
+        created_at: now,
+        completion_token: Some(session_id.to_string()),
+    };
+    state
+        .store
+        .create_control_session(&session)
         .await
         .map_err(map_store_error)?;
-    Ok(sessions
-        .into_iter()
-        .find(|session| session.session_use == SessionUse::WaveAgent))
+    state
+        .event_hub
+        .send(Event::session_created(session.clone()));
+    Ok(Json(session_dto(session)))
 }
 
 async fn start_run(
@@ -2949,6 +3053,109 @@ mod tests {
         )
         .await;
         assert!(matches!(missing, Err((StatusCode::NOT_FOUND, _))));
+    }
+
+    fn register_request(force: bool) -> RegisterWaveAgentRequest {
+        RegisterWaveAgentRequest {
+            endpoint: "127.0.0.1:4242".to_string(),
+            pid: 4242,
+            cwd: "/tmp/repo".to_string(),
+            force,
+        }
+    }
+
+    #[tokio::test]
+    async fn register_wave_agent_creates_wave_server_session() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo", "served-wave");
+        state.store.create_wave(&wave).await.expect("seed wave");
+
+        let Json(session) = register_wave_agent_handler(
+            State(state.clone()),
+            Path(wave.name().clone()),
+            Json(register_request(false)),
+        )
+        .await
+        .expect("register");
+
+        assert_eq!(session.session_use, "wave_agent");
+        assert_eq!(session.source, crate::lfd::types::WAVE_SERVER_SOURCE);
+        assert_eq!(session.status, "running");
+        assert_eq!(
+            session
+                .env
+                .get(WAVE_SERVER_ENDPOINT_ENV)
+                .map(String::as_str),
+            Some("127.0.0.1:4242")
+        );
+        assert_eq!(
+            session.env.get(WAVE_SERVER_PID_ENV).map(String::as_str),
+            Some("4242")
+        );
+
+        // The registered server is the wave's one brain: run_wave is
+        // idempotent against it (returns the same session, launches nothing).
+        let Json(run_response) = run_wave_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(wave.id().to_string()),
+            None,
+        )
+        .await
+        .expect("run wave");
+        assert_eq!(run_response.id, session.id);
+    }
+
+    #[tokio::test]
+    async fn register_wave_agent_conflicts_unless_forced() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo", "double-brain-wave");
+        state.store.create_wave(&wave).await.expect("seed wave");
+
+        let Json(first) = register_wave_agent_handler(
+            State(state.clone()),
+            Path(wave.id().to_string()),
+            Json(register_request(false)),
+        )
+        .await
+        .expect("first register");
+
+        // Second brain refused, error names the live session.
+        let err = register_wave_agent_handler(
+            State(state.clone()),
+            Path(wave.id().to_string()),
+            Json(register_request(false)),
+        )
+        .await
+        .expect_err("second register should conflict");
+        assert_eq!(err.0, StatusCode::CONFLICT);
+        assert!(err.1 .0.error.message.contains(&first.id));
+
+        // Force takes over: old session retired, new one live.
+        let Json(second) = register_wave_agent_handler(
+            State(state.clone()),
+            Path(wave.id().to_string()),
+            Json(register_request(true)),
+        )
+        .await
+        .expect("forced register");
+        assert_ne!(second.id, first.id);
+
+        let old = state
+            .store
+            .get_control_session(&first.id.parse().expect("session id"))
+            .await
+            .expect("load old session")
+            .expect("old session exists");
+        assert_eq!(old.status, SessionStatus::Canceled);
+
+        let live = state
+            .store
+            .live_wave_agent_session(wave.id())
+            .await
+            .expect("live lookup")
+            .expect("new brain live");
+        assert_eq!(live.id.to_string(), second.id);
     }
 
     #[tokio::test]

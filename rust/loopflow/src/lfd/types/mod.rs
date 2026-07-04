@@ -21,8 +21,9 @@ pub use event::Event;
 pub use execution::{ExecutionProcess, ExecutionProcessStatus};
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use session::{
-    tmux_session_name, Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES,
-    PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
+    tmux_session_name, Session, SessionStatus, SessionUse, LF_CLI_SOURCE, LIVE_SESSION_STATUSES,
+    PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE, WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV,
+    WAVE_SERVER_SOURCE,
 };
 pub use summary::Summary;
 pub use trigger::{

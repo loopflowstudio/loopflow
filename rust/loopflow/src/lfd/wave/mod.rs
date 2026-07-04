@@ -19,8 +19,16 @@
 //! fold of it, rebuilt on boot so a restart keeps the whole conversation. The
 //! journal is server-owned persistence, not IPC; the only coordination file
 //! is a dumb discovery pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
+//!
+//! The server also keeps a best-effort [`lfd_link`]: it registers itself with
+//! a running lfd as the wave's `WaveAgent` session (one brain per wave,
+//! enforced on both sides) and tails lfd's event stream to journal
+//! `WorkerDispatched`/`WorkerFinished` observations, which fold into the
+//! mind's `<in_flight>` heartbeat context. No lfd → warn once, fully
+//! functional anyway.
 
 pub mod journal;
+pub mod lfd_link;
 pub mod memory;
 pub mod mind;
 pub mod runtime;
@@ -30,6 +38,7 @@ pub mod supervisor;
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use tokio::sync::mpsc;
@@ -43,12 +52,14 @@ use crate::lfd::wave::runtime::WaveRuntime;
 use crate::ops::util::resolve_wave_name;
 
 /// Start the reactive wave server for `name` and block until it is stopped
-/// (Ctrl-C). Binds a loopback port, publishes the discovery pointer, and runs
-/// the mind on a codex app-server session. The mind's cwd is the repo root
-/// the server was started from (run `lf wave` from the wave's worktree);
-/// wave state (journal, discovery pointer, MEMORY.md) lives under the main
-/// repo so Concerto and a restarted server agree on where it is.
-pub fn run(name: &str) -> Result<()> {
+/// (Ctrl-C). Binds a loopback port, publishes the discovery pointer,
+/// registers with lfd as the wave's agent session (best-effort — see
+/// [`lfd_link`]; `force` takes over an existing live wave-agent session),
+/// and runs the mind on a codex app-server session. The mind's cwd is the
+/// repo root the server was started from (run `lf wave` from the wave's
+/// worktree); wave state (journal, discovery pointer, MEMORY.md) lives under
+/// the main repo so Concerto and a restarted server agree on where it is.
+pub fn run(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
@@ -56,6 +67,7 @@ pub fn run(name: &str) -> Result<()> {
 
     let (events_tx, events_rx) = mpsc::unbounded_channel();
     let harness = default_create_harness("codex", ApprovalPolicy::AutoApprove, events_tx)?;
+    let link = lfd_link::LinkConfig::resolve(&wave, &repo_root.display().to_string(), force);
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(serve(
@@ -64,18 +76,21 @@ pub fn run(name: &str) -> Result<()> {
         wave,
         harness,
         events_rx,
+        Some(link),
         shutdown_signal(),
     ))
 }
 
 /// Serve the wave until `shutdown` resolves. The harness and its event stream
-/// are parameters so tests can drive a mock instead of a real vendor process.
+/// are parameters so tests can drive a mock instead of a real vendor process;
+/// `link` is `None` in tests that exercise the server without an lfd.
 async fn serve(
     repo_root: PathBuf,
     mind_cwd: PathBuf,
     wave: String,
     harness: Box<dyn Harness>,
     events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
+    link: Option<lfd_link::LinkConfig>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
@@ -94,6 +109,62 @@ async fn serve(
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
+
+    // lfd link: register as the wave's agent session (one-brain pre-flight),
+    // then keep the link alive — lazy re-registration if lfd was down, and
+    // the observation tail journaling worker facts. Best-effort by design:
+    // an unreachable lfd degrades to today's lfd-less behavior.
+    let registration: lfd_link::SharedRegistration = Arc::default();
+    let mut link_task: Option<(lfd_link::LinkConfig, tokio::task::JoinHandle<()>)> = None;
+    if let Some(mut link) = link {
+        link.endpoint = addr.to_string();
+        match lfd_link::register_once(&link).await {
+            lfd_link::RegisterAttempt::Registered(reg) => {
+                tracing::info!(
+                    wave,
+                    session_id = reg.session_id,
+                    "registered with lfd as the wave's agent session"
+                );
+                *registration.lock().expect("registration slot poisoned") = Some(reg);
+            }
+            lfd_link::RegisterAttempt::Refused { message } => {
+                mind.abort();
+                return Err(anyhow!(
+                    "refusing to start: {message}. Stop that session (or let it \
+                     finish), or rerun with --force to take over."
+                ));
+            }
+            lfd_link::RegisterAttempt::Unreachable(err) => {
+                tracing::warn!(
+                    wave,
+                    error = err,
+                    "lfd unreachable; running lfd-less (no registration, no one-brain \
+                     enforcement, no worker observations); registration retries lazily"
+                );
+            }
+        }
+        // Ctrl+C exits the process before the graceful path below runs, so
+        // deregister from the interrupt hook too; `take()` makes whichever
+        // path runs first the only one that deregisters.
+        let hook_link = link.clone();
+        let hook_registration = registration.clone();
+        crate::engine::agent::register_interrupt_cleanup(move || {
+            let taken = hook_registration
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take());
+            if let Some(reg) = taken {
+                lfd_link::deregister_blocking(&hook_link, &reg);
+            }
+        });
+        let task = tokio::spawn(lfd_link::run_link(
+            runtime.clone(),
+            link.clone(),
+            registration.clone(),
+        ));
+        link_task = Some((link, task));
+    }
+
     server::write_endpoint(&repo_root, &wave, addr)?;
     // Ctrl+C exits the process before graceful shutdown runs, so remove the
     // discovery pointer from the interrupt handler too.
@@ -110,8 +181,19 @@ async fn serve(
         .await;
 
     // Shutdown: stop the mind (its harness child dies with it — kill_on_drop)
-    // and every live subagent, drop the pointer.
+    // and every live subagent, deregister from lfd, drop the pointer.
     mind.abort();
+    if let Some((link, task)) = link_task {
+        task.abort();
+        let taken = registration
+            .lock()
+            .expect("registration slot poisoned")
+            .take();
+        if let Some(reg) = taken {
+            let _ = tokio::task::spawn_blocking(move || lfd_link::deregister_blocking(&link, &reg))
+                .await;
+        }
+    }
     runtime.supervisor().shutdown_all();
     server::remove_endpoint(&repo_root, &wave);
 
@@ -692,6 +774,7 @@ mod tests {
                 "ship".into(),
                 Box::new(StubHarness),
                 events_rx,
+                None,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -706,6 +789,54 @@ mod tests {
             contents.starts_with("127.0.0.1:"),
             "pointer is just an address"
         );
+
+        shutdown_tx.send(()).unwrap();
+        handle.await.unwrap().unwrap();
+        assert!(!endpoint.exists(), "pointer removed on shutdown");
+    }
+
+    /// Best-effort registration: with lfd unreachable the server must come up
+    /// fully functional (registration degrades to a lazy background retry).
+    #[tokio::test]
+    async fn serve_is_fully_functional_when_lfd_is_unreachable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_events_tx, events_rx) = mpsc::unbounded_channel();
+        let repo2 = repo.clone();
+        let cwd = repo.clone();
+        let handle = tokio::spawn(async move {
+            let mut link = lfd_link::LinkConfig::resolve("ship", "/tmp/repo", false);
+            // Nothing listens on port 1: registration fails soft.
+            link.base_url = "http://127.0.0.1:1".to_string();
+            serve(
+                repo2,
+                cwd,
+                "ship".into(),
+                Box::new(StubHarness),
+                events_rx,
+                Some(link),
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
+            .await
+        });
+
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        let addr = std::fs::read_to_string(&endpoint).unwrap();
+
+        // The HTTP surface answers: lfd-less is fully functional.
+        let health: serde_json::Value = reqwest::get(format!("http://{}/health", addr.trim()))
+            .await
+            .expect("health reachable")
+            .json()
+            .await
+            .expect("health json");
+        assert_eq!(health["wave"], "ship");
 
         shutdown_tx.send(()).unwrap();
         handle.await.unwrap().unwrap();

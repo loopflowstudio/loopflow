@@ -35,7 +35,8 @@ use crate::lfd::triggers::{
 use crate::lfd::types::{
     tmux_session_name, Event, LivePrState, LivePullRequestState, Run, RunStatus, Session,
     SessionStatus, SessionUse, Signal, Wave, WaveMode, WaveStatus, CI_FIX_FLOW,
-    LIVE_SESSION_STATUSES, PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
+    LIVE_SESSION_STATUSES, PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE, WAVE_SERVER_PID_ENV,
+    WAVE_SERVER_SOURCE,
 };
 #[cfg(test)]
 use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
@@ -104,6 +105,15 @@ async fn tmux_session_exists(session_name: &str) -> Result<bool> {
         .await
         .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
     Ok(status.success())
+}
+
+/// Whether a process with `pid` is running on this host (`kill -0` probe).
+async fn process_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
 }
 
 async fn read_tmux_exit_code(exit_file: PathBuf) -> Result<Option<i32>> {
@@ -456,6 +466,26 @@ impl WaveExecutor {
             .await?;
         let mut completed = 0;
         for session in active {
+            if session.source == WAVE_SERVER_SOURCE {
+                // A registered `lf wave` server. lfd never launched it, so
+                // liveness is the recorded pid (same host — the endpoint is
+                // loopback). A dead pid is a server that crashed without
+                // deregistering: close the row so one-brain enforcement
+                // doesn't key on a ghost.
+                let alive = match session
+                    .env
+                    .get(WAVE_SERVER_PID_ENV)
+                    .and_then(|pid| pid.parse::<u32>().ok())
+                {
+                    Some(pid) => process_alive(pid).await,
+                    None => false,
+                };
+                if !alive && self.complete_session(&session.id, 1).await? {
+                    info!(session_id = %session.id, "reconciled crashed wave server session");
+                    completed += 1;
+                }
+                continue;
+            }
             if !session.is_tmux_backed() {
                 continue;
             }

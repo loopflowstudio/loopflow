@@ -280,38 +280,78 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     // Reorder args so flags can appear after the step name
-    let args: Vec<String> = std::env::args().collect();
-    let args = reorder_args(args);
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = reorder_args(raw_args.clone());
 
     let cli = Cli::parse_from(args.clone());
     debug!(?cli, "parsed CLI arguments");
 
-    if cli.list {
-        return in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all());
-    }
+    // Inside a wave context, agent-launching runs register themselves as lfd
+    // sessions; every other command still flips LFD_SESSION_ID to "inherited"
+    // for its children (see lf::session for the env contract).
+    let registration = match run_label(&cli) {
+        Some(step) => loopflow::lf::session::register_run(
+            &step,
+            cli.model.as_deref().unwrap_or("lf"),
+            &raw_args,
+        ),
+        None => {
+            loopflow::lf::session::mark_child_sessions_inherited();
+            None
+        }
+    };
 
+    let result = if cli.list {
+        in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
+    } else {
+        match &cli.command {
+            Some(Commands::Inline { prompt }) => {
+                let text = prompt.join(" ");
+                in_repo_runtime(&args, |_| {
+                    loopflow::lf::commands::run::run(None, Some(&text), &cli)
+                })
+            }
+            Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run(op, cli.model.as_deref())
+            }),
+            Some(Commands::Wave { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
+            }
+            Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::External(external_args)) => {
+                match loopflow::lf::commands::run::split_step_args(external_args) {
+                    Ok((name, step_args)) => {
+                        let message = join_args(&step_args);
+                        run_target(&name, message.as_deref(), &cli, &args)
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            None => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::run::run(None, None, &cli)
+            }),
+        }
+    };
+
+    if let Some(registration) = registration {
+        registration.complete(if result.is_ok() { 0 } else { 1 });
+    }
+    result
+}
+
+/// Session label for agent-launching invocations; `None` for utility commands
+/// (`lf op`, `lf usage`, `lf -l`) and `lf wave`, which never self-register.
+fn run_label(cli: &Cli) -> Option<String> {
+    if cli.list {
+        return None;
+    }
     match &cli.command {
-        Some(Commands::Inline { prompt }) => {
-            let text = prompt.join(" ");
-            in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::run::run(None, Some(&text), &cli)
-            })
-        }
-        Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::ops::run(op, cli.model.as_deref())
-        }),
-        Some(Commands::Wave { name }) => in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name)),
-        Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
-        Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
-        Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
-        Some(Commands::External(external_args)) => {
-            let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
-            let message = join_args(&step_args);
-            run_target(&name, message.as_deref(), &cli, &args)
-        }
-        None => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::run::run(None, None, &cli)
-        }),
+        Some(Commands::Inline { .. }) => Some("inline".to_string()),
+        Some(Commands::External(args)) => args
+            .first()
+            .map(|step| step.trim_end_matches(':').to_string()),
+        None => Some("chat".to_string()),
+        Some(Commands::Op { .. }) | Some(Commands::Wave { .. }) | Some(Commands::Usage) => None,
     }
 }
 

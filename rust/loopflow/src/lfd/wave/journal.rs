@@ -14,13 +14,13 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! Two kinds have no producers yet: `WorkerDispatched`/`WorkerFinished`
-//! arrive with the lfd-observation phase (the server tails lfd's event
-//! stream — these are confirmed facts, not commands); `MemoryUpdated`
-//! arrives when the mind starts curating MEMORY.md deliberately. They are
-//! defined now so the log format is settled before its producers land.
-//! `ThreadStarted` is produced by the mind: the vendor thread id is its
-//! first durable act, journaled before the first turn.
+//! `WorkerDispatched`/`WorkerFinished` are produced by the lfd observation
+//! tail ([`crate::lfd::wave::lfd_link`]): the server tails lfd's event
+//! stream — these are confirmed facts, not commands — and the in-flight
+//! view is their fold ([`fold_workers`]). `MemoryUpdated` has no producer
+//! until the mind starts curating MEMORY.md deliberately. `ThreadStarted`
+//! is produced by the mind: the vendor thread id is its first durable act,
+//! journaled before the first turn.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -88,13 +88,32 @@ impl Usage {
     }
 }
 
-/// How a dispatched worker ended. No producers until the lfd-observation
-/// phase, which may extend this.
+/// How a dispatched worker ended, as lfd reported it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerOutcome {
     Completed,
     Failed,
+}
+
+impl WorkerOutcome {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// One dispatched worker, folded from `WorkerDispatched`/`WorkerFinished`
+/// rows. `finished` is `None` while the worker is in flight.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkerRecord {
+    pub run_id: String,
+    pub session_id: String,
+    pub flow: String,
+    pub task: String,
+    pub finished: Option<WorkerOutcome>,
 }
 
 /// One journal row.
@@ -406,6 +425,50 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     }
 }
 
+/// Fold the worker observations: one record per dispatched run, in dispatch
+/// order, finished stamped when its `WorkerFinished` arrives. The map keyed
+/// on `run_id` is the idempotence guard's ground truth — a run dispatches
+/// exactly once, whatever the observer saw.
+pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
+    let mut workers: Vec<WorkerRecord> = Vec::new();
+    for event in events {
+        match &event.kind {
+            EventKind::WorkerDispatched {
+                run_id,
+                session_id,
+                flow,
+                task,
+            } => {
+                if workers.iter().any(|w| &w.run_id == run_id) {
+                    tracing::warn!(
+                        run_id,
+                        seq = event.seq,
+                        "duplicate WorkerDispatched in journal"
+                    );
+                    continue;
+                }
+                workers.push(WorkerRecord {
+                    run_id: run_id.clone(),
+                    session_id: session_id.clone(),
+                    flow: flow.clone(),
+                    task: task.clone(),
+                    finished: None,
+                });
+            }
+            EventKind::WorkerFinished {
+                run_id, outcome, ..
+            } => match workers.iter_mut().find(|w| &w.run_id == run_id) {
+                Some(worker) => worker.finished = Some(*outcome),
+                None => {
+                    tracing::warn!(run_id, seq = event.seq, "WorkerFinished for unknown worker");
+                }
+            },
+            _ => {}
+        }
+    }
+    workers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -616,6 +679,36 @@ mod tests {
                 turn_id: turn_id.clone()
             }
         );
+    }
+
+    #[test]
+    fn fold_workers_tracks_dispatch_and_finish_once_per_run() {
+        let (_tmp, path) = open_tmp();
+        let (mut journal, _) = Journal::open(&path).expect("open");
+        let dispatch = |run: &str| EventKind::WorkerDispatched {
+            run_id: run.to_string(),
+            session_id: format!("sess-{run}"),
+            flow: "implement".to_string(),
+            task: "build the thing".to_string(),
+        };
+        let events = vec![
+            journal.append(|_| dispatch("run-1")),
+            journal.append(|_| dispatch("run-2")),
+            // Duplicate dispatch rows are tolerated by the fold (first wins).
+            journal.append(|_| dispatch("run-1")),
+            journal.append(|_| EventKind::WorkerFinished {
+                run_id: "run-1".to_string(),
+                outcome: WorkerOutcome::Completed,
+                summary: "pr landed".to_string(),
+            }),
+        ];
+
+        let workers = fold_workers(&events);
+        assert_eq!(workers.len(), 2);
+        assert_eq!(workers[0].run_id, "run-1");
+        assert_eq!(workers[0].finished, Some(WorkerOutcome::Completed));
+        assert_eq!(workers[1].run_id, "run-2");
+        assert_eq!(workers[1].finished, None);
     }
 
     #[test]

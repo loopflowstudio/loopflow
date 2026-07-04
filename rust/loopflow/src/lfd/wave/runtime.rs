@@ -30,7 +30,8 @@ use tokio::sync::{broadcast, mpsc};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 use crate::lfd::wave::journal::{
-    fold_thread, journal_path, Event, EventKind, Journal, MessageId, MessageOp, Usage,
+    fold_thread, fold_workers, journal_path, Event, EventKind, Journal, MessageId, MessageOp,
+    Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::lfd::wave::memory::Memory;
 use crate::lfd::wave::state::{can_transition, MindState};
@@ -90,6 +91,11 @@ struct Inner {
     open_turn: Option<ChatTurn>,
     state: MindState,
     thread_id: Option<String>,
+    /// Dispatched workers, folded from `WorkerDispatched`/`WorkerFinished`
+    /// observations (the lfd tail). Keyed on run id — the idempotence guard:
+    /// a run dispatches once and finishes once, however many times the
+    /// observer sees it (live event + reconnect snapshot).
+    workers: Vec<WorkerRecord>,
 }
 
 /// The whole live state of one running wave server.
@@ -130,6 +136,7 @@ impl WaveRuntime {
     ) -> anyhow::Result<(Arc<Self>, mpsc::UnboundedReceiver<InboxItem>)> {
         let (mut journal, events) = Journal::open(&journal_path(&repo_root, &name))?;
         let mut fold = fold_thread(&events);
+        let workers = fold_workers(&events);
 
         // Janitor: a turn without a TurnFinished crashed with the server.
         for mut turn in fold.open {
@@ -166,6 +173,7 @@ impl WaveRuntime {
                 open_turn: None,
                 state,
                 thread_id: fold.thread_id,
+                workers,
             }),
             turn_tx,
             state_tx,
@@ -210,6 +218,84 @@ impl WaveRuntime {
     /// The last journaled vendor thread id, if any — the mind's resume handle.
     pub fn last_thread_id(&self) -> Option<String> {
         self.inner().thread_id.clone()
+    }
+
+    // -- Worker observations (the lfd tail's write surface) --
+    //
+    // These are OBSERVATIONS, not commands: the server tails lfd's event
+    // stream and records confirmed facts. Both appends are idempotent keyed
+    // on run id, so a live event plus a reconnect snapshot never journals a
+    // worker twice.
+
+    /// Journal a `WorkerDispatched` observation. Returns false (and appends
+    /// nothing) when the run is already known.
+    pub fn journal_worker_dispatched(
+        &self,
+        run_id: &str,
+        session_id: &str,
+        flow: &str,
+        task: &str,
+    ) -> bool {
+        let mut inner = self.inner();
+        if inner.workers.iter().any(|w| w.run_id == run_id) {
+            return false;
+        }
+        inner.journal.append(|_| EventKind::WorkerDispatched {
+            run_id: run_id.to_string(),
+            session_id: session_id.to_string(),
+            flow: flow.to_string(),
+            task: task.to_string(),
+        });
+        inner.workers.push(WorkerRecord {
+            run_id: run_id.to_string(),
+            session_id: session_id.to_string(),
+            flow: flow.to_string(),
+            task: task.to_string(),
+            finished: None,
+        });
+        true
+    }
+
+    /// Journal a `WorkerFinished` observation. Returns false (and appends
+    /// nothing) when the run was never dispatched or already finished.
+    pub fn journal_worker_finished(
+        &self,
+        run_id: &str,
+        outcome: WorkerOutcome,
+        summary: &str,
+    ) -> bool {
+        let mut inner = self.inner();
+        let Some(pos) = inner
+            .workers
+            .iter()
+            .position(|w| w.run_id == run_id && w.finished.is_none())
+        else {
+            return false;
+        };
+        inner.workers[pos].finished = Some(outcome);
+        inner.journal.append(|_| EventKind::WorkerFinished {
+            run_id: run_id.to_string(),
+            outcome,
+            summary: summary.to_string(),
+        });
+        true
+    }
+
+    /// Whether a `WorkerDispatched` is already journaled for `run_id` —
+    /// the observer checks before fetching run details it won't need.
+    pub fn worker_known(&self, run_id: &str) -> bool {
+        self.inner().workers.iter().any(|w| w.run_id == run_id)
+    }
+
+    /// Workers dispatched and not yet finished — folded into the mind's
+    /// heartbeat seed as the `<in_flight>` section.
+    pub fn in_flight_workers(&self) -> Vec<WorkerRecord> {
+        self.inner()
+            .workers
+            .iter()
+            .filter(|w| w.finished.is_none())
+            .cloned()
+            .collect()
     }
 
     /// Journal the vendor thread the mind runs on. The borrowed-handle rule:
@@ -930,6 +1016,55 @@ mod tests {
 
         // Nothing left to force a second time.
         assert!(!rt.force_finalize_open_turn(Lifecycle::Interrupted, "again"));
+    }
+
+    #[test]
+    fn worker_observations_are_idempotent_and_survive_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        {
+            let (rt, _rx) = open_runtime(tmp.path());
+            assert!(rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
+            // Same run seen again (reconnect snapshot): guarded, not journaled.
+            assert!(!rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
+            assert_eq!(rt.in_flight_workers().len(), 1);
+
+            // A finish for a run never dispatched is refused.
+            assert!(!rt.journal_worker_finished("run-9", WorkerOutcome::Failed, "?"));
+            assert!(rt.journal_worker_finished("run-1", WorkerOutcome::Completed, "pr landed"));
+            assert!(!rt.journal_worker_finished(
+                "run-1",
+                WorkerOutcome::Completed,
+                "pr landed again"
+            ));
+            assert!(rt.in_flight_workers().is_empty());
+        }
+
+        // A restarted runtime folds the same guard state back out of the log:
+        // the finished run stays finished, a new run dispatches normally.
+        let (rt, _rx) = open_runtime(tmp.path());
+        assert!(!rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
+        assert!(rt.journal_worker_dispatched("run-2", "sess-2", "design", "sketch it"));
+        assert_eq!(rt.in_flight_workers().len(), 1);
+        assert_eq!(rt.in_flight_workers()[0].run_id, "run-2");
+
+        // Exactly one WorkerDispatched per run in the journal itself.
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let dispatched: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::WorkerDispatched { run_id, .. } => Some(run_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dispatched, vec!["run-1", "run-2"]);
+        let finished: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::WorkerFinished { run_id, .. } => Some(run_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished, vec!["run-1"]);
     }
 
     #[test]

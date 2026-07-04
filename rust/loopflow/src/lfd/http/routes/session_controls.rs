@@ -4,21 +4,26 @@ use axum::http::uri::Authority;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::Path as FsPath;
+use time::OffsetDateTime;
 use tokio::process::Command;
 use tracing::warn;
 
 use crate::lfd::http::dto::{
     session_connection_info_dto, session_dto, CreateSessionRequestDto, CreateSessionResponseDto,
-    ListResponse, SessionConnectionInfoDto, SessionDto,
+    ListResponse, RegisterSessionRequestDto, RegisterSessionResponseDto, SessionConnectionInfoDto,
+    SessionDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, Session, SessionUse, LIVE_SESSION_STATUSES};
+use crate::lfd::types::{
+    Event, Session, SessionStatus, SessionUse, LF_CLI_SOURCE, LIVE_SESSION_STATUSES,
+};
 
-const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
+pub const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
 #[derive(Debug, Deserialize)]
 pub struct ListSessionsQuery {
@@ -60,6 +65,69 @@ pub async fn create_session_handler(
     Ok(Json(CreateSessionResponseDto {
         session: session_dto(session),
         connection,
+    }))
+}
+
+/// Register a session for an already-running `lf` process. Unlike
+/// `POST /sessions`, nothing is launched: the caller *is* the process and
+/// marks itself terminal later via `POST /sessions/{id}/complete` with the
+/// returned completion token.
+pub async fn register_session_handler(
+    State(state): State<HttpState>,
+    Json(payload): Json<RegisterSessionRequestDto>,
+) -> ApiResult<RegisterSessionResponseDto> {
+    let wave_id = parse_lfd_id(&payload.wave_id, "invalid wave id")?;
+    state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let parent_session_id = payload
+        .parent_session_id
+        .as_deref()
+        .map(|value| parse_lfd_id(value, "invalid parent session id"))
+        .transpose()?;
+
+    let session_id = LfdId::new();
+    let mut session = Session {
+        id: session_id.clone(),
+        wave_id,
+        run_id: None,
+        parent_session_id,
+        session_use: SessionUse::Worker,
+        step: payload.step,
+        agent: payload.agent,
+        cwd: payload.cwd,
+        argv: payload.argv,
+        env: BTreeMap::new(),
+        source: LF_CLI_SOURCE.to_string(),
+        tmux_name: payload.tmux_name.unwrap_or_default(),
+        status: SessionStatus::Pending,
+        attached_at: None,
+        started_at: None,
+        completed_at: None,
+        created_at: OffsetDateTime::now_utc(),
+        completion_token: Some(session_id.to_string()),
+    };
+    // The registering process is already running when it calls in.
+    session.start();
+    state
+        .store
+        .create_control_session(&session)
+        .await
+        .map_err(map_store_error)?;
+    state
+        .event_hub
+        .send(Event::session_created(session.clone()));
+
+    let completion_token = session
+        .completion_token
+        .clone()
+        .expect("registered sessions always carry a completion token");
+    Ok(Json(RegisterSessionResponseDto {
+        session: session_dto(session),
+        completion_token,
     }))
 }
 
@@ -523,6 +591,146 @@ mod tests {
         .expect_err("ambiguous current session lookup should fail");
 
         assert_eq!(error.0, StatusCode::CONFLICT);
+    }
+
+    fn register_payload(wave_id: &str) -> RegisterSessionRequestDto {
+        RegisterSessionRequestDto {
+            wave_id: wave_id.to_string(),
+            parent_session_id: None,
+            step: "design".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo".to_string(),
+            argv: vec!["lf".to_string(), "design".to_string()],
+            tmux_name: Some("lf-goals".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_session_creates_running_worker_session() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo");
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+        let parent = make_session(wave.id().clone(), TMUX_TERMINAL_SOURCE);
+        state
+            .store
+            .create_control_session(&parent)
+            .await
+            .expect("parent session should be created");
+
+        let mut payload = register_payload(&wave.id().to_string());
+        payload.parent_session_id = Some(parent.id.to_string());
+
+        let Json(response) = register_session_handler(State(state.clone()), Json(payload))
+            .await
+            .expect("register should succeed");
+
+        assert_eq!(response.session.wave_id, wave.id().to_string());
+        assert_eq!(
+            response.session.parent_session_id.as_deref(),
+            Some(parent.id.as_str())
+        );
+        assert_eq!(response.session.argv, vec!["lf", "design"]);
+        assert_eq!(response.session.session_use, "worker");
+        assert_eq!(response.session.source, "lf_cli");
+        assert_eq!(response.session.status, "running");
+        assert_eq!(response.session.tmux_name, "lf-goals");
+        assert_eq!(response.completion_token, response.session.id);
+
+        let session_id = parse_lfd_id(&response.session.id, "session id").expect("valid id");
+        let stored = state
+            .store
+            .get_control_session(&session_id)
+            .await
+            .expect("session lookup should succeed")
+            .expect("session should be stored");
+        assert_eq!(stored.status, SessionStatus::Running);
+        assert_eq!(
+            stored.completion_token.as_deref(),
+            Some(response.session.id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn register_session_rejects_unknown_wave() {
+        let state = test_http_state().await;
+
+        let error = register_session_handler(
+            State(state),
+            Json(register_payload(&LfdId::new().to_string())),
+        )
+        .await
+        .expect_err("register should fail for unknown wave");
+
+        assert_eq!(error.0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn registered_session_completes_by_exit_code() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo");
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+
+        for (exit_code, expected) in [(0, "succeeded"), (3, "failed")] {
+            let Json(registered) = register_session_handler(
+                State(state.clone()),
+                Json(register_payload(&wave.id().to_string())),
+            )
+            .await
+            .expect("register should succeed");
+
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                COMPLETION_TOKEN_HEADER,
+                HeaderValue::from_str(&registered.completion_token)
+                    .expect("token should be a valid header value"),
+            );
+            let Json(completed) = complete_session_handler(
+                State(state.clone()),
+                headers,
+                Path(registered.session.id.clone()),
+                Json(CompleteSessionRequest { exit_code }),
+            )
+            .await
+            .expect("complete should succeed");
+
+            assert_eq!(completed.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn registered_session_completion_requires_token() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo");
+        state
+            .store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
+        let Json(registered) = register_session_handler(
+            State(state.clone()),
+            Json(register_payload(&wave.id().to_string())),
+        )
+        .await
+        .expect("register should succeed");
+
+        let error = complete_session_handler(
+            State(state),
+            HeaderMap::new(),
+            Path(registered.session.id),
+            Json(CompleteSessionRequest { exit_code: 0 }),
+        )
+        .await
+        .expect_err("complete without token should fail");
+
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
     }
 
     #[test]

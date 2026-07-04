@@ -8,6 +8,23 @@ use crate::lfd::id::LfdId;
 
 pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
 pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
+/// A bare `lf` invocation that self-registered from inside a wave context.
+/// Not tmux-backed: the process lives inside an ancestor's terminal, so
+/// attach/cancel must not manage tmux for it; the process marks itself
+/// terminal via the completion-token path.
+pub const LF_CLI_SOURCE: &str = "lf_cli";
+/// A self-registered `lf wave` server: the process is owned by the wave
+/// server, not launched by lfd. The session row records the running server
+/// (endpoint + pid in `env`) so Concerto sees the mind and one-brain
+/// enforcement has a fact to key on.
+pub const WAVE_SERVER_SOURCE: &str = "wave_server";
+
+/// Env key on a `wave_server` session carrying the server's loopback
+/// `host:port` (the `.wave-endpoint` address).
+pub const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_ENDPOINT";
+/// Env key on a `wave_server` session carrying the server's pid, used by
+/// session reconciliation to detect a crashed server.
+pub const WAVE_SERVER_PID_ENV: &str = "LF_WAVE_SERVER_PID";
 
 /// Build a human-readable tmux session name from the branch name.
 ///

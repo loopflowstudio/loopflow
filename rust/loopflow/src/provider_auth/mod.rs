@@ -1900,13 +1900,11 @@ where
     F: FnMut(&'static str) -> Fut,
     Fut: Future<Output = Option<String>>,
 {
-    let missing_credentials = || {
-        AuthError::CommandUnavailable {
+    let missing_credentials = || AuthError::CommandUnavailable {
         provider,
         command: format!(
-            "set {client_id_env} and {client_secret_env}, or configure them in Doppler, to enable {provider} OAuth"
+            "set {client_id_env} and {client_secret_env}, or Doppler, to enable {provider} OAuth"
         ),
-    }
     };
     let client_id = read_oauth_client_credential(client_id_env, &mut fetch_secret)
         .await
@@ -1928,10 +1926,7 @@ where
     if let Some(value) = read_nonempty_env(name) {
         return Some(value);
     }
-
-    fetch_secret(name)
-        .await
-        .and_then(|value| read_nonempty_value(&value))
+    fetch_secret(name).await
 }
 
 async fn fetch_doppler_secret(name: &'static str) -> Option<String> {

@@ -1,69 +1,80 @@
 ---
 requires: wave-agent-design.md
-produces: the live-vendor shakedown runbook for the wave agent MVP
+produces: the live-vendor shakedown runbook — Claude-drivable, no daemon
 ---
 # Wave agent shakedown
 
 Code-complete ≠ done. Everything past the conformance traces is untested
-against live vendors. Walk this in order; each step gates the next. Expect
-2–5 real bugs — that's the point of the walk.
+against live vendors. No `lfd` anywhere in this runbook — the wave server is
+sovereign; the store is the registry. Gates 1–5 are Claude-drivable from the
+CLI (background tmux + curl + journal tail); gates 6–7 need Jack.
 
-## 0. Build + unit sanity
-- [ ] `cargo build --release` + `swift build`; full suites green.
-- [ ] `lfd` running (main repo, per concerto-main-repo convention).
+## Rules of engagement
+- First live-mind runs happen in a **throwaway repo**, never this tree — an
+  AutoApprove codex grinding in the worktree we're editing is self-inflicted
+  split-brain. Setup: init a tiny git repo in the scratchpad with
+  `wave/demo/GOAL.md` ("maintain TODO.md; one small improvement per pass")
+  and a MEMORY.md stub.
+- Watch spend: every mind turn burns a subscription turn. Interrupt early,
+  keep passes short, tear down when idle.
+- Journal is the oracle: `.lf/journal/waves/<name>/journal.jsonl` in the
+  wave's worktree. `/health`, `GET /conversation`, and the SSE stream are the
+  wire views. Kill switch: Ctrl-C on the server; verify no codex survivors
+  with `pgrep -fl codex`.
 
-## 1. First contact — the mind alone (no lfd needed)
-- [ ] From `../loopflow.goals`: `lf wave goals`.
-- [ ] `.wave-endpoint` written; `GET /health` shows `idle`, then `turning`.
-- [ ] Journal exists: `.lf/journal/waves/goals/journal.jsonl` — ThreadStarted
-      first, then MindState idle→turning, TurnStarted….
-- [ ] Watch the first real codex app-server turn stream through
-      `GET /conversation` — items arrive, turn finalizes.
-- Likely first bugs: app-server handshake details the traces missed; thread-id
-  capture timing (the 10s window); prompt size on the first seeded turn.
+## 1. First contact — the mind alone (throwaway repo)
+- [ ] `lf wave demo` → bootstraps/enters `<repo>.demo` worktree, writes
+      `.wave-endpoint`, registers a WaveAgent session row in the store.
+- [ ] Journal order: ThreadStarted first, then MindState idle→turning,
+      TurnStarted…; `/health` walks idle→turning.
+- [ ] First real codex app-server turn streams items and finalizes.
+- Likely bugs: handshake details the traces missed; thread-id capture window;
+  first-turn seed size; codex flags drift.
 
-## 2. Chat
-- [ ] `POST /messages {op: "message", text: "what are you working on?"}` while
-      idle → turn starts immediately, TurnStarted.answers names the message.
-- [ ] Send a message mid-turn → queued; boundary turn drains it.
-- [ ] Restart `lf wave` mid-conversation → thread intact (journal replay),
-      turn ids continue; vendor thread cold-starts (documented).
+## 2. Chat (curl-drivable)
+- [ ] `{op:"message"}` while idle → immediate turn, answers names the message.
+- [ ] Message mid-turn → queued, boundary turn drains it (answers = all ids).
+- [ ] Server restart mid-conversation → thread intact, ids continue, vendor
+      thread cold-starts (documented).
 
 ## 3. Steer + interrupt (the new muscles)
-- [ ] Mid-turn `{op: "steer", ...}` → lands in the live turn (codex
-      pending_input); journal shows TurnSteered.
-- [ ] Mid-turn `{op: "interrupt", text: ""}` → turn finalizes `interrupted`
-      (not failed), state walks Turning→Interrupting→Idle, no orphan codex
-      (`ps`).
-- [ ] Interrupt & send: `{op: "interrupt", text: "do X instead"}` → next turn
-      answers it.
-- [ ] Pathological: interrupt during codex's own tool call — does the 10s
-      deadline force-path fire cleanly?
+- [ ] Mid-turn `{op:"steer"}` → lands in the live turn; TurnSteered journaled.
+- [ ] Mid-turn `{op:"interrupt", text:""}` → turn finalizes `interrupted`,
+      state walks Turning→Interrupting→Idle, `pgrep codex` clean.
+- [ ] Interrupt & send → next turn answers the text.
+- [ ] Interrupt during a codex tool call → does the 10s deadline force-path
+      fire cleanly?
 
-## 4. Concerto
-- [ ] WaveChat attaches via .wave-endpoint; in-progress turns stream (cursor
-      visible); composer verb follows state (Send / Steer / Interrupt & Send /
-      Interrupt).
-- [ ] Kill the wave server → banner/composer degrade sanely; restart →
-      reconnect, no transcript interleave.
+## 4. One-brain + registry (store-direct)
+- [ ] Second `lf wave demo` refused, names the live session; `--force` takes
+      over; dead-pid row → takeover without --force.
+- [ ] Session rows visible in the store (sqlite3 query or `lf d` reader when
+      it exists); wave server row marked terminal on Ctrl-C.
 
-## 5. Orchestration (needs lfd)
-- [ ] Wave server registered: mind visible in the wave agent tree; second
-      `lf wave goals` refused; loop_ticker skips the served wave.
-- [ ] Ask the mind (via chat) to dispatch a worker → it runs
-      `lfq worker run … ` → worktree named `loopflow.goals.<id>`, tmux session
-      attachable from Concerto.
-- [ ] WorkerDispatched/Finished appear in the journal (observation tail);
-      next heartbeat turn's context carries <in_flight>.
-- [ ] Bare `lf <flow>` inside the wave context self-registers as a child
-      session (agent tree shows it).
-- [ ] Worker's PR lands; Asana task moved via the mind (`lf op pm update`).
+## 5. Orchestration — workers, no daemon
+- [ ] Ask the mind (chat) to dispatch → it runs `lf q worker run demo …` →
+      worktree `<repo>.demo.<id>`, detached tmux session, run+session rows.
+- [ ] Worker's own `lf` self-registers (child session row, correct parent;
+      no double-registration).
+- [ ] WorkerDispatched appears in the journal (store poll); WorkerFinished on
+      completion; next heartbeat turn carries <in_flight>.
+- [ ] Placement: `--stack` forks from parent branch with lineage columns;
+      pooled run shares the wave worktree.
 
-## 6. Soak
-- [ ] Leave it grinding an hour: heartbeat cadence sane, MEMORY.md gets
-      *curated* edits (not blobs) or the operating prompt needs tuning,
-      journal growth reasonable, no fd/process leaks, spend acceptable
-      (each heartbeat burns a subscription turn).
+## 6. Concerto (Jack)
+- [ ] WaveChat attaches via .wave-endpoint; turns stream live; composer verbs
+      follow state (Send / Steer / Interrupt & Send / Interrupt).
+- [ ] Kill the server → sane degrade; restart → clean reconnect.
+- [ ] Judgment gates: does steering *feel* immediate? Is the transcript
+      readable at a glance? Would you leave this running?
+
+## 7. The real thing (Jack + Claude)
+- [ ] `lf wave goals` in its own worktree, the actual goals GOAL.md, real
+      Asana roadmap via `lf op pm`. One supervised session: watch it read the
+      roadmap, dispatch one real worker, land one real PR, update Asana.
+- [ ] Soak an hour: heartbeat cadence sane, MEMORY.md gets *curated* edits
+      (or the operating prompt needs tuning), journal growth reasonable, no
+      fd/process leaks, spend acceptable.
 
 ## Known-accepted gaps (don't re-find these)
 - Vendor thread resume = cold start (visible thread survives via journal).
@@ -71,3 +82,6 @@ against live vendors. Walk this in order; each step gates the next. Expect
 - WorkerFinished.summary is thin (exit + PR url) until worker reports exist.
 - Steer degrades to queue on claude/opencode minds (codex-only for now).
 - No Decisions/gating; ApprovalPolicy is AutoApprove.
+- Concerto fleet surfaces (wave list badges, agent tree) still read the old
+  daemon — they need `lfd serve` (subscription server) or its successor;
+  WaveChat itself is daemon-free.

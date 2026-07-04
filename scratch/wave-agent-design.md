@@ -205,6 +205,12 @@ The big version, in the order the primitives unlock it:
 8. **Rented persistence.** The same goal + committed MEMORY checkpoint +
    `.mcp.json` run as cloud routines (2-looping-agent-cloud A2); the wave
    server is the local, richer tier of the same product.
+9. **lfd's second life.** After the collapse (lf does the work, the db is
+   the registry), the server earns its way back only as push: the guarded
+   subscription server for Concerto today; later a global pubsub fabric
+   (GitHub events, cross-repo signals) and the access/query gate for
+   distributed compute — multiple machines, teams. Waves stay sovereign;
+   lfd federates them.
 
 ## 4. The MVP (this branch)
 
@@ -420,6 +426,20 @@ mechanics (as checkpoint writer), `opencode_runtime.rs` reaper (wire
   brain; goal *rendering* internals (`render_goal`, `load_goal`) stay — they
   seed the mind's turns and the A2 cloud path.
 
-**Open:** none blocking. Decision point three (mind registers as an lfd
-`WaveAgent` session, best-effort) is design-accepted by use — the worker
-observation model and one-brain enforcement build on it.
+**Corrected (2026-07-04, per the architecture roadmap item "Collapse lfd/lfq
+into lf; shrink lfd to a guarded subscription server"):** there is no central
+daemon above the wave. `lf` is one binary that does the work AND records to
+the shared local SQLite store directly — **the db IS the run registry**
+(`register_session` / `active_sessions_by_worktree`, grouped by worktree
+basename). `lf wave` runs its own server, inside its own worktree
+(`<repo>.<wave>`, self-bootstrapped). Decision point three's *facts* stand —
+the mind registers as a WaveAgent session, one-brain keys on that fact,
+worker activity is observed — but the transport is store-direct, not HTTP/WS
+to a daemon. Worker dispatch is `lf q worker run` (worktree + tmux + store
+rows, no HTTP). `lfd serve` survives only as a guarded subscription server
+(push for Concerto), execing `lf` rather than reimplementing behavior; hard
+cut, no compat shims. Its future beyond that: a global pubsub fabric (e.g.
+GitHub events) and/or the access/query gate for distributed compute across
+machines and teams — the thing you consult, not the thing that runs you.
+
+**Open:** none blocking.

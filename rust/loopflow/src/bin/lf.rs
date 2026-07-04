@@ -321,6 +321,8 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
             }
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
+            Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
             Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
             Some(Commands::Chat { text, target }) => {
                 loopflow::lf::commands::chat::run(text, target)
@@ -367,6 +369,8 @@ fn run_label(cli: &Cli) -> Option<String> {
         Some(Commands::Op { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Usage)
+        | Some(Commands::Runs)
+        | Some(Commands::Trace { .. })
         | Some(Commands::Q { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Memory { .. }) => None,

@@ -43,6 +43,10 @@ pub struct ChatTurn {
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
+    /// Speaker label for attributed emissions (`lf chat` — worker reports,
+    /// child-wave escalations). Absent for the mind's own turns and plain
+    /// user turns.
+    pub from: Option<String>,
 }
 
 impl ChatTurn {
@@ -61,6 +65,7 @@ impl ChatTurn {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: Self::now_rfc3339(),
+            from: None,
         }
     }
 }
@@ -103,5 +108,22 @@ mod tests {
         let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
         assert_eq!(decoded, turn);
         assert_eq!(decoded.role, ChatRole::User);
+    }
+
+    #[test]
+    fn attributed_turn_round_trips_and_absent_from_decodes_none() {
+        let mut turn = ChatTurn::user("turn-1".into(), "worker report".into());
+        turn.from = Some("worker".to_string());
+        let value = serde_json::to_value(&turn).expect("serialize");
+        assert_eq!(value["from"], "worker");
+        let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(decoded.from.as_deref(), Some("worker"));
+
+        // Absent `from` is None — no default masking on the wire.
+        let mut value =
+            serde_json::to_value(ChatTurn::user("turn-2".into(), "hi".into())).expect("serialize");
+        value.as_object_mut().expect("object").remove("from");
+        let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(decoded.from, None);
     }
 }

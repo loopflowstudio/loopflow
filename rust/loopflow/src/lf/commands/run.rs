@@ -194,6 +194,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 step_name,
                 message,
                 prepared.components.operate,
+                &crate::engine::prompt::format_wave_context_sections(&prepared.components),
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
@@ -247,9 +248,12 @@ fn should_launch_via_skill(step_name: &str) -> bool {
 }
 
 /// Build the launch seed for a vendor skill handoff: the skill invocation,
-/// system-safe instruction sections, and optional user message. Orientation now
-/// lives in the step bodies themselves, and the step body loads from the synced
-/// skill on invoke, so this stays small enough for the GUI deep-link cap.
+/// system-safe instruction sections, the ambient wave sections (a run born
+/// inside a wave inherits the wave's memory and recent chat — hard-capped,
+/// and empty outside a wave), and optional user message. Orientation now
+/// lives in the step bodies themselves, and the step body loads from the
+/// synced skill on invoke, so this stays small enough for the GUI deep-link
+/// cap.
 ///
 /// The invocation sigil is harness-specific: Codex's interactive composer
 /// reserves `/` for built-in commands, so skills fire with `$name` there (and
@@ -260,6 +264,7 @@ fn skill_launch_seed(
     step_name: &str,
     message: Option<&str>,
     loopflow: bool,
+    wave_sections: &[String],
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
@@ -269,6 +274,10 @@ fn skill_launch_seed(
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
     let mut seed = format!("{sigil}{step_name}\n\n{}", system_sections.join("\n\n"));
+    for section in wave_sections {
+        seed.push_str("\n\n");
+        seed.push_str(section);
+    }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
         seed.push_str(message);
@@ -506,6 +515,7 @@ mod tests {
             "implement",
             Some("build auth"),
             false,
+            &[],
         );
         assert!(seed.starts_with("/implement\n\n"));
         // Orientation now lives in the step body, not the seed.
@@ -517,14 +527,14 @@ mod tests {
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, &[]);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
     fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
         for surface in [Surface::Cli, Surface::Ide, Surface::ConcertoMac] {
-            let seed = skill_launch_seed("claude", surface, "gate", None, false);
+            let seed = skill_launch_seed("claude", surface, "gate", None, false, &[]);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");
         }
@@ -532,30 +542,51 @@ mod tests {
 
     #[test]
     fn skill_launch_seed_omits_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, &[]);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
     fn skill_launch_seed_headless_includes_preamble() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
         assert!(seed.contains("Run mode is headless"));
     }
 
     #[test]
     fn skill_launch_seed_omits_loopflow_when_disabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
         assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf op commit"));
     }
 
     #[test]
     fn skill_launch_seed_includes_loopflow_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, &[]);
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("lf op commit"));
         assert!(seed.contains("</lf:loopflow>"));
+    }
+
+    #[test]
+    fn skill_launch_seed_carries_ambient_wave_sections_before_the_message() {
+        let sections = vec![
+            "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>".to_string(),
+            "<lf:wave-chat-recent>\nuser: status?\n</lf:wave-chat-recent>".to_string(),
+        ];
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            Some("build auth"),
+            false,
+            &sections,
+        );
+        let memory_pos = seed.find("<lf:wave-memory>").unwrap();
+        let chat_pos = seed.find("<lf:wave-chat-recent>").unwrap();
+        let message_pos = seed.find("<lf:message>").unwrap();
+        assert!(memory_pos < chat_pos);
+        assert!(chat_pos < message_pos);
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub mod prompt;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;
+pub mod wave_context;
 pub mod worktree;
 pub mod worktrees;
 
@@ -58,4 +59,8 @@ pub use stream::{
 pub use structured_reply::{
     render_structured_reply_guidance, structured_replies_for_context, ClientContext,
     StructuredReply,
+};
+pub use wave_context::{
+    gather_wave_chat, render_wave_chat, resolve_ambient_wave_name, WAVE_CHAT_MAX_CHARS,
+    WAVE_CHAT_RECENT_TURNS,
 };

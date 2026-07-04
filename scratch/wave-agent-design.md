@@ -510,6 +510,19 @@ Semantics that keep it clean:
   read the origin's).
 - **Intent-then-fact journaling**: command-item = intent; the journaled
   emission/observed effect = fact. Same discipline as WorkerDispatched.
+- **Hierarchical scopes (Jack, 2026-07-04; post-demo, rides the lf-language
+  item)**: chat and memory are two-level — wave-global (the thread +
+  MEMORY.md) and branch/worktree-scoped (a channel + memory overlay per work
+  line), the latter strictly *extra on top* of the former (overlay
+  semantics, like the `.lf/` override model). Publish to either — `lf chat`
+  defaults to the publisher's own scope (speak locally, escalate
+  deliberately); subscribe to either or all — **the wave's listener
+  subscribes to all its children's scopes** (and a parent wave's listener to
+  its child waves', same move one level up). Mechanically: a `scope` field
+  on journal events; channels are folds-with-a-filter, no new storage.
+  Branch memory lives in the worktree — travels with the branch; at land the
+  mind curates what folds up into wave memory (ephemeral work gets ephemeral
+  memory; only distilled learnings survive the merge).
 
 **Concerto is a viewer, never a participant (2026-07-04, Jack).** Concerto ↔
 lf runs entirely on shared machine substrate — store rows, `.wave-endpoint`,

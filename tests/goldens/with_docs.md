@@ -112,7 +112,8 @@ Wave context is included in docs below.
 
 ## Wave memory
 
-Persistent memory at wave/rust/MEMORY.md. Read it before every iteration.
+Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
+contents, when any, ride this prompt's wave-memory section.
 Keep it compact enough to include every iteration: correct stale entries,
 add durable observations, and delete session-specific notes.
 
@@ -131,13 +132,12 @@ How to update:
 - Correct or remove entries that are wrong or stale.
 - Use absolute dates, not "today" or "recently".
 - When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+</lf:wave>
 
-<lf:memory path="wave/rust/MEMORY.md">
+<lf:wave-memory>
 - Keep prompts concise and concrete.
 - Prefer behavior-focused tests over mock wiring.
-
-</lf:memory>
-</lf:wave>
+</lf:wave-memory>
 
 Scratch design artifacts and working notes.
 

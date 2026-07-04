@@ -19,20 +19,25 @@ a busy-loop.
   orchestration step.
 - **The mind orchestrates, never grinds.** Its operating prompt is the
   rendered `GOAL.md` seed plus the coordinating-session discipline; heavy
-  work is dispatched to subagents (`lfq worker run`). The server tails lfd's
-  event stream and journals `WorkerDispatched`/`WorkerFinished` observations
-  (it is never in the dispatch path); dispatched-not-finished workers ride
-  each heartbeat as a compact `<in_flight>` section.
+  work is dispatched to subagents (`lf q worker run <wave> --flow F --task T`,
+  daemonless — run + session rows written straight to the shared store, the
+  worker launched in a detached tmux session). The server polls the same
+  store and journals `WorkerDispatched`/`WorkerFinished` observations (it is
+  never in the dispatch path) — every ~10s and once before each mind turn;
+  dispatched-not-finished workers ride each heartbeat as a compact
+  `<in_flight>` section.
 - **Failure is bounded.** A failed turn returns the mind to idle; three
   consecutive failures (or a dead vendor session) mark the mind `failed` and
   stop the heartbeat. The next user message revives it.
-- **One brain per wave.** On boot the server registers with a running lfd as
-  the wave's `WaveAgent` session (`POST /v0/waves/{wave}/agent/register`,
-  source `wave_server`; deregistered on shutdown, pid-probed by lfd's
-  reconciliation after a crash). lfd's loop ticker and `run_wave` skip a
-  wave with a live registered brain; a second `lf wave` refuses to start
-  unless `--force` takes over. lfd unreachable → warn once, run fully
-  functional, retry lazily; no daemon means no enforcement (status quo).
+- **One brain per wave.** On boot the server writes itself a `WaveAgent`
+  session row in the shared store (source `wave_server`, endpoint + pid in
+  `env`; the db IS the registry — no daemon in the path). The row is marked
+  terminal on shutdown or Ctrl-C; a crashed server's row is closed by the
+  next boot's pid probe (and by lfd's reconciliation, when one runs). lfd's
+  loop ticker and `run_wave` skip a wave with a live registered brain; a
+  second `lf wave` refuses to start naming the live session unless `--force`
+  takes over (kill by recorded pid, cancel the row). No registry store on
+  the machine → warn once, run fully functional, no enforcement.
 
 Truth is the per-wave append-only journal —
 `.lf/journal/waves/<name>/journal.jsonl`, per-machine, never committed. The
@@ -45,9 +50,11 @@ is explicit. `wave/<name>/MEMORY.md` is read-only here (seeds the mind); the
 journal carries the raw history. The journal is server-owned persistence, not
 IPC.
 
-The mind runs in the repo root the server was started from — run `lf wave`
-from the wave's worktree. Main-checkout protection and worktree bootstrap
-are still to come.
+`lf wave <name>` self-bootstraps its worktree: it ensures the wave's
+`<repo>.<wave>` sibling exists (creating it off main on first boot) and
+enters it before starting the server, so the mind always runs there — never
+the main checkout. Wave state (journal, discovery pointer, MEMORY.md) stays
+under the main repo.
 
 ## Wire contract (snake_case, stable)
 

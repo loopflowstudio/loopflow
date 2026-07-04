@@ -43,8 +43,9 @@ use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_lf_inline_command, build_lf_step_command,
-    cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path,
+    advance_branch, auto_create_pr, build_lf_dispatch_command, build_lf_inline_command,
+    build_lf_step_command, cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path,
+    shell_escape, tmux_exit_file,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -76,16 +77,6 @@ impl Drop for GitStatePollerTask {
     fn drop(&mut self) {
         self.handle.abort();
     }
-}
-
-fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\'', "'\\''");
-    format!("'{escaped}'")
-}
-
-fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
-    cwd.join(".lf/tmp/sessions")
-        .join(format!("{session_id}.exit"))
 }
 
 fn tmux_available() -> bool {
@@ -143,13 +134,8 @@ fn build_run_command(
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<(Vec<String>, String)> {
     if let Some(task) = run.task.as_ref() {
-        let mut cmd =
-            build_lf_step_command(&run.flow, true, &run.direction, &run.area, wave.name());
-        let flow_arg = cmd
-            .get_mut(1)
-            .ok_or_else(|| anyhow!("lf dispatch command missing flow argument"))?;
-        flow_arg.push(':');
-        cmd.push(task.clone());
+        let cmd =
+            build_lf_dispatch_command(&run.flow, task, &run.direction, &run.area, wave.name());
         return Ok((cmd, format!("dispatch:{}", run.flow)));
     }
 
@@ -623,7 +609,7 @@ impl WaveExecutor {
             } else {
                 "run".to_string()
             },
-            tmux_name: tmux_session_name(&run.branch),
+            tmux_name: tmux_session_name(&format!("{}-{}", run.branch, session_id.as_str())),
             status: SessionStatus::Pending,
             attached_at: None,
             started_at: None,

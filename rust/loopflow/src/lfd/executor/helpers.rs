@@ -425,6 +425,35 @@ pub(crate) fn build_lf_step_command(
     cmd
 }
 
+/// The dispatch form of an `lf` invocation: `lf <flow>: <task>` plus the
+/// standard run options. One builder for every dispatcher — the lfd executor
+/// and `lf q worker run` must launch byte-identical workers.
+pub(crate) fn build_lf_dispatch_command(
+    flow: &str,
+    task: &str,
+    directions: &[String],
+    docs: &[String],
+    wave_name: &str,
+) -> Vec<String> {
+    let mut cmd = build_lf_step_command(flow, true, directions, docs, wave_name);
+    cmd[1].push(':');
+    cmd.push(task.to_string());
+    cmd
+}
+
+/// Shell-quote one argv element for the tmux launch line.
+pub(crate) fn shell_escape(value: &str) -> String {
+    let escaped = value.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+/// Where a tmux-wrapped session records its exit code (read by whoever
+/// reconciles the session — the lfd executor's watcher today).
+pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
+    cwd.join(".lf/tmp/sessions")
+        .join(format!("{session_id}.exit"))
+}
+
 pub(crate) fn build_lf_inline_command(
     prompt: &str,
     batch: bool,

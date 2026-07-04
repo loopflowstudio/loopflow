@@ -45,7 +45,7 @@ const BOOL_FLAGS: &[&str] = &[
 
 /// Known subcommands that should not be treated as step names.
 const KNOWN_COMMANDS: &[&str] = &[
-    ":", "op", "wave", "loop", "usage", "runs", "trace", "help",
+    ":", "op", "q", "wave", "loop", "usage", "runs", "trace", "help",
 ];
 
 fn is_value_flag(arg: &str) -> bool {
@@ -318,6 +318,7 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
             }
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
             Some(Commands::External(external_args)) => {
                 match loopflow::lf::commands::run::split_step_args(external_args) {
                     Ok((name, step_args)) => {
@@ -340,7 +341,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf op`, `lf usage`, `lf -l`) and `lf wave`, which never self-register.
+/// (`lf op`, `lf q`, `lf usage`, `lf -l`) and `lf wave`, which never
+/// self-register (`lf q` creates the worker's row itself; `lf wave` registers
+/// as the wave's agent session).
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
         return None;
@@ -351,7 +354,10 @@ fn run_label(cli: &Cli) -> Option<String> {
             .first()
             .map(|step| step.trim_end_matches(':').to_string()),
         None => Some("chat".to_string()),
-        Some(Commands::Op { .. }) | Some(Commands::Wave { .. }) | Some(Commands::Usage) => None,
+        Some(Commands::Op { .. })
+        | Some(Commands::Wave { .. })
+        | Some(Commands::Usage)
+        | Some(Commands::Q { .. }) => None,
     }
 }
 

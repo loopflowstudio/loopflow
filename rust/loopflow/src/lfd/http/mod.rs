@@ -86,10 +86,6 @@ pub fn router(state: HttpState) -> Router {
             "/sessions/current",
             get(session_controls::current_session_handler),
         )
-        .route(
-            "/sessions/register",
-            post(session_controls::register_session_handler),
-        )
         .route("/sessions/{id}", get(session_controls::get_session_handler))
         .route(
             "/sessions/{id}/attach",
@@ -138,10 +134,6 @@ pub fn router(state: HttpState) -> Router {
             get(waves::get_wave_file_diff_handler),
         )
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
-        .route(
-            "/waves/{wave_id}/agent/register",
-            post(waves::register_wave_agent_handler),
-        )
         .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),

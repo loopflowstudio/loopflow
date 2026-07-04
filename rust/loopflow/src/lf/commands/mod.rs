@@ -2,6 +2,7 @@ pub mod auth;
 pub mod flow;
 pub mod list;
 pub mod ops;
+pub mod q;
 pub mod run;
 pub mod runs;
 pub mod usage;

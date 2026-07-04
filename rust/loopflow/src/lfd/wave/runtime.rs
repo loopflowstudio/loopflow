@@ -31,7 +31,7 @@ use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 use crate::lfd::wave::journal::{
     fold_thread, fold_workers, journal_path, Event, EventKind, Journal, MessageId, MessageOp,
-    Usage, WorkerOutcome, WorkerRecord,
+    PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::lfd::wave::memory::Memory;
 use crate::lfd::wave::state::{can_transition, MindState};
@@ -96,6 +96,8 @@ struct Inner {
     /// a run dispatches once and finishes once, however many times the
     /// observer sees it (live event + reconnect snapshot).
     workers: Vec<WorkerRecord>,
+    /// Durable scheduler queue folded from the journal on boot.
+    pending_messages: Vec<PendingMessage>,
 }
 
 /// The whole live state of one running wave server.
@@ -174,6 +176,7 @@ impl WaveRuntime {
                 state,
                 thread_id: fold.thread_id,
                 workers,
+                pending_messages: fold.pending_messages,
             }),
             turn_tx,
             state_tx,
@@ -218,6 +221,21 @@ impl WaveRuntime {
     /// The last journaled vendor thread id, if any — the mind's resume handle.
     pub fn last_thread_id(&self) -> Option<String> {
         self.inner().thread_id.clone()
+    }
+
+    /// User messages journaled before a restart but not yet consumed by a
+    /// turn. The mind drains this once at boot before listening to the live
+    /// inbox.
+    pub fn pending_messages(&self) -> Vec<UserMessage> {
+        self.inner()
+            .pending_messages
+            .iter()
+            .map(|message| UserMessage {
+                id: message.id.clone(),
+                op: message.op,
+                text: message.text.clone(),
+            })
+            .collect()
     }
 
     // -- Worker observations (the lfd tail's write surface) --

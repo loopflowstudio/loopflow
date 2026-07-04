@@ -14,14 +14,15 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! `WorkerDispatched`/`WorkerFinished` are produced by the lfd observation
-//! tail ([`crate::lfd::wave::lfd_link`]): the server tails lfd's event
-//! stream — these are confirmed facts, not commands — and the in-flight
+//! `WorkerDispatched`/`WorkerFinished` are produced by the registry observer
+//! ([`crate::lfd::wave::registry::StoreObserver`]): the server polls the
+//! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` has no producer
 //! until the mind starts curating MEMORY.md deliberately. `ThreadStarted`
 //! is produced by the mind: the vendor thread id is its first durable act,
 //! journaled before the first turn.
 
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -38,7 +39,7 @@ const FORMAT_VERSION: u32 = 1;
 
 /// Identifies one user message within a wave (`"msg-<seq>"`, from the seq of
 /// its `UserMessage` event).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MessageId(pub String);
 
@@ -114,6 +115,14 @@ pub struct WorkerRecord {
     pub flow: String,
     pub task: String,
     pub finished: Option<WorkerOutcome>,
+}
+
+/// A journaled user message that has not yet been consumed by a turn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingMessage {
+    pub id: MessageId,
+    pub op: MessageOp,
+    pub text: String,
 }
 
 /// One journal row.
@@ -335,6 +344,9 @@ pub struct ThreadFold {
     /// Last `ThreadStarted`'s vendor thread id — the resume handle for the
     /// mind's persistent vendor session.
     pub thread_id: Option<String>,
+    /// User messages not named by any `TurnStarted.answers` or
+    /// `TurnSteered.answers`; this seeds the scheduler queue on restart.
+    pub pending_messages: Vec<PendingMessage>,
 }
 
 /// Fold journal events into the thread — the pure function the in-memory
@@ -349,15 +361,25 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut open: Vec<ChatTurn> = Vec::new();
     let mut state = MindState::Idle;
     let mut thread_id: Option<String> = None;
+    let mut pending_messages: Vec<PendingMessage> = Vec::new();
+    let mut consumed_messages: HashSet<MessageId> = HashSet::new();
 
     for event in events {
         match &event.kind {
-            EventKind::UserMessage { text, .. } => {
+            EventKind::UserMessage { id, op, text } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
+                if !consumed_messages.contains(id) {
+                    pending_messages.push(PendingMessage {
+                        id: id.clone(),
+                        op: *op,
+                        text: text.clone(),
+                    });
+                }
             }
-            EventKind::TurnStarted { turn_id, .. } => {
+            EventKind::TurnStarted { turn_id, answers } => {
+                mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
                 open.push(ChatTurn {
                     id: turn_id.clone(),
                     role: ChatRole::Assistant,
@@ -408,10 +430,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 thread_id = Some(started.clone());
             }
+            EventKind::TurnSteered { answers, .. } => {
+                mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
+            }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
-            EventKind::TurnSteered { .. }
-            | EventKind::WorkerDispatched { .. }
+            EventKind::WorkerDispatched { .. }
             | EventKind::WorkerFinished { .. }
             | EventKind::MemoryUpdated { .. } => {}
         }
@@ -422,7 +446,22 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         open,
         state,
         thread_id,
+        pending_messages,
     }
+}
+
+fn mark_consumed(
+    pending_messages: &mut Vec<PendingMessage>,
+    consumed_messages: &mut HashSet<MessageId>,
+    answers: &[MessageId],
+) {
+    if answers.is_empty() {
+        return;
+    }
+    for answer in answers {
+        consumed_messages.insert(answer.clone());
+    }
+    pending_messages.retain(|message| !consumed_messages.contains(&message.id));
 }
 
 /// Fold the worker observations: one record per dispatched run, in dispatch

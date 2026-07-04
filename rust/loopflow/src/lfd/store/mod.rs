@@ -725,6 +725,36 @@ impl Store {
             .find(|session| session.session_use == crate::lfd::types::SessionUse::WaveAgent))
     }
 
+    /// Record a session in the run registry. The db IS the registry: `lf`
+    /// writes its own row here directly — self-registered flow runs, the
+    /// `lf wave` server's WaveAgent row, `lf q worker run` dispatches — no
+    /// daemon in the path. The writer later marks the row terminal via
+    /// [`Store::update_control_session`].
+    pub async fn register_session(&self, session: &Session) -> StoreResult<()> {
+        ControlSessionStore::create_session(self, session).await
+    }
+
+    /// Live sessions grouped under one worktree, keyed by the worktree
+    /// directory's basename (`<repo>.<wave>`, `<repo>.<wave>.<id>`, ...):
+    /// everything currently running in that tree, whoever launched it.
+    pub async fn active_sessions_by_worktree(
+        &self,
+        worktree_name: &str,
+    ) -> StoreResult<Vec<Session>> {
+        let sessions = self
+            .list_control_sessions(None, Some(crate::lfd::types::LIVE_SESSION_STATUSES))
+            .await?;
+        Ok(sessions
+            .into_iter()
+            .filter(|session| {
+                std::path::Path::new(&session.cwd)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    == Some(worktree_name)
+            })
+            .collect())
+    }
+
     pub async fn get_active_control_session_for_run(
         &self,
         run_id: &LfdId,
@@ -2202,6 +2232,21 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
             ),
         }),
     }
+}
+
+/// Open the machine's shared registry store only if one already exists —
+/// a sqlite db file on disk, or a configured postgres. `None` means this
+/// machine has no registry yet; callers that instrument best-effort (lf
+/// self-registration, the wave server) treat that as "not instrumented" and
+/// stay silent rather than conjuring an empty db.
+pub async fn open_existing_store() -> Option<Store> {
+    let cfg = crate::lfd::storage_config_from_env().ok()?;
+    if let StorageConfig::Sqlite { path } = &cfg {
+        if !path.exists() {
+            return None;
+        }
+    }
+    open_store(&cfg).await.ok()
 }
 
 pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {

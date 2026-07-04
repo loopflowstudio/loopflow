@@ -20,24 +20,25 @@
 //! journal is server-owned persistence, not IPC; the only coordination file
 //! is a dumb discovery pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
 //!
-//! The server also keeps a best-effort [`lfd_link`]: it registers itself with
-//! a running lfd as the wave's `WaveAgent` session (one brain per wave,
-//! enforced on both sides) and tails lfd's event stream to journal
-//! `WorkerDispatched`/`WorkerFinished` observations, which fold into the
-//! mind's `<in_flight>` heartbeat context. No lfd → warn once, fully
-//! functional anyway.
+//! The server also keeps a best-effort seat in the shared session
+//! [`registry`] (the same local store lfd serves from — the db IS the
+//! registry): a `WaveAgent` session row registered store-direct at boot (one
+//! brain per wave, enforced by a pid-probing pre-flight) and a store-polling
+//! observer that journals `WorkerDispatched`/`WorkerFinished` observations,
+//! which fold into the mind's `<in_flight>` heartbeat context. No registry
+//! store on the machine → warn once, fully functional anyway.
 
 pub mod journal;
-pub mod lfd_link;
 pub mod memory;
 pub mod mind;
+pub mod registry;
 pub mod runtime;
 pub mod server;
 pub mod state;
 pub mod supervisor;
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -47,53 +48,176 @@ use crate::engine::worktrees::main_repo_root;
 use crate::lf::commands::util::find_repo_root;
 use crate::lfd::conversations::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfd::conversations::types::ConversationEvent;
+use crate::lfd::executor::ensure_wave_worktree;
+use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::wave::mind::MindConfig;
 use crate::lfd::wave::runtime::WaveRuntime;
 use crate::ops::util::resolve_wave_name;
 
 /// Start the reactive wave server for `name` and block until it is stopped
-/// (Ctrl-C). Binds a loopback port, publishes the discovery pointer,
-/// registers with lfd as the wave's agent session (best-effort — see
-/// [`lfd_link`]; `force` takes over an existing live wave-agent session),
-/// and runs the mind on a codex app-server session. The mind's cwd is the
-/// repo root the server was started from (run `lf wave` from the wave's
-/// worktree); wave state (journal, discovery pointer, MEMORY.md) lives under
-/// the main repo so Concerto and a restarted server agree on where it is.
+/// (Ctrl-C). Bootstraps into the wave's worktree (`<repo>.<wave>` sibling —
+/// created if missing; the mind always runs there, never the main checkout),
+/// binds a loopback port, publishes the discovery pointer, registers as the
+/// wave's agent session in the shared store (best-effort — see [`registry`];
+/// `force` takes over an existing live wave-agent session), and runs the
+/// mind on a codex app-server session. Wave state (journal, discovery
+/// pointer, MEMORY.md) lives under the main repo so Concerto and a restarted
+/// server agree on where it is.
 pub fn run(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
 
+    // Self-bootstrap: ensure and enter the wave's worktree.
+    let mind_cwd = wave_worktree(&main_repo, &wave)?;
+    if std::env::current_dir().ok().as_deref() != Some(mind_cwd.as_path()) {
+        std::env::set_current_dir(&mind_cwd)?;
+        println!("lf wave · {wave} · worktree {}", mind_cwd.display());
+    }
+
     let (events_tx, events_rx) = mpsc::unbounded_channel();
     let harness = default_create_harness("codex", ApprovalPolicy::AutoApprove, events_tx)?;
-    let link = lfd_link::LinkConfig::resolve(&wave, &repo_root.display().to_string(), force);
 
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(serve(
-        main_repo,
-        repo_root,
-        wave,
-        harness,
-        events_rx,
-        Some(link),
-        shutdown_signal(),
-    ))
+    rt.block_on(async {
+        let registry_config = resolve_registry(&wave, &mind_cwd, force).await;
+        serve(
+            main_repo,
+            mind_cwd,
+            wave,
+            harness,
+            events_rx,
+            registry_config,
+            shutdown_signal(),
+        )
+        .await
+    })
+}
+
+/// The wave's own worktree — `<repo>.<wave>`, a sibling of the main repo —
+/// created on first boot, reused after. The server registers under this
+/// directory's name and the mind runs in it.
+fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
+    let (path, _branch) = ensure_wave_worktree(main_repo, wave)?;
+    Ok(PathBuf::from(path))
+}
+
+/// Open the machine's shared registry and resolve this wave's row. `None`
+/// (with one warning) when there is no registry or the wave isn't in it:
+/// the server runs unregistered — no one-brain enforcement, no worker
+/// observations — which is exactly the pre-registry status quo.
+async fn resolve_registry(wave: &str, cwd: &Path, force: bool) -> Option<registry::RegistryConfig> {
+    let Some(store) = open_existing_store().await else {
+        tracing::warn!(
+            wave,
+            "no session registry on this machine; running unregistered \
+             (no one-brain enforcement, no worker observations)"
+        );
+        return None;
+    };
+    let store: SharedStore = Arc::new(store);
+    match store.get_wave_by_name(wave).await {
+        Ok(Some(row)) => Some(registry::RegistryConfig {
+            store,
+            wave: row,
+            cwd: cwd.display().to_string(),
+            pid: std::process::id(),
+            force,
+        }),
+        Ok(None) => {
+            tracing::warn!(
+                wave,
+                "wave not in the session registry; running unregistered"
+            );
+            None
+        }
+        Err(err) => {
+            tracing::warn!(wave, error = %err, "session registry unreadable; running unregistered");
+            None
+        }
+    }
 }
 
 /// Serve the wave until `shutdown` resolves. The harness and its event stream
 /// are parameters so tests can drive a mock instead of a real vendor process;
-/// `link` is `None` in tests that exercise the server without an lfd.
+/// `registry_config` is `None` in tests that exercise the server without a
+/// registry store.
 async fn serve(
     repo_root: PathBuf,
     mind_cwd: PathBuf,
     wave: String,
     harness: Box<dyn Harness>,
     events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
-    link: Option<lfd_link::LinkConfig>,
+    registry_config: Option<registry::RegistryConfig>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+
+    // Registry seat: write the WaveAgent row (one-brain pre-flight — a live
+    // brain refuses the start unless --force) and start the store-polling
+    // observer. Best-effort by design: a store failure degrades to the
+    // registry-less status quo.
+    let mut registration: Option<registry::Registration> = None;
+    let mut observer: Option<Arc<registry::StoreObserver>> = None;
+    let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
+    if let Some(config) = registry_config {
+        match registry::register(&config, &addr.to_string()).await {
+            Ok(registry::RegisterOutcome::Registered(reg)) => {
+                let reg = *reg;
+                tracing::info!(
+                    wave,
+                    session_id = %reg.session_id(),
+                    "registered in the session registry as the wave's agent session"
+                );
+                // The mind's children attribute here: a bare `lf` inside the
+                // mind self-registers under this wave with this session as
+                // its parent (see lf::session for the env contract).
+                std::env::set_var(
+                    crate::lf::session::WAVE_ID_ENV,
+                    config.wave.id().to_string(),
+                );
+                std::env::set_var(
+                    crate::lf::session::SESSION_ID_ENV,
+                    reg.session_id().to_string(),
+                );
+                std::env::set_var(crate::lf::session::SESSION_INHERITED_ENV, "1");
+                // Ctrl+C exits the process before the graceful path below
+                // runs, so deregister from the interrupt hook too; the
+                // once-guard makes whichever path runs first the only one.
+                let hook_registration = reg.clone();
+                crate::engine::agent::register_interrupt_cleanup(move || {
+                    hook_registration.deregister_blocking();
+                });
+                registration = Some(reg);
+
+                let obs = Arc::new(registry::StoreObserver::new(
+                    runtime.clone(),
+                    config.store.clone(),
+                    config.wave.id().clone(),
+                ));
+                observer_task = Some(tokio::spawn(Arc::clone(&obs).run(registry::POLL_CADENCE)));
+                observer = Some(obs);
+            }
+            Ok(registry::RegisterOutcome::Refused { message }) => {
+                return Err(anyhow!(
+                    "refusing to start: {message}. Stop that session (or let it \
+                     finish), or rerun with --force to take over."
+                ));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    wave,
+                    error = %err,
+                    "session registry write failed; running unregistered (no one-brain \
+                     enforcement, no worker observations)"
+                );
+            }
+        }
+    }
 
     // The mind is the wave's one brain: it owns the vendor thread and reacts
     // to user messages and heartbeats. It runs as its own task so the HTTP
@@ -105,65 +229,8 @@ async fn serve(
         events_rx,
         mind_cwd,
         MindConfig::default(),
+        observer,
     ));
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let addr = listener.local_addr()?;
-
-    // lfd link: register as the wave's agent session (one-brain pre-flight),
-    // then keep the link alive — lazy re-registration if lfd was down, and
-    // the observation tail journaling worker facts. Best-effort by design:
-    // an unreachable lfd degrades to today's lfd-less behavior.
-    let registration: lfd_link::SharedRegistration = Arc::default();
-    let mut link_task: Option<(lfd_link::LinkConfig, tokio::task::JoinHandle<()>)> = None;
-    if let Some(mut link) = link {
-        link.endpoint = addr.to_string();
-        match lfd_link::register_once(&link).await {
-            lfd_link::RegisterAttempt::Registered(reg) => {
-                tracing::info!(
-                    wave,
-                    session_id = reg.session_id,
-                    "registered with lfd as the wave's agent session"
-                );
-                *registration.lock().expect("registration slot poisoned") = Some(reg);
-            }
-            lfd_link::RegisterAttempt::Refused { message } => {
-                mind.abort();
-                return Err(anyhow!(
-                    "refusing to start: {message}. Stop that session (or let it \
-                     finish), or rerun with --force to take over."
-                ));
-            }
-            lfd_link::RegisterAttempt::Unreachable(err) => {
-                tracing::warn!(
-                    wave,
-                    error = err,
-                    "lfd unreachable; running lfd-less (no registration, no one-brain \
-                     enforcement, no worker observations); registration retries lazily"
-                );
-            }
-        }
-        // Ctrl+C exits the process before the graceful path below runs, so
-        // deregister from the interrupt hook too; `take()` makes whichever
-        // path runs first the only one that deregisters.
-        let hook_link = link.clone();
-        let hook_registration = registration.clone();
-        crate::engine::agent::register_interrupt_cleanup(move || {
-            let taken = hook_registration
-                .lock()
-                .ok()
-                .and_then(|mut slot| slot.take());
-            if let Some(reg) = taken {
-                lfd_link::deregister_blocking(&hook_link, &reg);
-            }
-        });
-        let task = tokio::spawn(lfd_link::run_link(
-            runtime.clone(),
-            link.clone(),
-            registration.clone(),
-        ));
-        link_task = Some((link, task));
-    }
 
     server::write_endpoint(&repo_root, &wave, addr)?;
     // Ctrl+C exits the process before graceful shutdown runs, so remove the
@@ -181,18 +248,14 @@ async fn serve(
         .await;
 
     // Shutdown: stop the mind (its harness child dies with it — kill_on_drop)
-    // and every live subagent, deregister from lfd, drop the pointer.
+    // and every live subagent, mark the registry row terminal, drop the
+    // pointer.
     mind.abort();
-    if let Some((link, task)) = link_task {
+    if let Some(task) = observer_task {
         task.abort();
-        let taken = registration
-            .lock()
-            .expect("registration slot poisoned")
-            .take();
-        if let Some(reg) = taken {
-            let _ = tokio::task::spawn_blocking(move || lfd_link::deregister_blocking(&link, &reg))
-                .await;
-        }
+    }
+    if let Some(registration) = registration {
+        registration.deregister().await;
     }
     runtime.supervisor().shutdown_all();
     server::remove_endpoint(&repo_root, &wave);
@@ -795,29 +858,75 @@ mod tests {
         assert!(!endpoint.exists(), "pointer removed on shutdown");
     }
 
-    /// Best-effort registration: with lfd unreachable the server must come up
-    /// fully functional (registration degrades to a lazy background retry).
+    fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
+        use crate::lfd::types::{RepoWork, WaveMode, WaveStatus};
+        crate::lfd::types::Wave {
+            id: crate::lfd::id::LfdId::new(),
+            name: name.to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            goal: "ship-roadmap".to_string(),
+            metrics: Vec::new(),
+            crons: Vec::new(),
+            repos: vec![RepoWork {
+                repo: "/tmp/repo".to_string(),
+                worktree: String::new(),
+                branch: String::new(),
+                status: WaveStatus::Idle,
+                iteration: 0,
+                cycle_start_iteration: 0,
+                position: 0,
+            }],
+            direction: Vec::new(),
+            area: Vec::new(),
+            paused: false,
+            created_at: Some(time::OffsetDateTime::now_utc()),
+            workers: 1,
+            parent_wave_id: None,
+        }
+    }
+
+    /// The registry seat end to end through `serve`: the WaveAgent row is
+    /// live while the server runs and marked terminal by graceful shutdown.
     #[tokio::test]
-    async fn serve_is_fully_functional_when_lfd_is_unreachable() {
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn serve_registers_the_brain_and_deregisters_on_shutdown() {
+        // serve() exports the wave-context env on registration; serialize
+        // with everything else that touches process env.
+        let _env = crate::lf::session::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let repo = tmp.path().to_path_buf();
+        let store: crate::lfd::store::SharedStore = Arc::new(
+            crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+                tmp.path().join("lfd.db"),
+            ))
+            .await
+            .expect("open store"),
+        );
+        let wave_row = make_wave_row("ship");
+        store.create_wave(&wave_row).await.expect("seed wave");
+        let wave_id = wave_row.id().clone();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let repo2 = repo.clone();
         let cwd = repo.clone();
+        let config = registry::RegistryConfig {
+            store: store.clone(),
+            wave: wave_row,
+            cwd: repo.display().to_string(),
+            pid: std::process::id(),
+            force: false,
+        };
         let handle = tokio::spawn(async move {
-            let mut link = lfd_link::LinkConfig::resolve("ship", "/tmp/repo", false);
-            // Nothing listens on port 1: registration fails soft.
-            link.base_url = "http://127.0.0.1:1".to_string();
             serve(
                 repo2,
                 cwd,
                 "ship".into(),
                 Box::new(StubHarness),
                 events_rx,
-                Some(link),
+                Some(config),
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -827,19 +936,115 @@ mod tests {
 
         let endpoint = server::endpoint_path(&repo, "ship");
         wait_for(|| endpoint.exists()).await;
-        let addr = std::fs::read_to_string(&endpoint).unwrap();
 
-        // The HTTP surface answers: lfd-less is fully functional.
-        let health: serde_json::Value = reqwest::get(format!("http://{}/health", addr.trim()))
+        // Registered: the row is live and carries this server's endpoint.
+        let live = store
+            .live_wave_agent_session(&wave_id)
             .await
-            .expect("health reachable")
-            .json()
-            .await
-            .expect("health json");
-        assert_eq!(health["wave"], "ship");
+            .expect("live lookup")
+            .expect("brain registered");
+        let addr = std::fs::read_to_string(&endpoint).unwrap();
+        assert_eq!(
+            live.env
+                .get(crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV)
+                .map(String::as_str),
+            Some(addr.trim())
+        );
 
         shutdown_tx.send(()).unwrap();
         handle.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "pointer removed on shutdown");
+        assert!(
+            store
+                .live_wave_agent_session(&wave_id)
+                .await
+                .expect("live lookup")
+                .is_none(),
+            "graceful shutdown deregisters the brain"
+        );
+    }
+
+    /// One brain per wave: a live registered server refuses a second serve.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn serve_refuses_to_start_over_a_live_brain() {
+        let _env = crate::lf::session::test_env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let store: crate::lfd::store::SharedStore = Arc::new(
+            crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+                tmp.path().join("lfd.db"),
+            ))
+            .await
+            .expect("open store"),
+        );
+        let wave_row = make_wave_row("ship");
+        store.create_wave(&wave_row).await.expect("seed wave");
+
+        // A live brain, registered as another `lf wave` would be.
+        let first = registry::RegistryConfig {
+            store: store.clone(),
+            wave: wave_row.clone(),
+            cwd: "/tmp/repo.ship".to_string(),
+            pid: std::process::id(),
+            force: false,
+        };
+        let registry::RegisterOutcome::Registered(_live) =
+            registry::register(&first, "127.0.0.1:9")
+                .await
+                .expect("register")
+        else {
+            panic!("first registration succeeds");
+        };
+
+        let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_events_tx, events_rx) = mpsc::unbounded_channel();
+        let err = serve(
+            tmp.path().to_path_buf(),
+            tmp.path().to_path_buf(),
+            "ship".into(),
+            Box::new(StubHarness),
+            events_rx,
+            Some(registry::RegistryConfig {
+                store,
+                wave: wave_row,
+                cwd: "/tmp/repo.ship".to_string(),
+                pid: std::process::id(),
+                force: false,
+            }),
+            async {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .expect_err("second brain refused");
+        assert!(
+            err.to_string().contains("--force"),
+            "error points at --force: {err}"
+        );
+    }
+
+    /// `lf wave` self-bootstraps: the wave's `<repo>.<wave>` sibling worktree
+    /// is created on first boot and reused after — the mind never runs in the
+    /// main checkout.
+    #[test]
+    fn wave_worktree_creates_and_reuses_the_sibling_tree() {
+        let repo = loopflow_test_support::TestRepo::new();
+
+        let created = wave_worktree(repo.path(), "ship").expect("bootstrap worktree");
+        let repo_name = repo
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("repo name");
+        assert_eq!(
+            created.file_name().and_then(|name| name.to_str()),
+            Some(format!("{repo_name}.ship").as_str()),
+            "wave worktree is the <repo>.<wave> sibling"
+        );
+        assert!(created.join(".git").exists(), "worktree is a checkout");
+
+        let reused = wave_worktree(repo.path(), "ship").expect("reuse worktree");
+        assert_eq!(reused, created, "second boot reuses the same tree");
     }
 }

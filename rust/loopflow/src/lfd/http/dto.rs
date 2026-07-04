@@ -300,30 +300,6 @@ pub struct CreateSessionRequestDto {
     pub agent: String,
 }
 
-/// Request body for `POST /v0/sessions/register`: a bare `lf` invocation
-/// inside a wave context registering the run it is about to start. Rust-only
-/// wire type — the `lf` CLI is the sole client; not mirrored in Python or
-/// Swift.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RegisterSessionRequestDto {
-    pub wave_id: String,
-    pub parent_session_id: Option<String>,
-    pub step: String,
-    pub agent: String,
-    pub cwd: String,
-    pub argv: Vec<String>,
-    /// Name of the enclosing tmux session when the run happens inside one.
-    pub tmux_name: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RegisterSessionResponseDto {
-    pub session: SessionDto,
-    /// Token the registering process presents on
-    /// `POST /v0/sessions/{id}/complete` to mark itself terminal.
-    pub completion_token: String,
-}
-
 /// Request body for `POST /v0/waves/{id}/workers`. Mirrored in the Python
 /// client (`client.run_worker`); not mirrored in Swift.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -212,8 +212,10 @@ fn orchestration_discipline(wave: &str) -> String {
         "You are the mind of the '{wave}' wave — its long-running orchestrator.\n\
          Discipline:\n\
          - Never grind inline. Read state, decide, dispatch work to subagents \
-         (via `lfq worker run` when available), fold what you learn into \
-         wave/{wave}/MEMORY.md, and answer the human.\n\
+         via `lf q worker run {wave} --flow <flow> --task \"<task>\"` (add \
+         `--pool` to share the wave's worktree, `--stack <run-id>` to build on \
+         an unlanded run), fold what you learn into wave/{wave}/MEMORY.md, and \
+         answer the human.\n\
          - Keep turns short — decisions and dispatches, not implementation.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
@@ -340,7 +342,9 @@ pub async fn run_mind(
     mut events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     cwd: PathBuf,
     config: MindConfig,
+    observer: Option<Arc<crate::lfd::wave::registry::StoreObserver>>,
 ) {
+    let pending_messages = runtime.pending_messages();
     let mut mind = Mind {
         sink: TurnSink::new(runtime.clone()),
         adapter: EventAdapter::new(),
@@ -348,7 +352,8 @@ pub async fn run_mind(
         harness,
         cwd,
         config,
-        queue: Vec::new(),
+        observer,
+        queue: pending_messages,
         consecutive_failures: 0,
         in_flight: false,
         failed: false,
@@ -359,6 +364,8 @@ pub async fn run_mind(
 
     if let Err(err) = mind.start_thread().await {
         mind.fail(&format!("mind failed to start: {err:#}"));
+    } else if !mind.queue.is_empty() {
+        mind.start_queued_turn().await;
     }
 
     let mut events_open = true;
@@ -410,6 +417,9 @@ struct Mind {
     adapter: EventAdapter,
     cwd: PathBuf,
     config: MindConfig,
+    /// Registry poller, when this server is registered: refreshed once
+    /// before every turn so the `<in_flight>` fold is current.
+    observer: Option<Arc<crate::lfd::wave::registry::StoreObserver>>,
     /// Messages awaiting a turn. The journal's fold is the durable queue
     /// (`UserMessage`s not named in any `TurnStarted.answers`); this is the
     /// scheduler's working copy.
@@ -622,8 +632,18 @@ impl Mind {
     }
 
     async fn on_heartbeat(&mut self) {
+        self.refresh_observations().await;
         let prompt = heartbeat_prompt(&self.runtime);
         self.send_turn(prompt, Vec::new()).await;
+    }
+
+    /// One registry poll before a turn, so the turn's view of in-flight
+    /// workers (the `<in_flight>` fold) is current rather than one poll
+    /// cadence stale.
+    async fn refresh_observations(&self) {
+        if let Some(observer) = &self.observer {
+            observer.poll_once().await;
+        }
     }
 
     /// Drain the whole queue into one turn; its `TurnStarted.answers` names
@@ -632,6 +652,7 @@ impl Mind {
         if self.queue.is_empty() {
             return;
         }
+        self.refresh_observations().await;
         let messages = std::mem::take(&mut self.queue);
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
         let content = messages
@@ -865,6 +886,7 @@ mod tests {
                 heartbeat_idle: heartbeat,
                 interrupt_deadline,
             },
+            None,
         ));
         TestMind {
             runtime,
@@ -1151,6 +1173,32 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "from the first life");
         assert_eq!(*mind.starts.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn boot_with_unanswered_messages_replays_them_to_the_mind() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let expected_message_id = {
+            let (runtime, _rx) =
+                WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+            let turn = runtime
+                .deliver_user_message("answer this after restart".into(), MessageOp::Message);
+            message_id(&turn)
+        };
+
+        let mind = boot_in(tmp, Duration::from_secs(600));
+        wait_for("pending message sent", || mind.input_count() == 1).await;
+        assert_eq!(mind.inputs.lock().unwrap()[0], "answer this after restart");
+
+        mind.emit_turn("answered after restart", Lifecycle::Completed);
+        wait_for("answer marked consumed", || {
+            started_answers(&mind.journal_events()).len() == 1
+        })
+        .await;
+        assert_eq!(
+            started_answers(&mind.journal_events())[0],
+            vec![expected_message_id]
+        );
     }
 
     // -- Steering --

@@ -155,9 +155,45 @@ pub enum Commands {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
     },
+    /// Queue operations against the shared run registry (daemonless dispatch)
+    Q {
+        #[command(subcommand)]
+        cmd: QCommand,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QCommand {
+    /// Worker dispatch
+    Worker {
+        #[command(subcommand)]
+        cmd: WorkerCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkerCommand {
+    /// Dispatch a worker: record its run + session in the registry and
+    /// launch `lf <flow>: <task>` in a detached tmux session
+    Run {
+        /// Wave name
+        wave: String,
+        /// Flow the worker runs
+        #[arg(long)]
+        flow: String,
+        /// Task text handed to the flow
+        #[arg(long)]
+        task: String,
+        /// Run in the wave's shared worktree instead of a fresh one
+        #[arg(long, conflicts_with = "stack")]
+        pool: bool,
+        /// Fork the worker's branch from this run's branch (dependent series)
+        #[arg(long, value_name = "RUN_ID")]
+        stack: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -26,8 +26,21 @@ Earlier same day: codex-cli 0.142.5 protocol drift (5 shapes) + two shutdown
 bugs (nvm-shim grandchild orphan; reader/writer deadlock) — all fixed,
 proven by a 3s live smoke turn.
 
-**Still to walk:** gate 5 (orchestration via `lf q worker run` — blocked on
-fix 1), gates 6–7 (Concerto + the real goals wave — Jack).
+**Gate 5 (second walk, same day): PASSED — and richer than scripted.** The
+mind dispatched via `lf q worker run` (one clean turn, run id reported
+back); worker landed in `<repo>.demo.<runid>` + tmux; `worker_dispatched`
+journaled by the store observer; the worker sent FOUR attributed `lf chat`
+reports mid-run; each entered the mind's queue and was answered; the mind
+ran `lf memory add` unprompted (memory_updated journaled); `worker_finished`
+closed the loop; the thread shows `from: worker` bylines throughout. Found
+along the way: drift #2 (`wave_runs`/`wave_run_id` — the mind diagnosed the
+missing `runs` table itself by reading our source and diffing schemas;
+healed by migration 049 after a full fresh-vs-live schema diff), and the
+SIGHUP teardown gap (tmux kill-session bypassed SIGINT-only cleanup,
+orphaning the mind's codex pair — fix in the wrap pass).
+
+**Still to walk:** gates 6–7 (Concerto + the real goals wave — Jack), with
+`scripts/demo_wave.sh` as the guided runner.
 
 Code-complete ≠ done. Everything past the conformance traces is untested
 against live vendors. No `lfd` anywhere in this runbook — the wave server is

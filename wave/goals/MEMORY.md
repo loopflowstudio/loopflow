@@ -2,6 +2,64 @@
 
 Steers Loopflow toward persistent Goal-driven Waves: goals as the authored loop prompt, Asana as the live roadmap, and Concerto as the session surface.
 
+## The wave agent + waves outward (2026-07-04)
+
+**Governing principle (Jack): "waves outward" — radically zero centralized
+control.** The wave is the unit of sovereignty; nothing sits above the waves.
+The wave process is the LISTENER unifying sovereign `lf` runs (PUBLISHERS)
+by subscription; coordination is shared fact (the store IS the registry) and
+notification, never command. Concerto is a viewer; `lfd serve`'s only future
+is relay listener + access gate (it execs lf — constitutional clause). Test
+every feature: "does this create a center?"
+
+**Shipped (branch `jack-heart.goals.20260703_1511`, PR #796 — the full
+demo):** `lf wave <name>` = a sovereign per-wave server: persistent codex
+app-server mind (0.142.5, live-proven), append-only journal as runtime truth
+(thread/state/queue are folds; restart-safe), steer/interrupt with an
+anti-wedge deadline, open-turn streaming, store-direct registration +
+one-brain, `lf q worker run` (placement fresh/pool/stack;
+`<repo>.<wave>.<id>` worktrees), `lf chat`/`lf memory` (emissions are
+messages with bylines; server holds MEMORY.md's pen at the origin), ambient
+context (`<lf:wave-chat-recent>` + `<lf:wave-memory>` in every lf run; empty
+when waveless). Demo performed live: mind dispatched a worker; the worker
+sent four attributed `lf chat` reports mid-run; the mind reacted and ran
+`lf memory add` unprompted; observation journaled dispatch/finish; thread
+survived restart. `lf goal` deleted; the old loop_ticker path stands down
+for served waves.
+
+**Hard-won learnings:**
+- **Schema-drift class:** the ontology collapse renamed tables/columns by
+  editing historical CREATE migrations in place — fresh dbs fine, recorded
+  dbs stranded (`wave_run_id`, `wave_runs`, `agents/fork_runs.wave_run_id`).
+  Healed by rename migrations 048/049 + a rename-convergence tolerance
+  list, and `open_existing_store` now migrates on direct open. When code
+  and a live db disagree, diff a fresh-migrated schema against the live one
+  before whacking single moles. NEVER edit an applied migration.
+- **Vendor drift discipline:** conformance traces catch mapping bugs; only a
+  live smoke catches protocol drift (codex 0.142.5: app-server subcommand,
+  clientInfo required, client-sent `initialized`, `turn/start {threadId,
+  input:[...]}`, steer carries `expectedTurnId`, usage via
+  `thread/tokenUsage/updated`) and process-tree bugs (nvm shim makes the
+  real binary a grandchild — process-group kill; reader/writer shutdown
+  deadlock; tmux kill-session sends SIGHUP which bypassed SIGINT-only
+  cleanup hooks).
+- **The emission vocabulary is exec, one door:** `lf chat`/`lf memory`/`lf q`
+  — the only door every process on the machine has; worker reports ride it,
+  which solved report thinness for free. Speak locally, escalate
+  deliberately (`--parent` walks store ancestry to the parent's registered
+  endpoint).
+- **Free-energy brief** (scratch/research/softmax-free-energy.md, in git
+  history): the design has the tradition's structure, not its dynamics —
+  and "unattended iterations" as a metric rewards the dark-room failure
+  mode; pair it with a progress setpoint. Roadmap item "Wave dynamics"
+  carries the adopt-nows.
+
+**Roadmap consolidated in Asana (2026-07-04):** 11 open → 8, priorities on
+the custom field (Urgent: demo PR; High: lf language, Concerto viewer; Med:
+dynamics, spend cap, prove-the-language; Low: backends a/b), every item
+reframed for waves-outward (spend-cap enforcement moved out of the daemon;
+backend b = sovereign waves behind the gate, not a hosted daemon).
+
 ## Shipped (runtime model foundation)
 
 - **Two-file wave surface** — `wave/<name>/` is `GOAL.md` (intent) + `MEMORY.md` (this file). Both are injected into the wave loop's assembled context, so the agent reads its intent and memory each iteration.

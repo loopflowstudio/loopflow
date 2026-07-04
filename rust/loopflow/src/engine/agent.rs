@@ -711,6 +711,18 @@ fn launch_streaming(
     let mut logged_first_output = false;
     let mut parser = StreamParser::new();
 
+    // When `lf wave` runs this pass it sets `LF_WAVE_EVENT_SINK` to a per-wave
+    // NDJSON path. We append every raw stdout line (the agent's stream-json) so
+    // the wave's in-process chat server can tail it and assemble ChatTurns. The
+    // sink is best-effort and independent of terminal rendering.
+    let mut event_sink = std::env::var_os("LF_WAVE_EVENT_SINK").and_then(|path| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+    });
+
     let use_color = match stream_format {
         StreamFormat::Human(c) => Some(c),
         StreamFormat::Raw => None,
@@ -730,6 +742,10 @@ fn launch_streaming(
                 }
                 match stream {
                     StreamKind::Stdout => {
+                        if let Some(sink) = event_sink.as_mut() {
+                            use std::io::Write;
+                            let _ = writeln!(sink, "{line}");
+                        }
                         if let Some(color) = use_color {
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {

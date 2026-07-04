@@ -28,3 +28,37 @@ deleted, so this PR targets `main` instead — which now contains #778.
 - Chat **input/composer** to message a running wave.
 
 `WaveChatSource` is the single seam to swap when the server lands.
+
+## WaveChat backend landed (this PR extends #786)
+
+The Rust half of the follow-ons above is now built:
+
+- **Restored** the harness engine (codex/claude/opencode) + conversation `types`
+  + `opencode_runtime` + conformance tests under
+  `rust/loopflow/src/lfd/conversations/`. Analytics (`usage.rs`, usage routes)
+  was intentionally **not** restored.
+- **Built** the per-wave in-process chat server (`conversations/server.rs`) and a
+  `StreamEvent → ChatTurn` builder (`conversations/turns.rs`). `lf wave` now hosts
+  it (`lf/commands/loop.rs`), discovery via `wave/<name>/.chat-endpoint`.
+- **Codex-wired**: inner passes append raw `codex exec --json` to a per-wave sink
+  (`LF_WAVE_EVENT_SINK`, hook in `engine/agent.rs`); a tailer folds it into turns.
+- `POST /chat` → `wave/<name>/MAILBOX.md`, drained into the next pass's prompt
+  (`lf/commands/goal.rs`, `<lf:mailbox>` tag).
+
+### Executive decision: dropped the daemon-era round-trip test
+
+`tests/session_input_round_trip.rs` tested the removed central
+`/v0/conversations` daemon (ConversationManager, HttpState.conversations, store
+persistence). Reviving it would mean reviving the exact central daemon the
+lf-loop model replaced, so it was **not** restored. In its place:
+`tests/wave_chat_server.rs` round-trips the new per-wave contract (discovery,
+`/health`, `/chat`, `POST /chat`, `/chat/stream` SSE, codex ingestion).
+
+### Still stubbed / follow-ons
+
+- Only **codex** is wired to the live sink (claude/opencode harnesses are
+  restored + conformance-tested but not driven by `lf wave` yet).
+- Turn items are summarized from `StreamEvent::ToolUse` (command/file/tool); the
+  richer codex **app-server** item mapping in `codex_mapping.rs` is restored but
+  reserved for a future app-server driver.
+- No cross-pass persistence: turns live in memory for the server's lifetime.

@@ -301,12 +301,34 @@ fn build_goal_message(
     };
 
     let mut message = render_goal(&goal, &ctx);
+    if let Some(mailbox) = drain_mailbox(repo, wave_name) {
+        message.push_str(&format!(
+            "\n\n<lf:mailbox>\nNew messages from the operator since the last pass. Treat these as \
+             high-priority direction:\n\n{mailbox}\n</lf:mailbox>"
+        ));
+    }
     if once {
         message.push_str(
             "\n\n<lf:goal-once>\nRun a single loop iteration, then stop and summarize.\n</lf:goal-once>",
         );
     }
     Ok(message)
+}
+
+/// Read and clear `wave/<wave>/MAILBOX.md` — the drop point for human messages
+/// posted to the wave's chat server (`POST /chat`). Returns the messages so the
+/// next pass folds them into its prompt, then truncates the file so each message
+/// is delivered exactly once. Returns `None` when the mailbox is empty/absent.
+fn drain_mailbox(repo: &Path, wave_name: &str) -> Option<String> {
+    let path = repo.join("wave").join(wave_name).join("MAILBOX.md");
+    let contents = std::fs::read_to_string(&path).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let messages = trimmed.to_string();
+    let _ = std::fs::write(&path, b"");
+    Some(messages)
 }
 
 /// Best-effort fetch of the wave's open dispatches from a running `lfd`.

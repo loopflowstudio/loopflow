@@ -371,7 +371,9 @@ impl Harness for CodexHarness {
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let mut child = Command::new("codex")
-            .arg("--app-server")
+            // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
+            // to `codex app-server` (verified against 0.142.5).
+            .arg("app-server")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -379,7 +381,7 @@ impl CodexHarness {
             // must not leak a live app-server.
             .kill_on_drop(true)
             .spawn()
-            .map_err(|err| anyhow!("failed to spawn codex --app-server: {err}"))?;
+            .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
 
         let stdin = child
             .stdin

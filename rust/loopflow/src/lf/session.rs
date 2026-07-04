@@ -6,7 +6,10 @@
 //! row, no wave attribution. This module closes the gap: when an
 //! agent-launching `lf` command starts inside a wave context, it writes its
 //! own Session row to the shared local store (the db IS the registry — no
-//! daemon in the path) and marks itself terminal when the run ends. No wave
+//! daemon in the path) and marks itself terminal when the run ends. A run
+//! whose row a dispatcher already created (`lf q worker run`, the lfd
+//! executor) registers nothing but still completes that existing row at run
+//! end — daemonless dispatches have no other process to close them. No wave
 //! env or no store on this machine → exactly the old behavior, silently.
 //!
 //! # Env contract
@@ -45,9 +48,11 @@ pub const SESSION_INHERITED_ENV: &str = "LFD_SESSION_INHERITED";
 pub enum RunContext {
     /// No wave env: not inside a wave context. Leave everything untouched.
     Outside,
-    /// Executor-launched: the dispatcher already created this process's
-    /// session row and set `LFD_SESSION_ID` to it. Registering again would
-    /// double-count.
+    /// Dispatcher-launched: the dispatcher (lfd executor or `lf q worker
+    /// run`) already created this process's session row and set
+    /// `LFD_SESSION_ID` to it. Registering again would double-count, but the
+    /// run still completes its own existing row at exit — with no daemon
+    /// guaranteed to be running, nothing else may ever mark it terminal.
     OwnSession,
     /// Inside a wave context without an own session row: register one.
     NeedsRegistration {
@@ -79,11 +84,11 @@ pub fn classify_run_context(
 }
 
 /// Register this `lf` invocation as a session if it runs inside a wave
-/// context. Returns a guard to complete with the run's exit code; dropping it
-/// unfinished (panic, early error) records a failure, and Ctrl+C reports via
-/// the interrupt-hook machinery. Returns `None` — with zero noise — outside
-/// wave contexts, for executor-launched runs, and when the machine has no
-/// registry store (or the write fails).
+/// context, or adopt the row a dispatcher already created for it. Returns a
+/// guard to complete with the run's exit code; dropping it unfinished (panic,
+/// early error) records a failure, and Ctrl+C reports via the interrupt-hook
+/// machinery. Returns `None` — with zero noise — outside wave contexts and
+/// when the machine has no registry store (or the write fails).
 pub fn register_run(step: &str, agent: &str, argv: &[String]) -> Option<RunSession> {
     let context = classify_run_context(
         env_var(WAVE_ID_ENV).as_deref(),
@@ -94,7 +99,7 @@ pub fn register_run(step: &str, agent: &str, argv: &[String]) -> Option<RunSessi
         RunContext::Outside => return None,
         RunContext::OwnSession => {
             mark_child_sessions_inherited();
-            return None;
+            return adopt_own_session();
         }
         RunContext::NeedsRegistration {
             wave_id,
@@ -143,6 +148,36 @@ pub fn register_run(step: &str, agent: &str, argv: &[String]) -> Option<RunSessi
     Some(session)
 }
 
+/// Adopt the session row a dispatcher created for this process — `lf q
+/// worker run` and the lfd executor both point `LFD_SESSION_ID` at a row the
+/// child owns. If no daemon ever runs, nothing else marks the row terminal,
+/// so the run completes it at exit through the same guard machinery as a
+/// self-registered row. Never creates a row: a missing row or store is a
+/// silent `None`, and an already-terminal row (canceled, or closed by a
+/// faster reconciler) stays untouched.
+fn adopt_own_session() -> Option<RunSession> {
+    let session_id: LfdId = env_var(SESSION_ID_ENV)?.parse().ok()?;
+    let (store, session) = block_on(async move {
+        let store: SharedStore = Arc::new(open_existing_store().await?);
+        let session = store.get_control_session(&session_id).await.ok()??;
+        Some((store, session))
+    })??;
+    if session.status.is_terminal() {
+        return None;
+    }
+    let session = RunSession {
+        inner: Arc::new(SessionHandle {
+            store,
+            session,
+            adopted: true,
+            completed: AtomicBool::new(false),
+        }),
+    };
+    let interrupted = Arc::clone(&session.inner);
+    crate::engine::agent::register_interrupt_cleanup(move || interrupted.complete(130));
+    Some(session)
+}
+
 /// Flip `LFD_SESSION_ID`'s meaning for everything this process spawns: the
 /// row belongs to an ancestor, not to the spawned process. Called by every
 /// `lf` command — including non-registering ones like `lf op`/`lf wave`,
@@ -181,6 +216,12 @@ impl Drop for RunSession {
 struct SessionHandle {
     store: SharedStore,
     session: Session,
+    /// Dispatcher-created row this process owns (OwnSession), as opposed to
+    /// a row this process registered itself. Adopted rows are re-read before
+    /// the completion write: a running lfd (or a cancel) may have closed the
+    /// row already, and `update_control_session` overwrites unconditionally —
+    /// a terminal row must never be flipped.
+    adopted: bool,
     completed: AtomicBool,
 }
 
@@ -189,6 +230,20 @@ impl SessionHandle {
     /// must never fail because its registry write did.
     fn complete(&self, exit_code: i32) {
         if self.completed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if self.adopted {
+            let store = self.store.clone();
+            let id = self.session.id.clone();
+            let _ = block_on(async move {
+                let Some(mut row) = store.get_control_session(&id).await.ok().flatten() else {
+                    return;
+                };
+                if !row.complete(exit_code) {
+                    return;
+                }
+                let _ = store.update_control_session(&row).await;
+            });
             return;
         }
         let mut session = self.session.clone();
@@ -220,6 +275,7 @@ async fn register_session(mut session: Session) -> Option<RunSession> {
         inner: Arc::new(SessionHandle {
             store,
             session,
+            adopted: false,
             completed: AtomicBool::new(false),
         }),
     })
@@ -279,7 +335,9 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{
+        RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
+    };
 
     use super::{block_on_new_runtime, classify_run_context, register_run, RunContext};
 
@@ -421,6 +479,73 @@ mod tests {
         id
     }
 
+    /// Seed the row a dispatcher creates for this very process — the
+    /// `lf q worker run` shape: worker, tmux-backed, already running.
+    fn seed_own_session(path: &Path, wave: &Wave) -> Session {
+        let now = OffsetDateTime::now_utc();
+        let session = Session {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: crate::lfd::types::SessionUse::Worker,
+            step: "dispatch:implement".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo".to_string(),
+            argv: Vec::new(),
+            env: Default::default(),
+            source: TMUX_TERMINAL_SOURCE.to_string(),
+            tmux_name: "lf-worker".to_string(),
+            status: SessionStatus::Running,
+            attached_at: Some(now),
+            started_at: Some(now),
+            completed_at: None,
+            created_at: now,
+            completion_token: None,
+        };
+        let stored = session.clone();
+        let path = path.to_path_buf();
+        block_on_new_runtime(async move {
+            let store = open_store(&StorageConfig::sqlite(path))
+                .await
+                .expect("open registry store");
+            store
+                .register_session(&stored)
+                .await
+                .expect("seed own session");
+        });
+        session
+    }
+
+    fn store_session(path: &Path, session: &Session) {
+        let session = session.clone();
+        let path = path.to_path_buf();
+        block_on_new_runtime(async move {
+            let store = open_store(&StorageConfig::sqlite(path))
+                .await
+                .expect("open registry store");
+            store
+                .update_control_session(&session)
+                .await
+                .expect("update session");
+        });
+    }
+
+    fn count_sessions(path: &Path, wave: &Wave) -> usize {
+        let wave_id = wave.id().clone();
+        let path = path.to_path_buf();
+        block_on_new_runtime(async move {
+            let store = open_store(&StorageConfig::sqlite(path))
+                .await
+                .expect("open registry store");
+            store
+                .list_control_sessions(Some(&wave_id), None)
+                .await
+                .expect("session list")
+                .len()
+        })
+    }
+
     fn load_session(path: &Path, id: &str) -> Session {
         let id: LfdId = id.parse().expect("session id");
         let path = path.to_path_buf();
@@ -551,6 +676,143 @@ mod tests {
 
         assert!(register_run("design", "lf", &["lf".to_string()]).is_none());
         assert!(!db.exists(), "a missing registry must not be conjured");
+        clear_session_env();
+    }
+
+    // ── OwnSession: complete the dispatcher-created row, never make one ──
+
+    #[test]
+    fn own_session_run_completes_its_existing_row_by_exit_code() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let wave = seed_registry(&db);
+        let own = seed_own_session(&db, &wave);
+        std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
+        std::env::set_var(super::SESSION_ID_ENV, own.id.to_string());
+        // LFD_SESSION_INHERITED absent: this process owns the row.
+
+        let adoption = register_run("implement", "lf", &["lf".to_string()]).expect("adopted");
+        assert_eq!(adoption.session_id(), own.id.as_str());
+        // No second row: adoption never registers.
+        assert_eq!(count_sessions(&db, &wave), 1);
+        // Children chain under the adopted session.
+        assert_eq!(
+            std::env::var(super::SESSION_ID_ENV).as_deref(),
+            Ok(own.id.as_str())
+        );
+        assert_eq!(
+            std::env::var(super::SESSION_INHERITED_ENV).as_deref(),
+            Ok("1")
+        );
+
+        adoption.complete(0);
+        assert_eq!(
+            load_session(&db, own.id.as_str()).status,
+            SessionStatus::Succeeded
+        );
+
+        // Drop after complete must not overwrite the terminal status.
+        drop(adoption);
+        assert_eq!(
+            load_session(&db, own.id.as_str()).status,
+            SessionStatus::Succeeded
+        );
+        clear_session_env();
+    }
+
+    #[test]
+    fn own_session_nonzero_exit_and_drop_record_failure() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let wave = seed_registry(&db);
+        std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
+
+        let failed_row = seed_own_session(&db, &wave);
+        std::env::set_var(super::SESSION_ID_ENV, failed_row.id.to_string());
+        std::env::remove_var(super::SESSION_INHERITED_ENV);
+        let failed = register_run("implement", "lf", &["lf".to_string()]).expect("adopted");
+        failed.complete(3);
+        assert_eq!(
+            load_session(&db, failed_row.id.as_str()).status,
+            SessionStatus::Failed
+        );
+
+        // An adoption dropped unfinished records a failure too (the
+        // panic / early-error safety net).
+        let dropped_row = seed_own_session(&db, &wave);
+        std::env::set_var(super::SESSION_ID_ENV, dropped_row.id.to_string());
+        std::env::remove_var(super::SESSION_INHERITED_ENV);
+        let dropped = register_run("implement", "lf", &["lf".to_string()]).expect("adopted");
+        drop(dropped);
+        assert_eq!(
+            load_session(&db, dropped_row.id.as_str()).status,
+            SessionStatus::Failed
+        );
+        clear_session_env();
+    }
+
+    #[test]
+    fn own_session_with_missing_row_or_store_is_silent() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let wave = seed_registry(&db);
+        std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
+
+        // Registry exists but the row does not: silent no-op, no row conjured.
+        std::env::set_var(super::SESSION_ID_ENV, LfdId::new().to_string());
+        assert!(register_run("implement", "lf", &["lf".to_string()]).is_none());
+        assert_eq!(count_sessions(&db, &wave), 0);
+
+        // No registry at all: silent no-op, db not conjured.
+        let missing = tmp.path().join("never-created.db");
+        std::env::set_var("LFD_DB_PATH", &missing);
+        std::env::remove_var(super::SESSION_INHERITED_ENV);
+        assert!(register_run("implement", "lf", &["lf".to_string()]).is_none());
+        assert!(!missing.exists(), "a missing registry must not be conjured");
+        clear_session_env();
+    }
+
+    #[test]
+    fn own_session_never_overwrites_a_terminal_row() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let wave = seed_registry(&db);
+        std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
+
+        // Already terminal at adopt time (canceled, or a running lfd
+        // reconciled first): nothing to guard, nothing gets written.
+        let mut canceled = seed_own_session(&db, &wave);
+        assert!(canceled.cancel());
+        store_session(&db, &canceled);
+        std::env::set_var(super::SESSION_ID_ENV, canceled.id.to_string());
+        assert!(register_run("implement", "lf", &["lf".to_string()]).is_none());
+        assert_eq!(
+            load_session(&db, canceled.id.as_str()).status,
+            SessionStatus::Canceled
+        );
+
+        // Goes terminal between adopt and complete (the reconciler race):
+        // the completion write re-reads and skips.
+        let raced = seed_own_session(&db, &wave);
+        std::env::set_var(super::SESSION_ID_ENV, raced.id.to_string());
+        std::env::remove_var(super::SESSION_INHERITED_ENV);
+        let adoption = register_run("implement", "lf", &["lf".to_string()]).expect("adopted");
+        let mut closed = raced.clone();
+        assert!(closed.cancel());
+        store_session(&db, &closed);
+        adoption.complete(0);
+        assert_eq!(
+            load_session(&db, raced.id.as_str()).status,
+            SessionStatus::Canceled
+        );
         clear_session_env();
     }
 

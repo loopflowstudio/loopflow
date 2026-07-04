@@ -67,7 +67,20 @@ observation folds run_events (richer than session polling); `lf trace`
 becomes the per-run descent surface. Watch the 047/048 migration ordering
 (048 already reserves around it).
 
-### 6. Center-audit cleanups  [architecture-wave territory, coordinate]
+### 6. Close the loops: prediction, setpoints, precision  [queued — from
+scratch/research/softmax-free-energy.md]
+The design has the free-energy tradition's structure (sovereign blankets,
+nested causation, algedonic bus) but not its dynamics. Three adopt-nows:
+(a) mind states a predicted outcome at dispatch (`WorkerDispatched` gains
+it); the `WorkerFinished` delta — the surprise — drives memory + attention;
+(b) heartbeat reads GOAL.md metrics as setpoints and folds the *gap* into
+the seed (Beer's homeostat; only spend_cap closes a loop today); (c)
+precision-weight algedonic escalation so only high-precision surprise
+reaches root/human. Watch: "unattended iterations" as a metric rewards the
+dark-room failure mode — pair it with a progress setpoint. Epistemic
+dispatch + surprise-weighted memory pruning stay vision.
+
+### 7. Center-audit cleanups  [architecture-wave territory, coordinate]
 Fat-daemon routes Concerto's fleet surfaces still call; python lfq deletion;
 the executor/trigger paths the collapse item hard-cuts. Not this branch's
 work — but this branch shouldn't add to them. Standing question for every

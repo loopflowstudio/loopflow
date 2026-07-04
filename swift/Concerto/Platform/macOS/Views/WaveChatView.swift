@@ -19,7 +19,14 @@ struct WaveChatView: View {
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
     @State private var sendError: String?
+    @State private var launch: LaunchState = .idle
     @FocusState private var composerFocused: Bool
+
+    enum LaunchState: Equatable {
+        case idle
+        case starting
+        case failed(String)
+    }
 
     private var identity: String { "\(repoPath)|\(waveName)" }
 
@@ -40,6 +47,7 @@ struct WaveChatView: View {
         .task(id: identity) {
             connection?.stop()
             sendError = nil
+            launch = .idle
             let conn = WaveChatConnection(repoPath: repoPath, waveName: waveName)
             connection = conn
             conn.start()
@@ -95,11 +103,7 @@ struct WaveChatView: View {
     private var statusOverlay: some View {
         switch connection?.phase ?? .idle {
         case .notRunning, .idle:
-            emptyState(
-                icon: "moon.zzz",
-                title: "Wave isn't running",
-                message: "Start it with  lf wave \(waveName)  and its conversation appears here live."
-            )
+            notRunningState
         case .connecting:
             VStack(spacing: Spacing.md) {
                 ProgressView()
@@ -134,6 +138,91 @@ struct WaveChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    // MARK: - Not running (start the wave)
+    //
+    // The wave is a detached tmux session, launched here through the same door
+    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Concerto
+    // never touches it. After a launch, the connection's 1s endpoint poll picks
+    // the wave up on its own — this view just waits for the phase to move.
+
+    private var notRunningState: some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "moon.zzz")
+                .font(Typography.heroTitle(28))
+                .foregroundStyle(palette.textSecondary.opacity(0.5))
+            Text("Wave isn't running")
+                .font(Typography.sectionTitle())
+                .foregroundStyle(palette.text)
+            Text(waveStartHint(waveName: waveName))
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+            Button {
+                startWave()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    if launch == .starting {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(launch == .starting ? "Starting…" : "Start wave")
+                }
+            }
+            .buttonStyle(DarkButtonStyle())
+            .disabled(launch == .starting)
+            .accessibilityIdentifier("wave-chat-start")
+            if case .failed(let message) = launch {
+                Text(message)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+                    .accessibilityIdentifier("wave-chat-start-error")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    /// Launch `lf wave` detached, then wait for the endpoint poll to attach.
+    /// The launch itself is quick (tmux returns immediately); the wave server
+    /// takes a few seconds to publish its endpoint.
+    private func startWave() {
+        guard launch != .starting else { return }
+        launch = .starting
+        let repoPath = repoPath
+        let waveName = waveName
+        Task {
+            do {
+                try await Task.detached {
+                    try LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: waveName)
+                }.value
+            } catch {
+                launch = .failed(error.localizedDescription)
+                return
+            }
+            // The connection polls the endpoint pointer every second; give the
+            // wave server up to 20s to come up before calling it failed.
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                // Bail if the pane moved to a different wave mid-wait.
+                guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
+                let phase = conn.phase
+                if phase != .notRunning && phase != .idle {
+                    launch = .idle
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
+            launch = .failed(
+                "Wave didn't come up. Check the tmux session for what went wrong: "
+                    + "tmux attach -t \(PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName))"
+            )
+        }
     }
 
     // MARK: - Composer
@@ -243,6 +332,15 @@ struct WaveChatView: View {
         guard let date = turn.createdAtDate else { return nil }
         return Self.timestampFormatter.localizedString(for: date, relativeTo: Date())
     }
+}
+
+/// The not-running hint, with the launch command as inline code so `lf` can't
+/// be misread as "If". Plain-string fallback only if markdown parsing fails.
+func waveStartHint(waveName: String) -> AttributedString {
+    let markdown = "Start it here, or run `lf wave \(waveName)` in a terminal — "
+        + "its conversation appears here live."
+    return (try? AttributedString(markdown: markdown))
+        ?? AttributedString(markdown.replacingOccurrences(of: "`", with: ""))
 }
 
 #endif

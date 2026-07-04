@@ -206,7 +206,17 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "048_terminal_sessions_run_id",
         sql: include_str!("migrations/048_terminal_sessions_run_id.sql"),
     },
+    Migration {
+        version: "049_runs_rename",
+        sql: include_str!("migrations/049_runs_rename.sql"),
+    },
 ];
+
+/// Migrations that rename schema objects fresh dbs never had under the old
+/// names (the collapse edited historical CREATEs in place): their "no such
+/// table/column" failure means "already in the target state".
+const RENAME_CONVERGENCE_MIGRATIONS: &[&str] =
+    &["048_terminal_sessions_run_id", "049_runs_rename"];
 
 /// Per-migration failures that mean "the db is already in the target state":
 /// record the migration as applied and converge instead of crashing.
@@ -215,9 +225,10 @@ fn is_tolerated_migration_error(version: &str, message: &str) -> bool {
     if message.contains("duplicate column name") || message.contains("already exists") {
         return true;
     }
-    // 048 renames a column that fresh dbs (post-collapse CREATE) never had.
-    version == "048_terminal_sessions_run_id"
-        && (message.contains("no such column") || message.contains("does not exist"))
+    RENAME_CONVERGENCE_MIGRATIONS.contains(&version)
+        && (message.contains("no such column")
+            || message.contains("no such table")
+            || message.contains("does not exist"))
 }
 
 /// Migrations applicable to a backend. Currently returns all migrations
@@ -541,6 +552,47 @@ mod drift_tests {
             )
             .unwrap();
         assert!(has_run_id, "wave_run_id should be renamed to run_id");
+    }
+
+
+    #[test]
+    fn runs_rename_converges_an_old_schema_db() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE wave_runs (id TEXT PRIMARY KEY, wave_id TEXT NOT NULL);
+             CREATE TABLE agents (id TEXT PRIMARY KEY, wave_run_id TEXT);
+             CREATE TABLE fork_runs (id TEXT PRIMARY KEY, wave_run_id TEXT);
+             CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        for m in migrations() {
+            if m.version != "049_runs_rename" {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![m.version],
+                )
+                .unwrap();
+            }
+        }
+        apply_sqlite(&conn).unwrap();
+        let runs_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='runs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(runs_exists, "wave_runs should be renamed to runs");
+        for table in ["agents", "fork_runs"] {
+            let has_run_id: bool = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name='run_id'"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(has_run_id, "{table}.wave_run_id should be renamed to run_id");
+        }
     }
 
     #[test]

@@ -16,6 +16,7 @@ struct WaveChatView: View {
 
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
+    @State private var sendError: String?
     @FocusState private var composerFocused: Bool
 
     private var identity: String { "\(repoPath)|\(waveName)" }
@@ -36,6 +37,7 @@ struct WaveChatView: View {
         .background(palette.background)
         .task(id: identity) {
             connection?.stop()
+            sendError = nil
             let conn = WaveChatConnection(repoPath: repoPath, waveName: waveName)
             connection = conn
             conn.start()
@@ -111,12 +113,6 @@ struct WaveChatView: View {
                 title: "No turns yet",
                 message: "Send a message to start the conversation."
             )
-        case .failed(let reason):
-            emptyState(
-                icon: "exclamationmark.triangle",
-                title: "Couldn't reach the wave",
-                message: reason
-            )
         }
     }
 
@@ -147,6 +143,20 @@ struct WaveChatView: View {
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            if let sendError {
+                Text(sendError)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                    .accessibilityIdentifier("wave-chat-send-error")
+            }
+            composerRow
+        }
+        .padding(Spacing.lg)
+        .background(palette.background)
+    }
+
+    private var composerRow: some View {
         HStack(alignment: .bottom, spacing: Spacing.sm) {
             TextField(composerPlaceholder, text: $composerText, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -167,8 +177,6 @@ struct WaveChatView: View {
                 .buttonStyle(DarkButtonStyle())
                 .disabled(!canSend)
         }
-        .padding(Spacing.lg)
-        .background(palette.background)
     }
 
     private var composerPlaceholder: String {
@@ -179,7 +187,19 @@ struct WaveChatView: View {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, isLive else { return }
         composerText = ""
-        Task { try? await connection.send(text) }
+        sendError = nil
+        Task {
+            do {
+                try await connection.send(text)
+            } catch {
+                // Don't lose the message: put it back in the composer (unless the
+                // user already started typing something new) and say what failed.
+                if composerText.isEmpty {
+                    composerText = text
+                }
+                sendError = "Send failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func timestampLabel(for turn: ChatTurn) -> String? {

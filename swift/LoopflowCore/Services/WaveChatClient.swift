@@ -34,7 +34,7 @@ public enum WaveEndpoint {
 }
 
 /// Observable connection to one wave's chat server: the live thread plus a phase
-/// the UI renders (not running / connecting / live / failed).
+/// the UI renders (not running / connecting / live).
 @MainActor
 @Observable
 public final class WaveChatConnection {
@@ -43,7 +43,6 @@ public final class WaveChatConnection {
         case notRunning
         case connecting
         case live
-        case failed(String)
     }
 
     public let repoPath: String
@@ -140,6 +139,10 @@ public final class WaveChatConnection {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
+        // A fresh stream replays the server's full transcript. Drop the previous
+        // generation first: after a server restart, turn ids and sequences start
+        // over, and stale high-sequence turns would interleave with the replay.
+        turns = []
         phase = .live
 
         var event = ""

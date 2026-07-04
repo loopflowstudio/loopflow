@@ -126,16 +126,6 @@ struct PortfolioRepoStateTests {
         #expect(name == "lf-loopflow-concerto")
     }
 
-    @Test("wave worktree path is deterministic sibling")
-    func waveWorktreePathIsDeterministicSibling() {
-        let path = PortfolioRepoState.waveWorktreePath(
-            repoPath: "/Users/jack/src/loopflow",
-            waveName: "feature/new*wave"
-        )
-
-        #expect(path == "/Users/jack/src/loopflow.feature-new-wave")
-    }
-
     private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {
         Wave(
             id: id,

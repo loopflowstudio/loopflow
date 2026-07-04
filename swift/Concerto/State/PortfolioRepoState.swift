@@ -30,12 +30,6 @@ final class PortfolioRepoState {
         return wave
     }
 
-    /// Start the wave's /goal agent with local `lf goal --tmux`, then return the
-    /// tmux handle so the caller can attach without lfd.
-    func attachWaveAgent(waveName: String) async throws -> SessionConnectionInfo {
-        try await LocalWaveAgentLauncher.attach(repoPath: repoPath, waveName: waveName)
-    }
-
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
@@ -143,16 +137,6 @@ final class PortfolioRepoState {
         return "lf-\(repoName)-\(sanitizeWavePathComponent(waveName))"
             .replacingOccurrences(of: ".", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-    }
-
-    nonisolated static func waveWorktreePath(repoPath: String, waveName: String) -> String {
-        let repo = URL(fileURLWithPath: repoPath)
-        return repo
-            .deletingLastPathComponent()
-            .appendingPathComponent(
-                "\(repo.lastPathComponent).\(sanitizeWavePathComponent(waveName))"
-            )
-            .normalizedFilePath
     }
 
     nonisolated static func waveAgentSessionExists(repoPath: String, waveName: String) -> Bool {

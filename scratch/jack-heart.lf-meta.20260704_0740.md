@@ -41,16 +41,22 @@ where did it go wrong" in two commands.
 
 ## Gaps to close (in scope)
 
-1. **Plain CLI runs are invisible.** Journaling is wave-worktree-only and CLI
-   runs mint no run_id. Fix: mint a run_id for every `lf` invocation; write
-   the same `events.jsonl` lifecycle events for all runs.
-2. **Journal is per-worktree; reads must be machine-grain** (decided: analysis
-   sees every repo on the machine). Fix: journal writes ALSO go durable under
-   `~/.lf/logs/<repo>/<worktree>/events.jsonl` — same dual-write pattern the
-   prompt logs already use, same directory tree, so one walk serves both.
-3. **CLI runs record no tokens/duration.** `StreamEvent::Result { cost_usd,
-   duration_secs }` and `StreamEvent::Usage` are parsed then dropped in the
-   CLI path. Fix: fold them into the run's Completed event.
+Direction update mid-build (Jack): lfd is being eliminated — `lf` writes the
+local SQLite directly, the same store lfd maintains. So the ledger is not a
+new file tree; it is a `run_events` table (migration 047) in `~/.lf/lfd.db`,
+machine-grain by construction. As built:
+
+1. **Plain CLI runs are invisible** → every `lf` invocation now mints a
+   run_id (exported as LF_RUN_ID for prompt logs and children, un-exported at
+   run end) and writes lifecycle rows to `run_events` via the shared
+   SqliteStore (WAL, best-effort, never fails the run). The file journal
+   remains wave-worktree-only for the daemon's poller.
+2. **Machine-grain reads** → `run_events` carries repo/worktree/wave columns;
+   one table serves every repo on the machine.
+3. **CLI runs record no tokens/duration** → the streaming loop feeds
+   `StreamEvent::Usage`/`Result` into the journal's usage stash; terminal run
+   rows carry totals + cost, step boundaries carry cumulative snapshots for
+   per-step deltas.
 
 ## Key functions
 

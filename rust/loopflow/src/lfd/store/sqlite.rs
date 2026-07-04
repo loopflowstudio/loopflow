@@ -18,7 +18,7 @@ use crate::lfd::store::rows::{
 };
 use crate::lfd::store::token_crypto;
 use crate::lfd::store::{
-    ForkRun, ForkRunStatus, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
+    ForkRun, ForkRunStatus, RunEventRow, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
 };
 use crate::lfd::types::{
     ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
@@ -1880,5 +1880,98 @@ impl SqliteStore {
             by_repo_provider,
             by_wave_provider,
         ))
+    }
+
+    // Run ledger (`run_events`): the machine-grain, append-only record of
+    // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
+
+    pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO run_events (
+                run_id, seq, ts, repo, worktree, wave, node, event, command,
+                flow, step, step_index, error, input_tokens, output_tokens,
+                cache_read_tokens, cost_usd, duration_secs
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                row.run_id,
+                row.seq,
+                row.ts,
+                row.repo,
+                row.worktree,
+                row.wave,
+                row.node,
+                row.event,
+                row.command,
+                row.flow,
+                row.step,
+                row.step_index,
+                row.error,
+                row.input_tokens,
+                row.output_tokens,
+                row.cache_read_tokens,
+                row.cost_usd,
+                row.duration_secs,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
+        self.query_run_events(
+            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+                    flow, step, step_index, error, input_tokens, output_tokens,
+                    cache_read_tokens, cost_usd, duration_secs
+             FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
+            params![since_unix],
+        )
+    }
+
+    /// Events for one run; `run_id` may be a unique prefix.
+    pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
+        let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
+        self.query_run_events(
+            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+                    flow, step, step_index, error, input_tokens, output_tokens,
+                    cache_read_tokens, cost_usd, duration_secs
+             FROM run_events WHERE run_id LIKE ?1 ORDER BY run_id, seq",
+            params![prefix],
+        )
+    }
+
+    fn query_run_events(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> StoreResult<Vec<RunEventRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params, |row| {
+            Ok(RunEventRow {
+                run_id: row.get(0)?,
+                seq: row.get(1)?,
+                ts: row.get(2)?,
+                repo: row.get(3)?,
+                worktree: row.get(4)?,
+                wave: row.get(5)?,
+                node: row.get(6)?,
+                event: row.get(7)?,
+                command: row.get(8)?,
+                flow: row.get(9)?,
+                step: row.get(10)?,
+                step_index: row.get(11)?,
+                error: row.get(12)?,
+                input_tokens: row.get(13)?,
+                output_tokens: row.get(14)?,
+                cache_read_tokens: row.get(15)?,
+                cost_usd: row.get(16)?,
+                duration_secs: row.get(17)?,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
     }
 }

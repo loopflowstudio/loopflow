@@ -127,9 +127,10 @@ def create_user(email: str) -> User:
 **Specify "done when."** A command to run, output to expect. The implementing session needs to know when to stop.
 
 **Name the demo.** Every design states the moment that proves the win: what
-the developer runs and what they see. If no demo can be described, the scope
-is wrong — an infrastructure-only slice should be carried one step further,
-to where it shows itself.
+the developer runs and what they see. If no demo can be described, the slice
+is usually scoped one step short — carry it to where it shows itself. The one
+exception: work explicitly commissioned as infrastructure-only. Then say so
+in the doc instead of inventing a demo.
 
 ## Design doc sections
 

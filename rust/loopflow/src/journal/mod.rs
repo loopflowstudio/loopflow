@@ -10,6 +10,8 @@ use tracing::debug;
 
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::id::LfdId;
+use crate::lfd::store::sqlite::SqliteStore;
+use crate::lfd::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -17,12 +19,87 @@ pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
+    static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
 }
 
 #[derive(Debug, Clone)]
 struct RunContext {
     run_id: LfdId,
-    run_dir: PathBuf,
+    /// File-journal directory — present only in wave worktrees, where the
+    /// daemon's poller tails it. The SQLite ledger records every run.
+    run_dir: Option<PathBuf>,
+    repo: Option<String>,
+    wave: Option<String>,
+    seq: i64,
+    /// True when this process minted the run id (vs inheriting LF_RUN_ID);
+    /// the export is removed again when the run ends.
+    minted_run_id: bool,
+}
+
+/// Token/cost totals accumulated from the agent stream on this thread,
+/// attached to ledger rows as the run progresses.
+#[derive(Debug, Clone, Copy, Default)]
+struct PendingUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cost_usd: Option<f64>,
+    duration_secs: Option<f64>,
+    seen: bool,
+}
+
+impl PendingUsage {
+    const fn new() -> Self {
+        Self {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cost_usd: None,
+            duration_secs: None,
+            seen: false,
+        }
+    }
+}
+
+/// Accumulate token usage reported by the agent stream for the current run.
+pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>) {
+    PENDING_USAGE.with(|cell| {
+        let mut usage = cell.borrow_mut();
+        usage.input_tokens += input.unwrap_or(0);
+        usage.output_tokens += output.unwrap_or(0);
+        usage.cache_read_tokens += cache_read.unwrap_or(0);
+        usage.seen = true;
+    });
+}
+
+/// Record the stream's final cost/duration report for the current run.
+pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
+    PENDING_USAGE.with(|cell| {
+        let mut usage = cell.borrow_mut();
+        if cost_usd.is_some() {
+            usage.cost_usd = cost_usd;
+        }
+        if duration_secs.is_some() {
+            usage.duration_secs = match usage.duration_secs {
+                Some(existing) => Some(existing + duration_secs.unwrap_or(0.0)),
+                None => duration_secs,
+            };
+        }
+        usage.seen = true;
+    });
+}
+
+fn snapshot_usage() -> Option<PendingUsage> {
+    PENDING_USAGE.with(|cell| {
+        let usage = *cell.borrow();
+        usage.seen.then_some(usage)
+    })
+}
+
+fn clear_usage() {
+    PENDING_USAGE.with(|cell| {
+        *cell.borrow_mut() = PendingUsage::new();
+    });
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -149,7 +226,13 @@ fn try_emit(
         error: fields.error,
         signal: fields.signal,
     };
-    append_event(&context.run_dir, &event)?;
+
+    if let Some(run_dir) = &context.run_dir {
+        append_event(run_dir, &event)?;
+    }
+
+    let seq = next_seq();
+    ledger_insert(&context, &event, seq, repo_root);
 
     if matches!(node, LfNode::Run)
         && matches!(
@@ -157,10 +240,91 @@ fn try_emit(
             LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
         )
     {
+        if context.minted_run_id {
+            std::env::remove_var(LF_RUN_ID_ENV);
+        }
         clear_context();
+        clear_usage();
     }
 
     Ok(())
+}
+
+/// Best-effort write into the machine-grain SQLite ledger. Never fails the
+/// run: a locked or missing store degrades to a debug log line. Local-only —
+/// the ledger never leaves the machine.
+fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Path) {
+    let is_terminal_run = matches!(event.node, LfNode::Run)
+        && matches!(
+            event.event,
+            LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
+        );
+    let is_step_boundary = matches!(event.node, LfNode::Step)
+        && matches!(event.event, LfEventType::Completed | LfEventType::Errored);
+    // Terminal run rows carry the run's totals; step boundaries carry a
+    // cumulative snapshot so a reader can diff consecutive steps.
+    let usage = if is_terminal_run || is_step_boundary {
+        snapshot_usage()
+    } else {
+        None
+    };
+
+    let row = RunEventRow {
+        run_id: event.run_id.as_str().to_string(),
+        seq,
+        ts: event.ts.unix_timestamp(),
+        repo: context.repo.clone(),
+        worktree: Some(repo_root.display().to_string()),
+        wave: context.wave.clone(),
+        node: node_name(event.node).to_string(),
+        event: event_name(event.event).to_string(),
+        command: event
+            .command
+            .as_ref()
+            .and_then(|argv| serde_json::to_string(argv).ok()),
+        flow: event.flow.clone(),
+        step: event.step.clone(),
+        step_index: event.index.map(i64::from),
+        error: event.error.clone(),
+        input_tokens: usage.map(|u| u.input_tokens as i64),
+        output_tokens: usage.map(|u| u.output_tokens as i64),
+        cache_read_tokens: usage.map(|u| u.cache_read_tokens as i64),
+        cost_usd: usage.and_then(|u| u.cost_usd),
+        duration_secs: usage.and_then(|u| u.duration_secs),
+    };
+
+    match open_ledger() {
+        Ok(store) => {
+            if let Err(err) = store.insert_run_event(&row) {
+                debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+            }
+        }
+        Err(err) => {
+            debug!(error = %err, "ledger unavailable");
+        }
+    }
+}
+
+/// Open the local ledger store, creating and migrating it if needed.
+pub fn open_ledger() -> Result<SqliteStore, crate::lfd::store::StoreError> {
+    SqliteStore::new(&crate::lfd::default_db_path())
+}
+
+fn node_name(node: LfNode) -> &'static str {
+    match node {
+        LfNode::Run => "run",
+        LfNode::Flow => "flow",
+        LfNode::Step => "step",
+    }
+}
+
+fn event_name(event: LfEventType) -> &'static str {
+    match event {
+        LfEventType::Started => "started",
+        LfEventType::Completed => "completed",
+        LfEventType::Errored => "errored",
+        LfEventType::Escalated => "escalated",
+    }
 }
 
 fn ensure_run_context(
@@ -171,31 +335,77 @@ fn ensure_run_context(
         return Ok(Some(context));
     }
 
-    let Some(main_repo) = main_repo_root(repo_root).ok() else {
-        return Ok(None);
-    };
-    let Some(wave_name) = wave_name_from_worktree_and_main(repo_root, &main_repo) else {
-        return Ok(None);
+    let main_repo = main_repo_root(repo_root).ok();
+    let wave_name = main_repo
+        .as_ref()
+        .and_then(|main| wave_name_from_worktree_and_main(repo_root, main));
+
+    let (run_id, minted_run_id) = match configured_run_id(repo_root) {
+        Some(run_id) => (run_id, false),
+        None => {
+            // Mint and export the run id so prompt logs and child processes
+            // carry the same identity as the ledger rows. The export is
+            // removed when the run ends (see try_emit).
+            let run_id = LfdId::default();
+            std::env::set_var(LF_RUN_ID_ENV, run_id.as_str());
+            (run_id, true)
+        }
     };
 
-    ensure_journal_ignored(repo_root)?;
-    let run_id = configured_run_id(repo_root).unwrap_or_default();
-    let run_dir = runs_root(repo_root).join(run_id.as_str());
-    fs::create_dir_all(&run_dir)?;
+    // The file journal exists for the daemon's poller, which only watches
+    // wave worktrees. Everything else still lands in the SQLite ledger.
+    let run_dir = if wave_name.is_some() {
+        ensure_journal_ignored(repo_root)?;
+        let dir = runs_root(repo_root).join(run_id.as_str());
+        fs::create_dir_all(&dir)?;
+        Some(dir)
+    } else {
+        None
+    };
 
-    let context = RunContext { run_id, run_dir };
+    let repo = main_repo
+        .as_deref()
+        .unwrap_or(repo_root)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string);
+
+    let context = RunContext {
+        run_id,
+        run_dir,
+        repo,
+        wave: wave_name.clone(),
+        seq: 0,
+        minted_run_id,
+    };
     set_context(context.clone());
 
-    if fields.wave_name.as_deref() != Some(wave_name.as_str()) {
-        debug!(
-            expected_wave = %wave_name,
-            observed_wave = ?fields.wave_name,
-            repo = %repo_root.display(),
-            "journal run start received mismatched wave metadata"
-        );
+    if let Some(wave_name) = wave_name {
+        if fields.wave_name.as_deref() != Some(wave_name.as_str()) {
+            debug!(
+                expected_wave = %wave_name,
+                observed_wave = ?fields.wave_name,
+                repo = %repo_root.display(),
+                "journal run start received mismatched wave metadata"
+            );
+        }
     }
 
     Ok(Some(context))
+}
+
+fn next_seq() -> i64 {
+    RUN_CONTEXT.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        match borrow.as_mut() {
+            Some(context) => {
+                let seq = context.seq;
+                context.seq += 1;
+                seq
+            }
+            None => 0,
+        }
+    })
 }
 
 fn configured_run_id(repo_root: &Path) -> Option<LfdId> {
@@ -297,6 +507,9 @@ mod tests {
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = env_lock().lock().expect("env lock");
         super::clear_context();
+        super::clear_usage();
+        let home = tempfile::TempDir::new().expect("ledger home");
+        std::env::set_var("LF_HOME", home.path());
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
         match value {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
@@ -311,10 +524,16 @@ mod tests {
         result
     }
 
-    fn journal_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    /// Holds the env lock and points the ledger (LF_HOME) at a tempdir so
+    /// tests never touch the real ~/.lf store.
+    fn journal_test_guard() -> (std::sync::MutexGuard<'static, ()>, tempfile::TempDir) {
         let guard = env_lock().lock().expect("env lock");
         super::clear_context();
-        guard
+        super::clear_usage();
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+        let home = tempfile::TempDir::new().expect("ledger home");
+        std::env::set_var("LF_HOME", home.path());
+        (guard, home)
     }
 
     fn started_fields(
@@ -340,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_is_disabled_in_main_repo() {
+    fn file_journal_is_disabled_in_main_repo_but_ledger_records() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let command = vec!["lf".to_string(), "implement".to_string()];
@@ -351,6 +570,7 @@ mod tests {
             LfEventType::Started,
             started_fields(&command, repo.path(), "main"),
         );
+        super::record_usage(Some(100), Some(20), Some(5));
         emit(
             repo.path(),
             LfNode::Run,
@@ -358,7 +578,26 @@ mod tests {
             LfEventFields::default(),
         );
 
+        // No file journal outside wave worktrees...
         assert!(!runs_root(repo.path()).exists());
+
+        // ...but the machine-grain ledger has the run, with usage on the
+        // terminal event.
+        let store = super::open_ledger().expect("ledger");
+        let events = store.list_run_events_since(0).expect("ledger rows");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].node, "run");
+        assert_eq!(events[0].event, "started");
+        assert!(events[0].repo.is_some());
+        assert!(events[0]
+            .command
+            .as_deref()
+            .unwrap_or("")
+            .contains("implement"));
+        assert_eq!(events[1].event, "completed");
+        assert_eq!(events[1].input_tokens, Some(100));
+        assert_eq!(events[1].output_tokens, Some(20));
+        assert_eq!(events[1].cache_read_tokens, Some(5));
     }
 
     #[test]

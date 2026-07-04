@@ -40,10 +40,10 @@ re-derive what these already record.
 
 7. **Name the demo.** Before writing the design, state the demo: the moment a
    developer sees the win working — the command they run and what appears, the
-   interaction that now works. If you can't describe the demo, the design isn't
-   ready; reshape the scope until you can. Infrastructure-only slices that
-   produce nothing showable are a smell — carry the slice one step further,
-   to where it shows itself.
+   interaction that now works. If you can't describe the demo, the slice is
+   usually scoped one step short — carry it to where it shows itself. The one
+   exception: work explicitly commissioned as infrastructure-only. Then say so
+   in the doc instead of inventing a demo.
 
 8. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable design.
 

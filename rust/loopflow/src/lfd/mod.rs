@@ -3,6 +3,7 @@ pub mod attention;
 pub mod auth;
 pub mod client;
 pub mod config;
+pub mod conversations;
 pub mod credential_socket;
 pub mod events;
 pub mod executor;
@@ -28,6 +29,7 @@ pub mod session_token;
 pub mod store;
 pub mod triggers;
 pub mod types;
+pub mod wave;
 
 use std::path::{Path, PathBuf};
 

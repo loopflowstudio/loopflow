@@ -147,8 +147,9 @@ pub enum Commands {
         #[arg(long)]
         tmux: bool,
     },
-    /// Run a wave's progress loop: loopflow owns the outer loop, each pass is
-    /// one bounded `lf -b goal <wave> --once`
+    /// Start a wave's reactive server: a long-lived process that autonomously
+    /// runs progress subagents and serves the live conversation + chat over a
+    /// loopback HTTP port (discovery via `wave/<name>/.wave-endpoint`).
     #[command(name = "wave", alias = "loop")]
     Wave {
         /// Wave name (matches wave/<name>/)

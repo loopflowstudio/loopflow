@@ -45,6 +45,36 @@ pub fn kill_child_if_running() {
     }
 }
 
+/// Cleanups to run when the process is interrupted (Ctrl+C) before it exits.
+/// The Ctrl+C handler calls `std::process::exit`, which skips Rust destructors,
+/// so anything that must be torn down on interrupt (e.g. the wave server's
+/// discovery pointer) registers a hook here.
+#[allow(clippy::type_complexity)]
+static INTERRUPT_HOOKS: OnceLock<Mutex<Vec<Box<dyn Fn() + Send>>>> = OnceLock::new();
+
+fn interrupt_hooks() -> &'static Mutex<Vec<Box<dyn Fn() + Send>>> {
+    INTERRUPT_HOOKS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Register a cleanup to run on Ctrl+C, before the process exits.
+pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
+    interrupt_hooks()
+        .lock()
+        .expect("interrupt hooks lock poisoned")
+        .push(Box::new(f));
+}
+
+/// Run all registered interrupt cleanups. Called from the Ctrl+C handler.
+pub fn run_interrupt_cleanups() {
+    if let Some(hooks) = INTERRUPT_HOOKS.get() {
+        if let Ok(hooks) = hooks.lock() {
+            for hook in hooks.iter() {
+                hook();
+            }
+        }
+    }
+}
+
 /// Result from launching a runner.
 #[derive(Debug, Clone, Default)]
 pub struct LaunchResult {

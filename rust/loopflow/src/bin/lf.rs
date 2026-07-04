@@ -263,6 +263,7 @@ fn main() -> anyhow::Result<()> {
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
     // survive as an orphan.
     ctrlc::set_handler(|| {
+        loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
         std::process::exit(130);
     })
@@ -302,9 +303,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Goal { name, once, tmux }) => in_repo_runtime(&args, |_| {
             loopflow::lf::commands::goal::run(name, *once, *tmux, &cli)
         }),
-        Some(Commands::Wave { name }) => {
-            in_repo_runtime(&args, |_| loopflow::lf::commands::r#loop::run(name))
-        }
+        Some(Commands::Wave { name }) => in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name)),
         Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
         Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
         Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),

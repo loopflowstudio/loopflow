@@ -64,13 +64,44 @@ impl ChatTurn {
     }
 }
 
+/// Incremental outcome of feeding one stream event to a [`TurnBuilder`].
+///
+/// This is the seam the wave's journal hangs off: the builder still assembles
+/// whole [`ChatTurn`]s, but every increment surfaces to the caller so it can
+/// be recorded (as `TurnStarted`/`TurnItem`/`TurnFinished` events) the moment
+/// it happens, not only at finalization.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TurnDelta {
+    /// A new assistant turn opened (first content event).
+    Opened,
+    /// A prose fragment appended to the open turn's text.
+    Text(String),
+    /// An item added to the open turn.
+    Item(ConversationItem),
+    /// Token usage reported for the open turn.
+    Usage {
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+    },
+    /// The open turn finalized. Carries the assembled turn whole.
+    Finished {
+        turn: ChatTurn,
+        cost_usd: Option<f64>,
+    },
+}
+
 /// Folds a live `StreamEvent` sequence into `ChatTurn`s.
 ///
-/// One builder spans the whole life of a wave server; `feed` is called for every
-/// event parsed from the agent's stream. It opens an assistant turn on the first
-/// content event and closes it on a `Result`, returning the completed turn so the
-/// server can broadcast it. `snapshot` exposes the turn currently in progress so a
-/// late subscriber sees partial text.
+/// One builder spans one subagent pass; `feed` is called for every event
+/// parsed from the agent's stream. It opens an assistant turn on the first
+/// content event and closes it on a `Result`, surfacing every increment as a
+/// [`TurnDelta`]. `snapshot` exposes the turn currently in progress so a late
+/// subscriber sees partial text.
+///
+/// Builder-local turn ids (`"turn-<n>"`, counting from 1) are placeholders:
+/// the wave runtime reassigns ids from the journal's seq domain when it
+/// records the turn.
 #[derive(Debug, Default)]
 pub struct TurnBuilder {
     next_index: u64,
@@ -87,48 +118,75 @@ impl TurnBuilder {
         self.open.as_ref()
     }
 
-    fn open_turn(&mut self) -> &mut ChatTurn {
-        if self.open.is_none() {
-            self.next_index += 1;
-            self.open = Some(ChatTurn {
-                id: format!("turn-{}", self.next_index),
-                role: ChatRole::Assistant,
-                text: String::new(),
-                status: Lifecycle::Running,
-                items: Vec::new(),
-                created_at: ChatTurn::now_rfc3339(),
-            });
+    /// Open a turn if none is open. Returns whether one was opened.
+    fn ensure_open(&mut self) -> bool {
+        if self.open.is_some() {
+            return false;
         }
-        self.open.as_mut().expect("turn just opened")
+        self.next_index += 1;
+        self.open = Some(ChatTurn {
+            id: format!("turn-{}", self.next_index),
+            role: ChatRole::Assistant,
+            text: String::new(),
+            status: Lifecycle::Running,
+            items: Vec::new(),
+            created_at: ChatTurn::now_rfc3339(),
+        });
+        true
     }
 
-    /// Feed one stream event. Returns `Some(turn)` when a turn is finalized.
-    pub fn feed(&mut self, event: &StreamEvent) -> Option<ChatTurn> {
+    /// Feed one stream event, returning every increment it produced (a first
+    /// content event yields `Opened` plus its content delta).
+    pub fn feed(&mut self, event: &StreamEvent) -> Vec<TurnDelta> {
+        let mut deltas = Vec::new();
         match event {
             StreamEvent::Text(text) => {
-                let turn = self.open_turn();
+                if self.ensure_open() {
+                    deltas.push(TurnDelta::Opened);
+                }
+                let turn = self.open.as_mut().expect("turn just ensured open");
                 if !turn.text.is_empty() {
                     turn.text.push('\n');
                 }
                 turn.text.push_str(text);
-                None
+                deltas.push(TurnDelta::Text(text.clone()));
             }
             StreamEvent::ToolUse { name, summary } => {
-                let index = self.open_turn().items.len();
-                let turn = self.open_turn();
-                turn.items.push(tool_item(index, name, summary));
-                None
+                if self.ensure_open() {
+                    deltas.push(TurnDelta::Opened);
+                }
+                let turn = self.open.as_mut().expect("turn just ensured open");
+                let item = tool_item(turn.items.len(), name, summary);
+                turn.items.push(item.clone());
+                deltas.push(TurnDelta::Item(item));
             }
-            StreamEvent::Usage { .. } => None,
-            StreamEvent::Result { subtype, .. } => {
-                let mut turn = self.open.take()?;
-                turn.status = match subtype {
-                    ResultSubtype::Success => Lifecycle::Completed,
-                    ResultSubtype::Error => Lifecycle::Failed,
-                };
-                Some(turn)
+            StreamEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+            } => {
+                deltas.push(TurnDelta::Usage {
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                    cache_read_tokens: *cache_read_tokens,
+                });
+            }
+            StreamEvent::Result {
+                subtype, cost_usd, ..
+            } => {
+                if let Some(mut turn) = self.open.take() {
+                    turn.status = match subtype {
+                        ResultSubtype::Success => Lifecycle::Completed,
+                        ResultSubtype::Error => Lifecycle::Failed,
+                    };
+                    deltas.push(TurnDelta::Finished {
+                        turn,
+                        cost_usd: *cost_usd,
+                    });
+                }
             }
         }
+        deltas
     }
 
     /// Close any in-progress turn (e.g. the pass ended without a `Result`),
@@ -186,18 +244,41 @@ fn tool_item(index: usize, name: &str, summary: &str) -> ConversationItem {
 mod tests {
     use super::*;
 
+    /// Feed events, returning only the finalized turns.
+    fn feed_all(builder: &mut TurnBuilder, events: &[StreamEvent]) -> Vec<ChatTurn> {
+        events
+            .iter()
+            .flat_map(|e| builder.feed(e))
+            .filter_map(|d| match d {
+                TurnDelta::Finished { turn, .. } => Some(turn),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn text_and_result_produce_one_completed_turn() {
         let mut builder = TurnBuilder::new();
-        assert!(builder.feed(&StreamEvent::Text("hello".into())).is_none());
-        assert!(builder.feed(&StreamEvent::Text("world".into())).is_none());
-        let turn = builder
-            .feed(&StreamEvent::Result {
+        let first = builder.feed(&StreamEvent::Text("hello".into()));
+        assert_eq!(
+            first,
+            vec![TurnDelta::Opened, TurnDelta::Text("hello".into())],
+            "first content event opens the turn"
+        );
+        assert_eq!(
+            builder.feed(&StreamEvent::Text("world".into())),
+            vec![TurnDelta::Text("world".into())]
+        );
+        let turns = feed_all(
+            &mut builder,
+            &[StreamEvent::Result {
                 subtype: ResultSubtype::Success,
                 cost_usd: None,
                 duration_secs: None,
-            })
-            .expect("turn finalized on result");
+            }],
+        );
+        assert_eq!(turns.len(), 1);
+        let turn = &turns[0];
         assert_eq!(turn.id, "turn-1");
         assert_eq!(turn.role, ChatRole::Assistant);
         assert_eq!(turn.text, "hello\nworld");
@@ -206,12 +287,18 @@ mod tests {
     }
 
     #[test]
-    fn tool_use_becomes_command_item() {
+    fn tool_use_becomes_command_item_and_surfaces_as_delta() {
         let mut builder = TurnBuilder::new();
-        builder.feed(&StreamEvent::ToolUse {
+        let deltas = builder.feed(&StreamEvent::ToolUse {
             name: "Bash".into(),
             summary: "cargo test".into(),
         });
+        assert_eq!(deltas[0], TurnDelta::Opened);
+        assert!(matches!(
+            &deltas[1],
+            TurnDelta::Item(ConversationItem::Command { command, .. })
+                if command == &vec!["cargo test".to_string()]
+        ));
         let snap = builder.snapshot().expect("open turn");
         assert_eq!(snap.items.len(), 1);
         assert!(matches!(
@@ -221,40 +308,74 @@ mod tests {
     }
 
     #[test]
+    fn usage_surfaces_as_delta() {
+        let mut builder = TurnBuilder::new();
+        builder.feed(&StreamEvent::Text("working".into()));
+        let deltas = builder.feed(&StreamEvent::Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            cache_read_tokens: None,
+        });
+        assert_eq!(
+            deltas,
+            vec![TurnDelta::Usage {
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                cache_read_tokens: None,
+            }]
+        );
+    }
+
+    #[test]
     fn error_result_marks_turn_failed() {
         let mut builder = TurnBuilder::new();
         builder.feed(&StreamEvent::Text("boom".into()));
-        let turn = builder
-            .feed(&StreamEvent::Result {
+        let turns = feed_all(
+            &mut builder,
+            &[StreamEvent::Result {
                 subtype: ResultSubtype::Error,
                 cost_usd: None,
                 duration_secs: None,
-            })
-            .expect("turn finalized");
-        assert_eq!(turn.status, Lifecycle::Failed);
+            }],
+        );
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].status, Lifecycle::Failed);
+    }
+
+    #[test]
+    fn result_without_open_turn_produces_nothing() {
+        let mut builder = TurnBuilder::new();
+        let deltas = builder.feed(&StreamEvent::Result {
+            subtype: ResultSubtype::Success,
+            cost_usd: None,
+            duration_secs: None,
+        });
+        assert!(deltas.is_empty());
     }
 
     #[test]
     fn each_turn_gets_a_fresh_id() {
         let mut builder = TurnBuilder::new();
-        builder.feed(&StreamEvent::Text("one".into()));
-        let first = builder
-            .feed(&StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: None,
-            })
-            .expect("first turn");
-        builder.feed(&StreamEvent::Text("two".into()));
-        let second = builder
-            .feed(&StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: None,
-            })
-            .expect("second turn");
-        assert_eq!(first.id, "turn-1");
-        assert_eq!(second.id, "turn-2");
+        let turns = feed_all(
+            &mut builder,
+            &[
+                StreamEvent::Text("one".into()),
+                StreamEvent::Result {
+                    subtype: ResultSubtype::Success,
+                    cost_usd: None,
+                    duration_secs: None,
+                },
+                StreamEvent::Text("two".into()),
+                StreamEvent::Result {
+                    subtype: ResultSubtype::Success,
+                    cost_usd: None,
+                    duration_secs: None,
+                },
+            ],
+        );
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].id, "turn-1");
+        assert_eq!(turns[1].id, "turn-2");
     }
 
     #[test]

@@ -11,14 +11,18 @@ blocks the other.
 ```
 
 - **Progress** (autonomous): the [`progress`] arm keeps a `codex exec --json`
-  subagent grinding. Every finalized turn is narrated into the thread and folded
-  into `wave/<name>/MEMORY.md`.
+  subagent grinding. Every turn increment is appended to the wave's journal;
+  each finalized turn commits to the thread.
 - **Chat** (over HTTP): a user message is answered **talk-only** from memory and
   current progress state. Chat observes; it does not steer progress.
 
-All state is in-process (`WaveRuntime`): the `thread` the user sees, a MEMORY
-handle, an inbox channel, and a supervisor tracking every live subagent run.
-No files are used as IPC.
+Truth is the per-wave append-only journal —
+`.lf/journal/waves/<name>/journal.jsonl`, per-machine, never committed. The
+in-process state (`WaveRuntime`) is a fold of it: the `thread` the user sees
+and the mind state are rebuilt from the journal on boot, so a restart keeps
+the full conversation and turn ids continue monotonically. `wave/<name>/
+MEMORY.md` is read-only here (seeds prompts and chat); the journal carries the
+raw history. The journal is server-owned persistence, not IPC.
 
 ## Wire contract (snake_case, stable)
 
@@ -30,7 +34,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}` |
+| `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
 | `GET /conversation/stream`| SSE; each event named `turn`, `data:` a `Turn` JSON. Replays the thread on connect, then streams live. |
 | `POST /messages {text}`   | Appends a user `Turn` and returns it. The reply lands as a later `assistant` turn. |
@@ -42,7 +46,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
   "id": "turn-3",
   "role": "user | assistant",
   "text": "…",
-  "status": "in_progress | completed | failed",
+  "status": "pending | running | completed | failed | interrupted",
   "items": [ ConversationItem, … ],
   "created_at": "2026-07-04T00:42:03.412861Z"
 }

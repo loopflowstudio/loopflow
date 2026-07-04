@@ -11,20 +11,24 @@
 //! ```
 //!
 //! - **subagent progress events** — the work. The [`progress`] arm keeps a
-//!   subagent grinding at all times; every finalized turn is narrated into the
-//!   thread and durable facts fold into MEMORY.
+//!   subagent grinding at all times; every turn increment is appended to the
+//!   wave's journal and each finalized turn commits to the thread.
 //! - **user messages** — chat over HTTP. Answered TALK-ONLY from memory and
 //!   current progress state; chat observes, it does not steer progress.
 //!
-//! All state is in-process (see [`runtime::WaveRuntime`]): the `thread` the user
-//! sees, a MEMORY handle, and an in-process inbox channel. There are no files as
-//! IPC. The only file the server writes for coordination is a dumb discovery
+//! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
+//! waves/<name>/`); the in-process state ([`runtime::WaveRuntime`]) — the
+//! `thread` the user sees, the mind [`state`] — is a fold of it, rebuilt on
+//! boot so a restart keeps the whole conversation. The journal is server-owned
+//! persistence, not IPC; the only coordination file is a dumb discovery
 //! pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
 
+pub mod journal;
 pub mod memory;
 pub mod progress;
 pub mod runtime;
 pub mod server;
+pub mod state;
 pub mod subagent;
 pub mod supervisor;
 
@@ -58,7 +62,7 @@ async fn serve(
     wave: String,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
-    let (runtime, inbox_rx) = WaveRuntime::new(wave.clone(), repo_root.clone());
+    let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
 
     // Reaction 2 (chat) and the autonomous progress arm run as independent
     // top-level tasks so neither blocks the other. Each progress *pass* is
@@ -117,6 +121,11 @@ mod tests {
         }
     }
 
+    /// Inject a finalized progress turn, as the progress arm's sink would.
+    fn narrate(runtime: &WaveRuntime, text: &str) {
+        runtime.append_finalized_turn(progress_turn(text), Vec::new());
+    }
+
     /// Boot just the HTTP surface + chat consumer over a runtime we control,
     /// without the real-codex progress arm. Returns the bound address and the
     /// runtime so the test can inject progress turns directly.
@@ -126,7 +135,8 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         std::fs::write(dir.join("MEMORY.md"), "Goal: ship the reactive server.\n").expect("mem");
 
-        let (runtime, inbox_rx) = WaveRuntime::new("ship".into(), tmp.path().to_path_buf());
+        let (runtime, inbox_rx) =
+            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         tokio::spawn(run_chat_consumer(runtime.clone(), inbox_rx));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -151,7 +161,7 @@ mod tests {
     #[tokio::test]
     async fn subagent_turn_appears_in_conversation() {
         let (base, runtime, _tmp) = boot().await;
-        runtime.narrate_progress(progress_turn("Implemented the reactive server."));
+        narrate(&runtime, "Implemented the reactive server.");
 
         let body = reqwest::get(format!("{base}/conversation"))
             .await
@@ -166,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn posted_message_appears_as_user_turn_and_gets_a_reply() {
         let (base, runtime, _tmp) = boot().await;
-        runtime.narrate_progress(progress_turn("wired the SSE stream"));
+        narrate(&runtime, "wired the SSE stream");
 
         let client = reqwest::Client::new();
         let posted: ChatTurn = client
@@ -193,14 +203,17 @@ mod tests {
     #[tokio::test]
     async fn health_reports_status_and_turn_count() {
         let (base, runtime, _tmp) = boot().await;
-        runtime.narrate_progress(progress_turn("first"));
+        narrate(&runtime, "first");
         let body = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
             .text()
             .await
             .unwrap();
-        assert!(body.contains("\"status\":\"ok\""));
+        assert!(
+            body.contains("\"status\":\"idle\""),
+            "health status is the mind state"
+        );
         assert!(body.contains("\"wave\":\"ship\""));
         assert!(body.contains("\"turns\":1"));
     }
@@ -208,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn sse_replays_on_connect_then_streams_live() {
         let (base, runtime, _tmp) = boot().await;
-        runtime.narrate_progress(progress_turn("replayed turn"));
+        narrate(&runtime, "replayed turn");
 
         let host = base.strip_prefix("http://").unwrap().to_string();
         let mut stream = tokio::net::TcpStream::connect(&host).await.unwrap();
@@ -220,7 +233,7 @@ mod tests {
             .unwrap();
 
         // Read until we've seen the replayed turn, then a live one.
-        runtime.narrate_progress(progress_turn("live turn"));
+        narrate(&runtime, "live turn");
         let mut acc = String::new();
         let mut buf = [0u8; 2048];
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);

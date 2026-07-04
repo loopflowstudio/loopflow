@@ -1,13 +1,15 @@
 //! A single subagent run: a child process that streams stream-json, folded
-//! into [`ChatTurn`]s in-process.
+//! into turn increments in-process.
 //!
 //! This is the unit of work the wave server spawns. A run owns one child
 //! process (`codex exec --json`, or any command that emits the same
 //! stream-json on stdout), parses each line with [`StreamParser`] into
-//! [`StreamEvent`]s, and folds them into [`ChatTurn`]s via [`TurnBuilder`].
-//! Every finalized turn is handed to a callback so the caller can narrate it.
+//! [`StreamEvent`]s, and folds them via [`TurnBuilder`]. Every increment — a
+//! turn opening, a prose fragment, an item, usage, a finalized turn — is
+//! handed to the callback as a [`TurnDelta`], so the caller can journal the
+//! pass as it happens, not only at turn boundaries.
 //!
-//! Nothing here touches files. The turns flow back through an in-process
+//! Nothing here touches files. The deltas flow back through an in-process
 //! callback; the caller (the progress arm, or a reactive spawn) decides what to
 //! do with them.
 
@@ -18,7 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 
 use crate::engine::stream::{ParseResult, StreamParser};
-use crate::lfd::conversations::turns::{ChatTurn, TurnBuilder};
+use crate::lfd::conversations::turns::{TurnBuilder, TurnDelta};
 use crate::lfd::conversations::types::Lifecycle;
 
 /// Drain a child's stderr to the debug log so a failing subagent leaves a
@@ -71,20 +73,21 @@ impl SubagentSpec {
     }
 }
 
-/// Run one subagent to completion, invoking `on_turn` for every finalized
-/// [`ChatTurn`]. Returns when the child exits (or its stdout closes).
+/// Run one subagent to completion, invoking `on_delta` for every turn
+/// increment ([`TurnDelta`]). Returns when the child exits (or its stdout
+/// closes).
 ///
 /// The child's stdout is read line by line; each line is fed to the parser and
-/// any resulting events folded into turns. If the process ends mid-turn, the
-/// open turn is finalized (marked failed) so a partial pass still narrates.
+/// any resulting events folded into turn deltas. If the process ends mid-turn,
+/// the open turn is finalized (marked failed) so a partial pass still narrates.
 ///
 /// # Errors
 /// Returns an error only if the process can't be spawned or its stdout can't be
 /// captured — a normal non-zero exit is not an error here (the failed turn
 /// already carries that signal).
-pub async fn run_subagent<F>(spec: &SubagentSpec, mut on_turn: F) -> Result<()>
+pub async fn run_subagent<F>(spec: &SubagentSpec, mut on_delta: F) -> Result<()>
 where
-    F: FnMut(ChatTurn),
+    F: FnMut(TurnDelta),
 {
     let mut child = Command::new(&spec.program)
         .args(&spec.args)
@@ -115,8 +118,8 @@ where
         }
         if let ParseResult::Events(events) = parser.feed_line(&line) {
             for event in &events {
-                if let Some(turn) = builder.feed(event) {
-                    on_turn(turn);
+                for delta in builder.feed(event) {
+                    on_delta(delta);
                 }
             }
         }
@@ -124,7 +127,10 @@ where
 
     // The stream ended unexpectedly (no terminating Result): the turn crashed.
     if let Some(turn) = builder.finish_open(Lifecycle::Failed) {
-        on_turn(turn);
+        on_delta(TurnDelta::Finished {
+            turn,
+            cost_usd: None,
+        });
     }
 
     let _ = child.wait().await;
@@ -149,6 +155,20 @@ mod tests {
         }
     }
 
+    async fn collect_finished(
+        spec: &SubagentSpec,
+    ) -> Vec<crate::lfd::conversations::turns::ChatTurn> {
+        let mut turns = Vec::new();
+        run_subagent(spec, |delta| {
+            if let TurnDelta::Finished { turn, .. } = delta {
+                turns.push(turn);
+            }
+        })
+        .await
+        .expect("run subagent");
+        turns
+    }
+
     #[tokio::test]
     async fn folds_codex_stream_into_a_completed_turn() {
         let spec = replay_spec(&[
@@ -157,10 +177,7 @@ mod tests {
             r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#,
         ]);
 
-        let mut turns = Vec::new();
-        run_subagent(&spec, |turn| turns.push(turn))
-            .await
-            .expect("run subagent");
+        let turns = collect_finished(&spec).await;
 
         assert_eq!(turns.len(), 1);
         let turn = &turns[0];
@@ -176,10 +193,7 @@ mod tests {
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"half a thought"}}"#,
         ]);
 
-        let mut turns = Vec::new();
-        run_subagent(&spec, |turn| turns.push(turn))
-            .await
-            .expect("run subagent");
+        let turns = collect_finished(&spec).await;
 
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].status, Lifecycle::Failed);

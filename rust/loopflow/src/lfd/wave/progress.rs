@@ -2,9 +2,10 @@
 //!
 //! Progress is independent of chat. This driver keeps a progress subagent alive
 //! at all times: it builds a prompt from the wave's `GOAL.md` and current
-//! memory, runs one supervised subagent pass (`codex exec --json`), narrates
-//! every finalized turn into the thread, then immediately starts the next pass.
-//! Each pass is a tracked run in the [`Supervisor`], so passes — and any
+//! memory, runs one supervised subagent pass (`codex exec --json`), and folds
+//! every turn increment through a [`TurnSink`] — journaled as it happens,
+//! committed to the thread at finalization — then immediately starts the next
+//! pass. Each pass is a tracked run in the [`Supervisor`], so passes — and any
 //! children a pass spawns — form a supervised set with independent lifetimes,
 //! not a single flat bounded loop.
 
@@ -16,7 +17,7 @@ use tokio::sync::oneshot;
 
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::lfd::wave::memory::Memory;
-use crate::lfd::wave::runtime::WaveRuntime;
+use crate::lfd::wave::runtime::{TurnSink, WaveRuntime};
 use crate::lfd::wave::subagent::{run_subagent, SubagentSpec};
 
 /// Breather after a pass finishes so a fast-failing codex (missing binary,
@@ -35,13 +36,11 @@ pub async fn run_progress_arm(runtime: Arc<WaveRuntime>) {
 
         let rt = runtime.clone();
         let (done_tx, done_rx) = oneshot::channel();
-        // The pass is its own tracked run. It narrates each turn as it lands.
+        // The pass is its own tracked run. Its sink journals every increment
+        // and commits each turn to the thread as it finalizes.
         runtime.supervisor().spawn(async move {
-            if let Err(err) = run_subagent(&spec, |turn| {
-                rt.narrate_progress(turn);
-            })
-            .await
-            {
+            let mut sink = TurnSink::new(rt);
+            if let Err(err) = run_subagent(&spec, |delta| sink.on_delta(delta)).await {
                 tracing::warn!(error = %err, "progress pass failed to run");
             }
             let _ = done_tx.send(());

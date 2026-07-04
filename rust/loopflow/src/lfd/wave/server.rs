@@ -7,7 +7,8 @@
 //! nothing else.
 //!
 //! Wire contract (snake_case, stable — a Concerto worker builds against it):
-//! - `GET /health` → `{status, wave, turns, subagents, uptime_seconds}`
+//! - `GET /health` → `{status, wave, turns, subagents, uptime_seconds}`;
+//!   `status` is the mind state (`idle | turning | interrupting | failed`).
 //! - `GET /conversation` → `{turns: [Turn]}`
 //! - `GET /conversation/stream` → SSE; each event named `turn`, data a `Turn`
 //!   JSON; replays the thread on connect, then streams live.
@@ -77,7 +78,7 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     Json(HealthBody {
-        status: "ok".to_string(),
+        status: state.runtime.mind_state().name().to_string(),
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_snapshot().len(),
         subagents: state.runtime.supervisor().reap(),
@@ -100,24 +101,19 @@ async fn messages_handler(
 
 /// SSE: replay the thread on connect, then stream live turns. Subscribe before
 /// snapshotting to avoid a gap; dedupe live turns already in the snapshot by
-/// their monotonic sequence.
+/// id (turn ids are minted at `TurnStarted` but committed at `TurnFinished`,
+/// so commit order is not id order — a max-seq watermark would drop turns).
 async fn conversation_stream_handler(
     State(state): State<ServerState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = state.runtime.subscribe();
     let snapshot = state.runtime.thread_snapshot();
-    let max_seq = snapshot.iter().filter_map(|t| turn_seq(&t.id)).max();
+    let seen: std::collections::HashSet<String> = snapshot.iter().map(|t| t.id.clone()).collect();
 
     let replay = stream::iter(snapshot.into_iter().map(|t| Ok(turn_event(&t))));
     let live = BroadcastStream::new(rx).filter_map(move |res| {
         let out = match res {
-            Ok(turn) => {
-                let fresh = match (turn_seq(&turn.id), max_seq) {
-                    (Some(seq), Some(max)) => seq > max,
-                    _ => true,
-                };
-                fresh.then(|| Ok(turn_event(&turn)))
-            }
+            Ok(turn) => (!seen.contains(&turn.id)).then(|| Ok(turn_event(&turn))),
             // Lagged: the client fell behind. Skip; it resyncs from /conversation.
             Err(_) => None,
         };
@@ -131,11 +127,6 @@ fn turn_event(turn: &ChatTurn) -> Event {
     Event::default()
         .event("turn")
         .data(serde_json::to_string(turn).unwrap_or_default())
-}
-
-/// Parse the sequence out of a `"turn-<n>"` id.
-fn turn_seq(id: &str) -> Option<u64> {
-    id.strip_prefix("turn-").and_then(|n| n.parse().ok())
 }
 
 /// Path to the discovery pointer for a wave.
@@ -165,13 +156,6 @@ pub fn remove_endpoint(repo_root: &Path, wave: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn turn_seq_parses_turn_ids() {
-        assert_eq!(turn_seq("turn-7"), Some(7));
-        assert_eq!(turn_seq("turn-"), None);
-        assert_eq!(turn_seq("user-3"), None);
-    }
 
     #[test]
     fn write_and_remove_endpoint_roundtrips() {

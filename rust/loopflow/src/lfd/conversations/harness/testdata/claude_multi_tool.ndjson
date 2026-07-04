@@ -1,0 +1,5 @@
+{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_multi_1","name":"Bash"}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_multi_1","content":[{"type":"text","text":"command done"}]}]}}
+{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_multi_2","name":"Write"}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_multi_2","content":[{"type":"text","text":"file written"}]}]}}
+{"type":"result","is_error":false,"result":"done"}

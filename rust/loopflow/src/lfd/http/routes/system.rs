@@ -21,6 +21,7 @@ pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusRespon
     let counts = counts(&state).await;
     Json(StatusResponse {
         pid: std::process::id(),
+        role: "gatekeeper: reads, push, webhook ingress; mutations exec lf".to_string(),
         waves_defined: counts.waves_defined,
         waves_running: counts.waves_running,
         agents_active: counts.agents_active,

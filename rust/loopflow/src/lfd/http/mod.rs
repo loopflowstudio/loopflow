@@ -178,13 +178,13 @@ pub fn router(state: HttpState) -> Router {
             auth::auth_middleware,
         ));
 
+    // POST /hooks/git is gone: its only consumer was the activation queue.
     let hook_routes = Router::new()
-        .route("/hooks/git", post(hooks::git_hook_handler))
         .route("/v0/hooks/github", post(hooks::github_webhook_handler))
         .layer(DefaultBodyLimit::max(max_hook_body_bytes));
 
     Router::new()
-        // Unauthenticated: health probes, metrics, git hooks.
+        // Unauthenticated: health probes, metrics, GitHub webhooks.
         .route("/health", get(system::health_handler))
         .route("/metrics", get(system::metrics_handler))
         .nest("/v0", api_routes)

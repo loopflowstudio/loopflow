@@ -1,3 +1,23 @@
+//! GitHub webhook ingress — the gatekeeper's ears, speaking inward as `lf`.
+//!
+//! Webhooks no longer feed the trigger/activation machinery. Each surviving
+//! event execs the `lf` surface (collapse call #1):
+//!
+//! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
+//!   wave's mind decides whether and how to dispatch a fix.
+//! - **PR merged** → `lf op queue reconcile --wave <wave>` — the queue verb
+//!   owns stack-status inference and promotion.
+//! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
+//!   wave in the repo — the mind decides to rebase/integrate with judgment.
+//!
+//! Execs are spawned detached; a wave whose server is down bounces the chat
+//! with exit ≠ 0 — logged at debug, which is correct pubsub semantics, not an
+//! error. No wave resolved → log-and-drop.
+//!
+//! The CI *polling* path below (`poll_all_waves_ci`) still emits
+//! `Event::CiFailure` into the hub for the in-process trigger organ; it dies
+//! with the organs in cut 4. The webhook ingress is off it as of this file.
+
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -6,10 +26,10 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use bytes::Bytes;
-use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::resolve_lf_binary;
 use crate::lfd::github::{
     github_repo_from_local, poll_check_runs, verify_webhook_signature, CheckRun,
     GitHubCheckRunEvent, GitHubPullRequestEvent, GitHubPushEvent,
@@ -17,22 +37,8 @@ use crate::lfd::github::{
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::security::canonicalize_existing_path;
-use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{Event, Run, Signal, Trigger, Wave, WaveStatus, CI_FIX_FLOW};
+use crate::lfd::types::{Event, Run, Wave, CI_FIX_FLOW};
 use crate::lfdb::SharedStore;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
-
-#[derive(Deserialize)]
-pub struct GitHookRequest {
-    #[allow(dead_code)]
-    hook: String,
-    repo: String,
-    branch: Option<String>,
-    from_sha: Option<String>,
-    to_sha: Option<String>,
-}
 
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
@@ -43,201 +49,174 @@ struct WaveCiTarget {
     pr_number: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum WatchRepoTarget<'a> {
-    LocalPath(&'a str),
-    GitHubRepo(&'a str),
+// -- Outward speech --------------------------------------------------------
+
+/// One `lf` invocation the gatekeeper will spawn — argv after the binary.
+/// Planners return these so tests assert on the exact command line without
+/// spawning anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LfExec {
+    pub args: Vec<String>,
 }
 
-impl WatchRepoTarget<'_> {
-    fn label(self) -> &'static str {
-        match self {
-            Self::LocalPath(_) => "git hook",
-            Self::GitHubRepo(_) => "github push",
+impl LfExec {
+    fn chat(wave: &str, text: String) -> Self {
+        Self {
+            args: vec![
+                "chat".to_string(),
+                "--wave".to_string(),
+                wave.to_string(),
+                text,
+            ],
+        }
+    }
+
+    fn queue_reconcile(wave: &str) -> Self {
+        Self {
+            args: vec![
+                "op".to_string(),
+                "queue".to_string(),
+                "reconcile".to_string(),
+                "--wave".to_string(),
+                wave.to_string(),
+            ],
         }
     }
 }
 
-pub async fn git_hook_handler(
-    State(state): State<HttpState>,
-    Json(payload): Json<GitHookRequest>,
-) -> ApiResult<serde_json::Value> {
-    let repo = canonical_git_hook_repo(&payload.repo)?;
-    let matched = enqueue_watch_for_local_repo(
-        &state.store,
-        &state.event_hub,
-        &repo,
-        payload.branch.as_deref(),
-        payload.from_sha.as_deref(),
-        payload.to_sha.as_deref(),
-    )
-    .await;
-    state
-        .event_hub
-        .send(Event::worktree_updated(repo.clone(), repo, payload.branch));
-
-    Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
-}
-
-fn canonical_git_hook_repo(
-    repo: &str,
-) -> Result<String, (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>)> {
-    let path = Path::new(repo.trim());
-    if !path.is_absolute() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "repo must be an absolute path",
-        ));
-    }
-
-    let canonical = canonicalize_existing_path(path).map_err(|err| {
-        api_error(
-            StatusCode::BAD_REQUEST,
-            ApiMessage::Untrusted(err.to_string()),
-        )
-    })?;
-    if !canonical.is_dir() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "repo must be an existing directory",
-        ));
-    }
-
-    Ok(canonical.to_string_lossy().to_string())
-}
-
-async fn enqueue_watch_for_local_repo(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    repo_path: &str,
-    branch: Option<&str>,
-    from_sha: Option<&str>,
-    to_sha: Option<&str>,
-) -> u32 {
-    enqueue_watch_for_repo(
-        store,
-        event_hub,
-        WatchRepoTarget::LocalPath(repo_path),
-        branch,
-        from_sha,
-        to_sha,
-    )
-    .await
-}
-
-async fn enqueue_watch_for_github_repo(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    repo_full_name: &str,
-    git_ref: Option<&str>,
-    from_sha: Option<&str>,
-    to_sha: Option<&str>,
-) -> u32 {
-    enqueue_watch_for_repo(
-        store,
-        event_hub,
-        WatchRepoTarget::GitHubRepo(repo_full_name),
-        git_ref,
-        from_sha,
-        to_sha,
-    )
-    .await
-}
-
-async fn enqueue_watch_for_repo(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    repo_target: WatchRepoTarget<'_>,
-    git_ref: Option<&str>,
-    from_sha: Option<&str>,
-    to_sha: Option<&str>,
-) -> u32 {
-    if !is_main_ref(git_ref) {
-        return 0;
-    }
-
-    let triggers = match store.list_triggers_by_signal(Signal::Repo.as_i32()).await {
-        Ok(triggers) => triggers,
-        Err(err) => {
-            tracing::warn!(
-                error = %err,
-                source = repo_target.label(),
-                "failed to list repo triggers"
-            );
-            return 0;
-        }
-    };
-
-    let reason = build_push_reason(git_ref, from_sha, to_sha);
-    let from_sha = from_sha.unwrap_or("");
-    let to_sha = to_sha.unwrap_or("");
-
-    let mut matched = 0_u32;
-    for mut trigger in triggers {
-        if !trigger.enabled {
-            continue;
-        }
-
-        let wave = match store.get_wave(&trigger.wave_id).await {
-            Ok(Some(wave)) => wave,
-            Ok(None) => continue,
-            Err(err) => {
-                tracing::warn!(
-                    trigger_id = %trigger.id,
-                    source = repo_target.label(),
+/// Spawn each exec detached — the webhook response never waits on `lf`.
+/// A non-zero exit is a bounced message (wave server down), logged at debug.
+fn spawn_lf_execs(execs: Vec<LfExec>) {
+    let lf = resolve_lf_binary();
+    for exec in execs {
+        let lf = lf.clone();
+        tokio::spawn(async move {
+            let result = tokio::process::Command::new(&lf)
+                .args(&exec.args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            match result {
+                Ok(status) if status.success() => {}
+                Ok(status) => tracing::debug!(
+                    args = ?exec.args,
+                    code = ?status.code(),
+                    "lf exec bounced (no live subscriber)"
+                ),
+                Err(err) => tracing::debug!(
+                    args = ?exec.args,
                     error = %err,
-                    "failed loading wave for repo trigger"
-                );
-                continue;
+                    "lf exec failed to spawn"
+                ),
             }
-        };
-        if wave.status() == WaveStatus::Paused || !wave_matches_watch_repo(&wave, repo_target) {
-            continue;
-        }
+        });
+    }
+}
 
-        update_watch_main_sha(store, &mut trigger, to_sha).await;
+/// Push-to-main → `lf chat` for every wave living in the pushed repo.
+/// Non-main refs plan nothing.
+async fn plan_push_speech(
+    store: &SharedStore,
+    repo_full_name: &str,
+    git_ref: &str,
+    before: &str,
+    after: &str,
+) -> Result<Vec<LfExec>, String> {
+    if !is_main_ref(Some(git_ref)) {
+        return Ok(Vec::new());
+    }
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| err.to_string())?;
+    let text = main_moved_text(before, after);
+    Ok(waves
+        .iter()
+        .filter(|wave| wave_in_github_repo(wave, repo_full_name))
+        .map(|wave| LfExec::chat(wave.name(), text.clone()))
+        .collect())
+}
 
-        let outcome = enqueue_pending_activation(
+fn main_moved_text(before: &str, after: &str) -> String {
+    match (before.is_empty(), after.is_empty()) {
+        (false, false) => format!("main moved: {before}..{after}"),
+        (true, false) => format!("main moved: {after}"),
+        _ => "main moved".to_string(),
+    }
+}
+
+/// Failed check_run → `lf chat` to each wave owning an open PR the check ran
+/// against. Deduped per wave+commit through the shared CI-failure cache so a
+/// red matrix speaks once. No wave resolved → empty (the caller drops).
+async fn plan_check_run_speech(
+    store: &SharedStore,
+    cache: &Arc<Mutex<HashSet<String>>>,
+    event: &GitHubCheckRunEvent,
+) -> Result<Vec<LfExec>, String> {
+    let mut execs = Vec::new();
+    for pr in &event.check_run.pull_requests {
+        let targets = find_wave_ci_targets(
             store,
-            event_hub,
-            ActivationEnvelope::new(
-                &trigger.wave_id,
-                Some(&trigger.id),
-                reason.clone(),
-                from_sha,
-                to_sha,
-                "main",
-            ),
+            &event.repository.full_name,
+            &pr.head.branch,
+            Some(pr.number),
         )
-        .await;
-        if outcome.is_some() {
-            matched += 1;
+        .await?;
+        for target in targets {
+            let key = format!("{}:{}", target.wave_id, event.check_run.head_sha);
+            {
+                let mut cache = cache.lock().await;
+                if !cache.insert(key) {
+                    continue;
+                }
+            }
+            let Some(wave) = store
+                .get_wave(&target.wave_id)
+                .await
+                .map_err(|err| err.to_string())?
+            else {
+                continue;
+            };
+            execs.push(LfExec::chat(
+                wave.name(),
+                format!(
+                    "CI failed: {} on PR #{} — {}",
+                    event.check_run.name, target.pr_number, event.check_run.html_url
+                ),
+            ));
         }
     }
-
-    matched
+    Ok(execs)
 }
 
-fn wave_matches_watch_repo(wave: &Wave, repo_target: WatchRepoTarget<'_>) -> bool {
-    match repo_target {
-        WatchRepoTarget::LocalPath(repo_path) => canonicalize_existing_path(Path::new(wave.repo()))
-            .ok()
-            .is_some_and(|path| path.to_string_lossy() == repo_path),
-        WatchRepoTarget::GitHubRepo(repo_full_name) => {
-            github_repo_from_local(Path::new(wave.repo()))
-                .as_deref()
-                .is_some_and(|wave_repo_full_name| wave_repo_full_name == repo_full_name)
-        }
+/// PR merged → `lf op queue reconcile` for each wave holding that PR in its
+/// stack. Replaces the in-process `handle_pr_merged_with_events` call.
+async fn plan_pr_merged_reconciles(
+    store: &SharedStore,
+    repo_full_name: &str,
+    pr_number: u32,
+) -> Result<Vec<LfExec>, String> {
+    let wave_ids = find_waves_for_pr(store, repo_full_name, pr_number).await?;
+    let mut execs = Vec::new();
+    for wave_id in wave_ids {
+        let Some(wave) = store
+            .get_wave(&wave_id)
+            .await
+            .map_err(|err| err.to_string())?
+        else {
+            continue;
+        };
+        execs.push(LfExec::queue_reconcile(wave.name()));
     }
+    Ok(execs)
 }
 
-async fn update_watch_main_sha(store: &SharedStore, trigger: &mut Trigger, to_sha: &str) {
-    if to_sha.is_empty() {
-        return;
-    }
-
-    trigger.last_main_sha = Some(to_sha.to_string());
-    let _ = store.update_trigger(trigger).await;
+fn wave_in_github_repo(wave: &Wave, repo_full_name: &str) -> bool {
+    github_repo_from_local(Path::new(wave.repo()))
+        .as_deref()
+        .is_some_and(|wave_repo| wave_repo == repo_full_name)
 }
 
 fn is_main_ref(value: Option<&str>) -> bool {
@@ -246,15 +225,7 @@ fn is_main_ref(value: Option<&str>) -> bool {
     })
 }
 
-fn build_push_reason(branch: Option<&str>, from_sha: Option<&str>, to_sha: Option<&str>) -> String {
-    let branch = branch.unwrap_or("main");
-    let from_sha = from_sha.unwrap_or("");
-    let to_sha = to_sha.unwrap_or("");
-    if from_sha.is_empty() || to_sha.is_empty() {
-        return format!("{branch} updated");
-    }
-    format!("{branch} advanced {from_sha}..{to_sha}")
-}
+// -- The webhook handler ---------------------------------------------------
 
 pub async fn github_webhook_handler(
     State(state): State<HttpState>,
@@ -295,16 +266,29 @@ pub async fn github_webhook_handler(
                 )
             })?;
 
-            let matched = enqueue_watch_for_github_repo(
+            let execs = plan_push_speech(
                 &state.store,
-                &state.event_hub,
                 &event.repository.full_name,
-                Some(&event.git_ref),
-                Some(&event.before),
-                Some(&event.after),
+                &event.git_ref,
+                &event.before,
+                &event.after,
             )
-            .await;
-
+            .await
+            .map_err(|err| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiMessage::Untrusted(err),
+                )
+            })?;
+            let matched = execs.len() as u32;
+            if matched == 0 {
+                tracing::debug!(
+                    repo = %event.repository.full_name,
+                    git_ref = %event.git_ref,
+                    "push webhook matched no waves; dropped"
+                );
+            }
+            spawn_lf_execs(execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "check_run" => {
@@ -326,14 +310,7 @@ pub async fn github_webhook_handler(
                 ));
             }
 
-            let mut matched = 0_u32;
-            for pr in &event.check_run.pull_requests {
-                let targets = find_wave_ci_targets(
-                    &state.store,
-                    &event.repository.full_name,
-                    &pr.head.branch,
-                    Some(pr.number),
-                )
+            let execs = plan_check_run_speech(&state.store, &state.ci_failure_cache, &event)
                 .await
                 .map_err(|err| {
                     api_error(
@@ -341,30 +318,23 @@ pub async fn github_webhook_handler(
                         ApiMessage::Untrusted(err),
                     )
                 })?;
-
-                for target in targets {
-                    let emitted = emit_ci_failure(
-                        &state.event_hub,
-                        &state.ci_failure_cache,
-                        build_ci_failure_event(&target, &event.check_run),
-                    )
-                    .await;
-                    if emitted {
-                        matched += 1;
-                        tracing::info!(
-                            wave_id = %target.wave_id,
-                            run_id = %target.run_id,
-                            repo = %event.repository.full_name,
-                            branch = %target.branch,
-                            commit_sha = %event.check_run.head_sha,
-                            check_id = event.check_run.id,
-                            check_name = %event.check_run.name,
-                            "matched GitHub CI failure to wave"
-                        );
-                    }
-                }
+            let matched = execs.len() as u32;
+            if matched == 0 {
+                tracing::debug!(
+                    repo = %event.repository.full_name,
+                    check_name = %event.check_run.name,
+                    "CI failure webhook resolved no wave; dropped"
+                );
+            } else {
+                tracing::info!(
+                    repo = %event.repository.full_name,
+                    commit_sha = %event.check_run.head_sha,
+                    check_name = %event.check_run.name,
+                    matched,
+                    "CI failure spoken to waves via lf chat"
+                );
             }
-
+            spawn_lf_execs(execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "pull_request" => {
@@ -379,13 +349,7 @@ pub async fn github_webhook_handler(
                     serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
                 ));
             }
-            let merged_at = event
-                .pull_request
-                .merged_at
-                .as_deref()
-                .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
-                .unwrap_or_else(OffsetDateTime::now_utc);
-            let wave_ids = find_waves_for_pr(
+            let execs = plan_pr_merged_reconciles(
                 &state.store,
                 &event.repository.full_name,
                 event.pull_request.number,
@@ -397,27 +361,8 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            let mut processed = 0_u32;
-            for wave_id in wave_ids {
-                let handled = crate::lfd::queue::handle_pr_merged_with_events(
-                    &state.store,
-                    &state.github,
-                    &wave_id,
-                    event.pull_request.number,
-                    merged_at,
-                    Some(&state.event_hub),
-                )
-                .await
-                .map_err(|err| {
-                    api_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        ApiMessage::Untrusted(err),
-                    )
-                })?;
-                if handled {
-                    processed += 1;
-                }
-            }
+            let processed = execs.len() as u32;
+            spawn_lf_execs(execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -428,6 +373,8 @@ pub async fn github_webhook_handler(
     }
 }
 
+// -- CI polling (organ path; dies in cut 4) --------------------------------
+
 pub async fn poll_all_waves_ci(
     store: &SharedStore,
     event_hub: &EventHub,
@@ -435,17 +382,6 @@ pub async fn poll_all_waves_ci(
     cache: &Arc<Mutex<HashSet<String>>>,
 ) -> Result<u32, String> {
     let targets = list_wave_ci_targets(store, None).await?;
-    emit_ci_failures_for_targets(event_hub, cache, token, targets).await
-}
-
-pub async fn poll_wave_ci(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    cache: &Arc<Mutex<HashSet<String>>>,
-    wave_id: &LfdId,
-    token: &str,
-) -> Result<u32, String> {
-    let targets = list_wave_ci_targets(store, Some(wave_id.clone())).await?;
     emit_ci_failures_for_targets(event_hub, cache, token, targets).await
 }
 
@@ -518,10 +454,7 @@ async fn find_waves_for_pr(
         .map_err(|err| err.to_string())?;
     let mut matches = Vec::new();
     for wave in waves {
-        let Some(repo_name) = github_repo_from_local(Path::new(wave.repo())) else {
-            continue;
-        };
-        if repo_name != repo_full_name {
+        if !wave_in_github_repo(&wave, repo_full_name) {
             continue;
         }
         let has_pr = store
@@ -649,150 +582,59 @@ async fn emit_ci_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
-    use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
-    use crate::lfd::events::EventHub;
-    use crate::lfd::executor::WaveExecutor;
-    use crate::lfd::http::state::HttpState;
-    use crate::lfd::output::OutputHub;
-    use crate::lfd::scheduler::Scheduler;
+    use crate::lfd::github::{CheckRunPR, CheckRunRef, GitHubRepository};
     use crate::lfd::types::{
-        PullRequest, RepoWork, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus,
+        PullRequest, RepoWork, RunStackStatus, RunStatus, WaveMode, WaveStatus,
     };
-    use crate::lfdb::{open_store, SharedStore, StorageConfig};
-    use crate::provider_auth::ProviderAuthService;
+    use crate::lfdb::{open_store, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
     use tokio::sync::Mutex;
 
-    async fn test_http_state() -> HttpState {
-        let tmp = tempdir().expect("tempdir");
-        let db_path = tmp.path().join("lfd.db");
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path))
+    async fn temp_store(dir: &std::path::Path) -> SharedStore {
+        Arc::new(
+            open_store(&StorageConfig::sqlite(dir.join("lfd.db")))
                 .await
                 .expect("open sqlite store"),
-        );
-        let scheduler = Arc::new(Scheduler::new(1));
-        let output_hub = OutputHub::new(128, tmp.path().join("output"));
-        let event_hub = EventHub::new(128);
-        let executor = Arc::new(
-            WaveExecutor::new(
-                store.clone(),
-                scheduler.clone(),
-                output_hub.clone(),
-                event_hub.clone(),
-                ExecutorConfig::default(),
-                GitHubConfig::default(),
-            )
-            .expect("build executor"),
-        );
-        HttpState {
-            store: store.clone(),
-            scheduler,
-            executor,
-            event_hub,
-            output_hub,
-            provider_auth: ProviderAuthService::new(store.clone()),
-            auth: AuthProvider::Bearer {
-                session_token: secrecy::SecretString::from("test-token".to_string()),
-            },
-            started_at: OffsetDateTime::now_utc(),
-            github: GitHubConfig::default(),
-            http_security: HttpSecurityConfig::default(),
-            auth_failure_throttle: AuthFailureThrottle::new(),
-            ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        }
-    }
-
-    #[tokio::test]
-    async fn git_hook_handler_rejects_relative_repo_paths() {
-        let state = test_http_state().await;
-        let result = git_hook_handler(
-            State(state),
-            Json(GitHookRequest {
-                hook: "post-commit".to_string(),
-                repo: "../repo".to_string(),
-                branch: None,
-                from_sha: None,
-                to_sha: None,
-            }),
         )
-        .await;
-        assert!(matches!(result, Err((StatusCode::BAD_REQUEST, _))));
     }
 
-    #[tokio::test]
-    async fn git_hook_handler_canonicalizes_repo_path() {
-        let state = test_http_state().await;
-        let repo_dir = tempdir().expect("repo tempdir");
-        let mut rx = state.event_hub.subscribe();
-        let alias_path = repo_dir.path().join("..").join(
-            repo_dir
-                .path()
-                .file_name()
-                .expect("tempdir should have file name"),
-        );
-        let result = git_hook_handler(
-            State(state),
-            Json(GitHookRequest {
-                hook: "post-commit".to_string(),
-                repo: alias_path.to_string_lossy().to_string(),
-                branch: Some("main".to_string()),
-                from_sha: None,
-                to_sha: None,
-            }),
-        )
-        .await;
-        assert!(result.is_ok());
-
-        let event = rx.try_recv().expect("event emitted");
-        match event {
-            Event::WorktreeUpdated { repo, .. } => {
-                assert_eq!(
-                    repo,
-                    repo_dir
-                        .path()
-                        .canonicalize()
-                        .expect("canonical repo path")
-                        .to_string_lossy()
-                );
-            }
-            _ => panic!("expected worktree updated event"),
-        }
-    }
-
-    #[tokio::test]
-    async fn github_push_enqueues_watch_activation() {
-        let state = test_http_state().await;
-        let repo_dir = tempdir().expect("repo tempdir");
+    /// A local git repo with `origin` pointing at the given GitHub repo, so
+    /// `github_repo_from_local` resolves.
+    fn github_backed_repo(dir: &std::path::Path, full_name: &str) -> std::path::PathBuf {
+        let repo = dir.join(full_name.replace('/', "-"));
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        let repo_str = repo.to_string_lossy().to_string();
         std::process::Command::new("git")
-            .args(["-C", repo_dir.path().to_string_lossy().as_ref(), "init"])
+            .args(["-C", &repo_str, "init"])
             .status()
-            .expect("git init should run");
+            .expect("git init");
         std::process::Command::new("git")
             .args([
                 "-C",
-                repo_dir.path().to_string_lossy().as_ref(),
+                &repo_str,
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:loopflowstudio/loopflow.git",
+                &format!("git@github.com:{full_name}.git"),
             ])
             .status()
-            .expect("git remote add should run");
+            .expect("git remote add");
+        repo
+    }
 
-        let wave = Wave {
+    fn make_wave(name: &str, repo: &std::path::Path) -> Wave {
+        Wave {
             id: LfdId::new(),
-            name: "watch-wave".to_string(),
+            name: name.to_string(),
             mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             crons: Vec::new(),
             repos: vec![RepoWork {
-                repo: repo_dir.path().to_string_lossy().to_string(),
+                repo: repo.to_string_lossy().to_string(),
                 worktree: String::new(),
                 branch: String::new(),
                 status: WaveStatus::Idle,
@@ -800,50 +642,215 @@ mod tests {
                 cycle_start_iteration: 0,
                 position: 0,
             }],
-            direction: vec![],
-            area: vec![],
+            direction: Vec::new(),
+            area: Vec::new(),
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
             workers: 1,
             parent_wave_id: None,
-        };
-        state.store.create_wave(&wave).await.expect("create wave");
-        let trigger = Trigger {
+        }
+    }
+
+    fn run_with_open_pr(wave: &Wave, flow: &str, branch: &str, pr_number: u32) -> Run {
+        Run {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
-            source_wave_id: None,
-            signal: Signal::Repo,
-            flow: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-            max_iterations: None,
-        };
-        state
-            .store
-            .create_trigger(&trigger)
-            .await
-            .expect("create repo trigger");
+            wave_id: wave.id().clone(),
+            repo: wave.repo().to_string(),
+            flow: flow.to_string(),
+            task: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            iteration: 0,
+            step_index: 0,
+            status: RunStatus::Running,
+            worktree: "/tmp/worktree".to_string(),
+            branch: branch.to_string(),
+            started_at: None,
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            execution_cursor: None,
+            activation_log_id: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave.id().to_string(),
+            stack_status: RunStackStatus::Active,
+            lineage_inferred: false,
+            target_branch: "main".to_string(),
+            repair_of: None,
+            pr: Some(PullRequest {
+                url: format!("https://example.test/pr/{pr_number}"),
+                number: Some(pr_number),
+                state: Some("open".to_string()),
+                title: Some("test".to_string()),
+                branch: Some(branch.to_string()),
+            }),
+        }
+    }
 
-        let matched = enqueue_watch_for_github_repo(
-            &state.store,
-            &state.event_hub,
+    fn check_run_event(full_name: &str, branch: &str, pr_number: u32) -> GitHubCheckRunEvent {
+        GitHubCheckRunEvent {
+            action: "completed".to_string(),
+            check_run: CheckRun {
+                id: 9,
+                name: "test-check".to_string(),
+                head_sha: "abc123".to_string(),
+                status: "completed".to_string(),
+                conclusion: Some("failure".to_string()),
+                pull_requests: vec![CheckRunPR {
+                    number: pr_number,
+                    head: CheckRunRef {
+                        branch: branch.to_string(),
+                        sha: "abc123".to_string(),
+                    },
+                }],
+                html_url: "https://example.test/logs".to_string(),
+            },
+            repository: GitHubRepository {
+                full_name: full_name.to_string(),
+            },
+        }
+    }
+
+    /// Push to main speaks to every wave in the repo — and only those.
+    #[tokio::test]
+    async fn push_to_main_plans_chat_for_each_wave_in_repo() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        let other_repo = github_backed_repo(tmp.path(), "loopflowstudio/other");
+        store
+            .create_wave(&make_wave("ship", &repo))
+            .await
+            .expect("wave ship");
+        store
+            .create_wave(&make_wave("systems", &repo))
+            .await
+            .expect("wave systems");
+        store
+            .create_wave(&make_wave("elsewhere", &other_repo))
+            .await
+            .expect("wave elsewhere");
+
+        let execs = plan_push_speech(
+            &store,
             "loopflowstudio/loopflow",
-            Some("refs/heads/main"),
-            Some("abc"),
-            Some("def"),
+            "refs/heads/main",
+            "abc",
+            "def",
         )
-        .await;
-        assert_eq!(matched, 1);
+        .await
+        .expect("plan");
 
-        let pending = state
-            .store
-            .list_pending_activations(&wave.id)
+        let mut argvs: Vec<Vec<String>> = execs.into_iter().map(|exec| exec.args).collect();
+        argvs.sort();
+        assert_eq!(
+            argvs,
+            vec![
+                vec![
+                    "chat".to_string(),
+                    "--wave".to_string(),
+                    "ship".to_string(),
+                    "main moved: abc..def".to_string(),
+                ],
+                vec![
+                    "chat".to_string(),
+                    "--wave".to_string(),
+                    "systems".to_string(),
+                    "main moved: abc..def".to_string(),
+                ],
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn push_to_feature_branch_plans_nothing() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        store
+            .create_wave(&make_wave("ship", &repo))
             .await
-            .expect("pending activations");
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].to_sha, "def");
+            .expect("wave");
+
+        let execs = plan_push_speech(
+            &store,
+            "loopflowstudio/loopflow",
+            "refs/heads/feature",
+            "abc",
+            "def",
+        )
+        .await
+        .expect("plan");
+        assert!(execs.is_empty());
+    }
+
+    /// CI failure resolves the owning wave and plans the chat exec; the same
+    /// wave+commit never speaks twice; an unknown repo drops.
+    #[tokio::test]
+    async fn check_run_failure_plans_chat_once_per_wave_and_commit() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        let wave = make_wave("ship", &repo);
+        store.create_wave(&wave).await.expect("wave");
+        store
+            .create_run(&run_with_open_pr(&wave, "build", "feature", 1))
+            .await
+            .expect("run");
+
+        let cache = Arc::new(Mutex::new(HashSet::new()));
+        let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
+
+        let execs = plan_check_run_speech(&store, &cache, &event)
+            .await
+            .expect("plan");
+        assert_eq!(
+            execs,
+            vec![LfExec::chat(
+                "ship",
+                "CI failed: test-check on PR #1 — https://example.test/logs".to_string(),
+            )]
+        );
+
+        // Same wave+commit again: deduped to nothing.
+        let repeat = plan_check_run_speech(&store, &cache, &event)
+            .await
+            .expect("plan repeat");
+        assert!(repeat.is_empty(), "one speech per wave+commit");
+
+        // Unknown repo: no wave resolves, dropped.
+        let unknown = check_run_event("loopflowstudio/ghost", "feature", 1);
+        let dropped = plan_check_run_speech(&store, &cache, &unknown)
+            .await
+            .expect("plan unknown");
+        assert!(dropped.is_empty(), "no wave resolved → drop");
+    }
+
+    /// PR merged plans the queue-reconcile verb for the owning wave.
+    #[tokio::test]
+    async fn pr_merged_plans_queue_reconcile_for_owning_wave() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        let wave = make_wave("ship", &repo);
+        store.create_wave(&wave).await.expect("wave");
+        store
+            .create_run(&run_with_open_pr(&wave, "build", "feature", 7))
+            .await
+            .expect("run");
+
+        let execs = plan_pr_merged_reconciles(&store, "loopflowstudio/loopflow", 7)
+            .await
+            .expect("plan");
+        assert_eq!(execs, vec![LfExec::queue_reconcile("ship")]);
+
+        // A PR nobody holds plans nothing.
+        let none = plan_pr_merged_reconciles(&store, "loopflowstudio/loopflow", 99)
+            .await
+            .expect("plan none");
+        assert!(none.is_empty());
     }
 
     fn run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> Run {

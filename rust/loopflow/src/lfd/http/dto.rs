@@ -21,6 +21,8 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub pid: u32,
+    /// What this daemon is: one honest line, additive-safe for clients.
+    pub role: String,
     pub waves_defined: u32,
     pub waves_running: u32,
     pub agents_active: u32,

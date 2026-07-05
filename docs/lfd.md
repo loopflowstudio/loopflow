@@ -297,7 +297,7 @@ curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 
 The attach endpoint marks the session attached and returns tmux connection info. For day-to-day use, `tmux ls` and `tmux attach -t <name>` go straight to the session.
 
-## GitHub CI auto-fix
+## GitHub webhooks
 
 ```bash
 POST /v0/hooks/github
@@ -305,7 +305,13 @@ POST /v0/hooks/github
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-CI fix agents run the built-in `ci-fix` step.
+Webhooks speak inward as `lf`:
+
+- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's mind decides how to fix)
+- PR merged → `lf op queue reconcile --wave <wave>`
+- push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
+
+A wave with no live server bounces the message — correct pubsub, logged at debug. No wave resolved → dropped.
 
 ## Activation telemetry
 

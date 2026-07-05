@@ -35,6 +35,10 @@ at land the mind curates the distilled story up (parent channel + wave
 memory) and the raw work-line journal dies with the worktree. FLAGGED, not
 archived: if we miss raw records, `~/.lf/journal/<repo>/<worktree>` is the
 pre-named persistent home — build it only when lived experience asks.
+**Dead-listener speech (Jack, 2026-07-05): bounce ships; the write-queue is
+sanctioned** — store-queued publications drained at listener boot are the
+approved long-term shape, fine to build whenever, unimportant for initial
+demos. Wave B keeps today's honest bounce.
 
 ## Wave C — the extraction (phase 2, this branch's final act)
 mind.rs + state.rs + the TurnSink/interrupt paths leave the server. The

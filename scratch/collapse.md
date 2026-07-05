@@ -25,7 +25,12 @@ architecture item's own words; tokens get a one-time export.
 client can run lf commands through the gatekeeper — the gate forwards
 CLIENT authority, never its own; a remote client may do exactly what it
 could do locally, scoped by its credentials. Identity decides which verbs;
-the gate decides nothing.
+the gate decides nothing. **lfq may be reborn as the gate's client (Jack):**
+not how you use loopflow — how you do lf THROUGH HTTP: the same verb
+surface, transported to a gatekeeper, executing under the client's
+authority. The current python lfq (fat-daemon client) still dies in wave 2;
+the reborn lfq is a new, generic remote-lf. Open choice, held: a separate
+lfq tool vs `lf --gate <host> …` — one binary, reach as a flag.
 
 Substrate mapping (what replaces each registry job):
 - session/run lifecycle → publications on the run's own channel journal;

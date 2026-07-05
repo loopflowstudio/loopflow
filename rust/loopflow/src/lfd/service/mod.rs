@@ -8,7 +8,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::lfd::config::{LfdConfig, ServiceManager};
+use crate::lfd::config::LfdConfig;
 
 const SERVICE_ENV_KEYS: &[&str] = &[
     "LFD_HTTP_ADDR",
@@ -102,42 +102,33 @@ fn dispatch(
     force: bool,
     action: Action,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match ServiceManager::default() {
-        ServiceManager::Launchd => {
-            #[cfg(target_os = "macos")]
-            {
-                match action {
-                    Action::Install => macos::install(config, force),
-                    Action::Uninstall => macos::uninstall(config),
-                    Action::Start => macos::start(config, force),
-                    Action::Stop => macos::stop(config),
-                    Action::Status => macos::status(config),
-                }
-                .map_err(Into::into)
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err("launchd service management is only available on macOS".into())
-            }
+    #[cfg(target_os = "macos")]
+    {
+        match action {
+            Action::Install => macos::install(config, force),
+            Action::Uninstall => macos::uninstall(config),
+            Action::Start => macos::start(config, force),
+            Action::Stop => macos::stop(config),
+            Action::Status => macos::status(config),
         }
-        ServiceManager::Systemd => {
-            #[cfg(target_os = "linux")]
-            {
-                match action {
-                    Action::Install => linux::install(config, force),
-                    Action::Uninstall => linux::uninstall(config),
-                    Action::Start => linux::start(config, force),
-                    Action::Stop => linux::stop(config),
-                    Action::Status => linux::status(config),
-                }
-                .map_err(Into::into)
-            }
+        .map_err(Into::into)
+    }
 
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err("systemd service management is only available on Linux".into())
-            }
+    #[cfg(target_os = "linux")]
+    {
+        match action {
+            Action::Install => linux::install(config, force),
+            Action::Uninstall => linux::uninstall(config),
+            Action::Start => linux::start(config, force),
+            Action::Stop => linux::stop(config),
+            Action::Status => linux::status(config),
         }
+        .map_err(Into::into)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (config, force, action);
+        Err("service management is only supported on macOS and Linux".into())
     }
 }

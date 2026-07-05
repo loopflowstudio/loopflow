@@ -344,40 +344,6 @@ impl RawHttpSecurityConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceManager {
-    Launchd,
-    Systemd,
-}
-
-impl ServiceManager {
-    fn default_for_os() -> Self {
-        #[cfg(target_os = "linux")]
-        {
-            Self::Systemd
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            Self::Launchd
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Launchd => "launchd",
-            Self::Systemd => "systemd",
-        }
-    }
-}
-
-impl Default for ServiceManager {
-    fn default() -> Self {
-        Self::default_for_os()
-    }
-}
-
 fn parse_positive_usize(raw: &str, env_key: &str, field: &str) -> Result<usize> {
     let value: usize = raw
         .parse()

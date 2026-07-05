@@ -72,8 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match command {
             "migrate" => {
                 let status_only = args[2..].iter().any(|arg| arg == "--status");
-                let lfd_config = LfdConfig::load().expect("failed to load lfd config");
-                let storage_config = storage_config_from_config(&lfd_config)?;
+                let storage_config = storage_config_from_env()?;
                 let version = migrate_store(&storage_config, status_only).await?;
                 if status_only {
                     println!("schema_version={version}");
@@ -98,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:2486".to_string())
         .parse()?;
-    let storage_config = storage_config_from_config(&lfd_config)?;
+    let storage_config = storage_config_from_env()?;
 
     let cancel = CancellationToken::new();
 
@@ -269,9 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn storage_config_from_config(
-    _config: &LfdConfig,
-) -> Result<StorageConfig, Box<dyn std::error::Error>> {
+fn storage_config_from_env() -> Result<StorageConfig, Box<dyn std::error::Error>> {
     if std::env::var_os("LFD_DATABASE_URL").is_some() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -320,7 +317,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_flag, storage_config_from_config, LfdConfig, StorageConfig};
+    use super::{has_flag, storage_config_from_env, StorageConfig};
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use tempfile::{tempdir, TempDir};
@@ -371,8 +368,7 @@ mod tests {
         let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
         let home = setup_sqlite_env();
 
-        let config =
-            storage_config_from_config(&LfdConfig::default()).expect("sqlite default should parse");
+        let config = storage_config_from_env().expect("sqlite default should parse");
         match config {
             StorageConfig::Sqlite { path, .. } => {
                 let expected_root = home
@@ -394,8 +390,7 @@ mod tests {
         std::fs::create_dir_all(home.path().join(".lf").join("db")).expect("create db dir");
         std::env::set_var("LFD_DB_PATH", "db/custom.db");
 
-        let config =
-            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+        let config = storage_config_from_env().expect("sqlite config should parse");
         match config {
             StorageConfig::Sqlite { path, .. } => {
                 let expected_root = home
@@ -421,8 +416,7 @@ mod tests {
             .join("lfd.db");
         std::env::set_var("LFD_DB_PATH", &absolute);
 
-        let config =
-            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+        let config = storage_config_from_env().expect("sqlite config should parse");
         match config {
             StorageConfig::Sqlite { path, .. } => {
                 assert_eq!(path, absolute);
@@ -438,8 +432,7 @@ mod tests {
         let _home = setup_sqlite_env();
         std::env::set_var("LFD_DATABASE_URL", "postgres://example");
 
-        let err =
-            storage_config_from_config(&LfdConfig::default()).expect_err("postgres env removed");
+        let err = storage_config_from_env().expect_err("postgres env removed");
         assert_eq!(
             err.to_string(),
             "LFD_DATABASE_URL was removed; lfd uses sqlite via LFD_DB_PATH"

@@ -31,6 +31,11 @@ surface, transported to a gatekeeper, executing under the client's
 authority. The current python lfq (fat-daemon client) still dies in wave 2;
 the reborn lfq is a new, generic remote-lf. Open choice, held: a separate
 lfq tool vs `lf --gate <host> …` — one binary, reach as a flag.
+**Argv-mirror, not route-mirror (Jack):** the reborn lfq mirrors lf's ARGV,
+so the gate's entire mutation surface is ONE endpoint — exec(argv) →
+streamed output, under client identity filtering argv — never a per-verb
+HTTP API drifting against lf. Wave 2's deletion of the old route-mirror
+client stands; nothing in it survives into the argv shape.
 
 Substrate mapping (what replaces each registry job):
 - session/run lifecycle → publications on the run's own channel journal;

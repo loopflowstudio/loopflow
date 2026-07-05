@@ -144,9 +144,6 @@ http_security:
   trusted_proxy_cidrs: []
 ```
 
-`mode`, `service_manager`, `runtime_backend`, `storage`, and `executor.*` were
-removed with container mode. Delete those keys from old config files.
-
 ## Query waves
 
 The daemon serves reads to Concerto and `lf`. Examples below use `$LFD_ADDR`:
@@ -162,7 +159,6 @@ Wave intent lives in `wave/<name>/GOAL.md`:
 ```markdown
 ---
 primary_flow: build
-mode: loop
 metrics:
   - backlog is empty
 ---

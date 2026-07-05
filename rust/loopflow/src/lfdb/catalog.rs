@@ -105,23 +105,23 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
         sqlite_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, mode, primary_flow, goal, metrics, parent_wave_id\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics,\n                parent_wave_id = excluded.parent_wave_id",
+        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, primary_flow, goal, metrics, parent_wave_id\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics,\n                parent_wave_id = excluded.parent_wave_id",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
     },
     QueryDef {
@@ -240,7 +240,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListChildWaves — a chord's contents are its children, ordered by creation.
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers, mode,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
         sqlite_override: None,
     },
     // RecordRunTokenUsage — one row per run, replaced if re-recorded.

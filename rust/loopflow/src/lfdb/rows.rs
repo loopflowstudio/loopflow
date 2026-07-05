@@ -1,7 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
-    RepoId, RepoWork, Run, RunStackStatus, RunStatus, Summary, Wave, WaveMode, WaveStatus,
+    RepoId, RepoWork, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::{
     ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
@@ -61,7 +61,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
-/// SELECT id, name, direction, area, paused, created_at, workers, mode,
+/// SELECT id, name, direction, area, paused, created_at, workers,
 ///        primary_flow, goal, metrics, parent_wave_id
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let direction = parse_json_vec(&text(row, 2)?)?;
@@ -69,17 +69,14 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let paused = int(row, 4)? != 0;
     let created_at = unix_to_datetime(bigint(row, 5)?);
     let workers = int(row, 6)? as u32;
-    let mode_str = text(row, 7)?;
-    let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
-    let primary_flow = text(row, 8)?;
-    let goal = text(row, 9)?;
-    let metrics = parse_json_vec(&text(row, 10)?)?;
-    let parent_wave_id = opt_text(row, 11)?.map(LfdId::from_raw);
+    let primary_flow = text(row, 7)?;
+    let goal = text(row, 8)?;
+    let metrics = parse_json_vec(&text(row, 9)?)?;
+    let parent_wave_id = opt_text(row, 10)?.map(LfdId::from_raw);
 
     Ok(Wave {
         id: LfdId::from_raw(text(row, 0)?),
         name: text(row, 1)?,
-        mode,
         primary_flow,
         goal,
         metrics,

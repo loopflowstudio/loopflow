@@ -368,8 +368,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, SessionUse, WaveMode, WaveStatus,
-        WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
+        RepoWork, Session, SessionStatus, SessionUse, WaveStatus, WAVE_SERVER_ENDPOINT_ENV,
+        WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{EventKind, MessageOp};
@@ -388,7 +388,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

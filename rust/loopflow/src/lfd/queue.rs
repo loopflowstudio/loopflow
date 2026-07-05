@@ -553,7 +553,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus,
+        PullRequest, QueueBlockReason, RepoWork, Run, RunStatus, Wave, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -616,7 +616,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

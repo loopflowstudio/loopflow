@@ -431,7 +431,7 @@ mod tests {
         assert_eq!(resolve_mind_vendor(tmp.path(), "ship").unwrap(), "codex");
 
         // GOAL.md without mind: codex.
-        std::fs::write(dir.join("GOAL.md"), "---\nmode: manual\n---\nShip.\n").unwrap();
+        std::fs::write(dir.join("GOAL.md"), "---\nworkers: 1\n---\nShip.\n").unwrap();
         assert_eq!(resolve_mind_vendor(tmp.path(), "ship").unwrap(), "codex");
 
         // mind: selects the harness (canonicalized).

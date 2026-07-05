@@ -410,7 +410,7 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
+    use crate::lfd::types::{RepoId, RepoWork, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;
     use std::process::Command;
@@ -453,7 +453,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

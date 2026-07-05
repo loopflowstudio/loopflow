@@ -40,23 +40,6 @@ lf build "…" --wave shipper --fork           # independent branch from the rev
 
 Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's mind.
 
-## Modes
-
-The wave's `mode` controls its primary execution pattern.
-
-| Mode | Behavior |
-|------|----------|
-| **manual** | Single run, then stop |
-| **loop** | Continuously until stopped |
-
-### Manual
-
-Single execution. Run a flow once, then stop.
-
-### Loop
-
-Continuous work. Each iteration picks a task, runs the flow, creates a PR. When the PR limit is reached, the loop pauses until PRs are merged.
-
 ## Crons
 
 Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident mind: when a schedule comes due while the mind is idle, it opens a system turn ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
@@ -66,7 +49,6 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ---
 primary_flow: build
 workers: 2
-mode: loop
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
@@ -86,7 +68,6 @@ Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 ---
 primary_flow: garden
 workers: 0
-mode: manual
 crons:
   - flow: govern-identity
     schedule: "0 0 0 * * Sun *"

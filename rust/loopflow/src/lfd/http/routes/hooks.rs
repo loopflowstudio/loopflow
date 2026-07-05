@@ -514,9 +514,7 @@ fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
 mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
-    use crate::lfd::types::{
-        PullRequest, RepoWork, RunStackStatus, RunStatus, WaveMode, WaveStatus,
-    };
+    use crate::lfd::types::{PullRequest, RepoWork, RunStackStatus, RunStatus, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -559,7 +557,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

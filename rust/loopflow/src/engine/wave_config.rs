@@ -25,7 +25,6 @@ pub struct WavePmConfig {
 pub struct WaveConfig {
     pub flow: Option<String>,
     pub goal: Option<String>,
-    pub mode: Option<String>,
     pub primary_flow: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub workers: Option<u32>,
@@ -209,14 +208,13 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nprimary_flow: build\nmode: manual\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
+            "---\nprimary_flow: build\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.goal.as_deref(), Some("scan"));
         assert_eq!(config.primary_flow.as_deref(), Some("build"));
-        assert_eq!(config.mode.as_deref(), Some("manual"));
         assert_eq!(config.workers, Some(3));
         assert_eq!(
             config.metrics,

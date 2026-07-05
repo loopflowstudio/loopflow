@@ -1613,11 +1613,10 @@ mod tests {
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        use crate::lfd::types::{RepoWork, WaveMode, WaveStatus};
+        use crate::lfd::types::{RepoWork, WaveStatus};
         crate::lfd::types::Wave {
             id: crate::lfd::id::LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

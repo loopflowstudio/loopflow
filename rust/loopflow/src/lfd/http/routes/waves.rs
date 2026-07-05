@@ -807,7 +807,7 @@ fn rename_wave_worktree(
 mod tests {
     use super::*;
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
-    use crate::lfd::types::{RepoWork, Session, SessionStatus, SessionUse, Wave, WaveMode};
+    use crate::lfd::types::{RepoWork, Session, SessionStatus, SessionUse, Wave};
     use std::path::Path;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -816,7 +816,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

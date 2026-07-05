@@ -193,7 +193,6 @@ private func waveAgentTreeData() -> Data {
             "object": "wave",
             "name": "goalreview",
             "repo": "/tmp/repo",
-            "mode": "manual",
             "primary_flow": "ship-roadmap",
             "goal": "ship-roadmap",
             "metrics": [],

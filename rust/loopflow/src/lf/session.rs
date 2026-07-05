@@ -366,7 +366,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
+        RepoWork, Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
 
@@ -440,7 +440,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "registry-wave".to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

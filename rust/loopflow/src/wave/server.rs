@@ -69,7 +69,8 @@
 //!   - `GET /resident/context` → `{thread_id, in_flight}` — the pre-turn
 //!     snapshot; serving it freshens the store observations (one poll).
 //! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
-//!   required — `"message"` (queued; the next turn answers it), `"steer"`
+//!   required — `"message"` (human speech steers a live steer-capable turn;
+//!   otherwise queued, the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is

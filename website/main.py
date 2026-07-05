@@ -124,6 +124,9 @@ def TerminalBlock(lines: list[tuple[str, str]]):
         Div(
             *[Div(line[1], cls=f"terminal-line {line[0]}") for line in lines],
             cls="terminal-body",
+            tabindex="0",
+            role="group",
+            **{"aria-label": "Terminal output"},
         ),
         cls="terminal",
     )

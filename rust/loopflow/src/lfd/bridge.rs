@@ -1,7 +1,7 @@
 //! The push bridge: store-poll → EventHub (collapse call #4).
 //!
 //! Mutations now happen outside the daemon's process — `lf wave` registers
-//! sessions store-direct, `lf q` writes runs, `lf op queue reconcile` writes
+//! sessions store-direct, placed `lf` runs write runs, `lf op queue reconcile` writes
 //! attention — and the in-process [`EventHub`] never sees them, so Concerto's
 //! `/ws` feed starves for anything the daemon didn't do itself. The bridge
 //! polls the store machine-wide (the [`crate::wave::registry::StoreObserver`]
@@ -303,7 +303,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         AttentionKind, RepoWork, Run, RunStackStatus, RunStatus, Session, SessionStatus,
-        SessionUse, Wave, WaveMode, WaveStatus,
+        SessionUse, Wave, WaveStatus,
     };
     use crate::lfdb::{open_store, StorageConfig};
 
@@ -319,7 +319,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

@@ -2,20 +2,18 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::config::{load_config, load_config_or_default};
+use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
-    current_branch, fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add,
-    WorktreeBranch,
+    fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
-    branch_exists, create_with_schema_synced, schedule_upstream_sync,
-    worktree_path as wave_worktree_path,
+    branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, run_worktree_path,
+    schedule_upstream_sync, short_run_id,
 };
 
 use crate::lfd::id::LfdId;
@@ -34,10 +32,6 @@ pub enum Placement {
     /// New `<repo>.<wave>.<short-run-id>` worktree off the default branch;
     /// independent branch, independent PR, independent land.
     Fresh,
-    /// Reuse the wave's shared `<repo>.<wave>` worktree. Pooled runs share
-    /// one branch; concurrent pooled dispatches can collide — pooling is a
-    /// conscious opt-in.
-    Pool,
     /// New worktree whose branch forks from the parent run's branch, for
     /// dependent series. Branch lineage carries the stack; the filesystem
     /// stays flat.
@@ -56,7 +50,7 @@ pub async fn create_run_for_placement(
     let last_run = stack_runs.last().cloned();
     let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
 
-    // Lineage: stacked runs fork from their named parent; fresh and pooled
+    // Lineage: stacked runs fork from their named parent; fresh
     // runs continue the wave's linear chain (the existing land queue order).
     let lineage_parent = match placement {
         Placement::Stack { parent_run_id } => Some(
@@ -65,7 +59,7 @@ pub async fn create_run_for_placement(
                 .await?
                 .ok_or_else(|| anyhow!("stack parent run not found: {parent_run_id}"))?,
         ),
-        Placement::Fresh | Placement::Pool => last_run,
+        Placement::Fresh => last_run,
     };
     let stack_position = lineage_parent
         .as_ref()
@@ -87,18 +81,8 @@ pub async fn create_run_for_placement(
         .expect("wave always has at least one RepoWork");
     let main_repo = Path::new(&repo_work.repo);
 
-    // Dispatches targeting a non-main branch (e.g. a fix on a PR branch)
-    // always get their own worktree tracking that branch, since the wave's
-    // shared worktree is on a different branch.
-    let is_targeted = target_branch
-        .map(|b| !b.is_empty() && b != "main")
-        .unwrap_or(false);
     let ((wt_path, branch), run_target_branch) = match placement {
-        Placement::Pool if !is_targeted => (
-            ensure_wave_worktree(main_repo, wave.name())?,
-            target_branch.unwrap_or("main").to_string(),
-        ),
-        Placement::Fresh | Placement::Pool => (
+        Placement::Fresh => (
             create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?,
             target_branch.unwrap_or("main").to_string(),
         ),
@@ -165,44 +149,8 @@ pub async fn create_run_for_placement(
 
 /// Create a worktree for this wave, or reuse the existing one.
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
-    let wt = wave_worktree_path(main_repo, wave_name);
-    if wt.exists() && wt.join(".git").exists() {
-        let branch = current_branch(&wt)?.unwrap_or_default();
-        return Ok((wt.to_string_lossy().to_string(), branch));
-    }
-
-    let config = load_config(Some(main_repo)).ok().flatten();
-    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
-    Ok((result.path.to_string_lossy().to_string(), result.branch))
-}
-
-/// Short run id: the leading 8 hex chars of the run's UUID, tying the
-/// worktree directory to its Run row.
-pub(crate) fn short_run_id(run_id: &str) -> String {
-    let hex: String = run_id
-        .chars()
-        .filter(|ch| ch.is_ascii_hexdigit())
-        .take(8)
-        .collect();
-    if hex.len() == 8 {
-        hex
-    } else {
-        short_hash(run_id, 8)
-    }
-}
-
-/// Sibling worktree for a wave-dispatched worker: `<repo>.<wave>.<short-run-id>`.
-///
-/// Segment count carries ownership: two segments (`<repo>.<name>`) is a human
-/// or wave worktree, three is a dispatched worker tied to a Run row.
-pub(crate) fn run_worktree_path(main_repo: &Path, wave_name: &str, run_id: &str) -> PathBuf {
-    let base_wt = wave_worktree_path(main_repo, wave_name);
-    let base_name = base_wt
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("wave");
-    base_wt.with_file_name(format!("{base_name}.{}", short_run_id(run_id)))
+    let lease = ensure_wave_worktree_lease(main_repo, wave_name)?;
+    Ok((lease.path.to_string_lossy().to_string(), lease.branch))
 }
 
 /// Generate a schema-formatted branch for the wave, de-colliding with word pairs.
@@ -424,37 +372,6 @@ pub(crate) fn build_lf_step_command(
     cmd
 }
 
-/// The dispatch form of an `lf` invocation: `lf <flow>: <task>` plus the
-/// standard run options. One builder for every dispatcher — the lfd executor
-/// and `lf q worker run` must launch byte-identical workers.
-pub(crate) fn build_lf_dispatch_command(
-    flow: &str,
-    task: &str,
-    directions: &[String],
-    docs: &[String],
-    wave_name: &str,
-) -> Vec<String> {
-    let mut cmd = build_lf_step_command(flow, true, directions, docs, wave_name);
-    cmd[1].push(':');
-    cmd.push(task.to_string());
-    cmd
-}
-
-/// One line appended to every dispatched worker's task: the finish trigger.
-/// The vocabulary itself (what a report looks like) rides the shared
-/// `<lf:loopflow>` section in the worker's assembled prompt — this stays a
-/// pointer, not a second teaching site.
-pub(crate) const WORKER_REPORT_INSTRUCTION: &str =
-    "When you finish, report the outcome to the wave's thread with `lf chat`.";
-
-/// The dispatched form of a worker task: the raw task plus the report-back
-/// pointer. Every dispatch door (`lf q worker run` and the lfd HTTP worker
-/// route) sends workers through this, so they report regardless of door.
-/// The Run row keeps the raw task; only the dispatched prompt grows.
-pub(crate) fn worker_dispatch_task(task: &str) -> String {
-    format!("{task}\n\n{WORKER_REPORT_INSTRUCTION}")
-}
-
 /// Shell-quote one argv element for the tmux launch line.
 pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
@@ -482,20 +399,6 @@ pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
 
 /// Wrapper tail for run-to-completion sessions: propagate the exit code.
 pub(crate) const TMUX_EXIT_TAIL: &str = r#"exit "$EXIT_CODE""#;
-
-/// Tail for dispatched workers: after a clean flow exit the wrapper itself
-/// runs `lf op pr` — the dispatcher's structural guarantee, independent of
-/// the worker's prompt remembering to. `no_pr` opts a deliberately PR-less
-/// dispatch out.
-pub(crate) fn worker_exit_tail(no_pr: bool) -> String {
-    if no_pr {
-        return TMUX_EXIT_TAIL.to_string();
-    }
-    format!(
-        r#"if [ "$EXIT_CODE" -eq 0 ]; then {lf} op pr; fi; {TMUX_EXIT_TAIL}"#,
-        lf = shell_escape(&resolve_lf_binary().to_string_lossy()),
-    )
-}
 
 /// The exit-file shell wrapper every tmux-backed session runs — the single
 /// authoring site of the exit-file wire contract.
@@ -586,13 +489,6 @@ fn append_lf_run_options(
     cmd.push(wave_name.to_string());
 }
 
-pub(crate) fn short_hash(value: &str, chars: usize) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let mut hash = hex::encode(digest);
-    hash.truncate(chars);
-    hash
-}
-
 fn sync_existing_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> anyhow::Result<()> {
     if branch.is_empty() {
         return Ok(());
@@ -668,8 +564,7 @@ mod tests {
 
     use super::{
         create_stacked_run_worktree, ensure_wave_worktree, is_ephemeral_worktree_path,
-        tmux_shell_command, worker_dispatch_task, worker_exit_tail, TMUX_EXIT_TAIL,
-        WORKER_REPORT_INSTRUCTION,
+        tmux_shell_command, TMUX_EXIT_TAIL,
     };
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
     use crate::lfd::id::LfdId;
@@ -726,8 +621,7 @@ mod tests {
         (temp, main_repo, origin)
     }
 
-    /// The exit-file wire contract, pinned. Both dispatch paths (the lfd
-    /// executor and `lf q worker run`) run every tmux session through this
+    /// The exit-file wire contract, pinned. Tmux sessions run through this
     /// one wrapper: it clears the inherited-session marker the tmux server
     /// leaks from the dispatcher's environment, exports the session env
     /// inline, and records the exit code in the session's exit file.
@@ -780,60 +674,6 @@ mod tests {
             "exit code lands in the session's exit file: {wrapper}"
         );
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
-    }
-
-    /// The auto-PR analog, pinned at the wrapper string: a dispatched worker's
-    /// tmux wrapper runs `lf op pr` after a clean flow exit — deterministic,
-    /// prompt-independent — and `--no-pr` removes it entirely.
-    #[test]
-    fn worker_exit_tail_runs_op_pr_on_clean_exit_unless_opted_out() {
-        let tail = worker_exit_tail(false);
-        assert!(
-            tail.starts_with(r#"if [ "$EXIT_CODE" -eq 0 ]; then "#),
-            "the PR step is gated on a clean exit: {tail}"
-        );
-        assert!(tail.contains(" op pr; fi; "), "runs lf op pr: {tail}");
-        assert!(
-            tail.ends_with(TMUX_EXIT_TAIL),
-            "still propagates the exit code"
-        );
-
-        assert_eq!(worker_exit_tail(true), TMUX_EXIT_TAIL);
-
-        // End to end through the shared wrapper: the launch line carries the
-        // gated `op pr` between the exit-file write and the final exit.
-        let session_id = LfdId::new();
-        let session = Session {
-            id: session_id.clone(),
-            wave_id: LfdId::new(),
-            run_id: None,
-            parent_session_id: None,
-            session_use: SessionUse::Worker,
-            step: "dispatch:implement".to_string(),
-            agent: "lf".to_string(),
-            cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
-            argv: vec!["lf".to_string(), "implement".to_string()],
-            env: BTreeMap::new(),
-            source: TMUX_TERMINAL_SOURCE.to_string(),
-            tmux_name: "lf-test".to_string(),
-            status: SessionStatus::Pending,
-            attached_at: None,
-            started_at: None,
-            completed_at: None,
-            created_at: OffsetDateTime::now_utc(),
-            completion_token: None,
-        };
-        let wrapper = tmux_shell_command(&session, &worker_exit_tail(false));
-        assert!(wrapper.contains(&format!("{session_id}.exit")));
-        assert!(wrapper.contains(" op pr; fi; "));
-        assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
-    }
-
-    #[test]
-    fn worker_dispatch_task_appends_the_report_pointer_once() {
-        let task = worker_dispatch_task("Add the thing.");
-        assert!(task.starts_with("Add the thing."));
-        assert_eq!(task.matches(WORKER_REPORT_INSTRUCTION).count(), 1);
     }
 
     #[test]

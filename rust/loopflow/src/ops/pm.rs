@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::Path;
 
 use crate::engine::config::load_config_or_default;
-use crate::lfd::http::routes::wave_config::{read_wave_config, update_wave_goal_config};
+use crate::engine::wave_config::{read_wave_config, update_wave_goal_config};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate};
 use crate::lfdb::open_store;

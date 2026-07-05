@@ -156,7 +156,7 @@ Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter
 lf wave shipper
 ```
 
-The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. Today CI failures and pushes to main land in the wave's thread as attributed `lf chat` notifications, so the demo path stays live while webhook coordination moves toward durable facts plus explicit commands.
+The wave agent coordinates; it dispatches a **worker** per task (`lf build "…" --wave shipper --dispatch`) and folds each shipped PR into memory. Today CI failures and pushes to main land in the wave's thread as attributed `lf chat` notifications, so the demo path stays live while webhook coordination moves toward durable facts plus explicit commands.
 
 **Concerto** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 

@@ -336,7 +336,7 @@ mod tests {
     use crate::lfd::http::routes::test_helpers::test_http_state;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        tmux_session_name, RepoWork, SessionStatus, SessionUse, Wave, WaveMode, WaveStatus,
+        tmux_session_name, RepoWork, SessionStatus, SessionUse, Wave, WaveStatus,
         PALETTE_TERMINAL_SOURCE, TMUX_TERMINAL_SOURCE,
     };
     use axum::extract::{Path, Query, State};
@@ -347,7 +347,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "terminal-test".to_string(),
-            mode: WaveMode::Manual,
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

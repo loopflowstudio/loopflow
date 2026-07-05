@@ -1,4 +1,3 @@
-mod compose;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -9,22 +8,14 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::lfd::config::{LfdConfig, ServiceManager};
+use crate::lfd::config::LfdConfig;
 
-// TODO(M2): when container/postgres mode is cut, keep this native service
-// hygiene: explicit env allowlist and 0600 service files when tokens/secrets
-// ride in the generated unit/plist.
 const SERVICE_ENV_KEYS: &[&str] = &[
     "LFD_HTTP_ADDR",
     "LFD_AUTH_TOKEN",
-    "LFD_MODE",
     "LFD_DB_PATH",
-    "LFD_DATABASE_URL",
     "LFD_GITHUB_WEBHOOK_SECRET",
     "LFD_GITHUB_TOKEN",
-    "LFD_EXECUTOR_CREDENTIALS_ENV",
-    "LFD_EXECUTOR_CREDENTIALS_MOUNTS",
-    "LFD_EXECUTOR_IMAGE",
     "LFD_HTTP_MAX_JSON_BODY_BYTES",
     "LFD_HTTP_MAX_HOOK_BODY_BYTES",
     "LFD_HTTP_MAX_WS_FRAME_BYTES",
@@ -111,50 +102,33 @@ fn dispatch(
     force: bool,
     action: Action,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match config.service_manager {
-        ServiceManager::Launchd => {
-            #[cfg(target_os = "macos")]
-            {
-                match action {
-                    Action::Install => macos::install(config, force),
-                    Action::Uninstall => macos::uninstall(config),
-                    Action::Start => macos::start(config, force),
-                    Action::Stop => macos::stop(config),
-                    Action::Status => macos::status(config),
-                }
-                .map_err(Into::into)
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err(format!(
-                    "mode resolved service_manager={} on this OS; use a mode compatible with Linux",
-                    config.service_manager.as_str()
-                )
-                .into())
-            }
+    #[cfg(target_os = "macos")]
+    {
+        match action {
+            Action::Install => macos::install(config, force),
+            Action::Uninstall => macos::uninstall(config),
+            Action::Start => macos::start(config, force),
+            Action::Stop => macos::stop(config),
+            Action::Status => macos::status(config),
         }
-        ServiceManager::Systemd => {
-            #[cfg(target_os = "linux")]
-            {
-                match action {
-                    Action::Install => linux::install(config, force),
-                    Action::Uninstall => linux::uninstall(config),
-                    Action::Start => linux::start(config, force),
-                    Action::Stop => linux::stop(config),
-                    Action::Status => linux::status(config),
-                }
-                .map_err(Into::into)
-            }
+        .map_err(Into::into)
+    }
 
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(format!(
-                    "mode resolved service_manager={} on this OS; use a mode compatible with macOS",
-                    config.service_manager.as_str()
-                )
-                .into())
-            }
+    #[cfg(target_os = "linux")]
+    {
+        match action {
+            Action::Install => linux::install(config, force),
+            Action::Uninstall => linux::uninstall(config),
+            Action::Start => linux::start(config, force),
+            Action::Stop => linux::stop(config),
+            Action::Status => linux::status(config),
         }
+        .map_err(Into::into)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (config, force, action);
+        Err("service management is only supported on macOS and Linux".into())
     }
 }

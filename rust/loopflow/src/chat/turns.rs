@@ -1,7 +1,7 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Concerto consumes.
 //!
 //! The wave's mind runs on a persistent harness session
-//! ([`crate::lfd::conversations::harness`]) inside the RESIDENT process; its
+//! ([`crate::harness`]) inside the RESIDENT process; its
 //! `ConversationEvent` stream is adapted into resident wire deltas (see
 //! [`crate::wave::mind::EventAdapter`] and [`crate::wave::wire`]) and folded
 //! by the listener's runtime into journaled, broadcast turns.
@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
+use crate::chat::types::{ConversationItem, Lifecycle};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub enum ChatRole {
     Assistant,
 }
 
-/// One turn in a wave's conversation — the unit the chat server streams.
+/// One turn in a wave chat — the unit the chat server streams.
 ///
 /// Wire type consumed by Concerto. Every field is required (no serde defaults):
 /// the same shape round-trips through Rust and Swift.

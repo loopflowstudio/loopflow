@@ -372,9 +372,13 @@ def _install_concerto(spec: BundleSpec, version: str) -> None:
         typer.echo(f"  [codesign] signing with stable identity: {identity}")
     sign = subprocess.run(
         [
-            "codesign", "--force", "--deep",
+            "codesign",
+            "--force",
+            "--deep",
             "--preserve-metadata=entitlements",
-            "--sign", identity, str(spec.app_path),
+            "--sign",
+            identity,
+            str(spec.app_path),
         ],
         capture_output=True,
         text=True,

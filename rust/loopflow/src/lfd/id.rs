@@ -1,7 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
 
-use bytes::BytesMut;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,35 +85,5 @@ impl rusqlite::types::FromSql for LfdId {
         let s = value.as_str()?;
         s.parse()
             .map_err(|err| rusqlite::types::FromSqlError::Other(Box::new(err)))
-    }
-}
-
-impl tokio_postgres::types::ToSql for LfdId {
-    fn to_sql(
-        &self,
-        ty: &tokio_postgres::types::Type,
-        out: &mut BytesMut,
-    ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        self.0.to_sql(ty, out)
-    }
-
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-        <String as tokio_postgres::types::ToSql>::accepts(ty)
-    }
-
-    tokio_postgres::types::to_sql_checked!();
-}
-
-impl<'a> tokio_postgres::types::FromSql<'a> for LfdId {
-    fn from_sql(
-        ty: &tokio_postgres::types::Type,
-        raw: &'a [u8],
-    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let value = <String as tokio_postgres::types::FromSql>::from_sql(ty, raw)?;
-        Ok(value.parse()?)
-    }
-
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-        <String as tokio_postgres::types::FromSql>::accepts(ty)
     }
 }

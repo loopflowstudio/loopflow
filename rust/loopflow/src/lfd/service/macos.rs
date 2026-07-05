@@ -1,10 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::lfd::config::{LfdConfig, RuntimeBackend};
+use crate::lfd::config::LfdConfig;
 
-use super::{compose, contains_sensitive_service_env, service_environment, write_service_file};
+use super::{contains_sensitive_service_env, service_environment, write_service_file};
 
 /// macOS launchd service management.
 ///
@@ -23,17 +23,10 @@ fn log_dir() -> Result<PathBuf> {
     Ok(home.join(".lf/logs"))
 }
 
-pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
-    if let Some(existing_backend) = installed_backend()? {
-        if existing_backend != config.runtime_backend {
-            if !force {
-                bail!(
-                    "lfd is already installed with `{}` backend. Re-run `lfd install --force` to replace it.",
-                    existing_backend.as_str()
-                );
-            }
-            teardown_backend(existing_backend)?;
-        }
+pub fn install(_config: &LfdConfig, force: bool) -> Result<()> {
+    let plist_path = plist_path()?;
+    if plist_path.exists() && !force {
+        anyhow::bail!("lfd is already installed. Re-run `lfd install --force` to replace it.");
     }
 
     let lfd_path = std::env::current_exe()?
@@ -45,15 +38,8 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
     let log_dir = log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
 
-    if config.runtime_backend == RuntimeBackend::Compose {
-        compose::ensure_docker_available()?;
-        compose::write_managed_compose_file(config)?;
-        compose::pull()?;
-    }
+    let program_args = build_program_arguments(&lfd_path);
 
-    let program_args = build_program_arguments(config.runtime_backend, &lfd_path)?;
-
-    let plist_path = plist_path()?;
     if let Some(parent) = plist_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -76,7 +62,7 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         .args(["load", &plist_str])
         .status()?;
     if status.success() {
-        println!("lfd service loaded ({})", config.runtime_backend.as_str());
+        println!("lfd service loaded");
     } else {
         eprintln!("Warning: launchctl load failed (exit {})", status);
     }
@@ -85,7 +71,6 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
 }
 
 pub fn uninstall(_config: &LfdConfig) -> Result<()> {
-    let backend = installed_backend()?;
     let plist_path = plist_path()?;
     if !plist_path.exists() {
         println!("Not installed");
@@ -100,10 +85,6 @@ pub fn uninstall(_config: &LfdConfig) -> Result<()> {
     std::fs::remove_file(&plist_path)?;
     println!("Uninstalled {}", plist_path.display());
 
-    if let Some(RuntimeBackend::Compose) = backend {
-        let _ = compose::teardown();
-    }
-
     Ok(())
 }
 
@@ -115,20 +96,8 @@ pub fn start(config: &LfdConfig, force: bool) -> Result<()> {
         ));
     }
 
-    let installed_backend = installed_backend()?.unwrap_or(RuntimeBackend::Native);
-    if installed_backend != config.runtime_backend {
-        if !force {
-            bail!(
-                "lfd is installed with `{}` backend, but config mode expects `{}`. Run `lfd install --force`.",
-                installed_backend.as_str(),
-                config.runtime_backend.as_str()
-            );
-        }
+    if force {
         return install(config, true);
-    }
-
-    if config.runtime_backend == RuntimeBackend::Compose {
-        compose::ensure_docker_available()?;
     }
 
     let plist_str = plist_path.to_string_lossy().to_string();
@@ -137,7 +106,7 @@ pub fn start(config: &LfdConfig, force: bool) -> Result<()> {
         .status()?;
 
     if status.success() {
-        println!("Started lfd ({})", config.runtime_backend.as_str());
+        println!("Started lfd");
     } else {
         eprintln!("Failed to start lfd (exit {})", status);
     }
@@ -165,16 +134,15 @@ pub fn stop(_config: &LfdConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn status(config: &LfdConfig) -> Result<()> {
+pub fn status(_config: &LfdConfig) -> Result<()> {
     let plist = plist_path()?;
     if !plist.exists() {
         println!("manager: launchd (missing)");
-        println!("backend: {}", config.runtime_backend.as_str());
+        println!("backend: native");
         println!("remediation: run `lfd install`");
         return Ok(());
     }
 
-    let backend = installed_backend()?.unwrap_or(RuntimeBackend::Native);
     let output = Command::new("launchctl").args(["list", LABEL]).output()?;
 
     if output.status.success() {
@@ -193,11 +161,7 @@ pub fn status(config: &LfdConfig) -> Result<()> {
         println!("manager: launchd (not_loaded)");
     }
 
-    println!("backend: {}", backend.as_str());
-
-    if backend == RuntimeBackend::Compose {
-        compose::print_service_status();
-    }
+    println!("backend: native");
 
     Ok(())
 }
@@ -268,69 +232,14 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn build_program_arguments(backend: RuntimeBackend, lfd_path: &str) -> Result<Vec<String>> {
-    match backend {
-        RuntimeBackend::Native => Ok(vec![lfd_path.to_string(), "serve".to_string()]),
-        RuntimeBackend::Compose => {
-            let mut args = vec!["/usr/bin/env".to_string(), "docker".to_string()];
-            args.extend(compose::compose_program_args()?);
-            Ok(args)
-        }
-    }
-}
-
-fn installed_backend() -> Result<Option<RuntimeBackend>> {
-    let plist = plist_path()?;
-    if !plist.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(plist)?;
-    Ok(Some(detect_backend_from_plist(&content)))
-}
-
-fn detect_backend_from_plist(content: &str) -> RuntimeBackend {
-    if content.contains("<string>docker</string>") && content.contains("<string>compose</string>") {
-        RuntimeBackend::Compose
-    } else {
-        RuntimeBackend::Native
-    }
-}
-
-fn teardown_backend(backend: RuntimeBackend) -> Result<()> {
-    if backend == RuntimeBackend::Compose {
-        compose::teardown()?;
-    }
-    Ok(())
+fn build_program_arguments(lfd_path: &str) -> Vec<String> {
+    vec![lfd_path.to_string(), "serve".to_string()]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_backend_from_plist, render_plist, RuntimeBackend};
+    use super::render_plist;
     use std::path::Path;
-
-    #[test]
-    fn detects_compose_backend_from_plist_content() {
-        let content = r#"
-<array>
-    <string>/usr/bin/env</string>
-    <string>docker</string>
-    <string>compose</string>
-</array>
-"#;
-        assert_eq!(detect_backend_from_plist(content), RuntimeBackend::Compose);
-    }
-
-    #[test]
-    fn detects_native_backend_from_plist_content() {
-        let content = r#"
-<array>
-    <string>/usr/local/bin/lfd</string>
-    <string>serve</string>
-</array>
-"#;
-        assert_eq!(detect_backend_from_plist(content), RuntimeBackend::Native);
-    }
 
     #[test]
     fn render_plist_persists_remote_native_environment() {

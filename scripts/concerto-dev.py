@@ -21,7 +21,6 @@ Commands:
     logs            Tail the app logs
     lfd             Stop installed lfd and run from this branch (native/sqlite)
     lfd -k          Aggressive preflight kill before starting lfd
-    lfd --docker    Run legacy Docker executor path (postgres in container)
     agent-image     Build the Docker agent image
 
     screenshots     Generate app screenshots
@@ -368,16 +367,13 @@ def _print_run_debug_checklist() -> None:
     print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
 
 
-def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
+def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
     """Build and run with stdout visible. `repo` is the repo the app opens."""
     lfd_process: subprocess.Popen[str] | None = None
     lfd_log: TextIO | None = None
 
     if with_lfd:
         _stop_installed_lfd()
-        if docker_lfd:
-            print("run-debug --docker-lfd is not supported yet")
-            return 1
     _reset_run_debug_databases(with_lfd=with_lfd)
 
     if with_lfd:
@@ -578,20 +574,18 @@ def cmd_logs() -> int:
     return 1
 
 
-def cmd_lfd(docker: bool = False, kill: bool = False) -> int:
+def cmd_lfd(kill: bool = False) -> int:
     """Stop installed lfd and run from this branch."""
     _stop_installed_lfd()
 
     if kill:
         print("Preflight kill complete; starting lfd from this branch...")
 
-    if docker:
-        return _lfd_docker()
     return _lfd_native()
 
 
 def _stop_installed_lfd() -> None:
-    """Stop any running lfd (launchd, pid file, compose, port)."""
+    """Stop any running lfd (launchd, pid file, port)."""
     label = "com.loopflow.lfd"
     plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
     domain_label = f"gui/{os.getuid()}/{label}"
@@ -628,100 +622,7 @@ def _stop_installed_lfd() -> None:
             pass
         pid_file.unlink(missing_ok=True)
 
-    _stop_docker_on_port(2486)
     _stop_lfd_on_port(2486)
-
-
-def _lfd_docker() -> int:
-    """Start the legacy postgres-backed Docker executor path.
-
-    lfd needs host filesystem access to resolve repo paths and build agent
-    images, so it runs on the host. Only postgres is containerized.
-    """
-    # Start postgres
-    pg_container = "lfd-dev-postgres"
-    result = run_capture(["docker", "inspect", pg_container, "--format", "{{.State.Running}}"])
-    if result.returncode == 0 and result.stdout.strip() == "true":
-        print(f"Postgres already running ({pg_container})")
-    else:
-        print("Starting postgres...")
-        # Remove stopped container if it exists
-        run(["docker", "rm", "-f", pg_container], check=False)
-        result = run(
-            [
-                "docker",
-                "run",
-                "-d",
-                "--name",
-                pg_container,
-                "-p",
-                "5432:5432",
-                "-e",
-                "POSTGRES_USER=lfd",
-                "-e",
-                "POSTGRES_PASSWORD=lfd",
-                "-e",
-                "POSTGRES_DB=lfd",
-                "--health-cmd",
-                "pg_isready -U lfd",
-                "--health-interval",
-                "2s",
-                "--health-retries",
-                "10",
-                "postgres:16-alpine",
-            ],
-            check=False,
-        )
-        if result.returncode != 0:
-            return result.returncode
-
-        # Wait for healthy
-        print("Waiting for postgres...")
-        for _ in range(30):
-            time.sleep(1)
-            check = run_capture(
-                [
-                    "docker",
-                    "inspect",
-                    pg_container,
-                    "--format",
-                    "{{.State.Health.Status}}",
-                ]
-            )
-            if check.stdout.strip() == "healthy":
-                break
-        else:
-            print("Postgres did not become healthy in time")
-            return 1
-        print("Postgres ready")
-
-    # Build agent image if needed (cached rebuilds are instant)
-    result = _ensure_agent_image()
-    if result != 0:
-        return result
-
-    # Build lfd from source
-    os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
-    os.environ["GRPC_VERBOSITY"] = "ERROR"
-
-    print("Building lfd...")
-    result = run(["cargo", "build", "--locked", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    # Legacy Docker executor path. Container mode is staging debt scheduled for
-    # M2 removal; keep this only so old Concerto dev flows do not break before
-    # the native replacement is fully proven.
-    env = os.environ.copy()
-    env["LFD_MODE"] = "container"
-    env["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
-    env["LFD_EXECUTOR_CREDENTIALS_MOUNTS"] = "claude,ssh,gitconfig"
-    env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
-
-    lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
-    print(f"Stream log: {LFD_STREAM_LOG}")
-    print("Starting lfd (legacy container mode, debug logging)...")
-    return stream_with_log([lfd_bin, "serve"], env=env, log_path=LFD_STREAM_LOG)
 
 
 def _lfd_native() -> int:
@@ -764,16 +665,6 @@ def cmd_agent_image() -> int:
         cwd=REPO_ROOT,
         check=False,
     ).returncode
-
-
-def _stop_docker_on_port(port: int) -> None:
-    """Stop any Docker containers bound to the given port."""
-    result = run_capture(["docker", "ps", "--filter", f"publish={port}", "-q"])
-    if result.returncode != 0 or not result.stdout.strip():
-        return
-    for container_id in result.stdout.strip().splitlines():
-        print(f"Stopping Docker container {container_id} on port {port}...")
-        run(["docker", "stop", container_id], check=False)
 
 
 def _stop_lfd_on_port(port: int) -> None:
@@ -935,30 +826,74 @@ def _create_dev_signing_identity() -> None:
             "keyUsage = critical,digitalSignature\n"
             "extendedKeyUsage = critical,codeSigning\n"
         )
-        run([
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-            "-keyout", str(key), "-out", str(cert),
-            "-days", "3650", "-config", str(config), "-extensions", "v3",
-        ])
+        run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+                "-days",
+                "3650",
+                "-config",
+                str(config),
+                "-extensions",
+                "v3",
+            ]
+        )
         # An empty p12 password trips a MAC-verification failure in macOS'
         # `security import`, so use a transient one.
-        run([
-            "openssl", "pkcs12", "-export", "-inkey", str(key), "-in", str(cert),
-            "-out", str(p12), "-name", DEV_SIGNING_IDENTITY,
-            "-passout", f"pass:{p12_password}",
-        ])
+        run(
+            [
+                "openssl",
+                "pkcs12",
+                "-export",
+                "-inkey",
+                str(key),
+                "-in",
+                str(cert),
+                "-out",
+                str(p12),
+                "-name",
+                DEV_SIGNING_IDENTITY,
+                "-passout",
+                f"pass:{p12_password}",
+            ]
+        )
         # -A lets any app (incl. codesign) use the private key without an access
         # prompt. Importing into the already-unlocked login keychain is
         # non-interactive.
-        run([
-            "security", "import", str(p12),
-            "-k", str(LOGIN_KEYCHAIN),
-            "-P", p12_password,
-            "-A",
-        ])
+        run(
+            [
+                "security",
+                "import",
+                str(p12),
+                "-k",
+                str(LOGIN_KEYCHAIN),
+                "-P",
+                p12_password,
+                "-A",
+            ]
+        )
         # Trust the cert for code signing so codesign/find-identity accept it.
-        run(["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign",
-             "-k", str(LOGIN_KEYCHAIN), str(cert)])
+        run(
+            [
+                "security",
+                "add-trusted-cert",
+                "-r",
+                "trustRoot",
+                "-p",
+                "codeSign",
+                "-k",
+                str(LOGIN_KEYCHAIN),
+                str(cert),
+            ]
+        )
 
 
 def _ensure_dev_signing_identity() -> str:
@@ -1235,7 +1170,7 @@ COMMANDS = {
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
-    "lfd": (cmd_lfd, "Stop local lfd and run from this branch (--docker or -k)"),
+    "lfd": (cmd_lfd, "Stop local lfd and run from this branch (-k for preflight kill)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
@@ -1254,11 +1189,6 @@ def main() -> int:
         sub = subparsers.add_parser(name, help=help_text)
         if name == "lfd":
             sub.add_argument(
-                "--docker",
-                action="store_true",
-                help="Use legacy Docker executor path",
-            )
-            sub.add_argument(
                 "-k",
                 "--kill",
                 action="store_true",
@@ -1275,11 +1205,6 @@ def main() -> int:
                 "--no-lfd",
                 action="store_true",
                 help="Run UI only (default; bundled lfd managed by Concerto)",
-            )
-            sub.add_argument(
-                "--docker-lfd",
-                action="store_true",
-                help="Reserved for future container lfd support with --with-lfd",
             )
             sub.add_argument(
                 "--repo",
@@ -1313,10 +1238,10 @@ def main() -> int:
 
     func, _ = COMMANDS[args.command]
     if args.command == "lfd":
-        return func(docker=args.docker, kill=args.kill)
+        return func(kill=args.kill)
     if args.command == "run-debug":
         with_lfd = args.with_lfd
-        return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd, repo=args.repo)
+        return func(with_lfd=with_lfd, repo=args.repo)
     if args.command == "run-ios":
         return func(device=args.device)
     if args.command == "setup":

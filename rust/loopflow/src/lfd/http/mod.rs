@@ -242,14 +242,6 @@ pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(err.to_string()),
         ),
-        StoreError::Postgres(err) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(err.to_string()),
-        ),
-        StoreError::PostgresPool(err) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(err.to_string()),
-        ),
     }
 }
 

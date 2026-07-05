@@ -89,7 +89,7 @@
 //!   ops are applied by the mind asynchronously, so watch the stream's
 //!   `state` events for the outcome.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
-//!   door: `lf q worker run` minted a work-line worktree and its channel
+//!   door: placed `lf` minted a work-line worktree and its channel
 //!   journal, and knocks here so the PARENT channel's thread shows
 //!   "work line <name> opened" (journaled as `ChannelOpened`, idempotent on
 //!   `run_id` — a repeated knock returns `{turn: null}`). 404 outside the
@@ -103,7 +103,7 @@
 //!   content's first non-empty line. The server is the sole writer of the
 //!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`.
 //!
-//! `Turn` is [`crate::lfd::conversations::turns::ChatTurn`].
+//! `Turn` is [`crate::chat::turns::ChatTurn`].
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::lfd::conversations::turns::ChatTurn;
+use crate::chat::turns::ChatTurn;
 use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -207,7 +207,7 @@ struct HealthBody {
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
-    /// `lf q worker run` — so the store fold, not a task registry, is truth).
+    /// placed `lf` — so the store fold, not a task registry, is truth).
     workers: usize,
     /// Whether the wave is paused (GOAL.md `paused: true`): the listener
     /// refuses to start turns while set, though it keeps serving and queueing.

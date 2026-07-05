@@ -1,15 +1,11 @@
 //! Persistence as shared infrastructure: the machine's registry, written and
 //! read by `lf` directly — `lfd` is one more client, not the owner. This
-//! module owns the storage backends (sqlite, postgres), the schema
-//! migrations, and the registry API ([`Store`] and its per-domain traits).
+//! module owns the sqlite registry, schema migrations, and registry API
+//! ([`Store`] and its per-domain traits).
 //!
 //! The persisted domain types still live in `crate::lfd::types` for now; the
 //! type split is a later, non-mechanical step.
 //!
-//! Seam note: a handful of registry methods lost their last caller in the
-//! collapse (chat memory/messages, merge events, fork-run cleanup, a few
-//! attention/session lookups). They ride along untouched until M2 narrows this
-//! module to sqlite-only machine scratchpad.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,9 +19,6 @@ use crate::lfd::types::{
 
 pub mod catalog;
 pub mod migrations;
-// TODO(M2): delete postgres and the dual-backend dispatch. sqlite stays as the
-// many-writer machine scratchpad; postgres is the center that dies.
-pub mod postgres;
 pub mod rows;
 pub mod sqlite;
 mod token_crypto;
@@ -181,10 +174,6 @@ impl TokenUsageReport {
 pub enum StoreError {
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("postgres error: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
-    #[error("postgres pool error: {0}")]
-    PostgresPool(#[from] deadpool_postgres::PoolError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("not found")]
@@ -198,31 +187,17 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
     Sqlite { path: PathBuf },
-    // TODO(M2): remove this variant with postgres.rs and LFD_DATABASE_URL.
-    Postgres { database_url: String },
 }
 
 impl StorageConfig {
     pub fn sqlite(path: PathBuf) -> Self {
         Self::Sqlite { path }
     }
-
-    pub fn postgres(database_url: impl Into<String>) -> Self {
-        Self::Postgres {
-            database_url: database_url.into(),
-        }
-    }
 }
 
 #[derive(Debug)]
 pub struct Store {
-    backend: StoreBackend,
-}
-
-#[derive(Debug)]
-enum StoreBackend {
-    Sqlite(sqlite::SqliteStore),
-    Postgres(postgres::PostgresStore),
+    sqlite: sqlite::SqliteStore,
 }
 
 async fn run_sqlite<T, F>(store: &sqlite::SqliteStore, func: F) -> StoreResult<T>
@@ -583,7 +558,7 @@ impl Store {
 
     /// Record a session in the run registry. The db IS the registry: `lf`
     /// writes its own row here directly — self-registered flow runs, the
-    /// `lf wave` server's WaveAgent row, `lf q worker run` dispatches — no
+    /// `lf wave` server's WaveAgent row, placed `lf` runs — no
     /// daemon in the path. The writer later marks the row terminal via
     /// [`Store::update_control_session`].
     pub async fn register_session(&self, session: &Session) -> StoreResult<()> {
@@ -814,110 +789,81 @@ pub trait StoreAdmin: Send + Sync {
 
 #[async_trait::async_trait]
 impl WaveStateStore for Store {
-    // Keep backend dispatch explicit and centralized in this file.
-    // Verbose match arms are intentional: they keep sqlite/postgres behavior greppable.
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        let waves = match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo = repo.map(str::to_string);
-                run_sqlite(store, move |store| store.list_waves(repo.as_deref())).await
-            }
-            StoreBackend::Postgres(store) => store.list_waves(repo).await,
+        let waves = {
+            let repo = repo.map(str::to_string);
+            run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
         }?;
         self.attach_repos_vec(waves).await
     }
 
     async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
-        let waves = match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let parent = parent.clone();
-                run_sqlite(store, move |store| store.list_child_waves(&parent)).await
-            }
-            StoreBackend::Postgres(store) => store.list_child_waves(parent).await,
+        let waves = {
+            let parent = parent.clone();
+            run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
         }?;
         self.attach_repos_vec(waves).await
     }
 
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let wave = match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_wave(wave_id).await,
+        let wave = {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
         }?;
         self.attach_repos_opt(wave).await
     }
 
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let wave = match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let name = name.to_string();
-                run_sqlite(store, move |store| store.get_wave_by_name(&name)).await
-            }
-            StoreBackend::Postgres(store) => store.get_wave_by_name(name).await,
+        let wave = {
+            let name = name.to_string();
+            run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
         }?;
         self.attach_repos_opt(wave).await
     }
 
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave = wave.clone();
-                run_sqlite(store, move |store| store.create_wave(&wave)).await
-            }
-            StoreBackend::Postgres(store) => store.create_wave(wave).await,
+        {
+            let wave = wave.clone();
+            run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
         }
     }
 
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave = wave.clone();
-                run_sqlite(store, move |store| store.update_wave(&wave)).await
-            }
-            StoreBackend::Postgres(store) => store.update_wave(wave).await,
+        {
+            let wave = wave.clone();
+            run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
         }
     }
 
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.delete_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_wave(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
         }
     }
 
     async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_wave_repos(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_wave_repos(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.list_wave_repos(&wave_id)).await
         }
     }
 
     async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                let repo = repo.clone();
-                run_sqlite(store, move |store| store.upsert_wave_repo(&wave_id, &repo)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_wave_repo(wave_id, repo).await,
+        {
+            let wave_id = wave_id.clone();
+            let repo = repo.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.upsert_wave_repo(&wave_id, &repo)
+            })
+            .await
         }
     }
 
     async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.delete_wave_repos(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_wave_repos(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.delete_wave_repos(&wave_id)).await
         }
     }
 
@@ -926,12 +872,12 @@ impl WaveStateStore for Store {
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
     ) -> StoreResult<Vec<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.cloned();
-                run_sqlite(store, move |store| store.list_runs(wave_id.as_ref(), limit)).await
-            }
-            StoreBackend::Postgres(store) => store.list_runs(wave_id, limit).await,
+        {
+            let wave_id = wave_id.cloned();
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_runs(wave_id.as_ref(), limit)
+            })
+            .await
         }
     }
 
@@ -939,86 +885,60 @@ impl WaveStateStore for Store {
         &self,
         ended_since: time::OffsetDateTime,
     ) -> StoreResult<Vec<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| {
-                    store.list_runs_active_or_ended_since(ended_since)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.list_runs_active_or_ended_since(ended_since).await
-            }
+        {
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_runs_active_or_ended_since(ended_since)
+            })
+            .await
         }
     }
 
     async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| store.get_run(&run_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_run(run_id).await,
+        {
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.get_run(&run_id)).await
         }
     }
 
     async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_active_run(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_active_run(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.get_active_run(&wave_id)).await
         }
     }
 
     async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.count_active_runs(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.count_active_runs(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.count_active_runs(&wave_id)).await
         }
     }
 
     async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_latest_run(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_latest_run(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.get_latest_run(&wave_id)).await
         }
     }
 
     async fn create_run(&self, run: &Run) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run = run.clone();
-                run_sqlite(store, move |store| store.create_run(&run)).await
-            }
-            StoreBackend::Postgres(store) => store.create_run(run).await,
+        {
+            let run = run.clone();
+            run_sqlite(&self.sqlite, move |store| store.create_run(&run)).await
         }
     }
 
     async fn update_run(&self, run: &Run) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run = run.clone();
-                run_sqlite(store, move |store| store.update_run(&run)).await
-            }
-            StoreBackend::Postgres(store) => store.update_run(run).await,
+        {
+            let run = run.clone();
+            run_sqlite(&self.sqlite, move |store| store.update_run(&run)).await
         }
     }
 
     async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_stack_runs(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_stack_runs(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.list_stack_runs(&wave_id)).await
         }
     }
 
@@ -1067,25 +987,22 @@ impl WaveStateStore for Store {
         repo_id: &str,
         pr_number: u32,
     ) -> StoreResult<Option<LivePullRequestState>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo_id = repo_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.get_live_pr_state(&repo_id, pr_number)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_live_pr_state(repo_id, pr_number).await,
+        {
+            let repo_id = repo_id.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_live_pr_state(&repo_id, pr_number)
+            })
+            .await
         }
     }
 
     async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let state = state.clone();
-                run_sqlite(store, move |store| store.upsert_live_pr_state(&state)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_live_pr_state(state).await,
+        {
+            let state = state.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.upsert_live_pr_state(&state)
+            })
+            .await
         }
     }
 
@@ -1094,21 +1011,21 @@ impl WaveStateStore for Store {
         status: Option<AttentionStatus>,
         kind: Option<AttentionKind>,
     ) -> StoreResult<Vec<AttentionItem>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_attention_items(status, kind)).await
-            }
-            StoreBackend::Postgres(store) => store.list_attention_items(status, kind).await,
+        {
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_attention_items(status, kind)
+            })
+            .await
         }
     }
 
     async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let attention_id = attention_id.clone();
-                run_sqlite(store, move |store| store.get_attention_item(&attention_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_attention_item(attention_id).await,
+        {
+            let attention_id = attention_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_attention_item(&attention_id)
+            })
+            .await
         }
     }
 
@@ -1117,175 +1034,142 @@ impl WaveStateStore for Store {
         run_id: &LfdId,
         kind: AttentionKind,
     ) -> StoreResult<Option<AttentionItem>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| {
-                    store.find_attention_item_for_run(&run_id, kind)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.find_attention_item_for_run(run_id, kind).await,
+        {
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.find_attention_item_for_run(&run_id, kind)
+            })
+            .await
         }
     }
 
     async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let item = item.clone();
-                run_sqlite(store, move |store| store.upsert_attention_item(&item)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_attention_item(item).await,
+        {
+            let item = item.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.upsert_attention_item(&item)
+            })
+            .await
         }
     }
 
     async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let attention_id = attention_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_attention_item(&attention_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_attention_item(attention_id).await,
+        {
+            let attention_id = attention_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.delete_attention_item(&attention_id)
+            })
+            .await
         }
     }
 
     async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_queue_blocks(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_queue_blocks(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.list_queue_blocks(&wave_id)).await
         }
     }
 
     async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let block = block.clone();
-                run_sqlite(store, move |store| store.upsert_queue_block(&block)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_queue_block(block).await,
+        {
+            let block = block.clone();
+            run_sqlite(&self.sqlite, move |store| store.upsert_queue_block(&block)).await
         }
     }
 
     async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_queue_block(&wave_id, &run_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_queue_block(wave_id, run_id).await,
+        {
+            let wave_id = wave_id.clone();
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.delete_queue_block(&wave_id, &run_id)
+            })
+            .await
         }
     }
 
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let event = event.clone();
-                run_sqlite(store, move |store| store.record_merge_event(&event)).await
-            }
-            StoreBackend::Postgres(store) => store.record_merge_event(event).await,
+        {
+            let event = event.clone();
+            run_sqlite(&self.sqlite, move |store| store.record_merge_event(&event)).await
         }
     }
 
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.get_summary(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_summary(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.get_summary(&wave_id)).await
         }
     }
 
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let summary = summary.clone();
-                run_sqlite(store, move |store| store.upsert_summary(&summary)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_summary(summary).await,
+        {
+            let summary = summary.clone();
+            run_sqlite(&self.sqlite, move |store| store.upsert_summary(&summary)).await
         }
     }
 
     async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_chat_memory_blocks(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_chat_memory_blocks(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_chat_memory_blocks(&wave_id)
+            })
+            .await
         }
     }
 
     async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let block = block.clone();
-                run_sqlite(store, move |store| store.upsert_chat_memory_block(&block)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_chat_memory_block(block).await,
+        {
+            let block = block.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.upsert_chat_memory_block(&block)
+            })
+            .await
         }
     }
 
     async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                let name = name.to_string();
-                run_sqlite(store, move |store| {
-                    store.delete_chat_memory_block(&wave_id, &name)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_chat_memory_block(wave_id, name).await,
+        {
+            let wave_id = wave_id.clone();
+            let name = name.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.delete_chat_memory_block(&wave_id, &name)
+            })
+            .await
         }
     }
 
     async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_chat_messages(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_chat_messages(wave_id).await,
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_chat_messages(&wave_id)
+            })
+            .await
         }
     }
 
     async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let message = message.clone();
-                run_sqlite(store, move |store| store.create_chat_message(&message)).await
-            }
-            StoreBackend::Postgres(store) => store.create_chat_message(message).await,
+        {
+            let message = message.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.create_chat_message(&message)
+            })
+            .await
         }
     }
 
     async fn record_run_usage(&self, usage: &RunTokenUsage) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let usage = usage.clone();
-                run_sqlite(store, move |store| store.record_run_usage(&usage)).await
-            }
-            StoreBackend::Postgres(store) => store.record_run_usage(usage).await,
+        {
+            let usage = usage.clone();
+            run_sqlite(&self.sqlite, move |store| store.record_run_usage(&usage)).await
         }
     }
 
     async fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.aggregate_token_usage()).await
-            }
-            StoreBackend::Postgres(store) => store.aggregate_token_usage().await,
+        {
+            run_sqlite(&self.sqlite, move |store| store.aggregate_token_usage()).await
         }
     }
 }
@@ -1293,97 +1177,77 @@ impl WaveStateStore for Store {
 #[async_trait::async_trait]
 impl RepoStore for Store {
     async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_repos()).await,
-            StoreBackend::Postgres(store) => store.list_repos().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.list_repos()).await
         }
     }
 
     async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let path = path.to_string();
-                run_sqlite(store, move |store| store.get_repo(&path)).await
-            }
-            StoreBackend::Postgres(store) => store.get_repo(path).await,
+        {
+            let path = path.to_string();
+            run_sqlite(&self.sqlite, move |store| store.get_repo(&path)).await
         }
     }
 
     async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo = repo.clone();
-                run_sqlite(store, move |store| store.upsert_repo(&repo)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_repo(repo).await,
+        {
+            let repo = repo.clone();
+            run_sqlite(&self.sqlite, move |store| store.upsert_repo(&repo)).await
         }
     }
 
     async fn delete_repo(&self, path: &str) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let path = path.to_string();
-                run_sqlite(store, move |store| store.delete_repo(&path)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_repo(path).await,
+        {
+            let path = path.to_string();
+            run_sqlite(&self.sqlite, move |store| store.delete_repo(&path)).await
         }
     }
 
     async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo_id = repo_id.clone();
-                run_sqlite(store, move |store| store.get_repo_by_repo_id(&repo_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_repo_by_repo_id(repo_id).await,
+        {
+            let repo_id = repo_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_repo_by_repo_id(&repo_id)
+            })
+            .await
         }
     }
 
     async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_edges()).await,
-            StoreBackend::Postgres(store) => store.list_edges().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.list_edges()).await
         }
     }
 
     async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let edge = edge.clone();
-                run_sqlite(store, move |store| store.add_edge(&edge)).await
-            }
-            StoreBackend::Postgres(store) => store.add_edge(edge).await,
+        {
+            let edge = edge.clone();
+            run_sqlite(&self.sqlite, move |store| store.add_edge(&edge)).await
         }
     }
 
     async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let parent_id = parent_id.clone();
-                let child_id = child_id.clone();
-                run_sqlite(store, move |store| store.remove_edge(&parent_id, &child_id)).await
-            }
-            StoreBackend::Postgres(store) => store.remove_edge(parent_id, child_id).await,
+        {
+            let parent_id = parent_id.clone();
+            let child_id = child_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.remove_edge(&parent_id, &child_id)
+            })
+            .await
         }
     }
 
     async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo_id = repo_id.clone();
-                run_sqlite(store, move |store| store.children(&repo_id)).await
-            }
-            StoreBackend::Postgres(store) => store.children(repo_id).await,
+        {
+            let repo_id = repo_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.children(&repo_id)).await
         }
     }
 
     async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let repo_id = repo_id.clone();
-                run_sqlite(store, move |store| store.parents(&repo_id)).await
-            }
-            StoreBackend::Postgres(store) => store.parents(repo_id).await,
+        {
+            let repo_id = repo_id.clone();
+            run_sqlite(&self.sqlite, move |store| store.parents(&repo_id)).await
         }
     }
 }
@@ -1391,56 +1255,41 @@ impl RepoStore for Store {
 #[async_trait::async_trait]
 impl ExecutionStore for Store {
     async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_fork_runs(&run_id, step_index)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_fork_runs(run_id, step_index).await,
+        {
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_fork_runs(&run_id, step_index)
+            })
+            .await
         }
     }
 
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let fork_run = fork_run.clone();
-                run_sqlite(store, move |store| store.upsert_fork_run(&fork_run)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_fork_run(fork_run).await,
+        {
+            let fork_run = fork_run.clone();
+            run_sqlite(&self.sqlite, move |store| store.upsert_fork_run(&fork_run)).await
         }
     }
 
     async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, |store| store.list_orphaned_fork_runs()).await
-            }
-            StoreBackend::Postgres(store) => store.list_orphaned_fork_runs().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.list_orphaned_fork_runs()).await
         }
     }
 
     async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_fork_runs(&run_id, step_index)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_fork_runs(run_id, step_index).await,
+        {
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.delete_fork_runs(&run_id, step_index)
+            })
+            .await
         }
     }
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, |store| store.fail_orphaned_runs()).await
-            }
-            StoreBackend::Postgres(store) => store.fail_orphaned_runs().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.fail_orphaned_runs()).await
         }
     }
 }
@@ -1448,22 +1297,22 @@ impl ExecutionStore for Store {
 #[async_trait::async_trait]
 impl ControlSessionStore for Store {
     async fn create_session(&self, session: &Session) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session = session.clone();
-                run_sqlite(store, move |store| store.create_control_session(&session)).await
-            }
-            StoreBackend::Postgres(store) => store.create_control_session(session).await,
+        {
+            let session = session.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.create_control_session(&session)
+            })
+            .await
         }
     }
 
     async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| store.get_control_session(&session_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_control_session(session_id).await,
+        {
+            let session_id = session_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_control_session(&session_id)
+            })
+            .await
         }
     }
 
@@ -1472,16 +1321,13 @@ impl ControlSessionStore for Store {
         wave_id: Option<&LfdId>,
         statuses: Option<&[SessionStatus]>,
     ) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.cloned();
-                let statuses = statuses.map(|values| values.to_vec());
-                run_sqlite(store, move |store| {
-                    store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_control_sessions(wave_id, statuses).await,
+        {
+            let wave_id = wave_id.cloned();
+            let statuses = statuses.map(|values| values.to_vec());
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
+            })
+            .await
         }
     }
 
@@ -1490,42 +1336,32 @@ impl ControlSessionStore for Store {
         wave_id: &LfdId,
         completed_since: i64,
     ) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_recent_control_sessions(&wave_id, completed_since)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .list_recent_control_sessions(wave_id, completed_since)
-                    .await
-            }
+        {
+            let wave_id = wave_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.list_recent_control_sessions(&wave_id, completed_since)
+            })
+            .await
         }
     }
 
     async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let run_id = run_id.clone();
-                run_sqlite(store, move |store| {
-                    store.get_active_control_session_for_run(&run_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_active_control_session_for_run(run_id).await,
+        {
+            let run_id = run_id.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_active_control_session_for_run(&run_id)
+            })
+            .await
         }
     }
 
     async fn update_session(&self, session: &Session) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session = session.clone();
-                run_sqlite(store, move |store| store.update_control_session(&session)).await
-            }
-            StoreBackend::Postgres(store) => store.update_control_session(session).await,
+        {
+            let session = session.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.update_control_session(&session)
+            })
+            .await
         }
     }
 }
@@ -1533,41 +1369,38 @@ impl ControlSessionStore for Store {
 #[async_trait::async_trait]
 impl TokenStore for Store {
     async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let provider = provider.to_string();
-                run_sqlite(store, move |store| store.get_provider_token(&provider)).await
-            }
-            StoreBackend::Postgres(store) => store.get_provider_token(provider).await,
+        {
+            let provider = provider.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.get_provider_token(&provider)
+            })
+            .await
         }
     }
 
     async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let token = token.clone();
-                run_sqlite(store, move |store| store.upsert_provider_token(&token)).await
-            }
-            StoreBackend::Postgres(store) => store.upsert_provider_token(token).await,
+        {
+            let token = token.clone();
+            run_sqlite(&self.sqlite, move |store| {
+                store.upsert_provider_token(&token)
+            })
+            .await
         }
     }
 
     async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let provider = provider.to_string();
-                run_sqlite(store, move |store| store.delete_provider_token(&provider)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_provider_token(provider).await,
+        {
+            let provider = provider.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.delete_provider_token(&provider)
+            })
+            .await
         }
     }
 
     async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, |store| store.list_provider_tokens()).await
-            }
-            StoreBackend::Postgres(store) => store.list_provider_tokens().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.list_provider_tokens()).await
         }
     }
 }
@@ -1575,81 +1408,60 @@ impl TokenStore for Store {
 #[async_trait::async_trait]
 impl StoreAdmin for Store {
     async fn health_check(&self) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.health_check()).await,
-            StoreBackend::Postgres(store) => store.health_check().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.health_check()).await
         }
     }
 
     async fn schema_version(&self) -> StoreResult<String> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.schema_version()).await,
-            StoreBackend::Postgres(store) => store.schema_version().await,
+        {
+            run_sqlite(&self.sqlite, |store| store.schema_version()).await
         }
     }
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
-    match cfg {
-        StorageConfig::Sqlite { path } => Ok(Store {
-            backend: StoreBackend::Sqlite(sqlite::SqliteStore::new(path)?),
-        }),
-        StorageConfig::Postgres { database_url } => Ok(Store {
-            backend: StoreBackend::Postgres(
-                postgres::PostgresStore::connect_async(database_url).await?,
-            ),
-        }),
-    }
+    let StorageConfig::Sqlite { path } = cfg;
+    Ok(Store {
+        sqlite: sqlite::SqliteStore::new(path)?,
+    })
 }
 
-/// Open the machine's shared registry store only if one already exists —
-/// a sqlite db file on disk, or a configured postgres. `None` means this
-/// machine has no registry yet; callers that instrument best-effort (lf
+/// Open the machine's shared registry store only if one already exists.
+/// `None` means this machine has no registry yet; callers that instrument best-effort (lf
 /// self-registration, the wave server) treat that as "not instrumented" and
 /// stay silent rather than conjuring an empty db.
 pub async fn open_existing_store() -> Option<Store> {
     let cfg = crate::lfd::storage_config_from_env().ok()?;
-    if let StorageConfig::Sqlite { path } = &cfg {
-        if !path.exists() {
-            return None;
-        }
-        // lf-direct openers can meet a db created by an older lfd (the daemon
-        // migrates only at its own boot). Apply pending migrations here so a
-        // direct writer never hits schema drift; versioned migrations make a
-        // concurrent second applier a no-op, and sqlite locking serializes
-        // them. A failed migration means the db is unusable for us: warn and
-        // report "not instrumented" rather than limping on a wrong schema.
-        let conn = rusqlite::Connection::open(path).ok()?;
-        if let Err(err) = migrations::apply_sqlite(&conn) {
-            tracing::warn!(?path, %err, "registry store migration failed; running uninstrumented");
-            return None;
-        }
+    let StorageConfig::Sqlite { path } = &cfg;
+    if !path.exists() {
+        return None;
+    }
+    // lf-direct openers can meet a db created by an older lfd (the daemon
+    // migrates only at its own boot). Apply pending migrations here so a
+    // direct writer never hits schema drift; versioned migrations make a
+    // concurrent second applier a no-op, and sqlite locking serializes
+    // them. A failed migration means the db is unusable for us: warn and
+    // report "not instrumented" rather than limping on a wrong schema.
+    let conn = rusqlite::Connection::open(path).ok()?;
+    if let Err(err) = migrations::apply_sqlite(&conn) {
+        tracing::warn!(?path, %err, "registry store migration failed; running uninstrumented");
+        return None;
     }
     open_store(&cfg).await.ok()
 }
 
 pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {
-    match cfg {
-        StorageConfig::Sqlite { path } => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|err| {
-                    StoreError::InvalidData(format!("failed to create db dir: {err}"))
-                })?;
-            }
-            let conn = rusqlite::Connection::open(path)?;
-            if !status_only {
-                migrations::apply_sqlite(&conn)?;
-            }
-            migrations::latest_version_sqlite(&conn)
-        }
-        StorageConfig::Postgres { database_url } => {
-            if status_only {
-                postgres::PostgresStore::migrate_status_async(database_url).await
-            } else {
-                postgres::PostgresStore::migrate_async(database_url).await
-            }
-        }
+    let StorageConfig::Sqlite { path } = cfg;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| StoreError::InvalidData(format!("failed to create db dir: {err}")))?;
     }
+    let conn = rusqlite::Connection::open(path)?;
+    if !status_only {
+        migrations::apply_sqlite(&conn)?;
+    }
+    migrations::latest_version_sqlite(&conn)
 }
 pub type SharedStore = Arc<Store>;
 
@@ -1660,7 +1472,7 @@ mod tests {
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
         QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus,
-        RunStatus, Summary, Wave, WaveMode, WaveStatus,
+        RunStatus, Summary, Wave, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1670,7 +1482,6 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
@@ -2312,16 +2123,6 @@ mod tests {
             WaveStatus::Paused,
             "paused wave must keep its status across orphan cleanup"
         );
-    }
-
-    #[tokio::test]
-    #[ignore] // requires DATABASE_URL
-    async fn postgres_store_parity() {
-        let url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        let store = super::open_store(&StorageConfig::postgres(url))
-            .await
-            .expect("connect");
-        run_store_basic_suite(&store).await;
     }
 
     #[tokio::test]

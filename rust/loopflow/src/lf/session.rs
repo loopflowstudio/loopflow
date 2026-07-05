@@ -9,7 +9,7 @@
 //! first, else the wave worktree the run executes in — it writes its own
 //! Session row to the shared local store (the db IS the registry — no daemon
 //! in the path) and marks itself terminal when the run ends. A run whose row
-//! a dispatcher already created (`lf q worker run`, the lfd executor)
+//! placement already created
 //! registers nothing but still completes that existing row at run end —
 //! daemonless dispatches have no other process to close them. No wave
 //! context or no store on this machine → exactly the old behavior, silently.
@@ -46,7 +46,7 @@ use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
 /// The channel a dispatched process speaks on by default — the work line's
-/// ownership name (`goals.148e0e02`), set by `lf q worker run`. A bare run
+/// ownership name (`goals.148e0e02`), set by placed `lf` runs. A bare run
 /// without it falls back to the worktree name, which is the same channel
 /// name by construction (see `engine::wave_context::resolve_ambient_channel`).
 pub const CHANNEL_ENV: &str = "LFD_CHANNEL";
@@ -59,8 +59,7 @@ pub enum RunContext {
     /// No ambient wave (no env, not a wave worktree): leave everything
     /// untouched.
     Outside,
-    /// Dispatcher-launched: the dispatcher (lfd executor or `lf q worker
-    /// run`) already created this process's session row and set
+    /// Dispatcher-launched: placement already created this process's session row and set
     /// `LFD_SESSION_ID` to it. Registering again would double-count, but the
     /// run still completes its own existing row at exit — with no daemon
     /// guaranteed to be running, nothing else may ever mark it terminal.
@@ -154,8 +153,8 @@ fn register_run_in(
     Some(session)
 }
 
-/// Adopt the session row a dispatcher created for this process — `lf q
-/// worker run` and the lfd executor both point `LFD_SESSION_ID` at a row the
+/// Adopt the session row a dispatcher created for this process — placement
+/// points `LFD_SESSION_ID` at a row the
 /// child owns. If no daemon ever runs, nothing else marks the row terminal,
 /// so the run completes it at exit through the same guard machinery as a
 /// self-registered row. Never creates a row: a missing row or store is a
@@ -367,7 +366,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
+        RepoWork, Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
 
@@ -441,7 +440,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "registry-wave".to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
@@ -516,7 +514,7 @@ mod tests {
     }
 
     /// Seed the row a dispatcher creates for this very process — the
-    /// `lf q worker run` shape: worker, tmux-backed, already running.
+    /// Placed run shape: worker-owned row already running.
     fn seed_own_session(path: &Path, wave: &Wave) -> Session {
         let now = OffsetDateTime::now_utc();
         let session = Session {

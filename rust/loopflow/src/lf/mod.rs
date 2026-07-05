@@ -93,6 +93,18 @@ pub struct Cli {
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
+
+    /// Run this invocation in a separate worktree targeting the current branch
+    #[arg(long, conflicts_with_all = ["stack", "fork"])]
+    pub dispatch: bool,
+
+    /// Run this invocation in a worktree stacked on a parent run
+    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["dispatch", "fork"])]
+    pub stack: Option<String>,
+
+    /// Run this invocation in a separate worktree forked from the review base
+    #[arg(long, conflicts_with_all = ["dispatch", "stack"])]
+    pub fork: bool,
 }
 
 impl Cli {
@@ -162,11 +174,6 @@ pub enum Commands {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
     },
-    /// Queue operations against the shared run registry (daemonless dispatch)
-    Q {
-        #[command(subcommand)]
-        cmd: QCommand,
-    },
     /// Post a message into a wave's thread (worker reports, child-wave
     /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
     Chat {
@@ -235,40 +242,6 @@ pub enum MemoryCommand {
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum QCommand {
-    /// Worker dispatch
-    Worker {
-        #[command(subcommand)]
-        cmd: WorkerCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum WorkerCommand {
-    /// Dispatch a worker: record its run + session in the registry and
-    /// launch `lf <flow>: <task>` in a detached tmux session
-    Run {
-        /// Wave name
-        wave: String,
-        /// Flow the worker runs
-        #[arg(long)]
-        flow: String,
-        /// Task text handed to the flow
-        #[arg(long)]
-        task: String,
-        /// Run in the wave's shared worktree instead of a fresh one
-        #[arg(long, conflicts_with = "stack")]
-        pool: bool,
-        /// Fork the worker's branch from this run's branch (dependent series)
-        #[arg(long, value_name = "RUN_ID")]
-        stack: Option<String>,
-        /// Skip the automatic `lf op pr` on clean flow exit
-        #[arg(long = "no-pr")]
-        no_pr: bool,
     },
 }
 
@@ -852,34 +825,6 @@ mod tests {
         };
         assert_eq!(fact, "one fact");
         assert!(target.parent);
-    }
-
-    #[test]
-    fn worker_run_parses_no_pr_flag() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "q",
-            "worker",
-            "run",
-            "goals",
-            "--flow",
-            "implement",
-            "--task",
-            "Do it.",
-            "--no-pr",
-        ])
-        .expect("parse");
-        let Some(Commands::Q {
-            cmd:
-                QCommand::Worker {
-                    cmd: WorkerCommand::Run { wave, no_pr, .. },
-                },
-        }) = cli.command
-        else {
-            panic!("expected q worker run command");
-        };
-        assert_eq!(wave, "goals");
-        assert!(no_pr);
     }
 
     #[test]

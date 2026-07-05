@@ -152,9 +152,7 @@ def _check_new_if_boundaries() -> list[str]:
                 continue
             # A platform split with an `#else` fallback stays buildable on every
             # target; only fallback-less splits break the shared build.
-            if re.match(r"\s*#if\s+!?os\(", line) and _platform_if_has_fallback(
-                file_path, line
-            ):
+            if re.match(r"\s*#if\s+!?os\(", line) and _platform_if_has_fallback(file_path, line):
                 continue
             violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
             continue

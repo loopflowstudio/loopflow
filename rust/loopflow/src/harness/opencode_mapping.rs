@@ -2,9 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::lfd::conversations::types::{
-    ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
-};
+use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
 
 #[derive(Debug, Default)]
 pub(super) struct ReaderState {

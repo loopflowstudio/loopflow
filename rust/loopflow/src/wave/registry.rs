@@ -40,8 +40,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
-use crate::lfd::executor::helpers::{is_active_run_status, tmux_session_exists};
-use crate::lfd::http::routes::wave_config::read_wave_config;
+use crate::engine::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     Run, RunStatus, Session, SessionStatus, SessionUse, Wave, WaveStatus, LIVE_SESSION_STATUSES,
@@ -50,6 +49,22 @@ use crate::lfd::types::{
 use crate::lfdb::{SharedStore, StoreResult};
 use crate::wave::journal::WorkerOutcome;
 use crate::wave::runtime::WaveRuntime;
+
+fn is_active_run_status(status: RunStatus) -> bool {
+    matches!(
+        status,
+        RunStatus::Pending | RunStatus::Running | RunStatus::Waiting
+    )
+}
+
+async fn tmux_session_exists(session_name: &str) -> anyhow::Result<bool> {
+    let status = Command::new("tmux")
+        .args(["has-session", "-t", session_name])
+        .status()
+        .await
+        .map_err(|err| anyhow::anyhow!("tmux session probe failed: {err}"))?;
+    Ok(status.success())
+}
 
 /// How often the observer re-reads the store between turns. Modest by
 /// design: the mind also refreshes right before every turn it takes.
@@ -122,7 +137,7 @@ impl Registration {
 /// not degrade to running unregistered (observed live — two brains on one
 /// wave because boot skipped registration entirely). The created row is
 /// minimal and mirrors wave creation from GOAL.md frontmatter
-/// ([`read_wave_config`]): mode/goal/primary-flow from the frontmatter when
+/// ([`read_wave_config`]): goal/primary-flow from the frontmatter when
 /// present, [`Wave::new`] defaults otherwise.
 ///
 /// # Errors
@@ -141,9 +156,6 @@ pub async fn ensure_wave_row(
         main_repo.display().to_string(),
     );
     if let Some(config) = read_wave_config(main_repo, name) {
-        if let Some(mode) = config.mode.as_deref().and_then(|mode| mode.parse().ok()) {
-            wave.mode = mode;
-        }
         if let Some(flow) = config.primary_flow {
             wave.primary_flow = flow;
         }
@@ -292,7 +304,7 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
 
 /// The endpoint a wave's live server listens on, off the live WaveAgent
 /// session row's env (trimmed, empty dropped). Shared by `lf chat`'s target
-/// resolution and `lf q`'s channel-opened knock; callers fall back to the
+/// resolution and the work-line channel knock; callers fall back to the
 /// `wave/<name>/.wave-endpoint` discovery file when the store has no live row.
 pub(crate) async fn wave_server_endpoint(
     store: &SharedStore,
@@ -677,8 +689,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::lfd::types::{
-        PullRequest, RepoWork, RunStackStatus, RunStatus, WaveMode, WaveStatus,
-        TMUX_TERMINAL_SOURCE,
+        PullRequest, RepoWork, RunStackStatus, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{journal_path, EventKind, Journal};
@@ -695,7 +706,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
@@ -823,7 +833,7 @@ mod tests {
         std::fs::create_dir_all(&goal_dir).expect("wave dir");
         std::fs::write(
             goal_dir.join("GOAL.md"),
-            "---\nmode: manual\ngoal: keep shipping\n---\nShip.\n",
+            "---\ngoal: keep shipping\n---\nShip.\n",
         )
         .expect("GOAL.md");
 
@@ -836,7 +846,6 @@ mod tests {
             .expect("lookup")
             .expect("row exists");
         assert_eq!(stored.id, wave.id);
-        assert_eq!(stored.mode, WaveMode::Manual, "mode from GOAL.md");
         assert_eq!(stored.goal, "keep shipping", "goal from GOAL.md");
         assert_eq!(stored.repo(), repo.display().to_string());
 
@@ -870,7 +879,6 @@ mod tests {
         let wave = ensure_wave_row(&store, tmp.path(), "ship")
             .await
             .expect("row created");
-        assert_eq!(wave.mode, WaveMode::Loop);
         assert_eq!(wave.goal, "ship-roadmap");
         assert_eq!(wave.primary_flow, "ship-roadmap");
     }

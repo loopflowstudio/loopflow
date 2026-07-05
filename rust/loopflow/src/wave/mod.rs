@@ -58,6 +58,7 @@ pub mod resident;
 pub mod runtime;
 pub mod server;
 pub mod state;
+pub mod subscription;
 pub(crate) mod supervisor;
 pub mod wire;
 
@@ -67,10 +68,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
+use crate::engine::repo::find_repo_root;
 use crate::engine::worktrees::main_repo_root;
-// TODO(M1): move find_repo_root into engine/repo utilities so wave does not
-// import from lf::commands.
-use crate::lf::commands::util::find_repo_root;
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::util::resolve_wave_name;
@@ -419,8 +418,8 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-    use crate::lfd::conversations::types::Lifecycle;
+    use crate::chat::turns::{ChatRole, ChatTurn};
+    use crate::chat::types::Lifecycle;
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
@@ -1614,11 +1613,10 @@ mod tests {
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        use crate::lfd::types::{RepoWork, WaveMode, WaveStatus};
+        use crate::lfd::types::{RepoWork, WaveStatus};
         crate::lfd::types::Wave {
             id: crate::lfd::id::LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

@@ -9,11 +9,7 @@ pub struct Migration {
 
 /// All migrations in order. Add new migrations here.
 ///
-/// Each migration should work for both sqlite and postgres using portable SQL
-/// (TEXT/INTEGER/BOOLEAN — no backend-specific syntax).
-///
-/// If a migration genuinely requires different SQL per backend, add separate
-/// entries and filter them in `migrations()`.
+/// Each migration should work for sqlite.
 const ALL_MIGRATIONS: &[Migration] = &[
     Migration {
         version: "001_initial",
@@ -239,9 +235,6 @@ fn is_tolerated_migration_error(version: &str, message: &str) -> bool {
             || message.contains("does not exist"))
 }
 
-/// Migrations applicable to a backend. Currently returns all migrations
-/// since everything is portable SQL. Override resolution would go here
-/// if backend-specific migrations are ever needed.
 pub fn migrations() -> &'static [Migration] {
     ALL_MIGRATIONS
 }
@@ -321,115 +314,6 @@ fn applied_versions_sqlite(conn: &rusqlite::Connection) -> StoreResult<HashSet<S
 /// Latest applied migration version, or empty string if none applied.
 pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String> {
     let applied = applied_versions_sqlite(conn)?;
-    Ok(latest_applied_version(&applied))
-}
-
-// -- Postgres ----------------------------------------------------------------
-
-pub async fn apply_postgres(client: &mut tokio_postgres::Client) -> StoreResult<()> {
-    client
-        .batch_execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at BIGINT NOT NULL
-            )",
-        )
-        .await?;
-
-    let applied = applied_versions_postgres(client).await?;
-
-    for migration in migrations() {
-        if applied.contains(migration.version) {
-            continue;
-        }
-        let transaction = client.transaction().await?;
-        match transaction.batch_execute(migration.sql).await {
-            Ok(()) => {
-                transaction
-                    .execute(
-                        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
-                        &[&migration.version, &now_unix()],
-                    )
-                    .await?;
-                transaction.commit().await?;
-            }
-            Err(e) if is_tolerated_migration_error(migration.version, &e.to_string()) => {
-                // The failed transaction is poisoned; record the version in a
-                // fresh one.
-                transaction.rollback().await?;
-                client
-                    .execute(
-                        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
-                        &[&migration.version, &now_unix()],
-                    )
-                    .await?;
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    Ok(())
-}
-
-async fn applied_versions_postgres(
-    client: &tokio_postgres::Client,
-) -> StoreResult<HashSet<String>> {
-    // Check if table exists
-    let exists: bool = client
-        .query_one(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations')",
-            &[],
-        )
-        .await?
-        .get(0);
-
-    if !exists {
-        return Ok(HashSet::new());
-    }
-
-    let rows = client
-        .query("SELECT version FROM schema_migrations", &[])
-        .await?;
-    let versions = rows.into_iter().map(|row| row.get(0)).collect();
-    Ok(versions)
-}
-
-/// Latest applied migration version via a raw client, or empty string if none applied.
-pub async fn latest_version_postgres_client(
-    client: &tokio_postgres::Client,
-) -> StoreResult<String> {
-    latest_version_postgres_query(client).await
-}
-
-/// Latest applied migration version via a connection pool, or empty string if none applied.
-pub async fn latest_version_postgres_pool(pool: &deadpool_postgres::Pool) -> StoreResult<String> {
-    let client = pool
-        .get()
-        .await
-        .map_err(|e| crate::lfdb::StoreError::InvalidData(format!("pool error: {e}")))?;
-    latest_version_postgres_query(&**client).await
-}
-
-async fn latest_version_postgres_query(
-    client: &(impl tokio_postgres::GenericClient + Sync),
-) -> StoreResult<String> {
-    // Check if table exists
-    let exists: bool = client
-        .query_one(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations')",
-            &[],
-        )
-        .await?
-        .get(0);
-
-    if !exists {
-        return Ok(String::new());
-    }
-
-    let rows = client
-        .query("SELECT version FROM schema_migrations", &[])
-        .await?;
-    let applied: HashSet<String> = rows.into_iter().map(|row| row.get(0)).collect();
     Ok(latest_applied_version(&applied))
 }
 

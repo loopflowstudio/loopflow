@@ -54,8 +54,8 @@ respawn affordance, and one day the human-as-mind seat.
   `wave/<name>/GOAL.md` frontmatter; codex when unset. Read by the resident.
 - **The mind orchestrates, never grinds.** Its operating prompt is the
   rendered `GOAL.md` seed plus the coordinating-session discipline; heavy
-  work is dispatched to subagents (`lf q worker run <wave> --flow F --task T`,
-  daemonless). The LISTENER polls the shared store and journals
+  work is dispatched to subagents (`lf <flow> "task" --wave <wave> --dispatch`,
+  synchronously in a placed worktree). The LISTENER polls the shared store and journals
   `RunObserved`/`RunCompleted` observations — every ~10s and once per
   `GET /resident/context` (the resident calls it before each turn).
 - **Interrupts are twice-bounded.** The resident owns the cooperative cancel:
@@ -139,8 +139,8 @@ and dies with it (channels are conversations, not records). The listener
 serves the whole FAMILY: it holds the pen for every child journal (all pens
 in one process), folds each channel separately, and the family view folds
 upward. Child channels have no mind and no memory — pure streams. Names are
-topics, dots are the tree; subscription is by name or prefix. `lf q worker
-run` mints the work line's channel with its worktree — journal initialized
+topics, dots are the tree; subscription is by name or prefix. Placed `lf`
+runs mint the work line's channel with its worktree — journal initialized
 there, `LFD_CHANNEL` in the worker's env, and one `POST /channels` knock so
 the wave's thread shows "work line <name> opened".
 
@@ -207,7 +207,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 ```
 
 `items` are the tool/command/file/message artifacts the mind produced, in
-order (`ConversationItem` — see `lfd/conversations/types.rs`). User turns
+order (`ConversationItem` — see `chat/types.rs`). User turns
 carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
 across all sources. `from` is the speaker byline of an attributed emission
 (`lf chat`); null for the mind's own turns and plain user turns.

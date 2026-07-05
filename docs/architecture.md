@@ -53,7 +53,7 @@ Git/PR/PM ops             Clients
 | Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident mind |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
 | Roadmap item | Asana | `lf op pm` and wave flows |
-| Session | lfdb | `lf q` dispatch (tmux-wrapped `lf`) |
+| Session | lfdb | `lf` runs and placement flags |
 | Run/event | lfdb | lfd HTTP/event stream |
 | Attention | lfdb | lfd + Concerto |
 
@@ -78,9 +78,8 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 `lfd` is the gatekeeper: it serves read routes and the event push, verifies
 GitHub webhooks and translates them inward as `lf` execs, refreshes provider
-tokens, and tidies the registry at boot. It dispatches no work — `lf q`
-launches workers, and each wave's resident mind owns its own loop and cron
-schedules.
+tokens, and tidies the registry at boot. It dispatches no work; waves and
+ordinary `lf --dispatch` / `--stack` / `--fork` runs own agent execution.
 
 Important paths:
 
@@ -88,12 +87,11 @@ Important paths:
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/lfdb/`
 - `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
-- `rust/loopflow/src/lfd/executor/` (dispatch helpers shared with `lf q`, worktree janitor)
+- `rust/loopflow/src/lfd/executor/` (placement helpers and worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
-Native mode uses sqlite and a local capability token. The old container mode
-and postgres-backed shared-host story are staging debt scheduled for removal;
-self-hosted operations are SSH-first.
+`lfd` uses sqlite and a local capability token. The old container service path
+is gone; self-hosted operations are SSH-first.
 
 ## Clients
 
@@ -153,8 +151,6 @@ Loopflow integrates with:
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
 - Asana, Linear, and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
-- Docker/postgres container mode is legacy staging debt scheduled for the M2
-  substrate cut.
 - Swift/macOS services for Concerto and native host behavior.
 
 ## Where Complexity Collects

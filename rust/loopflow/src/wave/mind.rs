@@ -75,12 +75,12 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+use crate::chat::turns::{ChatRole, ChatTurn};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
-use crate::lfd::conversations::harness::{is_terminal_harness_error, Harness};
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
-use crate::lfd::http::routes::wave_config::{read_wave_config, WaveCronDef};
+use crate::engine::wave_config::{read_wave_config, WaveCronDef};
+use crate::harness::{is_terminal_harness_error, Harness};
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::wave::memory::Memory;
 use crate::wave::resident::ListenerClient;
@@ -215,10 +215,8 @@ impl Default for MindConfig {
 }
 
 /// PATH for the mind's harness and every child the resident spawns: this
-/// executable's directory first, so the discipline commands (`lf q worker
-/// run …`) resolve to the binary running this resident, never whatever
-/// `lf` the user's shell happens to find (observed live: the mind's `lf`
-/// was an older installed build missing `lf q`).
+/// executable's directory first, so placed `lf` commands resolve to the binary
+/// running this resident, never whatever `lf` the user's shell happens to find.
 pub fn path_for_children() -> OsString {
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let Some(exe_dir) = std::env::current_exe()
@@ -291,9 +289,8 @@ fn orchestration_discipline(wave: &str) -> String {
         "You are the mind of the '{wave}' wave — its long-running orchestrator.\n\
          Discipline:\n\
          - Never grind inline. Read state, decide, dispatch work to subagents \
-         via `lf q worker run {wave} --flow <flow> --task \"<task>\"` (add \
-         `--pool` to share the wave's worktree, `--stack <run-id>` to build on \
-         an unlanded run), curate what you learn into memory, and answer the \
+         via `lf <flow> \"<task>\" --wave {wave} --dispatch` (use \
+         `--stack <run-id>` for dependent work or `--fork` for independent work), curate what you learn into memory, and answer the \
          human.\n\
          - Exception: trivial, single-file, sub-minute work is done inline \
          without dispatch; dispatch is for real units of work.\n\
@@ -1113,8 +1110,8 @@ mod tests {
 
     use async_trait::async_trait;
 
-    use crate::lfd::conversations::harness::Capabilities;
-    use crate::lfd::conversations::types::TurnUsage;
+    use crate::chat::types::TurnUsage;
+    use crate::harness::Capabilities;
     use crate::wave::journal::{journal_path, EventKind, Journal};
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};

@@ -5,17 +5,7 @@ use std::process::Command;
 use crate::engine::{check_cli_available, LaunchTarget};
 
 pub fn find_repo_root() -> Result<PathBuf> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()?;
-
-    if !output.status.success() {
-        return Ok(std::env::current_dir()?);
-    }
-
-    Ok(PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
-    ))
+    crate::engine::repo::find_repo_root()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

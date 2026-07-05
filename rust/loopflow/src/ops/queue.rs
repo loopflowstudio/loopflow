@@ -181,7 +181,7 @@ mod tests {
     use crate::lfd::queue::{QueueOps, QueueRebaseConflict};
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, QueueBlockReason, RepoWork, Run,
-        RunStackStatus, RunStatus, Wave, WaveMode, WaveStatus,
+        RunStackStatus, RunStatus, Wave, WaveStatus,
     };
     use crate::lfdb::SharedStore;
 
@@ -232,7 +232,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

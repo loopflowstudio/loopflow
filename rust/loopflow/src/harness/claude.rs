@@ -9,11 +9,11 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
-use crate::lfd::conversations::harness::claude_mapping::ReaderState;
-use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::conversations::harness::{claude_mapping, Capabilities, Harness, HarnessError};
-use crate::lfd::conversations::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::harness::claude_mapping::ReaderState;
+use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError};
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,

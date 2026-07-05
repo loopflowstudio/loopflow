@@ -23,7 +23,7 @@ tmux attach -t <name>      # jump into one
 The wave agent coordinates; workers do the implementation. When the agent picks a substantial task it dispatches one:
 
 ```bash
-lf q worker run shipper --flow build --task "add retry to token refresh"
+lf build "add retry to token refresh" --wave shipper --dispatch
 ```
 
 A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
@@ -31,30 +31,14 @@ A worker runs the flow in its own worktree, opens a PR, and reports back. It inh
 By default each worker gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the default branch, with its own branch and PR. Placement flags change that:
 
 ```bash
-lf q worker run shipper --flow build --task "…" --pool           # run in the wave's shared worktree
-lf q worker run shipper --flow build --task "…" --stack <run-id> # fork from that run's branch
+lf build "…" --wave shipper --dispatch        # separate worktree for this task
+lf build "…" --wave shipper --stack <run-id> # stack on that run's branch
+lf build "…" --wave shipper --fork           # independent branch from the review base
 ```
 
-`--pool` runs in the wave's shared `<repo>.<wave>` worktree: pooled workers share one branch, so concurrent pooled dispatches can collide — use it only when workers must see each other's edits live. `--stack` starts dependent work on top of an unlanded run's branch; the new run targets the parent's branch instead of main.
+`--dispatch` creates a placed worktree and blocks until the normal `lf` run exits. `--stack` starts dependent work on top of an unlanded run's branch; `--fork` starts an independent branch from the review base.
 
 Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's mind.
-
-## Modes
-
-The wave's `mode` controls its primary execution pattern.
-
-| Mode | Behavior |
-|------|----------|
-| **manual** | Single run, then stop |
-| **loop** | Continuously until stopped |
-
-### Manual
-
-Single execution. Run a flow once, then stop.
-
-### Loop
-
-Continuous work. Each iteration picks a task, runs the flow, creates a PR. When the PR limit is reached, the loop pauses until PRs are merged.
 
 ## Crons
 
@@ -65,7 +49,6 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ---
 primary_flow: build
 workers: 2
-mode: loop
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
@@ -85,7 +68,6 @@ Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 ---
 primary_flow: garden
 workers: 0
-mode: manual
 crons:
   - flow: govern-identity
     schedule: "0 0 0 * * Sun *"

@@ -5,7 +5,6 @@ from __future__ import annotations
 WAVE_MINIMAL = {
     "id": "abc-123",
     "name": "reduce",
-    "mode": "loop",
     "primary_flow": "reduce",
     "goal": "ship-roadmap",
     "metrics": [],

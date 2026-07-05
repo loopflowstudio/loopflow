@@ -1,6 +1,6 @@
 //! The surviving executor surface: palette terminal sessions, boot session
 //! reconciliation, and the worktree janitor. Run dispatch left this process
-//! — `lf q worker run` launches workers in tmux and every flow run registers
+//! — placed `lf` runs launch workers and every flow run registers
 //! its own session row; this module only observes and tidies.
 
 use std::collections::{BTreeMap, HashSet};
@@ -251,8 +251,8 @@ impl WaveExecutor {
 
     async fn launch_tmux_session(&self, session: Session) -> Result<Session> {
         // The wrapper (exit-file contract, inherited-marker unset) has one
-        // authoring site: helpers::tmux_shell_command, shared with `lf q
-        // worker run`. Only the tail is the executor's choice.
+        // authoring site: helpers::tmux_shell_command. Only the tail is the
+        // executor's choice.
         launch_session_in_tmux(&session, session_tail(&session)).await?;
 
         let mut running = session;

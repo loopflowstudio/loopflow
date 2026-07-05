@@ -2,7 +2,6 @@
   "id": "wave_abc123",
   "object": "wave",
   "name": "engbot",
-  "mode": "loop",
   "primary_flow": "build",
   "goal": "ship-roadmap",
   "metrics": ["all roadmap items shipped", "cargo test green"],

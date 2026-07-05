@@ -1,11 +1,10 @@
-//! What remains of the executor after the organ cut: the dispatch helpers
-//! `lf q` shares (worktree placement, the tmux wrapper), palette terminal
-//! sessions, boot session reconciliation, and the worktree janitor.
+//! What remains of the executor after the organ cut: worktree placement,
+//! palette terminal sessions, boot session reconciliation, and the worktree
+//! janitor.
 //!
 //! The agent-spawning engines (docker/local runners), the run-execution
-//! chains, and the repair machinery died with the trigger organs — dispatch
-//! is `lf q worker run`'s job now, and every worker is a tmux-wrapped `lf`
-//! process that registers its own session row.
+//! chains, and the repair machinery died with the trigger organs. Normal `lf`
+//! placement flags now run synchronously in the placed worktree.
 
 // TODO(M1): move the remaining session reconciliation and worktree janitor
 // mechanisms to the session/worktree owners; keep cleanup idempotent for both

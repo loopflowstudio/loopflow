@@ -76,21 +76,14 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
-| **Mode** | Primary execution pattern: manual or loop | goal frontmatter |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |
 
-A wave is a named agent with a goal. Everything that defines it — goal, memory, mode, crons — is authored in the repo. Mode controls the primary execution pattern. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
-
-| Mode | Runs |
-|------|------|
-| **manual** | Single run |
-| **loop** | Continuously until stopped |
+A wave is a named agent with a goal. Everything that defines it — goal, memory, worker defaults, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
 
 ```markdown
 ---
 primary_flow: build
 workers: 2
-mode: loop
 metrics:
   - backlog is empty
 ---

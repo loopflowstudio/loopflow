@@ -3,7 +3,6 @@ pub mod auth;
 pub mod bridge;
 pub(crate) mod client;
 pub mod config;
-pub mod conversations;
 pub mod events;
 pub mod executor;
 pub mod github;
@@ -81,17 +80,6 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
-    if let Ok(database_url) = std::env::var("LFD_DATABASE_URL") {
-        let trimmed = database_url.trim();
-        if trimmed.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "LFD_DATABASE_URL is set but empty",
-            ));
-        }
-        return Ok(StorageConfig::postgres(trimmed.to_string()));
-    }
-
     let db_root = default_db_path()
         .parent()
         .map(Path::to_path_buf)

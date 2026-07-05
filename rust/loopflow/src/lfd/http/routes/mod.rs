@@ -9,7 +9,6 @@ pub mod runs;
 pub mod session_controls;
 pub mod system;
 pub mod usage;
-pub mod wave_config;
 pub mod waves;
 pub mod worktrees;
 pub mod ws;
@@ -159,13 +158,15 @@ pub async fn build_wave_dto(
         });
     }
 
-    let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
+    let wave_config = crate::engine::wave_config::read_wave_config(
+        std::path::Path::new(wave.repo()),
+        wave.name(),
+    );
 
     Ok(WaveDto {
         id: wave.id().to_string(),
         object: "wave".to_string(),
         name: wave.name().clone(),
-        mode: wave.mode().as_str().to_string(),
         primary_flow: wave.primary_flow().to_string(),
         goal: wave.goal().to_string(),
         metrics: wave.metrics().clone(),
@@ -432,7 +433,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, RepoWork, Run, RunStackStatus, RunStatus,
-        Wave, WaveMode, WaveStatus,
+        Wave, WaveStatus,
     };
     use crate::lfdb::SharedStore;
     use std::collections::{HashMap, HashSet};
@@ -490,7 +491,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
-            mode: WaveMode::Loop,
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),

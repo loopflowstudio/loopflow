@@ -23,7 +23,6 @@ def test_wave_fixture_parses():
     assert wave.primary_flow == "build"
     assert wave.goal == "ship-roadmap"
     assert wave.metrics == ["all roadmap items shipped", "cargo test green"]
-    assert wave.mode == "loop"
     assert wave.status == "running"
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]

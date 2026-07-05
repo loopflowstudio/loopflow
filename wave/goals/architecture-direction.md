@@ -4,8 +4,9 @@ The technical architecture the wave-agent work is converging toward, and the
 roadmap to it. Durable record of the design conversation whose working notes
 lived in `scratch/{components,collapse,realign,post-m2}.md` (wiped on land).
 Decisions marked **[R]** are Jack-ratified; **[~]** are proposed/open. This
-document records the target direction; PR #801 still carries explicit staging
-debt where called out below.
+document records the target direction. PR #801 (merged) reshaped the components;
+PR #803 (M1/M2 compression) then executed a large chunk of the debt below —
+resolved items are marked **[done #803]** in the staging-debt section.
 
 ## The anatomy
 
@@ -168,24 +169,30 @@ from goals.
 
 ## Known staging debt in PR #801
 
-This branch is M0, not the fully shaped architecture. Known mismatches with the
+The #801 branch was M0. PR #803 (M1/M2 compression) closed the substrate and
+harness items below; the remainder is still open. Known mismatches with the
 target above:
 
+- **[done #803]** `harness` moved out of `lfd::conversations` to top-level
+  `harness` + `chat`; vendor adapters no longer depend on the daemon.
+- **[done #803]** Postgres deleted; `lfdb` is sqlite-only (the
+  tokio-postgres/deadpool tree is gone). Narrowing sqlite to the operational
+  scratchpad is the remaining M2 work.
+- **[done #803]** `wave_config` re-export shim dropped and the route pruned;
+  the docker-compose lfd path deleted and the OS ServiceManager folded into
+  direct config dispatch. The `mode` knob is gone from `GOAL.md`.
+- **[done #803]** `lf q` retired; dispatch flows through `--dispatch`/`--wave`
+  on the flow commands (decision-question #1 resolved — one dispatch door).
+- Container mode's *deploy* mechanisms (env hardening, named credential mounts,
+  health checks, redaction, service-file hygiene) still need a home in the
+  future deploy/SSH story if they still apply.
 - `lfd` still has remote-bind/token scaffolding. Target: local capability token
   through M2, with real remote identity/auth in M3.
-- Container mode still exists. Target: cut it in M2 along with postgres. Preserve
-  useful mechanisms from the container work (env hardening, named credential
-  mounts, health checks, redaction, service-file hygiene) by moving them to the
-  future deploy/SSH story if they still apply.
 - `lfd` still has hand routes (`/land`, `/next`, `/combine`, `/stop`, rename)
   that call ops or tmux in-process. Target: exec `lf` argv, then remove the
   private hands.
-- `stream_events`, `find_repo_root`, `wave_config`, worktree naming, and
-  placement helpers still sit in pre-charter homes. M1 owns these moves.
-- `harness` still lives under `lfd::conversations`; M1 moves it to
-  `crate::harness`.
-- Postgres remains in `lfdb`; M2 deletes postgres and narrows sqlite to the
-  operational scratchpad.
+- `stream_events`, `find_repo_root`, and worktree naming/placement helpers
+  still sit in pre-charter homes. M1 owns these remaining moves.
 
 Mechanisms to preserve while moving or cutting old organs:
 

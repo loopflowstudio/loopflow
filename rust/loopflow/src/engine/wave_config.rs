@@ -1,5 +1,3 @@
-// TODO(M1): move wave config/frontmatter parsing into engine. It is used by
-// wave, ops, resident, and lfd; routes should not own this shared contract.
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;
@@ -10,24 +8,23 @@ use tracing::warn;
 /// The wave's resident mind reads these and opens a system turn when a
 /// schedule comes due (`crate::wave::mind`) — no daemon poller, no table.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct WaveCronDef {
+pub struct WaveCronDef {
     pub flow: String,
     pub schedule: String,
 }
 
 /// The Asana project a wave's roadmap lives in, from `pm.asana_project` in GOAL.md.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
-pub(crate) struct WavePmConfig {
+pub struct WavePmConfig {
     #[serde(default)]
     pub asana_project: Option<String>,
 }
 
 /// Intent read from `wave/<name>/GOAL.md` frontmatter during wave creation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub(crate) struct WaveConfig {
+pub struct WaveConfig {
     pub flow: Option<String>,
     pub goal: Option<String>,
-    pub mode: Option<String>,
     pub primary_flow: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub workers: Option<u32>,
@@ -50,7 +47,7 @@ pub(crate) struct WaveConfig {
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
-pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
+pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
@@ -164,7 +161,7 @@ fn remove_or_set_step_agents(
 }
 
 /// Update `wave/<name>/GOAL.md` frontmatter, preserving existing body text.
-pub(crate) fn update_wave_goal_config(
+pub fn update_wave_goal_config(
     repo: &Path,
     name: &str,
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
@@ -186,7 +183,7 @@ pub(crate) fn update_wave_goal_config(
 }
 
 /// Update agent fields in `wave/<name>/GOAL.md`, preserving existing frontmatter.
-pub(crate) fn update_wave_agent_config(
+pub fn update_wave_agent_config(
     repo: &Path,
     name: &str,
     agent: Option<String>,
@@ -211,14 +208,13 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nprimary_flow: build\nmode: manual\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
+            "---\nprimary_flow: build\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.goal.as_deref(), Some("scan"));
         assert_eq!(config.primary_flow.as_deref(), Some("build"));
-        assert_eq!(config.mode.as_deref(), Some("manual"));
         assert_eq!(config.workers, Some(3));
         assert_eq!(
             config.metrics,

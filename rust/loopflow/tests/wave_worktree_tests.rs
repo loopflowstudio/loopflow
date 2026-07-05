@@ -246,15 +246,15 @@ async fn stack_placement_forks_from_parent_branch_with_lineage() {
         .await
         .unwrap();
 
-    // Unlanded work on the parent branch, pushed like a worker's PR flow would.
+    // Unlanded work on the parent branch. The Fresh run's background upstream
+    // sync (schedule_upstream_sync) owns pushing this branch to origin; a manual
+    // push here would race that thread and hit "reference already exists". The
+    // stacked child forks from the parent's local tip, so it sees this commit
+    // without any push.
     let parent_wt = Path::new(&parent.worktree);
     std::fs::write(parent_wt.join("stacked.txt"), "level 0").unwrap();
     run_git_ok(parent_wt, &["add", "."]);
     run_git_ok(parent_wt, &["commit", "-m", "parent work"]);
-    run_git_ok(
-        parent_wt,
-        &["push", "origin", &format!("HEAD:{}", parent.branch)],
-    );
 
     let child_id = LfdId::new();
     let placement = Placement::Stack {

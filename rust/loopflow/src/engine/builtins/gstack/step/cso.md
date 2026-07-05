@@ -262,7 +262,7 @@ Find shadow infrastructure with excessive access.
 
 **Dockerfiles:** For each Dockerfile, check for missing `USER` directive (runs as root), secrets passed as `ARG`, `.env` files copied into images, exposed ports.
 
-**Config files with prod credentials:** Use Grep to search for database connection strings (postgres://, mysql://, mongodb://, redis://) in config files, excluding localhost/127.0.0.1/example.com. Check for staging/dev configs referencing prod.
+**Config files with prod credentials:** Use Grep to search for database connection strings and service URLs in config files, excluding localhost/127.0.0.1/example.com. Check for staging/dev configs referencing prod.
 
 **IaC security:** For Terraform files, check for `"*"` in IAM actions/resources, hardcoded secrets in `.tf`/`.tfvars`. For K8s manifests, check for privileged containers, hostNetwork, hostPID.
 

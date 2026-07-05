@@ -80,13 +80,6 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
-    if std::env::var_os("LFD_DATABASE_URL").is_some() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "LFD_DATABASE_URL was removed; lfd uses sqlite via LFD_DB_PATH",
-        ));
-    }
-
     let db_root = default_db_path()
         .parent()
         .map(Path::to_path_buf)

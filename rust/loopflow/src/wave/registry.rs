@@ -307,7 +307,7 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
 
 /// The endpoint a wave's live server listens on, off the live WaveAgent
 /// session row's env (trimmed, empty dropped). Shared by `lf chat`'s target
-/// resolution and `lf q`'s channel-opened knock; callers fall back to the
+/// resolution and the work-line channel knock; callers fall back to the
 /// `wave/<name>/.wave-endpoint` discovery file when the store has no live row.
 pub(crate) async fn wave_server_endpoint(
     store: &SharedStore,

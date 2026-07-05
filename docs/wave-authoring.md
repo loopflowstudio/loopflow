@@ -11,7 +11,7 @@ A wave is a named agent with a goal. You author its intent and memory; it works 
 
 ## Creating a Wave
 
-Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets `primary_flow:` / `mode:`. Then run the agent:
+Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets durable defaults such as `primary_flow:` and `workers:`. Then run the agent:
 
 ```bash
 lf wave infra             # start the wave agent
@@ -38,7 +38,6 @@ wave/infra/
 ```markdown
 ---
 primary_flow: build
-mode: loop
 workers: 2
 metrics:
   - daemon migrations are transactional
@@ -90,7 +89,6 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 |-------|-------------|
 | `primary_flow` | Default flow a worker runs (`build`, `garden`, `sync`, …) |
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
-| `mode` | Primary execution pattern: `manual` or `loop` |
 | `metrics` | Criteria the loop re-judges each iteration |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident mind |
@@ -123,7 +121,7 @@ Run the wave agent and it works one move at a time:
 3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
 
    ```bash
-   lf q worker run infra --flow build --task "wrap SQLite migrations in a transaction"
+   lf build "wrap SQLite migrations in a transaction" --wave infra --dispatch
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
@@ -147,14 +145,7 @@ tmux attach -t <name>       # jump into one; agent output lives here
 
 In **Concerto**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
 
-### Modes and Crons
-
-Mode controls the primary execution pattern. Crons schedule supplementary flows.
-
-| Mode | Behavior |
-|------|----------|
-| **manual** | Single run, then stop |
-| **loop** | Continuously until stopped or the roadmap empties |
+### Crons
 
 Crons live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
 
@@ -163,14 +154,13 @@ Crons live in `GOAL.md` frontmatter; the wave's resident mind fires each due sch
 ---
 primary_flow: garden
 workers: 0
-mode: manual
 crons:
   - flow: govern-coordination
     schedule: "0 0 0 * * * *"
 ---
 ```
 
-[Modes and crons →](waves.md)
+[Crons →](waves.md#crons)
 
 ---
 

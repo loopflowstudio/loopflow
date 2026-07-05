@@ -245,7 +245,7 @@ pub enum EventKind {
     },
     // -- channels --
     /// A work-line channel opened under this wave (dispatch minted the
-    /// worktree and its journal; see `lf q worker run`). Journaled on the
+    /// worktree and its journal; see placed `lf` runs). Journaled on the
     /// PARENT channel — the fold materializes a thread-visible turn
     /// ([`channel_opened_turn`]) so the wave's thread shows the opening.
     /// `run_id` is the idempotence key: one dispatch, one opening, however

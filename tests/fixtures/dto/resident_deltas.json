@@ -20,7 +20,7 @@
         "id": "t-1",
         "name": "Bash",
         "status": "completed",
-        "input": "lf q worker run ship --flow implement --task \"parser\"",
+        "input": "lf implement \"parser\" --wave ship --dispatch",
         "output": null
       }
     },

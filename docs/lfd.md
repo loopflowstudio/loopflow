@@ -5,7 +5,7 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work — `lf q` launches workers as tmux-wrapped `lf` processes, and each wave's resident mind owns its own loop.
+`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work; each wave's resident mind and ordinary `lf --dispatch` / `--stack` / `--fork` invocations own agent execution.
 
 ## Run Native lfd
 

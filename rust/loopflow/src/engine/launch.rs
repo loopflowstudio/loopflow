@@ -305,7 +305,7 @@ Test step body.
         .expect("prepare prompt");
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.config.system_prompt.contains("lf op commit"));
-        assert!(prepared.config.system_prompt.contains("lf q worker run"));
+        assert!(prepared.config.system_prompt.contains("--dispatch"));
         assert!(prepared.config.system_prompt.contains("tmux attach"));
     }
 

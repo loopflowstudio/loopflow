@@ -5,7 +5,9 @@ use std::sync::Arc;
 use loopflow::engine::config::BranchNameConfig;
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
 use loopflow::engine::naming::sanitize_for_branch;
-use loopflow::engine::worktrees::{branch_exists, create_with_schema, worktree_path};
+use loopflow::engine::worktrees::{
+    branch_exists, create_with_schema, run_worktree_path, worktree_path,
+};
 use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::types::{RepoWork, Wave, WaveMode, WaveStatus};
@@ -82,7 +84,7 @@ async fn run_creates_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
         .await
         .unwrap();
 
@@ -103,7 +105,7 @@ async fn run_creates_branch() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
         .await
         .unwrap();
 
@@ -127,37 +129,22 @@ async fn run_worktree_follows_naming_convention() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
         .await
         .unwrap();
 
-    let expected = worktree_path(repo.path(), "review");
+    let repo_name = repo.path().file_name().unwrap().to_string_lossy();
+    let expected = run_worktree_path(repo.path(), "review", run_id.as_str());
     assert_eq!(
         PathBuf::from(&run.worktree),
         expected,
-        "worktree path should follow {{repo}}.{{wave_name}} convention"
+        "worktree path should follow {{repo}}.{{wave_name}}.{{run_id}} convention"
     );
-}
-
-#[tokio::test]
-async fn run_reuses_existing_worktree() {
-    let repo = TestRepo::new();
-    let store = make_store().await;
-    let wave = make_wave(&repo.path().to_string_lossy(), "iterate");
-    store.create_wave(&wave).await.unwrap();
-
-    // First run creates the worktree
-    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
-        .await
-        .unwrap();
-    let wt_path = run1.worktree.clone();
-
-    // Second run reuses the existing worktree
-    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
-        .await
-        .unwrap();
-    assert_eq!(run2.worktree, wt_path, "should reuse existing worktree");
-    assert!(!run2.branch.is_empty(), "branch should still be set");
+    assert!(PathBuf::from(&run.worktree)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(&format!("{repo_name}.review.")));
 }
 
 #[tokio::test]
@@ -167,10 +154,10 @@ async fn run_records_parent_lineage() {
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
         .await
         .unwrap();
-    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
         .await
         .unwrap();
 

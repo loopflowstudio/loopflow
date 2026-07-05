@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use clap::{CommandFactory, Parser};
@@ -251,6 +252,19 @@ fn run_target(
     command: &[String],
 ) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    if placement_requested(cli) {
+        return run_placed_target(&repo_root, name, message, cli, command);
+    }
+    run_target_in_repo(&repo_root, name, message, cli, command)
+}
+
+fn run_target_in_repo(
+    repo_root: &Path,
+    name: &str,
+    message: Option<&str>,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
     match loopflow::lf::discovery::discover_target(&repo_root, name)? {
         loopflow::lf::discovery::Target::Step(_) => with_runtime(&repo_root, command, || {
             with_step_runtime(&repo_root, name, || {
@@ -270,6 +284,170 @@ fn run_target(
         loopflow::lf::discovery::Target::Flow(flow) => with_runtime(&repo_root, command, || {
             loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root)
         }),
+    }
+}
+
+fn placement_requested(cli: &Cli) -> bool {
+    cli.dispatch || cli.stack.is_some() || cli.fork
+}
+
+fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
+    let inner_command = strip_placement_args(command);
+    let inner_cli = Cli::try_parse_from(inner_command.clone())?;
+    if placement_requested(&inner_cli) {
+        return Err(anyhow::anyhow!(
+            "placement flags leaked into placed invocation"
+        ));
+    }
+    Ok((inner_cli, inner_command))
+}
+
+fn strip_placement_args(command: &[String]) -> Vec<String> {
+    let mut stripped = Vec::with_capacity(command.len());
+    let mut args = command.iter().peekable();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--dispatch" | "--fork" => {}
+            "--stack" => {
+                let _ = args.next();
+            }
+            value if value.starts_with("--stack=") => {}
+            _ => stripped.push(arg.clone()),
+        }
+    }
+    stripped
+}
+
+fn run_placed_target(
+    repo_root: &Path,
+    name: &str,
+    message: Option<&str>,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
+    let wave_name = resolve_placement_wave(repo_root, cli)?;
+    let placement = if let Some(parent) = cli.stack.as_deref() {
+        loopflow::lfd::executor::Placement::Stack {
+            parent_run_id: parent
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid --stack run id: '{parent}'"))?,
+        }
+    } else {
+        loopflow::lfd::executor::Placement::Fresh
+    };
+    let target_branch = if cli.dispatch {
+        loopflow::engine::git::current_branch(repo_root)?
+    } else {
+        None
+    };
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store: loopflow::lfdb::SharedStore = std::sync::Arc::new(runtime.block_on(async {
+        loopflow::lfdb::open_existing_store().await.ok_or_else(|| {
+            anyhow::anyhow!(
+                "no run registry on this machine — nothing has created ~/.lf/lfd.db yet"
+            )
+        })
+    })?);
+
+    let mut run = runtime.block_on(async {
+        let wave = store
+            .get_wave_by_name(&wave_name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("wave '{wave_name}' not found in the registry"))?;
+        let run_id = loopflow::lfd::id::LfdId::new();
+        let mut run = loopflow::lfd::executor::create_run_for_placement(
+            &store,
+            &wave,
+            &run_id,
+            &placement,
+            target_branch.as_deref(),
+        )
+        .await?;
+        run.flow = name.trim_end_matches(':').to_string();
+        run.task = message.map(str::to_string);
+        store.update_run(&run).await?;
+        anyhow::Ok(run)
+    })?;
+
+    eprintln!("placed {name} in {}", run.worktree);
+    let _cwd = CurrentDirGuard::set(&run.worktree)?;
+    let _wave_env = EnvGuard::set("LFD_WAVE_ID", run.wave_id.to_string());
+    let _run_env = EnvGuard::set("LFD_RUN_ID", run.id.to_string());
+    let _lf_run_env = EnvGuard::set("LF_RUN_ID", run.id.to_string());
+
+    let (inner_cli, inner_command) = inner_placement_invocation(command)?;
+    let result = run_target_in_repo(
+        Path::new(&run.worktree),
+        name,
+        message,
+        &inner_cli,
+        &inner_command,
+    );
+    let succeeded = result.is_ok();
+    let error = result.as_ref().err().map(ToString::to_string);
+    runtime.block_on(async {
+        run.status = if succeeded {
+            loopflow::lfd::types::RunStatus::Completed
+        } else {
+            loopflow::lfd::types::RunStatus::Failed
+        };
+        run.ended_at = Some(time::OffsetDateTime::now_utc());
+        run.error = error;
+        store.update_run(&run).await
+    })?;
+    result
+}
+
+fn resolve_placement_wave(repo_root: &Path, cli: &Cli) -> anyhow::Result<String> {
+    if let Some(wave) = cli.wave.as_ref().filter(|value| !value.trim().is_empty()) {
+        return Ok(wave.clone());
+    }
+    let main_repo = loopflow::engine::worktrees::main_repo_root(repo_root)?;
+    loopflow::engine::worktrees::wave_name_from_worktree_and_main(repo_root, &main_repo)
+        .ok_or_else(|| anyhow::anyhow!("placement requires --wave or an ambient wave worktree"))
+}
+
+struct CurrentDirGuard {
+    previous: PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn set(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let previous = std::env::current_dir()?;
+        std::env::set_current_dir(path)?;
+        Ok(Self { previous })
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        if let Err(err) = std::env::set_current_dir(&self.previous) {
+            eprintln!("failed to restore cwd {}: {err}", self.previous.display());
+        }
+    }
+}
+
+struct EnvGuard {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: impl Into<String>) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value.into());
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(value) = &self.previous {
+            std::env::set_var(self.key, value);
+        } else {
+            std::env::remove_var(self.key);
+        }
     }
 }
 
@@ -344,7 +522,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
             Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
             Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
-            Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
             Some(Commands::Chat { text, from, target }) => {
                 loopflow::lf::commands::chat::run(text, from.as_deref(), target)
             }
@@ -376,12 +553,15 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf op`, `lf q`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
-/// `lf wave`, which never self-register (`lf q` creates the worker's row
-/// itself; `lf wave` registers as the wave's agent session; chat/memory are
+/// (`lf op`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
+/// `lf wave`, which never self-register (placement creates the worker's row;
+/// `lf wave` registers as the wave's agent session; chat/memory are
 /// one-shot POSTs attributed via the env they inherit).
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
+        return None;
+    }
+    if placement_requested(cli) {
         return None;
     }
     match &cli.command {
@@ -395,7 +575,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Usage)
         | Some(Commands::Runs)
         | Some(Commands::Trace { .. })
-        | Some(Commands::Q { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Sub { .. })
         | Some(Commands::Memory { .. }) => None,
@@ -404,7 +583,10 @@ fn run_label(cli: &Cli) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_tables, reorder_args};
+    use super::{arg_tables, inner_placement_invocation, placement_requested, reorder_args};
+
+    use clap::Parser;
+    use loopflow::lf::{Cli, Commands};
 
     /// The derived tables cover everything the old hand lists carried, plus
     /// the uppercase short aliases those lists had drifted away from.
@@ -412,7 +594,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "q", "wave", "chat", "memory", "usage", "runs", "trace", "help",
+            ":", "op", "wave", "chat", "memory", "usage", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }
@@ -427,6 +609,7 @@ mod tests {
             "-w",
             "-W",
             "--wave",
+            "--stack",
         ] {
             assert!(tables.value_flags.contains(flag), "value flag {flag}");
         }
@@ -451,6 +634,8 @@ mod tests {
             "--diff",
             "--no-diff",
             "--no-loopflow",
+            "--dispatch",
+            "--fork",
             "-h",
             "--help",
             "-V",
@@ -485,6 +670,63 @@ mod tests {
         let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
+    }
+
+    #[test]
+    fn reorder_args_placement_flags_after_step() {
+        let args = vec![
+            "lf".to_string(),
+            "implement".to_string(),
+            "ship it".to_string(),
+            "--dispatch".to_string(),
+        ];
+        let result = reorder_args(args);
+        assert_eq!(result, vec!["lf", "--dispatch", "implement", "ship it"]);
+    }
+
+    #[test]
+    fn placed_inner_invocation_strips_dispatch() {
+        let command: Vec<String> = [
+            "lf",
+            "--dispatch",
+            "-b",
+            "--wave",
+            "goals",
+            "implement",
+            "ship it",
+        ]
+        .map(String::from)
+        .to_vec();
+        let cli = Cli::parse_from(command.clone());
+        assert!(placement_requested(&cli));
+
+        let (inner_cli, inner_command) = inner_placement_invocation(&command).unwrap();
+
+        assert!(!placement_requested(&inner_cli));
+        assert_eq!(
+            inner_command,
+            vec!["lf", "-b", "--wave", "goals", "implement", "ship it"]
+        );
+        assert!(inner_cli.batch);
+        assert_eq!(inner_cli.wave.as_deref(), Some("goals"));
+        assert!(matches!(inner_cli.command, Some(Commands::External(_))));
+    }
+
+    #[test]
+    fn placed_inner_invocation_strips_stack_value_forms() {
+        let spaced: Vec<String> = ["lf", "--stack", "01JSTACK", "implement"]
+            .map(String::from)
+            .to_vec();
+        let (inner_cli, inner_command) = inner_placement_invocation(&spaced).unwrap();
+        assert!(!placement_requested(&inner_cli));
+        assert_eq!(inner_command, vec!["lf", "implement"]);
+
+        let equals: Vec<String> = ["lf", "--stack=01JSTACK", "implement"]
+            .map(String::from)
+            .to_vec();
+        let (inner_cli, inner_command) = inner_placement_invocation(&equals).unwrap();
+        assert!(!placement_requested(&inner_cli));
+        assert_eq!(inner_command, vec!["lf", "implement"]);
     }
 
     #[test]

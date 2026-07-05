@@ -6,7 +6,6 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio_postgres::error::SqlState;
 
 use crate::lfd::github::github_repo_from_local;
 use crate::lfd::http::dto::{format_datetime, ListResponse, RepoDto};
@@ -311,10 +310,6 @@ fn is_repo_id_conflict(err: &StoreError) -> bool {
             rusqlite::Error::SqliteFailure(_, Some(message))
                 if message.contains("UNIQUE constraint failed: repos.repo_id")
         ),
-        StoreError::Postgres(postgres_err) => postgres_err.as_db_error().is_some_and(|db_error| {
-            db_error.code() == &SqlState::UNIQUE_VIOLATION
-                && db_error.constraint() == Some("idx_repos_repo_id")
-        }),
         _ => false,
     }
 }

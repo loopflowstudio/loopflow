@@ -57,19 +57,10 @@ lf wave s3           # the s3 (control) charter
 The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
 
 ```bash
-lf q worker run designer --flow build --task "unify button variants"
+lf build "unify button variants" --wave designer --dispatch
 ```
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
-
-### Modes
-
-The wave's `mode` controls its execution pattern.
-
-| Mode | Behavior | Example |
-|------|----------|---------|
-| **manual** | Single run | Ship one feature, run one audit |
-| **loop** | Continuous until stopped | Work through a backlog, grind PRs |
 
 ### Crons
 
@@ -337,7 +328,7 @@ Install the Rust binaries directly with cargo.
 
 ```bash
 lf wave engbot       # start the wave agent (Ctrl-C to stop)
-lf q worker run engbot --flow implement --task "Add the endpoint"
+lf implement "Add the endpoint" --wave engbot --dispatch
 tmux ls              # list live sessions — the wave agent and its workers
 tmux attach -t <name>  # attach to one
 ```

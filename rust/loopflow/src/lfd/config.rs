@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn removed_mode_yaml_is_rejected() {
         let err =
-            serde_yaml_ng::from_str::<RawLfdConfig>("mode: container").expect_err("mode removed");
+            serde_yaml_ng::from_str::<RawLfdConfig>("mode: removed").expect_err("mode removed");
 
         assert!(err.to_string().contains("unknown field `mode`"));
     }

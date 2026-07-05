@@ -13,11 +13,19 @@ guarded subscription server," under waves-outward. All decisions ratified
 **The trinity (Jack):** the filesystem is the database; lf is the hands;
 lfd is the GATEKEEPER — the machine's face to the outside world: discovery
 ("which waves exist here"), aggregation (union of the machine's channels),
-relay (push outward), gate (auth inward), token custody. sqlite survives
-only as the gatekeeper's PRIVATE REBUILDABLE INDEX over the filesystem —
-derived state, crash-harmless, exactly what the doorman tests demanded.
-"Yesterday's db-is-the-registry was a transitional stop, not the
-destination."
+relay (push outward), gate (auth inward), token custody. NO DATABASE ENGINES AT ALL (Jack, final): sqlite AND
+postgres both go. The gatekeeper's index is IN-MEMORY, rebuilt from the
+filesystem at boot — scanning is the migration. Postgres's team story is
+replaced by GATEKEEPER FEDERATION: a remote machine's state arrives through
+its face, never a shared db. Tokens → keychain/file custody. lfdb (renamed
+yesterday) is transitional scaffolding scheduled for whole deletion:
+backends, catalog, rows, 49 migrations; local dbs are disposable per the
+architecture item's own words; tokens get a one-time export.
+**The gate runs lf under client control (Jack):** an authenticated remote
+client can run lf commands through the gatekeeper — the gate forwards
+CLIENT authority, never its own; a remote client may do exactly what it
+could do locally, scoped by its credentials. Identity decides which verbs;
+the gate decides nothing.
 
 Substrate mapping (what replaces each registry job):
 - session/run lifecycle → publications on the run's own channel journal;

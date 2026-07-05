@@ -121,6 +121,16 @@ tree doesn't match this map; the conversion makes it match.
    dot-absence unified); wave_context imports it.
 
 ## Ratified during review (Jack, 2026-07-05)
+- **One pen, by hierarchy** (RATIFIED): the nearest running listener holds
+  the pens for its channel family; pens follow the tree. Why speech routes
+  through servers instead of appending directly.
+- **The interjection dial** (named open question): bottom row is hearable-
+  never-interrupting today (attributed speech queues at the boundary; only
+  unattributed human speech steers). Urgency-gated interjection — workers
+  interrupt upward only via surprise-weighted escalation (the free-energy
+  brief's precision-weighted algedonic channel) — is the sketched notch 3,
+  landing with M4's dynamics. Do not build interjection before the wave can
+  rank urgency.
 - **Waves outward is the reorganizing principle, radically applied** — the
   review found basics wrong because structure still encodes centralized
   execution; the conversion is not cleanup, it is the philosophy landing.

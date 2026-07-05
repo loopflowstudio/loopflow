@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::lfd::events::EventHub;
-use crate::lfd::provider_auth::Provider;
 use crate::lfd::types::Event;
 use crate::lfdb::{CredentialType, ProviderToken, SecretsProviderConfig, SharedStore};
+use crate::provider_auth::Provider;
 
 // Key mappings: env var name → provider that consumes it.
 const KEY_MAPPINGS: &[(&str, Provider)] = &[

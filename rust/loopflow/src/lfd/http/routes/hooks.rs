@@ -655,12 +655,12 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::http::state::HttpState;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::types::{
         PullRequest, RepoWork, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus,
     };
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::provider_auth::ProviderAuthService;
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;

@@ -14,10 +14,10 @@ use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
-use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
+use loopflow::provider_auth::ProviderAuthService;
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name)

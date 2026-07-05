@@ -95,9 +95,9 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::provider_auth::ProviderAuthService;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::sync::Mutex;

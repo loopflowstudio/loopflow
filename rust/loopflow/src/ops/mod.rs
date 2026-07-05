@@ -9,6 +9,7 @@ mod next;
 pub mod pm;
 mod pr;
 mod progress;
+pub mod queue;
 mod rebase;
 mod release;
 pub mod trace;

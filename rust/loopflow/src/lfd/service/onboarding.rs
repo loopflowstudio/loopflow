@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::lfd::provider_auth::Provider;
+use crate::provider_auth::Provider;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(200);

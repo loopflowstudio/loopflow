@@ -812,8 +812,15 @@ impl SqliteStore {
 
     pub fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // attention_items and terminal_sessions reference waves without
+        // ON DELETE CASCADE; delete them explicitly or the wave row is
+        // undeletable once either exists.
         conn.execute(
             "DELETE FROM attention_items WHERE wave_id = ?1",
+            params![wave_id],
+        )?;
+        conn.execute(
+            "DELETE FROM terminal_sessions WHERE wave_id = ?1",
             params![wave_id],
         )?;
         conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;

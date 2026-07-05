@@ -8,9 +8,9 @@ use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
-use crate::lfd::provider_auth::ProviderAuthService;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfdb::SharedStore;
+use crate::provider_auth::ProviderAuthService;
 
 #[derive(Clone)]
 pub struct HttpState {

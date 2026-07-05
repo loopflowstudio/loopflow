@@ -82,7 +82,7 @@ pub struct QueueRebaseConflict {
     pub files: Vec<String>,
 }
 
-trait QueueOps: Send + Sync {
+pub(crate) trait QueueOps: Send + Sync {
     fn ensure_branch_checked_out(&self, worktree: &Path, branch: &str) -> Result<(), String>;
     fn mark_ready(&self, worktree: &Path, pr_number: u32) -> Result<(), String>;
     fn mark_draft(&self, worktree: &Path, pr_number: u32) -> Result<(), String>;
@@ -95,7 +95,7 @@ trait QueueOps: Send + Sync {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct RealQueueOps;
+pub(crate) struct RealQueueOps;
 
 static QUEUE_RECONCILE_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -208,7 +208,7 @@ pub async fn remove_reconcile_lock(wave_id: &LfdId) {
     locks.remove(&wave_id.to_string());
 }
 
-async fn acquire_reconcile_lock(wave_id: &LfdId) -> OwnedMutexGuard<()> {
+pub(crate) async fn acquire_reconcile_lock(wave_id: &LfdId) -> OwnedMutexGuard<()> {
     let wave_key = wave_id.to_string();
     let lock = {
         let mut locks = QUEUE_RECONCILE_LOCKS.lock().await;
@@ -220,7 +220,7 @@ async fn acquire_reconcile_lock(wave_id: &LfdId) -> OwnedMutexGuard<()> {
     lock.lock_owned().await
 }
 
-async fn reconcile_wave_queue_with_ops(
+pub(crate) async fn reconcile_wave_queue_with_ops(
     store: &SharedStore,
     github_config: &GitHubConfig,
     wave_id: &LfdId,

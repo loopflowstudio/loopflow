@@ -319,7 +319,11 @@ fn is_repo_id_conflict(err: &StoreError) -> bool {
     }
 }
 
-fn would_create_cycle(edges: &[RepoEdge], new_parent: &RepoId, new_child: &RepoId) -> bool {
+pub(crate) fn would_create_cycle(
+    edges: &[RepoEdge],
+    new_parent: &RepoId,
+    new_child: &RepoId,
+) -> bool {
     let mut visited = std::collections::HashSet::new();
     let mut stack = vec![new_child.clone()];
 
@@ -387,7 +391,7 @@ fn is_git_repo(path: &Path) -> bool {
     git_entry.is_dir() || git_entry.is_file()
 }
 
-fn repo_name_from_path(path: &Path) -> String {
+pub(crate) fn repo_name_from_path(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
@@ -411,10 +415,10 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::provider_auth::ProviderAuthService;
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;

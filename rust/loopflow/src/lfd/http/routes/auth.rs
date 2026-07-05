@@ -5,12 +5,18 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::info;
 
+use std::sync::Arc;
+
+use crate::lfd::events::EventHub;
 use crate::lfd::http::dto::format_datetime;
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
-use crate::lfd::provider_auth::{AuthError, AuthFlowResponse, Provider, ProviderAuthSnapshot};
+use crate::lfd::types::Event;
 use crate::lfdb::CredentialType;
+use crate::provider_auth::{
+    AuthError, AuthEvent, AuthEventSink, AuthFlowResponse, Provider, ProviderAuthSnapshot,
+};
 
 #[derive(Debug, Serialize)]
 pub struct AuthProvidersResponse {
@@ -75,7 +81,7 @@ pub async fn start_auth_handler(
     let provider = parse_provider(&provider)?;
     let response = state
         .provider_auth
-        .start_auth(provider, state.event_hub.clone())
+        .start_auth(provider, hub_event_sink(state.event_hub.clone()))
         .await
         .map_err(map_auth_error)?;
 
@@ -118,7 +124,7 @@ pub async fn disconnect_auth_handler(
     let provider = parse_provider(&provider)?;
     state
         .provider_auth
-        .disconnect(provider, state.event_hub.clone())
+        .disconnect(provider, hub_event_sink(state.event_hub.clone()))
         .await
         .map_err(map_auth_error)?;
 
@@ -178,6 +184,22 @@ pub async fn configure_credential_handler(
         .await
         .map_err(map_auth_error)?;
     Ok(Json(status_dto(snapshot)))
+}
+
+/// Bridge provider-auth lifecycle notifications onto the daemon's EventHub.
+fn hub_event_sink(event_hub: EventHub) -> AuthEventSink {
+    Arc::new(move |event| {
+        event_hub.send(match event {
+            AuthEvent::FlowStarted {
+                provider,
+                verification_uri,
+                verification_uri_complete,
+            } => Event::auth_flow_started(provider, verification_uri, verification_uri_complete),
+            AuthEvent::Connected { provider, login } => Event::auth_connected(provider, login),
+            AuthEvent::Failed { provider, error } => Event::auth_failed(provider, error),
+            AuthEvent::Disconnected { provider } => Event::auth_disconnected(provider),
+        });
+    })
 }
 
 fn parse_provider(raw: &str) -> Result<Provider, ApiError> {
@@ -292,7 +314,7 @@ mod tests {
     fn status_dto_preserves_provider_and_login() {
         let dto = status_dto(ProviderAuthSnapshot {
             provider: Provider::GitHub,
-            status: crate::lfd::provider_auth::AuthStatus::Active {
+            status: crate::provider_auth::AuthStatus::Active {
                 login: Some("jackdanger".to_string()),
             },
             expires_at: Some(1_893_456_000),

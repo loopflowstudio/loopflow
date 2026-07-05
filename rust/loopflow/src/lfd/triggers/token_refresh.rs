@@ -8,10 +8,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::lfd::events::EventHub;
-use crate::lfd::provider_auth::{refresh_provider_token, Provider};
 use crate::lfd::types::Event;
 use crate::lfdb::rows::now_unix;
 use crate::lfdb::{ProviderToken, SharedStore};
+use crate::provider_auth::{refresh_provider_token, Provider};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const REFRESH_THRESHOLD: Duration = Duration::from_secs(20 * 60);

@@ -5,8 +5,8 @@ use time::OffsetDateTime;
 
 use crate::journal::{LfEvent, LfEventType, LfNode};
 use crate::lfd::id::LfdId;
-use crate::lfd::provider_auth::Provider;
 use crate::lfd::types::{AttentionItem, ExecutionProcessStatus, Session};
+use crate::provider_auth::Provider;
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]

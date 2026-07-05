@@ -13,8 +13,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand,
-    WtCommand,
+    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, QueueCommand, ReleaseCommand,
+    ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -102,6 +102,11 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
         },
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
+        OpsCommand::Queue { cmd } => match cmd {
+            QueueCommand::Reconcile { wave } => {
+                crate::ops::queue::reconcile_queue_cmd(wave.as_deref())
+            }
+        },
     }
 }
 

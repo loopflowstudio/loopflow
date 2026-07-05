@@ -1880,12 +1880,12 @@ mod tests {
     use crate::lfd::executor::{AgentExecutor, ExecutionContext, WaveExecutor};
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
     use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::types::{
         Session, SessionStatus, SessionUse, Signal, Wave, WaveMode, WaveStatus,
     };
     use crate::lfdb::{open_store, StorageConfig};
+    use crate::provider_auth::ProviderAuthService;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::path::Path;

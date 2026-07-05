@@ -160,6 +160,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: QCommand,
     },
+    /// Registry reads and writes as verbs — straight through the store, no daemon
+    D {
+        #[command(subcommand)]
+        cmd: DCommand,
+    },
     /// Post a message into a wave's thread (worker reports, child-wave
     /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
     Chat {
@@ -214,6 +219,133 @@ pub enum MemoryCommand {
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DCommand {
+    /// List waves (name, mode, paused, repos, live brain)
+    Waves {
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// One wave in full detail, or create/update/delete
+    Wave {
+        /// Wave name to show (omit when using a subcommand)
+        name: Option<String>,
+        #[command(subcommand)]
+        cmd: Option<DWaveCommand>,
+    },
+    /// Recent runs
+    Runs {
+        /// Filter to one wave by name
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+        /// Max rows
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: u32,
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Session rows from the run registry
+    Sessions {
+        /// Filter to one wave by name
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+        /// Only live sessions (pending/attached/running)
+        #[arg(long)]
+        live: bool,
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open attention items
+    Attention {
+        /// Filter to one wave by name
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Repo registry
+    Repo {
+        #[command(subcommand)]
+        cmd: DRepoCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DWaveCommand {
+    /// Create a wave: registry row + sibling worktree
+    Create {
+        /// Wave name (globally unique)
+        name: String,
+        /// Repo the wave works in (default: current repo's main checkout)
+        #[arg(long)]
+        repo: Option<String>,
+        /// loop or manual (default: manual)
+        #[arg(long)]
+        mode: Option<String>,
+        /// Primary flow
+        #[arg(long)]
+        flow: Option<String>,
+        /// Goal text
+        #[arg(long)]
+        goal: Option<String>,
+        /// Emit the created wave as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update a wave's registry row
+    Update {
+        /// Wave name
+        name: String,
+        /// loop or manual
+        #[arg(long)]
+        mode: Option<String>,
+        /// Primary flow
+        #[arg(long)]
+        flow: Option<String>,
+        /// Goal text
+        #[arg(long)]
+        goal: Option<String>,
+        /// Pause (true) or unpause (false) the wave
+        #[arg(long)]
+        paused: Option<bool>,
+        /// Emit the updated wave as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a wave: cascade the registry rows, remove its worktrees
+    Delete {
+        /// Wave name
+        name: String,
+        /// Delete even if a live brain session is registered for the wave
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DRepoCommand {
+    /// Register a repo (requires a GitHub origin remote)
+    Add {
+        /// Absolute path to the repo
+        path: String,
+        /// Also record an edge under this parent repo (path; must be registered)
+        #[arg(long)]
+        parent: Option<String>,
+        /// Emit the registered repo as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Unregister a repo by path
+    Remove {
+        /// Absolute path to the repo
+        path: String,
     },
 }
 
@@ -363,6 +495,22 @@ pub enum OpsCommand {
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
+    },
+    /// Merge-queue maintenance for stacked wave runs
+    Queue {
+        #[command(subcommand)]
+        cmd: QueueCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QueueCommand {
+    /// Run one reconcile pass: stack-status inference, draft/ready flips,
+    /// lazy head rebase, queue-block attention writes
+    Reconcile {
+        /// Only this wave (default: every wave with queue state)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
     },
 }
 
@@ -781,6 +929,129 @@ mod tests {
         };
         assert_eq!(fact, "one fact");
         assert!(target.parent);
+    }
+
+    /// `lf d wave <name>` shows detail; a subcommand word routes to the verb
+    /// instead of binding as the positional name.
+    #[test]
+    fn d_wave_positional_name_and_subcommands_coexist() {
+        let cli = Cli::try_parse_from(["lf", "d", "wave", "goals"]).expect("parse");
+        let Some(Commands::D {
+            cmd: DCommand::Wave { name, cmd },
+        }) = cli.command
+        else {
+            panic!("expected d wave command");
+        };
+        assert_eq!(name.as_deref(), Some("goals"));
+        assert!(cmd.is_none());
+
+        let cli = Cli::try_parse_from([
+            "lf", "d", "wave", "create", "goals", "--repo", "/tmp/r", "--mode", "loop",
+        ])
+        .expect("parse");
+        let Some(Commands::D {
+            cmd:
+                DCommand::Wave {
+                    name: None,
+                    cmd:
+                        Some(DWaveCommand::Create {
+                            name,
+                            repo,
+                            mode,
+                            flow,
+                            goal,
+                            json,
+                        }),
+                },
+        }) = cli.command
+        else {
+            panic!("expected d wave create command");
+        };
+        assert_eq!(name, "goals");
+        assert_eq!(repo.as_deref(), Some("/tmp/r"));
+        assert_eq!(mode.as_deref(), Some("loop"));
+        assert_eq!(flow, None);
+        assert_eq!(goal, None);
+        assert!(!json);
+    }
+
+    #[test]
+    fn d_reads_accept_wave_filter_and_json() {
+        let cli = Cli::try_parse_from(["lf", "d", "waves", "--json"]).expect("parse");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::D {
+                cmd: DCommand::Waves { json: true }
+            })
+        ));
+
+        let cli =
+            Cli::try_parse_from(["lf", "d", "runs", "-w", "goals", "-n", "5"]).expect("parse");
+        let Some(Commands::D {
+            cmd: DCommand::Runs { wave, limit, json },
+        }) = cli.command
+        else {
+            panic!("expected d runs command");
+        };
+        assert_eq!(wave.as_deref(), Some("goals"));
+        assert_eq!(limit, 5);
+        assert!(!json);
+
+        let cli = Cli::try_parse_from(["lf", "d", "sessions", "--live"]).expect("parse");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::D {
+                cmd: DCommand::Sessions {
+                    wave: None,
+                    live: true,
+                    json: false
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn d_wave_update_parses_paused_bool() {
+        let cli = Cli::try_parse_from(["lf", "d", "wave", "update", "goals", "--paused", "true"])
+            .expect("parse");
+        let Some(Commands::D {
+            cmd:
+                DCommand::Wave {
+                    cmd: Some(DWaveCommand::Update { name, paused, .. }),
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected d wave update command");
+        };
+        assert_eq!(name, "goals");
+        assert_eq!(paused, Some(true));
+    }
+
+    #[test]
+    fn d_repo_add_accepts_parent() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "d",
+            "repo",
+            "add",
+            "/tmp/child",
+            "--parent",
+            "/tmp/parent",
+        ])
+        .expect("parse");
+        let Some(Commands::D {
+            cmd:
+                DCommand::Repo {
+                    cmd: DRepoCommand::Add { path, parent, json },
+                },
+        }) = cli.command
+        else {
+            panic!("expected d repo add command");
+        };
+        assert_eq!(path, "/tmp/child");
+        assert_eq!(parent.as_deref(), Some("/tmp/parent"));
+        assert!(!json);
     }
 
     #[test]

@@ -14,7 +14,6 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CURRENT_DIR/../helpers.sh"
 
 work_dir="${1:-$(loopflow_pane_path)}"
-mode="$(loopflow_mode)"
 
 # Determine terminal dimensions
 cols="$(tmux display-message -p '#{window_width}' 2>/dev/null || echo 160)"
@@ -28,9 +27,7 @@ if (( cols < 120 )); then
 
     # Top: monitor
     tmux select-pane -t 0
-    if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "watch -n 5 lfq list" Enter
-    elif loopflow_has_cmd lf; then
+    if loopflow_has_cmd lf; then
         tmux send-keys "watch -n 5 lf op wt list" Enter
     fi
 
@@ -51,9 +48,7 @@ else
 
     # Leader pane (0): monitor
     tmux select-pane -t 0
-    if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "watch -n 5 lfq list" Enter
-    elif loopflow_has_cmd lf; then
+    if loopflow_has_cmd lf; then
         tmux send-keys "watch -n 5 lf op wt list" Enter
     fi
 

@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 import pytest
-from loopflow.client import Client
 from loopflow.models import Session
 from pydantic import ValidationError
 
@@ -58,13 +57,3 @@ class TestDTOFixtures:
             "agent": "codex",
         }
 
-    def test_run_worker_request_fixture_matches_client_encoding(self):
-        fixture = _load("run_worker_request.json")
-        body = Client._run_worker_body(
-            flow="implement",
-            task="Add the workers endpoint.",
-            parent_session_id="lfdsession_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
-            placement="stack",
-            parent_run_id="8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6",
-        )
-        assert body == fixture

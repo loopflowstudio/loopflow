@@ -33,53 +33,6 @@ public struct WaveConfigUpdate: Sendable {
     }
 }
 
-public struct RunOverrides: Sendable {
-    public var area: [String]?
-    public var direction: [String]?
-    public var flow: String?
-    public var goal: String?
-    public var roadmapItem: String?
-
-    public init(
-        area: [String]? = nil,
-        direction: [String]? = nil,
-        flow: String? = nil,
-        goal: String? = nil,
-        roadmapItem: String? = nil
-    ) {
-        self.area = area
-        self.direction = direction
-        self.flow = flow
-        self.goal = goal
-        self.roadmapItem = roadmapItem
-    }
-}
-
-public struct ConnectionInfo: Sendable {
-    public let worktree: String
-    public let step: String
-    public let agentId: String
-    public let promptFile: String
-    public let runId: String?
-    public let stepIndex: Int
-
-    public init(
-        worktree: String,
-        step: String,
-        agentId: String,
-        promptFile: String,
-        runId: String?,
-        stepIndex: Int
-    ) {
-        self.worktree = worktree
-        self.step = step
-        self.agentId = agentId
-        self.promptFile = promptFile
-        self.runId = runId
-        self.stepIndex = stepIndex
-    }
-}
-
 // SAFETY: WaveService is a value type with immutable captured dependencies;
 // request state is per-call and not shared across concurrent tasks.
 public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
@@ -392,66 +345,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try decodeResponse(AuthProviderStatus.self, from: data)
     }
 
-    // MARK: - Secrets
-
-    public func secretsStatus() async throws -> SecretsProviderStatus {
-        let (data, response) = try await performGet(secretsURL())
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(SecretsProviderStatus.self, from: data)
-    }
-
-    public func listSecretsProjects() async throws -> [DopplerProject] {
-        let (data, response) = try await performGet(secretsURL("projects"))
-        try requireOKStatus(response, data: data)
-        return try decodeResponse([DopplerProject].self, from: data)
-    }
-
-    public func listSecretsConfigs(project: String) async throws -> [DopplerConfig] {
-        var components = URLComponents(url: secretsURL("configs"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "project", value: project)]
-        let url = components.url!
-        let (data, response) = try await performGet(url)
-        try requireOKStatus(response, data: data)
-        return try decodeResponse([DopplerConfig].self, from: data)
-    }
-
-    public func selectSecretsConfig(
-        project: String, config: String
-    ) async throws -> SecretsProviderStatus {
-        var request = try makeRequest(secretsURL("select"), method: "POST")
-        let body = ["project": project, "config": config]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(SecretsProviderStatus.self, from: data)
-    }
-
-    public func syncSecrets() async throws -> SecretsProviderStatus {
-        let request = try makeRequest(secretsURL("sync"), method: "POST")
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(SecretsProviderStatus.self, from: data)
-    }
-
-    public func disconnectSecrets() async throws -> SecretsProviderStatus {
-        let request = try makeRequest(secretsURL(), method: "DELETE")
-        let (data, response) = try await performRequest(request)
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(SecretsProviderStatus.self, from: data)
-    }
-
-    private func secretsURL(_ component: String? = nil) -> URL {
-        var url = apiBaseURL.appendingPathComponent("secrets")
-        if let component {
-            url = url.appendingPathComponent(component)
-        }
-        return url
-    }
-
-    // MARK: - Waves
-
-    /// List waves for a repository via HTTP API.
-    /// The API normalizes worktree paths to their main repo.
     public func listWaves(repo: RepoTarget) async throws -> [Wave] {
         let repoPath = repo.path
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
@@ -510,7 +403,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return Self.parseWaveFromJSON(json)
     }
 
-    /// List flows and steps from lfd.
     public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
@@ -782,22 +674,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func fileDiff(waveId: String, path: String) async throws -> String {
-        let url = baseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("diff")
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "path", value: path)]
-        let requestURL = components.url!
-        let (data, response) = try await performGet(requestURL)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return json?["diff"] as? String ?? ""
-    }
-
     public func checkConnection() async throws {
         let url = baseURL.appendingPathComponent("status")
         let (_, response) = try await performGet(url)
@@ -828,73 +704,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             return response.statusCode == 200
         } catch {
             return false
-        }
-    }
-
-    public func createWave(name: String, repo: RepoTarget) async throws -> Wave {
-        try await createWave(name: name, repo: repo, flow: "ship-roadmap", run: false, status: nil)
-    }
-
-    public func createWave(name: String, repo: RepoTarget, flow: String, run: Bool) async throws -> Wave {
-        try await createWave(name: name, repo: repo, flow: flow, run: run, status: nil)
-    }
-
-    public func createWave(
-        name: String,
-        repo: RepoTarget,
-        flow: String,
-        run: Bool,
-        status: WaveStatus?
-    ) async throws -> Wave {
-        LoggingService.lfd(
-            "createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path) flow=\(flow) run=\(run) status=\(status?.rawValue ?? "default")"
-        )
-
-        var body: [String: Any] = [
-            "repo": repo.path,
-            "name": name.isEmpty ? NSNull() : name,
-            "flow": flow,
-            "direction": [],
-            "run": run,
-        ]
-        if let status {
-            body["status"] = status.rawValue
-        }
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves"),
-            method: "POST",
-            body: body,
-            contentType: "application/json"
-        )
-
-        LoggingService.lfd("createWave: POST \(request.url!) body=\(body)")
-
-        do {
-            // Use long timeout - createWave does git fetch + worktree add + push
-            let (data, response) = try await performRequest(request, useLongTimeouts: true)
-
-            LoggingService.lfd("createWave: status=\(response.statusCode)")
-
-            guard response.statusCode == 200 else {
-                let errorBody = String(data: data, encoding: .utf8) ?? ""
-                LoggingService.lfd("createWave: error response=\(errorBody)")
-                throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-            }
-
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                let errorMsg = Self.parseErrorMessage(data) ?? "Invalid response"
-                LoggingService.lfd("createWave: invalid response error=\(errorMsg)")
-                throw WaveServiceError.commandFailed(errorMsg)
-            }
-
-            let wave = Self.parseWaveFromJSON(json)
-            LoggingService.lfd("createWave: success id=\(wave.id) name=\(wave.name)")
-            return wave
-        } catch let error as WaveServiceError {
-            throw error
-        } catch {
-            LoggingService.lfd("createWave: exception=\(error.localizedDescription)")
-            throw WaveServiceError.commandFailed(error.localizedDescription)
         }
     }
 
@@ -1122,34 +931,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parsedObject(from: data, parse: Self.parseWaveAgentTreeFromJSON)
     }
 
-    public func ensureWaveAgent(waveId id: String, overrides: RunOverrides? = nil) async throws -> Session {
-        // Build body with any overrides
-        var body: [String: Any] = [:]
-        if let overrides {
-            if let area = overrides.area { body["area"] = area }
-            if let direction = overrides.direction { body["direction"] = direction }
-            if let flow = overrides.flow { body["flow"] = flow }
-            if let goal = overrides.goal { body["goal"] = goal }
-            if let roadmapItem = overrides.roadmapItem { body["roadmap_item"] = roadmapItem }
-        }
-
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves/\(id)/run"),
-            method: "POST",
-            body: body.isEmpty ? nil : body,
-            contentType: "application/json"
-        )
-
-        let (data, response) = try await performRequest(request)
-
-        guard response.statusCode == 200 else {
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
-        }
-
-        return try parsedObject(from: data, parse: Self.parseSessionFromJSON)
-    }
-
     // MARK: - Triggers
 
     public func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String? = nil) async throws -> Trigger {
@@ -1219,52 +1000,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try parseSessionResponse(data: data, response: response)
     }
 
-    public func stopSession(_ id: String) async throws -> AgentSession {
-        let request = try makeRequest(sessionURL(id), method: "DELETE")
-        let (data, response) = try await performRequest(request)
-        return try parseSessionResponse(data: data, response: response)
-    }
-
-    public func connect(_ id: String) async throws -> ConnectionInfo {
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves/\(id)/connect"),
-            method: "POST"
-        )
-
-        let (data, response) = try await performRequest(request)
-
-        guard response.statusCode == 200 else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let worktree = json["worktree"] as? String,
-              let step = json["step"] as? String,
-              let agentId = json["agent_id"] as? String,
-              let promptFile = json["prompt_file"] as? String else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-
-        let runId = json["run_id"] as? String
-        let stepIndex = json["step_index"] as? Int ?? 0
-
-        return ConnectionInfo(
-            worktree: worktree,
-            step: step,
-            agentId: agentId,
-            promptFile: promptFile,
-            runId: runId,
-            stepIndex: stepIndex
-        )
-    }
-
     public func stop(_ id: String) async throws {
         try await postWaveCommand(id, action: "stop")
-    }
-
-    public func restartStep(_ id: String) async throws {
-        try await postWaveCommand(id, action: "restart-step")
     }
 
     /// Land a wave's current branch (merge via PR).
@@ -1304,30 +1041,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
 
         return newBranch
-    }
-
-    /// Clone a wave with a new name.
-    public func cloneWave(_ id: String, name: String?) async throws -> Wave {
-        let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves/\(id)/clone"),
-            method: "POST",
-            body: name.map { ["name": $0] },
-            contentType: "application/json"
-        )
-
-        let (data, response) = try await performRequest(request)
-
-        guard response.statusCode == 200 else {
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
-        }
-
-        return Self.parseWaveFromJSON(json)
     }
 
     /// Delete a wave.

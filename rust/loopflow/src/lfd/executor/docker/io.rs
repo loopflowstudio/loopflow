@@ -81,9 +81,9 @@ impl DockerExecutor {
         let mut env: Vec<String> = Vec::new();
 
         // Inject provider tokens from the DB first so OAuth credentials win.
-        for (env_var, value) in crate::lfd::provider_auth::provider_env_vars(&self.store).await {
+        for (env_var, value) in crate::provider_auth::provider_env_vars(&self.store).await {
             if let Some(program) = program {
-                if !crate::lfd::provider_auth::provider_env_allowed_for_program(program, &env_var) {
+                if !crate::provider_auth::provider_env_allowed_for_program(program, &env_var) {
                     continue;
                 }
             }
@@ -97,12 +97,10 @@ impl DockerExecutor {
         }
 
         for name in &self.credential_env {
-            if crate::lfd::provider_auth::is_api_key_env_name(name) {
+            if crate::provider_auth::is_api_key_env_name(name) {
                 match program {
                     Some(program) => {
-                        if !crate::lfd::provider_auth::api_key_env_allowed_for_program(
-                            program, name,
-                        ) {
+                        if !crate::provider_auth::api_key_env_allowed_for_program(program, name) {
                             continue;
                         }
                     }
@@ -124,8 +122,7 @@ impl DockerExecutor {
         // canonical env_var_for_token() mapping for each.
         if let Ok(tokens) = self.store.list_provider_tokens().await {
             for token in tokens {
-                if let Some((env_var, value)) = crate::lfd::provider_auth::env_var_for_token(&token)
-                {
+                if let Some((env_var, value)) = crate::provider_auth::env_var_for_token(&token) {
                     if !env.iter().any(|e| e.starts_with(&format!("{env_var}="))) {
                         env.push(format!("{env_var}={value}"));
                     }

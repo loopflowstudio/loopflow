@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
@@ -23,32 +22,6 @@ try:
     spec.loader.exec_module(remote_smoke)
 finally:
     sys.path.pop(0)
-
-
-class _FakeApi:
-    def __init__(self, response: httpx.Response) -> None:
-        self._response = response
-
-    def request(self, method: str, path: str) -> httpx.Response:  # noqa: ARG002
-        return self._response
-
-
-def test_resolve_repo_path_prefers_explicit_override() -> None:
-    path = remote_smoke._resolve_repo_path(_FakeApi(httpx.Response(200, json={})), "/tmp/explicit")
-    assert path == "/tmp/explicit"
-
-
-def test_resolve_repo_path_requires_repo_on_fresh_host() -> None:
-    payload = {"object": "list", "data": []}
-    api = _FakeApi(httpx.Response(200, json=payload))
-    with pytest.raises(AssertionError, match="pass --repo"):
-        remote_smoke._resolve_repo_path(api, None)
-
-
-def test_resolve_repo_path_uses_first_valid_entry() -> None:
-    payload = {"object": "list", "data": [{"path": ""}, {"path": "/srv/loopflow"}]}
-    api = _FakeApi(httpx.Response(200, json=payload))
-    assert remote_smoke._resolve_repo_path(api, None) == "/srv/loopflow"
 
 
 def test_resolve_tls_rejects_insecure_with_ca_cert() -> None:

@@ -10,8 +10,8 @@ use time::OffsetDateTime;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::ConcreteStep;
 use crate::engine::git::{
-    create_branch, current_branch, fetch, get_default_branch, is_ancestor, push_with_upstream,
-    rev_parse, sync_main, worktree_add, WorktreeBranch,
+    current_branch, fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add,
+    WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
@@ -498,6 +498,20 @@ pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
 /// Wrapper tail for run-to-completion sessions: propagate the exit code.
 pub(crate) const TMUX_EXIT_TAIL: &str = r#"exit "$EXIT_CODE""#;
 
+/// Tail for dispatched workers: after a clean flow exit the wrapper itself
+/// runs `lf op pr` — the dispatcher's structural guarantee, independent of
+/// the worker's prompt remembering to. `no_pr` opts a deliberately PR-less
+/// dispatch out.
+pub(crate) fn worker_exit_tail(no_pr: bool) -> String {
+    if no_pr {
+        return TMUX_EXIT_TAIL.to_string();
+    }
+    format!(
+        r#"if [ "$EXIT_CODE" -eq 0 ]; then {lf} op pr; fi; {TMUX_EXIT_TAIL}"#,
+        lf = shell_escape(&resolve_lf_binary().to_string_lossy()),
+    )
+}
+
 /// The exit-file shell wrapper every tmux-backed session runs — the single
 /// authoring site of the exit-file wire contract.
 ///
@@ -715,22 +729,6 @@ fn set_pr_title(worktree: &Path, number: u64, title: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create a new branch in the worktree for the next loop iteration.
-pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result<String> {
-    let config = load_config_or_default(Some(worktree));
-    let branch_config = config.branch_names.as_ref();
-    let mut new_branch = format_branch_name(wave_name, branch_config, worktree)
-        .map_err(|e| anyhow!("failed to generate branch name: {e}"))?;
-
-    while branch_exists(worktree, &new_branch)? {
-        new_branch = format!("{new_branch}.{}", generate_word_pair());
-    }
-
-    create_branch(worktree, &new_branch)?;
-    push_with_upstream(worktree, "origin", &new_branch)?;
-    Ok(new_branch)
-}
-
 /// Clean up a run-scoped worktree after the run completes.
 ///
 /// Only removes per-run worktrees (`<repo>.<wave>.<short-run-id>`, or the
@@ -825,7 +823,8 @@ mod tests {
 
     use super::{
         create_stacked_run_worktree, ensure_wave_worktree, is_ephemeral_worktree_path,
-        tmux_shell_command, worker_dispatch_task, TMUX_EXIT_TAIL, WORKER_REPORT_INSTRUCTION,
+        tmux_shell_command, worker_dispatch_task, worker_exit_tail, TMUX_EXIT_TAIL,
+        WORKER_REPORT_INSTRUCTION,
     };
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
     use crate::lfd::id::LfdId;
@@ -935,6 +934,53 @@ mod tests {
             )),
             "exit code lands in the session's exit file: {wrapper}"
         );
+        assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
+    }
+
+    /// The auto-PR analog, pinned at the wrapper string: a dispatched worker's
+    /// tmux wrapper runs `lf op pr` after a clean flow exit — deterministic,
+    /// prompt-independent — and `--no-pr` removes it entirely.
+    #[test]
+    fn worker_exit_tail_runs_op_pr_on_clean_exit_unless_opted_out() {
+        let tail = worker_exit_tail(false);
+        assert!(
+            tail.starts_with(r#"if [ "$EXIT_CODE" -eq 0 ]; then "#),
+            "the PR step is gated on a clean exit: {tail}"
+        );
+        assert!(tail.contains(" op pr; fi; "), "runs lf op pr: {tail}");
+        assert!(
+            tail.ends_with(TMUX_EXIT_TAIL),
+            "still propagates the exit code"
+        );
+
+        assert_eq!(worker_exit_tail(true), TMUX_EXIT_TAIL);
+
+        // End to end through the shared wrapper: the launch line carries the
+        // gated `op pr` between the exit-file write and the final exit.
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            wave_id: LfdId::new(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::Worker,
+            step: "dispatch:implement".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
+            argv: vec!["lf".to_string(), "implement".to_string()],
+            env: BTreeMap::new(),
+            source: TMUX_TERMINAL_SOURCE.to_string(),
+            tmux_name: "lf-test".to_string(),
+            status: SessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+        let wrapper = tmux_shell_command(&session, &worker_exit_tail(false));
+        assert!(wrapper.contains(&format!("{session_id}.exit")));
+        assert!(wrapper.contains(" op pr; fi; "));
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
     }
 

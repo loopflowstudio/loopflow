@@ -38,38 +38,6 @@ loopflow_status_timeout_ms() {
 }
 
 # ---------------------------------------------------------------------------
-# Mode detection
-# ---------------------------------------------------------------------------
-
-loopflow_detect_container_mode() {
-    if ! loopflow_has_cmd lfq; then
-        return 1
-    fi
-    local timeout_s
-    timeout_s="$(awk "BEGIN {printf \"%.1f\", $(loopflow_status_timeout_ms) / 1000}")"
-    if loopflow_has_cmd timeout; then
-        timeout "$timeout_s" lfq list >/dev/null 2>&1
-    else
-        lfq list >/dev/null 2>&1
-    fi
-}
-
-loopflow_mode() {
-    local explicit
-    explicit="$(loopflow_get_option "@loopflow_mode" "auto")"
-    case "$explicit" in
-        lf) echo "lf"; return 0 ;;
-        container) echo "container"; return 0 ;;
-    esac
-    # auto detection
-    if loopflow_detect_container_mode; then
-        echo "container"
-    else
-        echo "lf"
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # Display
 # ---------------------------------------------------------------------------
 
@@ -178,20 +146,11 @@ _loopflow_fzf_pick() {
 }
 
 loopflow_pick_wave() {
-    local mode items selection
-    mode="$(loopflow_mode)"
-    if [[ "$mode" == "container" ]]; then
-        if ! loopflow_has_cmd lfq; then
-            loopflow_display "lfq not found"
-            return 1
-        fi
-        items="$(lfq list 2>/dev/null | tail -n +2)"
-    else
-        if loopflow_has_cmd lf; then
-            items="$(lf op wt list 2>/dev/null)"
-        elif loopflow_has_cmd git; then
-            items="$(git worktree list --porcelain 2>/dev/null | grep '^worktree ' | sed 's/^worktree //')"
-        fi
+    local items selection
+    if loopflow_has_cmd lf; then
+        items="$(lf op wt list 2>/dev/null)"
+    elif loopflow_has_cmd git; then
+        items="$(git worktree list --porcelain 2>/dev/null | grep '^worktree ' | sed 's/^worktree //')"
     fi
 
     if [[ -z "$items" ]]; then
@@ -271,45 +230,22 @@ loopflow_open_layout() {
 # Command dispatch
 # ---------------------------------------------------------------------------
 
-# Pick a wave and send an lfq command to the active pane.
-# loopflow_pick_wave already checks for lfq in container mode.
-_loopflow_container_wave_cmd() {
-    local cmd="$1"
-    local wave
-    wave="$(loopflow_pick_wave)" || return 1
-    tmux send-keys "lfq $cmd '$wave'" Enter
-}
-
 loopflow_dispatch() {
     local action="$1"
-    local mode
-    mode="$(loopflow_mode)"
 
     case "$action" in
         run)
-            if [[ "$mode" == "container" ]]; then
-                _loopflow_container_wave_cmd run
-            else
-                if ! loopflow_has_cmd lf; then
-                    loopflow_display "lf not found — install loopflow first"
-                    return 1
-                fi
-                tmux send-keys "lf implement" Enter
+            if ! loopflow_has_cmd lf; then
+                loopflow_display "lf not found — install loopflow first"
+                return 1
             fi
+            tmux send-keys "lf implement" Enter
             ;;
         stop)
-            if [[ "$mode" == "container" ]]; then
-                _loopflow_container_wave_cmd stop
-            else
-                tmux send-keys C-c
-            fi
+            tmux send-keys C-c
             ;;
         logs)
-            if [[ "$mode" == "container" ]]; then
-                _loopflow_container_wave_cmd logs
-            else
-                loopflow_display "logs: use lf output in terminal"
-            fi
+            loopflow_display "logs: use lf output in terminal"
             ;;
         pr)
             if loopflow_has_cmd gh; then
@@ -319,25 +255,17 @@ loopflow_dispatch() {
             fi
             ;;
         next|land)
-            if [[ "$mode" == "container" ]]; then
-                _loopflow_container_wave_cmd land
+            if loopflow_has_cmd lf; then
+                tmux send-keys "lf op $action" Enter
             else
-                if loopflow_has_cmd lf; then
-                    tmux send-keys "lf op $action" Enter
-                else
-                    loopflow_display "lf not found"
-                fi
+                loopflow_display "lf not found"
             fi
             ;;
         wave-pick)
             local wave
             wave="$(loopflow_pick_wave)" || return 1
-            if [[ "$mode" == "container" ]]; then
-                tmux send-keys "lfq logs '$wave'" Enter
-            else
-                # Open the worktree in a new lf-dev layout
-                "$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh" "$wave"
-            fi
+            # Open the worktree in a new lf-dev layout
+            "$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh" "$wave"
             ;;
         layout-pick)
             loopflow_open_layout
@@ -362,12 +290,10 @@ loopflow_dispatch() {
 loopflow_show_help() {
     local prefix
     prefix="$(loopflow_get_option "@loopflow_key_prefix" "l")"
-    local mode
-    mode="$(loopflow_mode)"
 
     local help_file="/tmp/loopflow-help-${USER}.txt"
     cat > "$help_file" <<EOF
-loopflow keybindings (mode: $mode)
+loopflow keybindings
 ─────────────────────────────
 prefix+$prefix+r  run step/wave
 prefix+$prefix+s  stop

@@ -9,7 +9,7 @@ won't break again."
 
 ```bash
 uv run pytest tests/regression/ -v                # all regression tests
-uv run pytest tests/regression/test_run_with_roadmap_item_on_pm_wave.py -v
+uv run pytest tests/regression/test_read_surface_serves_fresh_daemon.py -v
 ```
 
 The suite takes minutes, not seconds — each test spins up a fresh `lfd`

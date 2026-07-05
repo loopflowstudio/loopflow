@@ -186,18 +186,6 @@ def _concerto_commands(_changed: list[str]) -> list[Command]:
 def _e2e_commands(_changed: list[str]) -> list[Command]:
     return [
         Command(["tests/e2e/test_smoke.sh"], REPO_ROOT, "e2e-smoke"),
-        Command(
-            [
-                "uv",
-                "run",
-                "pytest",
-                "tests/e2e/test_api_smoke.py",
-                "tests/e2e/test_concurrent_clients.py",
-                "-v",
-            ],
-            REPO_ROOT,
-            "api-smoke",
-        ),
     ]
 
 

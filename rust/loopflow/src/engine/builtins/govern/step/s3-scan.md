@@ -1,5 +1,5 @@
 ---
-requires: lfq show/usage data, recent run history, algedonic history, CI status, PR status
+requires: live wave state, recent run history, algedonic history, CI status, PR status
 produces: scratch/vsm-s3-scan.md
 ---
 Scan control and health state.
@@ -26,7 +26,7 @@ available token / cost usage so s3 can judge capacity from real signals.
 
 ## Workflow
 
-1. Read `lfq show <wave> --json` for each member wave.
+1. Read each member wave's live state: `wave/<name>/.wave-endpoint` (present = running), MEMORY.md, and its tmux sessions.
 2. Read recent run history for throughput, completion times, and retries.
 3. Read token / cost usage data when available.
 4. Read algedonic history, repair chains, and escalation patterns.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Demo: the wave-agent model shipped so far — a wave is two files (GOAL.md +
 # MEMORY.md), its memory is injected into the loop's context, and its live
-# sessions are watchable/enterable via lfq.
+# sessions are watchable/enterable via tmux.
 #
 # Run from the repo root:  bash scripts/demo_waveagent.sh
 set -euo pipefail
@@ -29,11 +29,11 @@ grep -nE 'goals wave memory|Steers Loopflow' "$tmp" | head -3 | sed 's/^/  /'
 rm -f "$tmp"
 
 hr "3. Live sessions are watchable and enterable"
-echo "lfq turns the terminal into a session cockpit:"
-echo "  lfq sessions            # list live agent + dispatch sessions (needs-input flagged)"
-echo "  lfq attach <session>    # drop into one over tmux to answer an interactive step"
+echo "tmux is the session cockpit:"
+echo "  tmux ls                 # list live agent + dispatch sessions"
+echo "  tmux attach -t <name>   # drop into one to answer an interactive step"
 echo
-echo "(Requires a running lfd with active sessions; see 'lfq sessions --help'.)"
+echo "(Requires active dispatched sessions; dispatch with 'lf q worker run'.)"
 
 hr "Done"
 echo "Two files define a wave; its memory rides into every prompt; its sessions are"

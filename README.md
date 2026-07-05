@@ -25,14 +25,6 @@ Keep the design system coherent. Each loop: read the roadmap, pick the next
 design task, dispatch a worker to build it, and fold what changed into memory.
 ```
 
-Run the wave agent, then watch its work:
-
-```bash
-lfq wave run designer        # start (or attach to) the wave agent
-lfq sessions                 # every live session — the wave agent and its workers
-lfq attach <session-id>      # jump into one over tmux
-```
-
 Run the wave in your terminal:
 
 ```bash
@@ -40,6 +32,9 @@ lf wave designer             # the wave's server: one persistent mind, until Ctr
 lf chat "ship the button audit first"     # speak into its thread (any process can)
 lf memory add "buttons: variants unified" # curate what it knows
 ```
+
+Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
+`tmux attach -t <name>` to jump into one.
 
 `lf wave <name>` starts a long-lived server in the wave's own worktree: one
 persistent codex thread handles progress and chat as a single conversation —
@@ -298,19 +293,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining steps into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lfq wave run engbot        # start (or attach to) the wave agent
-lfq list                   # see every wave
-```
-
-Or drive it from Python:
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("engbot", repo=".", flow="build")
-loopflow.run_wave("engbot")
-PY
+lf wave engbot             # start the wave agent
 ```
 
 Directions compose extra nuance into any step or flow the wave dispatches.
@@ -348,31 +331,27 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Query lfd (lfq)
+## Dispatch and Observe
 
 ```bash
-uv tool install loopflow
-lfq                  # status overview
-lfq list             # list waves
-lfq show engbot      # show wave details
-lfq wave run engbot  # start or attach the Wave-agent session
-lfq worker run engbot --flow implement --task "Add the endpoint"
-lfq whoami           # show current lfd agent identity
-lfq sessions         # list live terminal sessions
-lfq attach <id>      # attach to one over tmux
-lfq logs engbot      # tail agent output
-lfq stop engbot      # stop a running wave
-lfq delete engbot    # remove wave and history
-lfq providers        # list providers with auth status and models
-lf op auth status   # local provider auth for lf steps and ops
-lf op auth asana    # connect Asana locally for `lf op` / step integrations
-lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
-lfq auth github      # connect GitHub in your browser
-lfq auth claude      # connect Claude in your browser
-lfq auth codex       # connect Codex in your browser
-lfq auth zen         # connect OpenCode Zen in your browser
-lfq auth asana       # connect Asana with OAuth
-lfq auth disconnect github
+lf wave engbot       # start the wave agent (Ctrl-C to stop)
+lf q worker run engbot --flow implement --task "Add the endpoint"
+tmux ls              # list live sessions — the wave agent and its workers
+tmux attach -t <name>  # attach to one
+```
+
+Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
+watch it in Concerto. To remove a wave, delete `wave/engbot/` and its worktree
+(`lf op wt remove engbot`).
+
+```bash
+lf op auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
+lf op auth github    # connect GitHub in your browser
+lf op auth claude    # connect Claude in your browser
+lf op auth codex     # connect Codex in your browser
+lf op auth zen       # connect OpenCode Zen in your browser
+lf op auth asana     # connect Asana with OAuth
+lf op auth disconnect github
 ```
 
 The roadmap lives in Asana. Pin a wave to its Asana project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
@@ -395,33 +374,8 @@ lf op pm status                              # show linked waves
 
 `lf op pm` reads and edits the roadmap directly in Asana — there is no local mirror and nothing to sync. Task notes preserve basic markdown formatting: Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when a task has none yet.
 
-`uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
+The `loopflow` Python package is a library only (wire models).  
 Use the install script or cargo to install `lf` and `lfd`.
-
-## Python API
-
-```bash
-uv pip install loopflow
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="build")
-loopflow.create_wave("ux", repo=".", flow="build")
-loopflow.create_wave("infra", repo=".", flow="govern-control")
-loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
-loopflow.run_wave("ux")
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("conductor", repo=".")
-conductor = loopflow.wave("conductor")
-print(conductor.primary_flow)
-```
 
 [Documentation →](docs/index.md)
 
@@ -461,7 +415,7 @@ Keybindings start with `prefix+l`:
 
 Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
-Works without `lf` or `lfq` installed — status shows placeholder, keybindings display clear messages.
+Works without `lf` installed — status shows placeholder, keybindings display clear messages.
 
 
 ## License

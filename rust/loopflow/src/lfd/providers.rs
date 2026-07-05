@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 #[cfg(test)]
-use crate::lfd::provider_auth::AuthStatus;
-use crate::lfd::provider_auth::{Provider, ProviderAuthSnapshot};
+use crate::provider_auth::AuthStatus;
+use crate::provider_auth::{Provider, ProviderAuthSnapshot};
 
 // ── Types ──────────────────────────────────────────────────────────────
 

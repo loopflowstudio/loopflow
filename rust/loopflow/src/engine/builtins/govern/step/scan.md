@@ -35,12 +35,10 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
    - The live roadmap — `lf op pm show --wave <wave-name>` (Asana is the source of truth; there are no local roadmap files)
 
 2. **Read runtime state.** For each member wave:
-   - `lfq show <wave-name> --json` — live wave state from lfd
-   - Capture wave status, iteration, open_pr_count, stack_count
-   - If `active_run` exists, capture status, step_index, branch, PR state,
-     draft state, queue_role, and queue_block_reason
-   - If `lfq show` says the wave does not exist, note it explicitly as
-     "defined on disk but not registered in lfd"
+   - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its
+     endpoint here; absent means the wave is not running
+   - `tmux ls` — the wave's server and any dispatched worker sessions
+   - Open PRs on the wave's branches (`gh pr list`) and their queue state
 
 3. **Read recent activity.** For each member wave:
    - `git log main --since="1 week ago"` filtered to the wave's area paths

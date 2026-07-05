@@ -21,6 +21,8 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub pid: u32,
+    /// What this daemon is: one honest line, additive-safe for clients.
+    pub role: String,
     pub waves_defined: u32,
     pub waves_running: u32,
     pub agents_active: u32,
@@ -300,30 +302,6 @@ pub struct CreateSessionRequestDto {
     pub agent: String,
 }
 
-/// Request body for `POST /v0/waves/{id}/workers`. Mirrored in the Python
-/// client (`client.run_worker`); not mirrored in Swift.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunWorkerRequestDto {
-    pub flow: String,
-    pub task: String,
-    pub parent_session_id: Option<String>,
-    #[serde(flatten)]
-    pub placement: WorkerPlacementDto,
-}
-
-/// Worktree placement for a dispatched worker. Required on every dispatch —
-/// the CLI (not the wire) supplies the `fresh` default.
-///
-/// `stack` carries the parent run id as a sibling `parent_run_id` field:
-/// `{"placement": "stack", "parent_run_id": "..."}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "placement", rename_all = "snake_case")]
-pub enum WorkerPlacementDto {
-    Fresh,
-    Pool,
-    Stack { parent_run_id: String },
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSessionResponseDto {
     pub session: SessionDto,
@@ -404,14 +382,6 @@ pub struct ChatMessageDto {
 #[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RestartStepResponse {
-    pub restarted: bool,
-    pub wave_id: String,
-    pub run_id: String,
-    pub step_index: u32,
 }
 
 #[derive(Debug, Serialize)]

@@ -412,7 +412,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "q", "wave", "loop", "chat", "memory", "usage", "runs", "trace", "help",
+            ":", "op", "q", "wave", "chat", "memory", "usage", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

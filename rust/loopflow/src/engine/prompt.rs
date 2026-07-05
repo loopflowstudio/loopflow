@@ -2379,10 +2379,7 @@ mod tests {
             &goal,
             &crate::engine::flow::GoalRenderContext {
                 flows: vec![],
-                roadmap: "wave/goals".to_string(),
                 memory: "- one source of truth".to_string(),
-                metrics: vec![],
-                in_flight: vec![],
             },
         );
         let components = PromptComponents {
@@ -2417,10 +2414,7 @@ mod tests {
             &goal,
             &crate::engine::flow::GoalRenderContext {
                 flows: vec![],
-                roadmap: "wave/goals".to_string(),
                 memory: String::new(),
-                metrics: vec![],
-                in_flight: vec![],
             },
         );
         assert!(

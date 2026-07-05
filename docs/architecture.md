@@ -37,8 +37,9 @@ Local CLI                 Daemon
         |                        |
         v                        v
 Git/PR/PM ops             Clients
-                            lfq / Python API
+                            lf CLI
                             Concerto Swift app
+                            webhooks
 ```
 
 ## Core Concepts
@@ -94,12 +95,11 @@ hosts.
 
 ## Clients
 
-`lfq` and the Python API are lightweight clients for lfd.
+`lf` and Concerto read lfd state; webhooks push events in. The Python package
+is a library of wire models only.
 
 Important paths:
 
-- `python/loopflow/cli.py`
-- `python/loopflow/client.py`
 - `python/loopflow/models.py`
 
 Concerto is the Swift app. It reads lfd state, renders waves and sessions, and
@@ -158,7 +158,7 @@ Loopflow integrates with:
 
 - Context assembly: every agent session depends on it, and the sources span
   docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Session lifecycle: lfd, lfq, Concerto, tmux, and external agents must agree on
+- Session lifecycle: lfd, Concerto, tmux, and external agents must agree on
   what is running, blocked, attachable, complete, or failed.
 - DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
   made as one contract update.

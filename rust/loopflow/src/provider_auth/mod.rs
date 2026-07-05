@@ -1,3 +1,14 @@
+//! Provider auth flows: device-code/browser OAuth for the agent and PM
+//! providers, token extraction from vendor CLI artifacts, and store-direct
+//! persistence into lfdb provider tokens.
+//!
+//! Shared home — called in-process by `lf op auth` and wrapped by the daemon's
+//! HTTP routes. Must not depend on daemon (`lfd`) types; auth lifecycle
+//! notifications go through [`AuthEventSink`], which the daemon maps onto its
+//! EventHub and the CLI ignores.
+
+pub mod credential_socket;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,12 +34,10 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::lfd::credential_socket::{
+use crate::lfdb::{CredentialType, ProviderToken, SharedStore};
+use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
-use crate::lfd::events::EventHub;
-use crate::lfd::types::Event;
-use crate::lfdb::{CredentialType, ProviderToken, SharedStore};
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -195,6 +204,34 @@ pub struct AuthFlowResponse {
     pub verification_uri_complete: Option<String>,
     pub user_code: Option<String>,
     pub expires_in: Option<u64>,
+}
+
+/// Auth lifecycle notifications. The daemon maps these onto its EventHub;
+/// the CLI drops them — for a CLI caller the store write is the record.
+#[derive(Debug, Clone)]
+pub enum AuthEvent {
+    FlowStarted {
+        provider: Provider,
+        verification_uri: String,
+        verification_uri_complete: Option<String>,
+    },
+    Connected {
+        provider: Provider,
+        login: Option<String>,
+    },
+    Failed {
+        provider: Provider,
+        error: String,
+    },
+    Disconnected {
+        provider: Provider,
+    },
+}
+
+pub type AuthEventSink = Arc<dyn Fn(AuthEvent) + Send + Sync>;
+
+pub fn no_event_sink() -> AuthEventSink {
+    Arc::new(|_| {})
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -825,7 +862,7 @@ impl ProviderAuthService {
     pub async fn start_auth(
         &self,
         provider: Provider,
-        event_hub: EventHub,
+        events: AuthEventSink,
     ) -> Result<AuthFlowResponse, AuthError> {
         self.prune_finished_pending().await;
         if self.is_pending(provider).await {
@@ -835,15 +872,15 @@ impl ProviderAuthService {
         let broker = self.broker(provider)?;
         let AuthFlowHandle { response, monitor } = broker.start_auth().await?;
 
-        event_hub.send(Event::auth_flow_started(
+        events(AuthEvent::FlowStarted {
             provider,
-            response.verification_uri.clone(),
-            response.verification_uri_complete.clone(),
-        ));
+            verification_uri: response.verification_uri.clone(),
+            verification_uri_complete: response.verification_uri_complete.clone(),
+        });
 
         let pending = self.pending.clone();
         let broker_for_task = broker.clone();
-        let event_hub_for_task = event_hub.clone();
+        let events_for_task = events.clone();
         let store_for_task = self.store.clone();
 
         let lifecycle = tokio::spawn(async move {
@@ -877,20 +914,26 @@ impl ProviderAuthService {
                                 }
                             }
                         }
-                        event_hub_for_task.send(Event::auth_connected(provider, login));
+                        events_for_task(AuthEvent::Connected { provider, login });
                     }
                     Ok(status) => {
-                        event_hub_for_task.send(Event::auth_failed(
+                        events_for_task(AuthEvent::Failed {
                             provider,
-                            format!("completed with status {}", status.as_str()),
-                        ));
+                            error: format!("completed with status {}", status.as_str()),
+                        });
                     }
                     Err(err) => {
-                        event_hub_for_task.send(Event::auth_failed(provider, err.to_string()));
+                        events_for_task(AuthEvent::Failed {
+                            provider,
+                            error: err.to_string(),
+                        });
                     }
                 },
                 Err(err) => {
-                    event_hub_for_task.send(Event::auth_failed(provider, err.to_string()));
+                    events_for_task(AuthEvent::Failed {
+                        provider,
+                        error: err.to_string(),
+                    });
                 }
             }
 
@@ -909,7 +952,7 @@ impl ProviderAuthService {
     pub async fn disconnect(
         &self,
         provider: Provider,
-        event_hub: EventHub,
+        events: AuthEventSink,
     ) -> Result<(), AuthError> {
         self.abort_pending(provider).await;
         self.broker(provider)?.disconnect().await?;
@@ -918,7 +961,7 @@ impl ProviderAuthService {
                 warn!(provider = %provider, error = %err, "failed to delete provider token");
             }
         }
-        event_hub.send(Event::auth_disconnected(provider));
+        events(AuthEvent::Disconnected { provider });
         Ok(())
     }
 
@@ -2634,14 +2677,177 @@ mod tests {
         }
 
         let service = ProviderAuthService::with_brokers(vec![Arc::new(FakeBroker)]);
-        let events = EventHub::new(32);
         service
-            .start_auth(Provider::GitHub, events)
+            .start_auth(Provider::GitHub, no_event_sink())
             .await
             .expect("start auth");
 
         let status = service.status(Provider::GitHub).await.expect("status");
         assert_eq!(status.status, AuthStatus::Pending);
+    }
+
+    #[derive(Debug, Clone)]
+    struct CompletingBroker {
+        provider: Provider,
+        token: ProviderToken,
+    }
+
+    #[async_trait]
+    impl AuthBroker for CompletingBroker {
+        fn provider(&self) -> Provider {
+            self.provider
+        }
+
+        async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+            let response = AuthFlowResponse {
+                provider: self.provider,
+                verification_uri: "https://github.com/login/device".to_string(),
+                verification_uri_complete: None,
+                user_code: Some("ABCD-1234".to_string()),
+                expires_in: Some(900),
+            };
+            let monitor = tokio::spawn(async { Ok(()) });
+            Ok(AuthFlowHandle::new(response, monitor))
+        }
+
+        async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+            Ok(AuthStatus::Active {
+                login: self.token.login.clone(),
+            })
+        }
+
+        async fn disconnect(&self) -> Result<(), AuthError> {
+            Ok(())
+        }
+
+        async fn extract_token(&self) -> Option<ProviderToken> {
+            Some(self.token.clone())
+        }
+    }
+
+    async fn temp_sqlite_store() -> SharedStore {
+        let db_path =
+            std::env::temp_dir().join(format!("provider-auth-test-{}.db", Uuid::new_v4().simple()));
+        Arc::new(
+            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        )
+    }
+
+    #[tokio::test]
+    async fn start_auth_persists_extracted_token_and_reports_events() {
+        let store = temp_sqlite_store().await;
+        let token = ProviderToken {
+            provider: "github".to_string(),
+            access_token: "gho_flow123".to_string(),
+            refresh_token: None,
+            expires_at: Some(now_unix() + 3600),
+            login: Some("jackdanger".to_string()),
+            updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
+        };
+        let broker = CompletingBroker {
+            provider: Provider::GitHub,
+            token: token.clone(),
+        };
+        let service = ProviderAuthService::with_brokers_and_store(
+            vec![Arc::new(broker)],
+            Some(store.clone()),
+        );
+
+        let events: Arc<StdMutex<Vec<AuthEvent>>> = Arc::new(StdMutex::new(Vec::new()));
+        let events_for_sink = events.clone();
+        let sink: AuthEventSink = Arc::new(move |event| {
+            events_for_sink.lock().expect("events mutex").push(event);
+        });
+
+        service
+            .start_auth(Provider::GitHub, sink)
+            .await
+            .expect("start auth");
+
+        // Wait for the background lifecycle to persist the token.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if !service.is_pending(Provider::GitHub).await {
+                break;
+            }
+            assert!(Instant::now() < deadline, "auth lifecycle did not finish");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let stored = store
+            .get_provider_token("github")
+            .await
+            .expect("get token")
+            .expect("token persisted by flow");
+        assert_eq!(stored.access_token, "gho_flow123");
+        assert_eq!(stored.login.as_deref(), Some("jackdanger"));
+        assert_eq!(stored.credential_type, CredentialType::OAuth);
+
+        let events = events.lock().expect("events mutex");
+        assert!(matches!(
+            events.first(),
+            Some(AuthEvent::FlowStarted { .. })
+        ));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, AuthEvent::Connected { .. })));
+    }
+
+    #[tokio::test]
+    async fn status_reads_expiry_from_stored_token() {
+        let store = temp_sqlite_store().await;
+        let expires_at = now_unix() + 7200;
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "asana".to_string(),
+                access_token: "asana-token".to_string(),
+                refresh_token: Some("asana-refresh".to_string()),
+                expires_at: Some(expires_at),
+                login: Some("jack@loopflow.studio".to_string()),
+                updated_at: now_unix(),
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .expect("upsert token");
+        let service = ProviderAuthService::with_brokers_and_store(Vec::new(), Some(store));
+
+        let snapshot = service.status(Provider::Asana).await.expect("status");
+        assert_eq!(
+            snapshot.status,
+            AuthStatus::Active {
+                login: Some("jack@loopflow.studio".to_string())
+            }
+        );
+        assert_eq!(snapshot.expires_at, Some(expires_at));
+        assert_eq!(
+            snapshot.next_refresh_at,
+            Some(expires_at - TOKEN_REFRESH_LEAD_SECONDS)
+        );
+        assert_eq!(snapshot.credential_type, Some(CredentialType::OAuth));
+    }
+
+    #[tokio::test]
+    async fn status_marks_stored_token_expired() {
+        let store = temp_sqlite_store().await;
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "claude".to_string(),
+                access_token: "stale".to_string(),
+                refresh_token: None,
+                expires_at: Some(now_unix() - 60),
+                login: None,
+                updated_at: now_unix(),
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .expect("upsert token");
+        let service = ProviderAuthService::with_brokers_and_store(Vec::new(), Some(store));
+
+        let snapshot = service.status(Provider::Claude).await.expect("status");
+        assert_eq!(snapshot.status, AuthStatus::Expired);
     }
 
     #[test]

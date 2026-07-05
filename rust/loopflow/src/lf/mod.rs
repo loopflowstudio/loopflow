@@ -139,7 +139,7 @@ pub enum Commands {
     /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
     /// that spawns and supervises the wave's mind as a resident child
     /// process.
-    #[command(name = "wave", alias = "loop")]
+    #[command(name = "wave")]
     Wave {
         /// Wave name (matches wave/<name>/)
         name: String,
@@ -262,6 +262,9 @@ pub enum WorkerCommand {
         /// Fork the worker's branch from this run's branch (dependent series)
         #[arg(long, value_name = "RUN_ID")]
         stack: Option<String>,
+        /// Skip the automatic `lf op pr` on clean flow exit
+        #[arg(long = "no-pr")]
+        no_pr: bool,
     },
 }
 
@@ -328,6 +331,12 @@ pub enum OpsCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
+    /// Rotate a recurring wave onto a fresh branch (pushed with upstream)
+    Advance {
+        /// Wave name (default: inferred from the worktree)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
     /// Create next iteration branch
     Next {
         #[arg(short = 'c', long = "create-pr")]
@@ -380,6 +389,22 @@ pub enum OpsCommand {
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
+    },
+    /// Merge-queue maintenance for stacked wave runs
+    Queue {
+        #[command(subcommand)]
+        cmd: QueueCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QueueCommand {
+    /// Run one reconcile pass: stack-status inference, draft/ready flips,
+    /// lazy head rebase, queue-block attention writes
+    Reconcile {
+        /// Only this wave (default: every wave with queue state)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
     },
 }
 
@@ -798,6 +823,54 @@ mod tests {
         };
         assert_eq!(fact, "one fact");
         assert!(target.parent);
+    }
+
+    #[test]
+    fn worker_run_parses_no_pr_flag() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "q",
+            "worker",
+            "run",
+            "goals",
+            "--flow",
+            "implement",
+            "--task",
+            "Do it.",
+            "--no-pr",
+        ])
+        .expect("parse");
+        let Some(Commands::Q {
+            cmd:
+                QCommand::Worker {
+                    cmd: WorkerCommand::Run { wave, no_pr, .. },
+                },
+        }) = cli.command
+        else {
+            panic!("expected q worker run command");
+        };
+        assert_eq!(wave, "goals");
+        assert!(no_pr);
+    }
+
+    #[test]
+    fn op_advance_parses_optional_wave() {
+        let cli = Cli::try_parse_from(["lf", "op", "advance"]).expect("parse");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Op {
+                op: OpsCommand::Advance { wave: None }
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["lf", "op", "advance", "-w", "goals"]).expect("parse");
+        let Some(Commands::Op {
+            op: OpsCommand::Advance { wave },
+        }) = cli.command
+        else {
+            panic!("expected op advance command");
+        };
+        assert_eq!(wave.as_deref(), Some("goals"));
     }
 
     #[test]

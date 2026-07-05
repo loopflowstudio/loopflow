@@ -11,19 +11,10 @@ A wave is a named agent with a goal. You author its intent and memory; it works 
 
 ## Creating a Wave
 
-Author `wave/<name>/GOAL.md`, then run the agent:
+Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets `primary_flow:` / `mode:`. Then run the agent:
 
 ```bash
-lfq wave run infra        # start (or attach to) the wave agent
-```
-
-In Concerto, create a wave from the dashboard — set its name and flow. Or from Python:
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("infra", repo=".", flow="build")
-loopflow.run_wave("infra")
+lf wave infra             # start the wave agent
 ```
 
 ---
@@ -104,7 +95,7 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 | `agent` | Preferred agent harness/model |
 | `pm.asana_project` | Asana project id backing the wave's roadmap (written by `lf op pm init`) |
 
-Crons and triggers are live lfd state — configure them through the HTTP or Python API; they are not read from `GOAL.md`.
+Crons and triggers are live lfd state — configure them through the HTTP API; they are not read from `GOAL.md`.
 
 ---
 
@@ -116,7 +107,7 @@ Crons and triggers are live lfd state — configure them through the HTTP or Pyt
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, Concerto and lfq pick them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Concerto picks them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -131,7 +122,7 @@ Run the wave agent and it works one move at a time:
 3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
 
    ```bash
-   lfq worker run infra --flow build --task "wrap SQLite migrations in a transaction"
+   lf q worker run infra --flow build --task "wrap SQLite migrations in a transaction"
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
@@ -148,12 +139,9 @@ When an item ships, its context — what was learned, what changed, what downstr
 ## Running and Monitoring
 
 ```bash
-lfq wave run mywave         # start or attach to the wave agent
-lfq sessions                # the wave agent and every worker it launched
-lfq attach <session-id>     # jump into one over tmux
-lfq list                    # all waves
-lfq logs mywave             # tail agent output
-lfq stop mywave             # stop a wave
+lf wave mywave              # start the wave agent (Ctrl-C to stop)
+tmux ls                     # the wave agent and every worker it launched
+tmux attach -t <name>       # jump into one; agent output lives here
 ```
 
 In **Concerto**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.

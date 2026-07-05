@@ -38,9 +38,9 @@ lf q worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline
-shell-out — so it's independently monitorable and steerable. Watch it with
-`lfq sessions` (live sessions, needs-input flagged) and drop into one with
-`lfq attach <id>` to answer an interactive step.
+shell-out — so it's independently monitorable and steerable. List live
+sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
+answer an interactive step.
 
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,

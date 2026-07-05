@@ -13,6 +13,7 @@ use crate::engine::stream::{render_event, ParseResult, StreamEvent, StreamParser
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
+pub(crate) use helpers::resolve_lf_binary;
 pub use helpers::{create_run_for_placement, ensure_wave_worktree, Placement};
 pub use wave::WaveExecutor;
 

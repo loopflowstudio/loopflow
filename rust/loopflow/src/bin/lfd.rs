@@ -14,10 +14,10 @@ use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
-use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
+use loopflow::provider_auth::ProviderAuthService;
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name)
@@ -208,6 +208,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let journal_handle =
         loopflow::lfd::journal::spawn(store.clone(), event_hub.clone(), cancel.clone());
 
+    // The push bridge: mutations happen in other processes now (lf wave
+    // registers store-direct, lf q writes runs, lf op writes attention) —
+    // poll the store and relay their effects to /ws subscribers.
+    {
+        let bridge = loopflow::lfd::bridge::StoreBridge::new(store.clone(), event_hub.clone());
+        let bridge_cancel = cancel.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = bridge_cancel.cancelled() => {}
+                _ = bridge.run(loopflow::lfd::bridge::POLL_CADENCE) => {}
+            }
+        });
+    }
+
     // Hourly output log pruning.
     {
         let prune_dir = output_dir;
@@ -282,6 +296,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let http_router = loopflow::lfd::http::router(http_state);
 
+    tracing::info!("gatekeeper: reads, push, webhook ingress; mutations exec lf");
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         tracing::info!(addr = %http_addr, "listening");

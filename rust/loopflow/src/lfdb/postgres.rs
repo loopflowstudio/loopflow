@@ -830,9 +830,18 @@ impl PostgresStore {
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         let wave_id = wave_id.clone();
         self.with_client(|client| async move {
+            // attention_items and terminal_sessions reference waves without
+            // ON DELETE CASCADE; delete them explicitly or the wave row is
+            // undeletable once either exists.
             client
                 .execute(
                     "DELETE FROM attention_items WHERE wave_id = $1",
+                    &[&wave_id],
+                )
+                .await?;
+            client
+                .execute(
+                    "DELETE FROM terminal_sessions WHERE wave_id = $1",
                     &[&wave_id],
                 )
                 .await?;

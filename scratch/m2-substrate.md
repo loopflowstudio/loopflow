@@ -1,10 +1,26 @@
 # M2 Substrate Design Notes
 
+This is the design doc to execute for the M2 `lf code` pass.
+
 M2 should land as one coherent PR that removes the old center: postgres,
 container mode, and the dual-backend persistence shape. The destination from
 `wave/goals/architecture-direction.md` is narrow sqlite as local operational
 scratchpad, chat/journals for conversation, git/GitHub for PR truth, Asana for
 roadmap truth, and explicit `lf` commands at authority boundaries.
+
+Jack's resolved direction:
+
+- "I think we should call the conversation chat."
+- Rename `conversation` to `chat` in M2.
+- Include the unfinished placement grammar in M2: remove `lf q worker run` and
+  add ordinary `lf` placement flags.
+- No backwards compatibility for old container/postgres config. Old keys can
+  error through normal config parsing; do not add migration shims or special
+  warnings.
+- Remove user-facing `mode` entirely, and remove the internal mode/profile
+  abstraction too. With container gone, there is no mode system.
+- Put the first query plane in `lfdb` unless implementation proves it needs to
+  compose non-sqlite sources immediately.
 
 ## M1 Review
 
@@ -60,20 +76,27 @@ local.
 
 The PR should:
 
-1. Remove postgres support completely.
-2. Remove container/compose mode as a product and service deployment shape.
-3. Simplify `lfdb` to a sqlite-only local registry.
-4. Narrow sqlite's job to machine operational facts.
-5. Move conversation/chat authority to the chat tier, not the registry.
-6. Introduce or clarify the query plane so readers do not reach through random
+1. Rename `conversation` to `chat`.
+2. Replace `lf q worker run` with ordinary `lf` placement flags.
+3. Remove postgres support completely.
+4. Remove container/compose mode as a product and service deployment shape.
+5. Remove user-facing `mode`.
+6. Simplify `lfdb` to a sqlite-only local registry.
+7. Narrow sqlite's job to machine operational facts.
+8. Move chat authority to the chat tier, not the registry.
+9. Introduce or clarify the query plane so readers do not reach through random
    daemon/store internals.
-7. Keep useful deployment hardening only where it still applies to native/SSH
+10. Keep useful deployment hardening only where it still applies to native/SSH
    operation.
 
 ## Current Substrate Surface
 
 Primary deletion areas:
 
+- `rust/loopflow/src/lf/commands/q.rs`, `QCommand`, `WorkerCommand`, and docs
+  teaching `lf q worker run`.
+- `Placement::Pool` and any run/session/fork machinery that only exists for the
+  old detached worker API.
 - `rust/loopflow/src/lfdb/postgres.rs`
 - `rust/loopflow/src/lfdb/rows.rs` if it only exists to abstract rusqlite vs
   tokio-postgres rows.
@@ -120,11 +143,32 @@ Questionable sqlite tables/API after narrowing:
 
 First, settle vocabulary:
 
-- Rename `crate::conversation` to `crate::chat` if "chat" is canonical.
+- Rename `crate::conversation` to `crate::chat`.
 - Rename public types only when they cross the user/product boundary. Internal
   wire/event names can remain temporarily if renaming them would dominate the
   substrate PR.
 - Update docs/prompts to say "chat" for the conversation tier.
+
+Then finish placement:
+
+- Add placement flags to normal `lf` flow/step execution:
+
+  ```text
+  lf implement "task" --dispatch
+  lf implement "task" --stack <run-id-or-branch>
+  lf implement "task" --fork
+  ```
+
+- Bare `lf ...` keeps the current cwd.
+- `--dispatch` runs in a separate worktree against the same remote target
+  branch.
+- `--stack` creates a branch/worktree stacked on the named parent. Stack truth
+  comes from git ancestry and PR base; sqlite lineage is cache/annotation.
+- `--fork` creates an independent branch/worktree from the current branch's
+  review base.
+- The placed command runs synchronously and blocks like a normal `lf` command.
+  Do not preserve detached tmux dispatch as the default replacement.
+- Delete public `lf q worker run` once the flags cover the behavior.
 
 Then remove postgres:
 
@@ -147,8 +191,8 @@ Then remove container mode:
 
 - Delete `Mode::Container`, `RuntimeBackend::Compose`, and
   `StorageType::Postgres`.
-- Make `mode` either absent/native-only or remove `mode` from config entirely
-  if no alternative remains.
+- Remove the user-facing `mode` config key and any internal profile abstraction
+  that only exists to switch modes.
 - Delete compose generation and docker compose service management.
 - Simplify macOS/Linux service install/start/status/uninstall to native only.
 - Remove `LFD_DATABASE_URL` from service env allowlists and config resolution.
@@ -160,48 +204,28 @@ Then remove container mode:
 
 Then narrow sqlite/query:
 
-- Define the "query plane" as the read API used by `lf`, `lfd`, `wave`, and
-  future `lfq`. It should compose authoritative sources rather than making
-  sqlite pretend to own everything.
+- Define the first query plane inside `lfdb`: the read API used by `lf`, `lfd`,
+  `wave`, and future `lfq` for sqlite-backed operational facts.
 - Reads over operational rows can stay in `lfdb`.
-- Reads over chat history should go through `chat` journal readers.
+- Reads over chat history should go through `chat` journal readers; do not
+  force them through sqlite just to make `lfdb` look central.
 - Reads over PR/branch truth should go through git/GitHub-facing ops helpers.
 - Aggregation should be derived/disposable.
 
-## Design Questions
+## Remaining Design Questions
 
-1. Should M2 begin by renaming `conversation` to `chat`? The word matters more
-   now than later because M2 will decide which tier owns history and summaries.
-
-2. Is the unfinished placement grammar part of M2's scope, or should it be a
-   separate M1 follow-up before M2 starts? The substrate work can proceed
-   without it, but the registry narrowing gets cleaner if `lf q worker run`,
-   `Placement::Pool`, and fork-run leftovers are already gone.
-
-3. When removing old config, should M2 hard-error on `mode: container`,
-   `storage: postgres`, and `LFD_DATABASE_URL` with explicit messages, or
-   silently ignore removed keys/env? The codebase style points toward hard
-   errors for config that used to mean real behavior.
-
-4. Should `mode` survive as `native`-only, or disappear from config now that
-   there is no product mode choice?
-
-5. Which sqlite domains remain authoritative enough to keep?
+1. Which sqlite domains remain authoritative enough to keep?
    Candidate keepers: run/session lifecycle, provider tokens, repo registry,
    attention/live PR cache. Candidate deletions/moves: chat messages, chat
    memory blocks, queue merge events, fork runs, summaries.
 
-6. What should the query plane be called and where should it live? Options:
-   `engine::query` for shared composition, `lfdb::query` for sqlite-only reads,
-   or a top-level `query` module that composes sqlite + chat + git/GitHub.
+2. Should the `lfdb` query plane be a distinct module, e.g. `lfdb::query`, or
+   just cleaned-up methods on `Store`/domain traits? A module is clearer if M2
+   adds new read models; methods are simpler if this is mostly deletion.
 
-7. Do we preserve any container-mode hardening in M2, or explicitly defer it to
+3. Do we preserve any container-mode hardening in M2, or explicitly defer it to
    M3's SSH-first self-hosted story? The useful pieces are env allowlisting,
    named credential mounts, service-file secret hygiene, and health checks.
-
-8. Does M2 update user docs/prompts away from `lf q worker run`, or only remove
-   postgres/container docs? If placement is out-of-scope, docs will remain
-   split-brained.
 
 ## Done When
 

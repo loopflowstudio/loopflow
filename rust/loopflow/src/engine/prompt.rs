@@ -14,6 +14,7 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
+use crate::lfd::wave::memory::Memory;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -718,18 +719,14 @@ fn gather_wave_memory_doc(
     // Memory lives under the ORIGIN repo: the wave server holds its pen
     // there, and a worktree's committed copy can lag it.
     let origin = crate::engine::wave_context::wave_origin(repo_root);
-    let memory_path = origin.join("wave").join(wave_name).join("MEMORY.md");
-    if !memory_path.is_file() {
+    let memory = Memory::for_wave(&origin, wave_name);
+    if !memory.path().is_file() {
         return Ok(None);
     }
 
-    let Ok(content) = fs::read_to_string(&memory_path) else {
-        return Ok(None);
-    };
-
     Ok(Some(Document {
         path: format!("wave/{wave_name}/MEMORY.md"),
-        content,
+        content: memory.read(),
         source: DocumentSource::WaveMemory,
     }))
 }

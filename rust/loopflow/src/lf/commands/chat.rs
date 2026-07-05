@@ -37,14 +37,14 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::wave_context::{
+    read_endpoint_pointer, resolve_ambient_wave, wave_origin, AmbientWaveRef,
+};
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::WaveTargetArgs;
 use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{Wave, WAVE_SERVER_ENDPOINT_ENV};
 use crate::lfd::wave::journal::Attribution;
-use crate::lfd::wave::server::endpoint_path;
-use crate::ops::util::resolve_wave_name;
 
 pub fn run(text_args: &[String], target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -154,24 +154,27 @@ pub(crate) async fn resolve_target(
     repo: Option<&Path>,
     env_wave_id: Option<&str>,
 ) -> Result<Option<ResolvedWave>> {
-    let main_repo = repo.map(|r| main_repo_root(r).unwrap_or_else(|_| r.to_path_buf()));
+    let main_repo = repo.map(wave_origin);
 
-    // The invoking context's wave: LFD_WAVE_ID first, else the worktree name.
-    let mut own_row: Option<Wave> = match (store, env_wave_id) {
-        (Some(store), Some(id)) => match id.parse() {
-            Ok(id) => store.get_wave(&id).await?,
-            Err(_) => None,
-        },
-        _ => None,
-    };
-    let own_name: Option<String> = match &own_row {
-        Some(row) => Some(row.name().clone()),
-        None => repo.and_then(|r| resolve_wave_name(r, None)),
-    };
-    if own_row.is_none() {
-        if let (Some(store), Some(name)) = (store, &own_name) {
-            own_row = store.get_wave_by_name(name).await?;
+    // The invoking context's wave: the shared ambient rule (env LFD_WAVE_ID
+    // first, else the worktree name) — the same resolution context assembly
+    // and run registration use.
+    let mut own_row: Option<Wave> = None;
+    let mut own_name: Option<String> = None;
+    match resolve_ambient_wave(env_wave_id, repo) {
+        Some(AmbientWaveRef::Id(id)) => {
+            if let (Some(store), Ok(id)) = (store, id.parse()) {
+                own_row = store.get_wave(&id).await?;
+            }
+            own_name = own_row.as_ref().map(|row| row.name().clone());
         }
+        Some(AmbientWaveRef::Name(name)) => {
+            if let Some(store) = store {
+                own_row = store.get_wave_by_name(&name).await?;
+            }
+            own_name = Some(name);
+        }
+        None => {}
     }
 
     let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
@@ -243,10 +246,7 @@ pub(crate) async fn resolve_target(
         .or(main_repo);
     if endpoint.is_none() {
         if let Some(root) = &repo_root {
-            endpoint = std::fs::read_to_string(endpoint_path(root, &target_name))
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty());
+            endpoint = read_endpoint_pointer(root, &target_name);
         }
     }
 

@@ -7,9 +7,11 @@
 //! resolves → nothing is added (zero tokens, no headers) — flows stay
 //! wave-agnostic.
 //!
-//! Resolution: explicit `--wave` (the caller passes it) > `LFD_WAVE_ID` env
-//! (managed sessions and dispatched workers, mapped to a name through the
-//! shared store) > worktree/branch name (`ops::util::resolve_wave_name`).
+//! Resolution: explicit `--wave` (the caller passes it) >
+//! [`resolve_ambient_wave`] — THE ambient rule, shared with `lf chat`
+//! targeting and run registration: `LFD_WAVE_ID` env first (managed sessions
+//! and dispatched workers), else worktree-root-guarded worktree/branch name
+//! resolution (`ops::util::resolve_wave_name`).
 //!
 //! Read path — reads only, the wave server stays the single writer:
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
@@ -22,14 +24,13 @@
 //! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
 //! repo — a worktree resolves its main repo first.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::engine::worktrees::main_repo_root;
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 use crate::lfd::wave::journal::{fold_thread, journal_path, read_events};
@@ -43,47 +44,118 @@ pub const WAVE_CHAT_MAX_CHARS: usize = 4_000;
 /// Per-operation timeout for the live-server read (loopback only).
 const LIVE_READ_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// The wave a run is ambiently inside, or `None` when no wave resolves.
-///
-/// `LFD_WAVE_ID` (set by dispatchers on every managed session) wins; a bare
-/// run falls back to the worktree/branch resolution every workflow op uses —
-/// but only when `repo_root` really is the working-tree root. A nested
-/// directory handed in as a "repo" (fixture trees, subdir invocations) must
-/// not inherit the enclosing checkout's wave.
-pub fn resolve_ambient_wave_name(repo_root: &Path) -> Option<String> {
-    if let Some(name) = std::env::var(crate::lf::session::WAVE_ID_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .and_then(|id| wave_name_for_id(id.trim()))
-    {
-        return Some(name);
-    }
-    if !is_worktree_root(repo_root) {
-        return None;
-    }
-    crate::ops::util::resolve_wave_name(repo_root, None)
+/// Which wave a process is ambiently inside, before any store lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AmbientWaveRef {
+    /// `LFD_WAVE_ID` from the env: the id of a wave row in the shared store.
+    Id(String),
+    /// The worktree/branch-derived wave name of the repo the run executes in.
+    Name(String),
 }
 
-/// Whether `repo_root` is the top of a git working tree (not a directory
-/// inside one, and not outside git entirely).
-fn is_worktree_root(repo_root: &Path) -> bool {
+/// THE ambient-wave rule, in one place — context assembly, `lf chat`/`lf
+/// memory` targeting, and run self-registration all resolve through it so a
+/// run that is context-visible is also registration-visible.
+///
+/// `LFD_WAVE_ID` (set by dispatchers on every managed session; trimmed) wins;
+/// a bare run falls back to the worktree/branch resolution every workflow op
+/// uses — but only when `repo_root` really is the working-tree root. A nested
+/// directory handed in as a "repo" (fixture trees, subdir invocations) must
+/// not inherit the enclosing checkout's wave.
+pub fn resolve_ambient_wave(
+    env_wave_id: Option<&str>,
+    repo_root: Option<&Path>,
+) -> Option<AmbientWaveRef> {
+    if let Some(id) = env_wave_id.map(str::trim).filter(|value| !value.is_empty()) {
+        return Some(AmbientWaveRef::Id(id.to_string()));
+    }
+    let repo_root = repo_root?;
+    if !repo_git_info(repo_root).is_worktree_root {
+        return None;
+    }
+    crate::ops::util::resolve_wave_name(repo_root, None).map(AmbientWaveRef::Name)
+}
+
+/// The wave a run is ambiently inside, or `None` when no wave resolves
+/// (including an env id the shared store never heard of — stale env).
+pub fn resolve_ambient_wave_name(repo_root: &Path) -> Option<String> {
+    let env_wave_id = std::env::var(crate::lf::session::WAVE_ID_ENV).ok();
+    match resolve_ambient_wave(env_wave_id.as_deref(), Some(repo_root))? {
+        AmbientWaveRef::Id(id) => wave_name_for_id(&id),
+        AmbientWaveRef::Name(name) => Some(name),
+    }
+}
+
+/// What the ambient-wave paths ask git about a repo root.
+#[derive(Debug, Clone)]
+struct RepoGitInfo {
+    /// `repo_root` is the top of a git working tree (not a directory inside
+    /// one, and not outside git entirely).
+    is_worktree_root: bool,
+    /// The main checkout this working tree belongs to; `repo_root` itself
+    /// when it is not a worktree root.
+    origin: PathBuf,
+}
+
+/// One git resolution per repo root per process. Prompt assembly asks "is
+/// this a worktree root?" and "where is the origin?" several times per run
+/// (wave resolution, chat, memory — 6-7 git execs before memoization);
+/// mirrors the Swift side's memoization of the same resolution.
+fn repo_git_info(repo_root: &Path) -> RepoGitInfo {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, RepoGitInfo>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache
+        .entry(repo_root.to_path_buf())
+        .or_insert_with(|| query_repo_git_info(repo_root))
+        .clone()
+}
+
+/// The single git call behind [`repo_git_info`]: toplevel and common dir in
+/// one `rev-parse`. A directory that is not itself a working-tree root
+/// (fixture trees, plain directories) is its own origin — it must not walk
+/// up into an enclosing checkout.
+fn query_repo_git_info(repo_root: &Path) -> RepoGitInfo {
+    let not_a_root = || RepoGitInfo {
+        is_worktree_root: false,
+        origin: repo_root.to_path_buf(),
+    };
     let Ok(output) = std::process::Command::new("git")
         .arg("-C")
         .arg(repo_root)
-        .args(["rev-parse", "--show-toplevel"])
+        .args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ])
         .output()
     else {
-        return false;
+        return not_a_root();
     };
     if !output.status.success() {
-        return false;
+        return not_a_root();
     }
-    let toplevel = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines().map(str::trim);
+    let toplevel = PathBuf::from(lines.next().unwrap_or_default());
+    let common_dir = PathBuf::from(lines.next().unwrap_or_default());
     let toplevel = toplevel.canonicalize().unwrap_or(toplevel);
     let root = repo_root
         .canonicalize()
         .unwrap_or_else(|_| repo_root.to_path_buf());
-    toplevel == root
+    if toplevel != root {
+        return not_a_root();
+    }
+    RepoGitInfo {
+        is_worktree_root: true,
+        origin: common_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| repo_root.to_path_buf()),
+    }
 }
 
 /// Map a wave id from the env to its name through the shared store. The
@@ -106,14 +178,10 @@ fn wave_name_for_id(id: &str) -> Option<String> {
 }
 
 /// The origin repo a wave's state lives under: the main checkout when
-/// `repo_root` is a worktree root, `repo_root` itself otherwise. A directory
-/// that is not itself a working-tree root (fixture trees, plain directories)
-/// is its own origin — it must not walk up into an enclosing checkout.
+/// `repo_root` is a worktree root, `repo_root` itself otherwise (see
+/// [`repo_git_info`] for the guard).
 pub fn wave_origin(repo_root: &Path) -> PathBuf {
-    if !is_worktree_root(repo_root) {
-        return repo_root.to_path_buf();
-    }
-    main_repo_root(repo_root).unwrap_or_else(|_| repo_root.to_path_buf())
+    repo_git_info(repo_root).origin
 }
 
 /// The wave's recent conversation, rendered compactly, or `None` when the
@@ -124,21 +192,30 @@ pub fn gather_wave_chat(repo_root: &Path, wave: &str) -> Option<String> {
     render_wave_chat(&turns)
 }
 
+/// The `wave/<name>/.wave-endpoint` discovery pointer's contents, trimmed.
+/// Missing or empty pointer → `None`. Shared by every pointer reader (`lf
+/// chat` targeting and the ambient read here); the wave server owns writes.
+pub fn read_endpoint_pointer(origin: &Path, wave: &str) -> Option<String> {
+    let addr = std::fs::read_to_string(endpoint_path(origin, wave)).ok()?;
+    let addr = addr.trim();
+    (!addr.is_empty()).then(|| addr.to_string())
+}
+
 /// Prefer the live server: the open turn is only there in full fidelity, and
 /// the journal is its own persistence. A dead/stale pointer degrades to the
-/// journal fold silently.
+/// journal fold silently. Asks for only the turns the render keeps
+/// (`?limit=N` = the last N); a server without limit support returns the
+/// full thread, which renders identically.
 fn live_turns(origin: &Path, wave: &str) -> Option<Vec<ChatTurn>> {
     #[derive(Debug, Deserialize)]
     struct ConversationBody {
         turns: Vec<ChatTurn>,
     }
 
-    let addr = std::fs::read_to_string(endpoint_path(origin, wave)).ok()?;
-    let addr = addr.trim();
-    if addr.is_empty() {
-        return None;
-    }
-    let body = http_get(addr, "/conversation")?;
+    let addr = read_endpoint_pointer(origin, wave)?;
+    let body = http_get(format!(
+        "http://{addr}/conversation?limit={WAVE_CHAT_RECENT_TURNS}"
+    ))?;
     serde_json::from_str::<ConversationBody>(&body)
         .ok()
         .map(|payload| payload.turns)
@@ -157,91 +234,26 @@ fn journal_turns(origin: &Path, wave: &str) -> Option<Vec<ChatTurn>> {
     Some(turns)
 }
 
-/// Blocking loopback HTTP GET over a raw socket. Deliberately not reqwest:
-/// context assembly is sync but sometimes runs inside a tokio runtime (flow
-/// steps), where `reqwest::blocking` panics. A raw socket blocks a thread
-/// that already blocks on child processes, bounded by [`LIVE_READ_TIMEOUT`].
-fn http_get(addr: &str, path: &str) -> Option<String> {
-    let socket_addr: std::net::SocketAddr = addr.parse().ok()?;
-    let mut stream = TcpStream::connect_timeout(&socket_addr, LIVE_READ_TIMEOUT).ok()?;
-    stream.set_read_timeout(Some(LIVE_READ_TIMEOUT)).ok()?;
-    stream.set_write_timeout(Some(LIVE_READ_TIMEOUT)).ok()?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
-    )
-    .ok()?;
-    // Read until the response is complete (Content-Length satisfied or the
-    // chunked terminator seen) rather than to EOF: a peer that resets after
-    // writing everything must not void a fully-received body.
-    let mut raw = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        if response_complete(&raw) {
-            break;
+/// Blocking GET on a scratch thread: context assembly is sync but sometimes
+/// already runs inside a tokio runtime (flow steps), where `reqwest::blocking`
+/// panics — the same reason [`wave_name_for_id`] hops threads. Bounded by
+/// [`LIVE_READ_TIMEOUT`] per phase (connect, whole request).
+fn http_get(url: String) -> Option<String> {
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(LIVE_READ_TIMEOUT)
+            .timeout(LIVE_READ_TIMEOUT)
+            .build()
+            .ok()?;
+        let response = client.get(url).send().ok()?;
+        if !response.status().is_success() {
+            return None;
         }
-        match stream.read(&mut buf) {
-            Ok(0) => break,
-            Ok(read) => raw.extend_from_slice(&buf[..read]),
-            Err(_) => break,
-        }
-    }
-    let text = String::from_utf8_lossy(&raw);
-    let (head, body) = text.split_once("\r\n\r\n")?;
-    let status_ok = head
-        .lines()
-        .next()
-        .is_some_and(|line| line.split_whitespace().nth(1) == Some("200"));
-    if !status_ok {
-        return None;
-    }
-    if head
-        .to_ascii_lowercase()
-        .contains("transfer-encoding: chunked")
-    {
-        return Some(dechunk(body));
-    }
-    Some(body.to_string())
-}
-
-/// Whether `raw` holds a complete HTTP response: headers plus either the
-/// declared Content-Length of body or the chunked terminator. Malformed or
-/// header-incomplete input is "not complete" — the read loop then continues
-/// to EOF/timeout and the parser decides.
-fn response_complete(raw: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(raw);
-    let Some((head, body)) = text.split_once("\r\n\r\n") else {
-        return false;
-    };
-    let head_lower = head.to_ascii_lowercase();
-    if head_lower.contains("transfer-encoding: chunked") {
-        return body.contains("0\r\n\r\n");
-    }
-    let Some(length) = head_lower
-        .lines()
-        .find_map(|line| line.strip_prefix("content-length:"))
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return false;
-    };
-    body.len() >= length
-}
-
-/// Decode a chunked transfer body, tolerating a truncated tail.
-fn dechunk(mut body: &str) -> String {
-    let mut out = String::new();
-    while let Some(size_end) = body.find("\r\n") {
-        let Ok(size) = usize::from_str_radix(body[..size_end].trim(), 16) else {
-            break;
-        };
-        let start = size_end + 2;
-        if size == 0 || body.len() < start + size {
-            break;
-        }
-        out.push_str(&body[start..start + size]);
-        body = &body[(start + size + 2).min(body.len())..];
-    }
-    out
+        response.text().ok()
+    })
+    .join()
+    .ok()
+    .flatten()
 }
 
 /// Render the last [`WAVE_CHAT_RECENT_TURNS`] turns compactly, newest last,
@@ -316,6 +328,62 @@ fn truncate_on_char_boundary(value: &mut String, mut max: usize) {
 mod tests {
     use super::*;
     use crate::lfd::wave::journal::{EventKind, Journal, MessageId, MessageOp, Usage};
+    use std::io::{Read, Write};
+
+    /// The one rule the three ambient call sites (context assembly, `lf chat`
+    /// targeting, run registration) share: env id first (trimmed), else
+    /// worktree-root-guarded name resolution.
+    #[test]
+    fn ambient_rule_env_id_wins_and_is_trimmed() {
+        assert_eq!(
+            resolve_ambient_wave(Some(" wave-1 "), None),
+            Some(AmbientWaveRef::Id("wave-1".to_string()))
+        );
+        // Blank env falls through to the (absent) repo.
+        assert_eq!(resolve_ambient_wave(Some("  "), None), None);
+        assert_eq!(resolve_ambient_wave(None, None), None);
+    }
+
+    #[test]
+    fn ambient_rule_resolves_wave_worktree_but_not_nested_or_bare_dirs() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let worktree = repo.create_wave_worktree("ship");
+        assert_eq!(
+            resolve_ambient_wave(None, Some(&worktree)),
+            Some(AmbientWaveRef::Name("ship".to_string()))
+        );
+
+        // A nested directory handed in as a "repo" must not inherit the
+        // enclosing checkout's wave.
+        let nested = worktree.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(resolve_ambient_wave(None, Some(&nested)), None);
+
+        // A bare directory outside git resolves nothing.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert_eq!(resolve_ambient_wave(None, Some(tmp.path())), None);
+
+        // Env still wins over the worktree.
+        assert_eq!(
+            resolve_ambient_wave(Some("wave-1"), Some(&worktree)),
+            Some(AmbientWaveRef::Id("wave-1".to_string()))
+        );
+    }
+
+    #[test]
+    fn wave_origin_of_a_worktree_is_the_main_checkout() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let worktree = repo.create_wave_worktree("origin-check");
+        let origin = wave_origin(&worktree);
+        assert_eq!(
+            origin.canonicalize().unwrap(),
+            repo.path().canonicalize().unwrap()
+        );
+
+        // A plain directory is its own origin.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert_eq!(wave_origin(tmp.path()), tmp.path());
+    }
 
     fn turn(role: ChatRole, text: &str) -> ChatTurn {
         ChatTurn {

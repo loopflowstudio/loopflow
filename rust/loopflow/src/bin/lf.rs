@@ -1,59 +1,75 @@
-use clap::Parser;
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use clap::{CommandFactory, Parser};
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{Cli, Commands};
 
-/// Flags that take a value (next arg is the value).
-const VALUE_FLAGS: &[&str] = &[
-    "-d",
-    "--direction",
-    "--docs",
-    "-m",
-    "--model",
-    "-w",
-    "--wave",
-];
+/// What `reorder_args` needs to know about the CLI, derived from the clap
+/// definition so it can never drift from it (the old hand-maintained lists
+/// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
+/// misrouting e.g. `lf debug -M codex`).
+struct ArgTables {
+    /// Top-level subcommand names and aliases — never reordered.
+    commands: HashSet<String>,
+    /// Top-level flags that take a value (the next arg belongs to them).
+    value_flags: HashSet<String>,
+    /// Top-level boolean flags (no value).
+    bool_flags: HashSet<String>,
+}
 
-/// Flags that are boolean (no value).
-const BOOL_FLAGS: &[&str] = &[
-    "-l",
-    "--list",
-    "-c",
-    "--clipboard",
-    "--no-direction",
-    "--yolo",
-    "-i",
-    "--interactive",
-    "-b",
-    "--batch",
-    "--tui",
-    "--ide",
-    "--chrome",
-    "--no-chrome",
-    "--diff-files",
-    "--no-diff-files",
-    "--diff",
-    "--no-diff",
-    "--no-loopflow",
-    "-h",
-    "--help",
-    "-V",
-    "--version",
-];
+fn arg_tables() -> &'static ArgTables {
+    static TABLES: OnceLock<ArgTables> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut cli = Cli::command();
+        // Materialize the built-ins (help subcommand, -h/--help, -V/--version).
+        cli.build();
 
-/// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &[
-    ":", "op", "q", "wave", "chat", "memory", "loop", "usage", "runs", "trace", "help",
-];
+        let mut commands = HashSet::new();
+        for sub in cli.get_subcommands() {
+            commands.insert(sub.get_name().to_string());
+            commands.extend(sub.get_all_aliases().map(String::from));
+        }
+
+        let mut value_flags = HashSet::new();
+        let mut bool_flags = HashSet::new();
+        for arg in cli.get_arguments() {
+            let flags = if arg.get_action().takes_values() {
+                &mut value_flags
+            } else {
+                &mut bool_flags
+            };
+            if let Some(short) = arg.get_short() {
+                flags.insert(format!("-{short}"));
+            }
+            for alias in arg.get_all_short_aliases().into_iter().flatten() {
+                flags.insert(format!("-{alias}"));
+            }
+            if let Some(long) = arg.get_long() {
+                flags.insert(format!("--{long}"));
+            }
+            for alias in arg.get_all_aliases().into_iter().flatten() {
+                flags.insert(format!("--{alias}"));
+            }
+        }
+
+        ArgTables {
+            commands,
+            value_flags,
+            bool_flags,
+        }
+    })
+}
 
 fn is_value_flag(arg: &str) -> bool {
-    VALUE_FLAGS.contains(&arg)
+    arg_tables().value_flags.contains(arg)
 }
 
 fn is_known_flag(arg: &str) -> bool {
-    BOOL_FLAGS.contains(&arg) || is_value_flag(arg)
+    arg_tables().bool_flags.contains(arg) || is_value_flag(arg)
 }
 
 /// Reorder args so flags come before the step/flow name.
@@ -68,7 +84,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 
     // If first arg is a known command, don't reorder
     if let Some(first) = rest.first() {
-        if KNOWN_COMMANDS.contains(&first.as_str()) {
+        if arg_tables().commands.contains(first.as_str()) {
             return args;
         }
     }
@@ -379,7 +395,81 @@ fn run_label(cli: &Cli) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::reorder_args;
+    use super::{arg_tables, reorder_args};
+
+    /// The derived tables cover everything the old hand lists carried, plus
+    /// the uppercase short aliases those lists had drifted away from.
+    #[test]
+    fn derived_tables_cover_commands_flags_and_aliases() {
+        let tables = arg_tables();
+        for command in [
+            ":", "op", "q", "wave", "loop", "chat", "memory", "usage", "runs", "trace", "help",
+        ] {
+            assert!(tables.commands.contains(command), "command {command}");
+        }
+        for flag in [
+            "-d",
+            "-D",
+            "--direction",
+            "--docs",
+            "-m",
+            "-M",
+            "--model",
+            "-w",
+            "-W",
+            "--wave",
+        ] {
+            assert!(tables.value_flags.contains(flag), "value flag {flag}");
+        }
+        for flag in [
+            "-l",
+            "--list",
+            "-c",
+            "-C",
+            "--clipboard",
+            "--no-direction",
+            "--yolo",
+            "-i",
+            "-I",
+            "-b",
+            "-B",
+            "--tui",
+            "--ide",
+            "--chrome",
+            "--no-chrome",
+            "--diff-files",
+            "--no-diff-files",
+            "--diff",
+            "--no-diff",
+            "--no-loopflow",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        ] {
+            assert!(tables.bool_flags.contains(flag), "bool flag {flag}");
+        }
+    }
+
+    /// Uppercase short aliases reorder exactly like their lowercase forms —
+    /// the drift the hand-maintained lists had (`lf debug -M codex` used to
+    /// treat `codex` as a step arg).
+    #[test]
+    fn reorder_args_uppercase_value_alias_after_step() {
+        let args = vec![
+            "lf".to_string(),
+            "debug".to_string(),
+            "-M".to_string(),
+            "codex".to_string(),
+        ];
+        assert_eq!(reorder_args(args), vec!["lf", "-M", "codex", "debug"]);
+    }
+
+    #[test]
+    fn reorder_args_uppercase_bool_alias_after_step() {
+        let args = vec!["lf".to_string(), "debug".to_string(), "-C".to_string()];
+        assert_eq!(reorder_args(args), vec!["lf", "-C", "debug"]);
+    }
 
     #[test]
     fn reorder_args_flag_after_step() {

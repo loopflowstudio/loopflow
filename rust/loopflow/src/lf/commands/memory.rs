@@ -145,11 +145,15 @@ mod tests {
     }
 
     async fn boot_server(origin: &Path, wave: &str) -> (String, Arc<WaveRuntime>) {
-        let (runtime, _inbox_rx) =
+        let runtime =
             WaveRuntime::open(wave.to_string(), origin.to_path_buf()).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(
+            runtime.clone(),
+            server::ResidentDoor::new("test-token"),
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });

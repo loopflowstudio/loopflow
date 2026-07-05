@@ -2,9 +2,16 @@
 //!
 //! Every endpoint reads or nudges [`WaveRuntime`]; none of them own logic. The
 //! timeline is served as-is, live events stream over SSE, and a POSTed message
-//! is dropped into the in-process inbox. Discovery is a dumb pointer file, not
-//! a transport: `wave/<name>/.wave-endpoint` holds `127.0.0.1:<port>` and
-//! nothing else.
+//! is journaled and broadcast to the resident's subscription. Discovery is a
+//! dumb pointer file, not a transport: `wave/<name>/.wave-endpoint` holds
+//! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
+//! this boot's resident token (see [`crate::wave::wire`]).
+//!
+//! This module is VENDOR-FREE: the mind lives in the resident process
+//! ([`crate::wave::resident`]), which publishes through the resident door
+//! (`/resident/attach`, `/resident/deltas`, `/resident/context` — token-gated)
+//! and listens on its own wave's `/events?inbox=true` subscription. The
+//! listener holds every pen; the resident holds the vendor.
 //!
 //! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
 //! the primary channel is the wave's name; work-line channels are addressed
@@ -15,9 +22,9 @@
 //! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `mind` is the resident's state (`idle | turning | interrupting
-//!   | failed`), or null for a channel with no resident (dormant channels,
-//!   when they exist — a served channel whose resident died reads
-//!   `status: "serving", mind: "failed"`); `workers` counts this wave's
+//!   | failed`), or null while no resident has ever been spawned or attached
+//!   (`--no-mind` serves dormant); a served channel whose resident died reads
+//!   `status: "serving", mind: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
@@ -45,6 +52,22 @@
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
 //!     state. Primary channel only (memory is wave identity; work lines have
 //!     none).
+//!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
+//!     is an [`InboxFrame`] — a resident-directed op. The pending queue
+//!     (journaled messages not yet named in any `answers`) replays on
+//!     connect, then live ops stream; a bare interrupt rides live-only with
+//!     `id: null` (nothing journaled). Primary channel only. The default
+//!     stream is byte-identical to the pre-resident wire.
+//! - The resident door (token-gated via the `x-lf-resident-token` header —
+//!   401 without this boot's token):
+//!   - `POST /resident/attach {pid}` → `{wave, thread_id}` — registers the
+//!     resident's pid for liveness and revives a `failed` mind (a fresh
+//!     resident IS the revival).
+//!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
+//!     deltas, applied to the journal fold
+//!     ([`WaveRuntime::apply_resident_delta`]).
+//!   - `GET /resident/context` → `{thread_id, in_flight}` — the pre-turn
+//!     snapshot; serving it freshens the store observations (one poll).
 //! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
 //!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
@@ -83,10 +106,10 @@
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -96,12 +119,78 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::conversations::turns::ChatTurn;
-use crate::wave::journal::{Attribution, MessageOp};
-use crate::wave::runtime::WaveRuntime;
+use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
+use crate::wave::registry::StoreObserver;
+use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::MindState;
+use crate::wave::wire::{
+    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
+    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+};
 
 /// Basename of the discovery pointer under `wave/<name>/`.
 pub const ENDPOINT_FILE: &str = ".wave-endpoint";
+
+/// The resident door's server-side state: this boot's token and the seat —
+/// the attached resident's pid, for liveness probing. Shared with the
+/// supervisor ([`crate::wave::supervisor`]), which probes attached pids and
+/// clears the seat when the resident dies.
+#[derive(Debug, Clone)]
+pub struct ResidentDoor {
+    token: String,
+    seat: Arc<Mutex<Option<u32>>>,
+}
+
+impl ResidentDoor {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            seat: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The attached resident's pid, if one has attached and not been cleared.
+    pub fn seat_pid(&self) -> Option<u32> {
+        *self.seat.lock().expect("resident seat lock poisoned")
+    }
+
+    /// Record the resident occupying the seat (attach, or spawn).
+    pub fn record_pid(&self, pid: u32) {
+        *self.seat.lock().expect("resident seat lock poisoned") = Some(pid);
+    }
+
+    /// The resident died: free the seat.
+    pub fn clear_seat(&self) {
+        *self.seat.lock().expect("resident seat lock poisoned") = None;
+    }
+
+    fn authorize(&self, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
+        let presented = headers
+            .get(RESIDENT_TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if presented == self.token {
+            return Ok(());
+        }
+        Err((
+            StatusCode::UNAUTHORIZED,
+            format!("missing or wrong {RESIDENT_TOKEN_HEADER}"),
+        ))
+    }
+}
+
+/// A fresh per-boot resident token.
+pub fn generate_resident_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
 
 #[derive(Debug, Serialize)]
 struct HealthBody {
@@ -160,12 +249,16 @@ struct PostChannelResponse {
     turn: Option<ChatTurn>,
 }
 
-/// `GET /events` scope query. Both explicitly Optional; setting both is a
-/// 400. Absent = the whole family.
+/// `GET /events` scope query. `channel`/`prefix` are explicitly Optional;
+/// setting both is a 400; absent = the whole family. `inbox` is explicitly
+/// Optional: `true` adds the resident's `inbox` frames (pending replay +
+/// live ops) to a primary-scope subscription; absent/false leaves the wire
+/// byte-identical to the pre-resident stream.
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     channel: Option<String>,
     prefix: Option<String>,
+    inbox: Option<bool>,
 }
 
 /// `GET /memory` response.
@@ -206,17 +299,28 @@ struct PostMessageResponse {
     state: String,
 }
 
-/// Server state: the runtime plus when it started (for uptime).
+/// Server state: the runtime, the resident door, the store observer (for the
+/// context door's freshness poll), and when the server started (for uptime).
 #[derive(Clone)]
 struct ServerState {
     runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Option<Arc<StoreObserver>>,
     started_at: OffsetDateTime,
 }
 
-/// Build the router over a running [`WaveRuntime`].
-pub fn router(runtime: Arc<WaveRuntime>) -> Router {
+/// Build the router over a running [`WaveRuntime`]. `observer` is the store
+/// poller when this server is registered — `GET /resident/context` freshens
+/// it before serving.
+pub fn router(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Option<Arc<StoreObserver>>,
+) -> Router {
     let state = ServerState {
         runtime,
+        resident,
+        observer,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -226,18 +330,89 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
+        .route("/resident/attach", post(resident_attach_handler))
+        .route("/resident/deltas", post(resident_deltas_handler))
+        .route("/resident/context", get(resident_context_handler))
         .with_state(state)
 }
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
+    // `mind` is null until a resident has ever been spawned or attached —
+    // a dormant channel (`--no-mind`) has no mind to report on.
+    let mind = state
+        .runtime
+        .resident_expected()
+        .then(|| state.runtime.mind_state().name().to_string());
     Json(HealthBody {
         status: "serving".to_string(),
-        mind: Some(state.runtime.mind_state().name().to_string()),
+        mind,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_snapshot().len(),
         workers: state.runtime.in_flight_workers().len(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
     })
+}
+
+// -- The resident door (token-gated; see crate::wave::wire) --
+
+async fn resident_attach_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<AttachRequest>,
+) -> Result<Json<AttachResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    state.resident.record_pid(body.pid);
+    state.runtime.set_resident_expected();
+    // A fresh resident IS the revival: a failed mind goes idle on attach.
+    if matches!(state.runtime.mind_state(), MindState::Failed { .. }) {
+        state
+            .runtime
+            .transition(MindState::Idle, "resident attached");
+    }
+    tracing::info!(pid = body.pid, "resident attached");
+    Ok(Json(AttachResponse {
+        wave: state.runtime.name().to_string(),
+        thread_id: state.runtime.last_thread_id(),
+    }))
+}
+
+async fn resident_deltas_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<PostDeltasRequest>,
+) -> Result<Json<PostDeltasResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    let accepted = body.deltas.len() as u64;
+    for delta in body.deltas {
+        state.runtime.apply_resident_delta(delta);
+    }
+    Ok(Json(PostDeltasResponse { accepted }))
+}
+
+async fn resident_context_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<ContextResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    // Freshen the store fold so the resident's next turn sees current
+    // workers, not a poll cadence's stale view.
+    if let Some(observer) = &state.observer {
+        observer.poll_once().await;
+    }
+    let in_flight = state
+        .runtime
+        .in_flight_workers()
+        .into_iter()
+        .map(|worker| InFlightWorker {
+            run_id: worker.run_id,
+            flow: worker.flow,
+            task: worker.task,
+        })
+        .collect();
+    Ok(Json(ContextResponse {
+        thread_id: state.runtime.last_thread_id(),
+        in_flight,
+    }))
 }
 
 async fn conversation_handler(
@@ -395,6 +570,7 @@ async fn events_handler(
     Query(query): Query<EventsQuery>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     let wave = state.runtime.name().to_string();
+    let include_inbox = query.inbox == Some(true);
     let (scope, primary) = match (query.channel, query.prefix) {
         (Some(_), Some(_)) => {
             return Err((
@@ -456,9 +632,21 @@ async fn events_handler(
     let mut streams: Vec<BoxedEventStream> = Vec::new();
     if primary {
         let sub = state.runtime.subscribe_with_snapshot();
+        // The resident's subscription replays the pending queue after the
+        // thread — its boot inbox. Consumption is validated at the resident
+        // door, so a stale replay can never double-consume.
+        let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+            sub.pending
+                .iter()
+                .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let replay = stream::iter(
             std::iter::once(Ok(state_event(&sub.state)))
-                .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t)))),
+                .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+                .chain(inbox_replay),
         );
         let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
             let out = match res {
@@ -484,7 +672,22 @@ async fn events_handler(
             };
             async move { out }
         });
-        let live = stream::select(live_turns, stream::select(live_states, live_memory));
+        let mut live: BoxedEventStream = Box::pin(stream::select(
+            live_turns,
+            stream::select(live_states, live_memory),
+        ));
+        if include_inbox {
+            let live_inbox = BroadcastStream::new(sub.inbox_rx).filter_map(move |res| {
+                let out = match res {
+                    Ok(item) => Some(Ok(inbox_event(&inbox_item_frame(&item)))),
+                    // Lagged: the pending fold is the durable queue; a
+                    // resident that falls behind resubscribes.
+                    Err(_) => None,
+                };
+                async move { out }
+            });
+            live = Box::pin(stream::select(live, live_inbox));
+        }
         streams.push(Box::pin(replay.chain(live)));
     }
     match live_children {
@@ -559,6 +762,33 @@ fn memory_event(summary: &str) -> Event {
     Event::default().event("memory").data(summary)
 }
 
+fn inbox_event(frame: &InboxFrame) -> Event {
+    Event::default()
+        .event("inbox")
+        .data(serde_json::to_string(frame).unwrap_or_default())
+}
+
+fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
+    InboxFrame {
+        id: Some(message.id.0.clone()),
+        op: message.op,
+        text: message.text.clone(),
+        from: message.from.clone(),
+    }
+}
+
+fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
+    match item {
+        InboxItem::Message(message) => pending_inbox_frame(message),
+        InboxItem::Interrupt => InboxFrame {
+            id: None,
+            op: MessageOp::Interrupt,
+            text: String::new(),
+            from: None,
+        },
+    }
+}
+
 /// Path to the discovery pointer for a wave.
 pub fn endpoint_path(repo_root: &Path, wave: &str) -> PathBuf {
     repo_root.join("wave").join(wave).join(ENDPOINT_FILE)
@@ -622,6 +852,47 @@ pub fn remove_endpoint(repo_root: &Path, wave: &str, own_addr: &str) {
     }
 }
 
+/// Path to the resident-token file for a wave (beside `.wave-endpoint`).
+pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
+    repo_root.join("wave").join(wave).join(RESIDENT_TOKEN_FILE)
+}
+
+/// Publish this boot's resident token so an attached resident (`lf wave
+/// <name> --mind-only`) can present it — the same filesystem-trust domain as
+/// the endpoint pointer. Owner-only on unix.
+pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
+    let path = resident_token_path(repo_root, wave);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Read the current resident token, for `--mind-only` attachment.
+pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
+    let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
+    let token = token.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Remove the token file on shutdown — only while it still holds this boot's
+/// token (a takeover owns the file now). Best-effort.
+pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
+    let path = resident_token_path(repo_root, wave);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if contents.trim() == own_token => {
+            let _ = std::fs::remove_file(path);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,6 +925,28 @@ mod tests {
             "127.0.0.1:50000",
             "foreign pointer survives our shutdown"
         );
+    }
+
+    /// The token file round-trips and removal honors ownership, like the
+    /// endpoint pointer.
+    #[test]
+    fn resident_token_file_roundtrips_and_respects_ownership() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(read_resident_token(tmp.path(), "ship").is_none());
+        write_resident_token(tmp.path(), "ship", "tok-1").expect("write");
+        assert_eq!(
+            read_resident_token(tmp.path(), "ship").as_deref(),
+            Some("tok-1")
+        );
+
+        // A foreign token (takeover) survives our shutdown; our own doesn't.
+        remove_resident_token(tmp.path(), "ship", "tok-other");
+        assert_eq!(
+            read_resident_token(tmp.path(), "ship").as_deref(),
+            Some("tok-1")
+        );
+        remove_resident_token(tmp.path(), "ship", "tok-1");
+        assert!(read_resident_token(tmp.path(), "ship").is_none());
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

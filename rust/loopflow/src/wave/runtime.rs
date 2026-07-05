@@ -16,27 +16,31 @@
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
 //!
-//! Two independent inputs feed the journal: the mind's harness events (via
-//! [`TurnSink`], driven by the mind's scheduler in [`super::mind`]) and user
-//! messages (HTTP → inbox channel). All appends go through one lock, so
+//! Two independent inputs feed the journal: the resident's wire deltas
+//! ([`WaveRuntime::apply_resident_delta`] — the old in-process `TurnSink`
+//! vocabulary, now arriving over `POST /resident/deltas`) and user messages
+//! (HTTP → journal + inbox broadcast). All appends go through one lock, so
 //! journal order, cache order, and broadcast order agree — one writer appends
-//! and broadcasts.
+//! and broadcasts. This module is vendor-free: the harness lives with the
+//! resident process, never here.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
+use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
 use crate::wave::channel::{in_family, scan_child_channels, ChannelFrame, ChildChannel};
 use crate::wave::journal::{
-    channel_opened_turn, fold_thread, fold_workers, journal_path, Attribution, Event, EventKind,
-    Journal, MessageId, MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
+    channel_opened_turn, fold_thread, fold_workers, journal_path, Attribution, EventKind, Journal,
+    MessageId, MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::state::{can_transition, MindState};
+use crate::wave::wire::{ResidentDelta, ResidentStateTo};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -55,11 +59,17 @@ const MEMORY_BROADCAST_CAPACITY: usize = 64;
 /// the primary turn broadcast: liveness only, a lagged subscriber resyncs.
 const FAMILY_BROADCAST_CAPACITY: usize = 256;
 
-/// One item from the HTTP surface to the mind's scheduler.
+/// Capacity of the live inbox broadcast (resident-directed ops → the
+/// `/events?inbox=true` frames and the supervisor). The journal is the
+/// durable queue; a lagged subscriber resyncs from the pending replay.
+const INBOX_BROADCAST_CAPACITY: usize = 256;
+
+/// One resident-directed op, broadcast live to the resident's subscription
+/// (`inbox` SSE frames) and the supervisor.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
-    /// A journaled user message (`message`, `steer`, or `interrupt` carrying
-    /// text — "interrupt & send"), awaiting consumption (named in a
+    /// A journaled user message (`message`, `steer`, `say`, or `interrupt`
+    /// carrying text — "interrupt & send"), awaiting consumption (named in a
     /// `TurnStarted.answers` or `TurnSteered.answers`).
     Message(PendingMessage),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
@@ -82,6 +92,11 @@ pub struct Subscription {
     /// Live `MemoryUpdated` summaries — fired on every curation, no replay
     /// (the file itself is the durable state).
     pub memory_rx: broadcast::Receiver<String>,
+    /// The pending queue as of the snapshot: journaled user messages not yet
+    /// named in any `answers` — the resident's boot replay.
+    pub pending: Vec<PendingMessage>,
+    /// Live resident-directed ops sent after the snapshot.
+    pub inbox_rx: broadcast::Receiver<InboxItem>,
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
@@ -96,6 +111,16 @@ struct Inner {
     /// content delta so subscribers watch it grow; cleared at finalization,
     /// when the terminal turn commits to `thread` under the same id.
     open_turn: Option<ChatTurn>,
+    /// Usage accrued for the open turn from `TurnUsage` deltas.
+    open_usage: Usage,
+    /// Count of prose fragments in the open turn, for `Message` item ids
+    /// (`"text-<n>"`).
+    open_text_items: usize,
+    /// Set by a force-finalize (interrupt-deadline janitor, resident death):
+    /// the journal already closed the turn, so late wire deltas for it —
+    /// including the resident's own eventual `TurnFinished` — are dropped
+    /// until the next `TurnOpened`.
+    drop_deltas_until_opened: bool,
     state: MindState,
     thread_id: Option<String>,
     /// Id of the mind's current or most recently committed assistant turn —
@@ -134,8 +159,14 @@ pub struct WaveRuntime {
     memory_tx: broadcast::Sender<String>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
     memory: Memory,
-    /// In-process user-message inbox (a channel, not a file).
-    inbox_tx: mpsc::UnboundedSender<InboxItem>,
+    /// Fans resident-directed ops out to the resident's `/events?inbox=true`
+    /// subscription and the supervisor. Liveness only — the journal's pending
+    /// fold is the durable queue.
+    inbox_tx: broadcast::Sender<InboxItem>,
+    /// Whether a resident has ever been spawned for / attached to this
+    /// listener. `/health` serves `mind: null` until then (a dormant channel
+    /// has no mind to report on).
+    resident_expected: AtomicBool,
     /// The channel family's child channels, materialized on demand. This
     /// server holds the pen for every one of them (single-writer per journal
     /// file, all pens in one process); the primary channel stays in `inner`
@@ -157,10 +188,7 @@ impl WaveRuntime {
     ///
     /// # Errors
     /// Journal I/O failure or an unreadable (future-versioned) journal.
-    pub fn open(
-        name: String,
-        repo_root: PathBuf,
-    ) -> anyhow::Result<(Arc<Self>, mpsc::UnboundedReceiver<InboxItem>)> {
+    pub fn open(name: String, repo_root: PathBuf) -> anyhow::Result<Arc<Self>> {
         let (mut journal, events) = Journal::open(&journal_path(&repo_root, &name))?;
         let mut fold = fold_thread(&events);
         let workers = fold_workers(&events);
@@ -198,15 +226,18 @@ impl WaveRuntime {
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
         let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (family_tx, _) = broadcast::channel(FAMILY_BROADCAST_CAPACITY);
-        let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
+        let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
-        let runtime = Arc::new(Self {
+        Ok(Arc::new(Self {
             name,
             repo_root,
             inner: Mutex::new(Inner {
                 journal,
                 thread: fold.turns,
                 open_turn: None,
+                open_usage: Usage::empty(),
+                open_text_items: 0,
+                drop_deltas_until_opened: false,
                 state,
                 thread_id: fold.thread_id,
                 last_assistant_turn_id,
@@ -219,10 +250,10 @@ impl WaveRuntime {
             memory_tx,
             memory,
             inbox_tx,
+            resident_expected: AtomicBool::new(false),
             children: Mutex::new(HashMap::new()),
             family_tx,
-        });
-        Ok((runtime, inbox_rx))
+        }))
     }
 
     pub fn name(&self) -> &str {
@@ -257,11 +288,38 @@ impl WaveRuntime {
         self.inner().thread_id.clone()
     }
 
-    /// User messages journaled before a restart but not yet consumed by a
-    /// turn. The mind drains this once at boot before listening to the live
-    /// inbox.
+    /// User messages journaled but not yet consumed by a turn — the durable
+    /// queue. Replayed as `inbox` frames when a resident subscribes, and the
+    /// validator for the resident's `answers` declarations.
     pub fn pending_messages(&self) -> Vec<PendingMessage> {
         self.inner().pending_messages.clone()
+    }
+
+    /// Live resident-directed ops (the supervisor's revive/janitor feed; the
+    /// SSE path uses [`WaveRuntime::subscribe_with_snapshot`] for a gap-free
+    /// pending replay).
+    pub fn subscribe_inbox(&self) -> broadcast::Receiver<InboxItem> {
+        self.inbox_tx.subscribe()
+    }
+
+    /// Live mind-state transitions (no snapshot).
+    pub fn subscribe_states(&self) -> broadcast::Receiver<MindState> {
+        self.state_tx.subscribe()
+    }
+
+    /// Live turn frames (no snapshot).
+    pub fn subscribe_turns(&self) -> broadcast::Receiver<Arc<ChatTurn>> {
+        self.turn_tx.subscribe()
+    }
+
+    /// Whether a resident has ever been spawned for / attached to this
+    /// listener (see `/health`'s `mind` field).
+    pub fn resident_expected(&self) -> bool {
+        self.resident_expected.load(Ordering::Relaxed)
+    }
+
+    pub fn set_resident_expected(&self) {
+        self.resident_expected.store(true, Ordering::Relaxed);
     }
 
     // -- Worker observations (the lfd tail's write surface) --
@@ -528,6 +586,8 @@ impl WaveRuntime {
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
             memory_rx: self.memory_tx.subscribe(),
+            pending: inner.pending_messages.clone(),
+            inbox_rx: self.inbox_tx.subscribe(),
         }
     }
 
@@ -560,9 +620,10 @@ impl WaveRuntime {
         true
     }
 
-    /// `Turning → Interrupting` for the open turn (a user interrupt landed).
-    /// Returns whether the transition applied — false when no turn is live.
-    pub fn begin_interrupt(&self, reason: &str) -> bool {
+    /// `Turning → Interrupting` for the open turn (the resident reported a
+    /// cancel in flight). Returns whether the transition applied — false when
+    /// no turn is live.
+    fn begin_interrupt(&self, reason: &str) -> bool {
         let mut inner = self.inner();
         let MindState::Turning { turn_id } = inner.state.clone() else {
             return false;
@@ -570,41 +631,21 @@ impl WaveRuntime {
         self.transition_locked(&mut inner, MindState::Interrupting { turn_id }, reason)
     }
 
-    /// Journal steer consumption for `answers` (`TurnSteered.answers` — see
-    /// [`crate::wave::journal`]). Normally the live turn consumed the
-    /// message; when the turn closed between the harness accepting the input
-    /// and this call (the send/journal race), consumption is journaled
-    /// against the last assistant turn — the vendor heard the text either
-    /// way, and an unmarked message would stay pending forever and be re-sent
-    /// as a fresh turn on every restart. A user turn is never named (the
-    /// thread's last turn at that point is usually the steer's own user
-    /// turn). Returns `false` when no assistant turn has ever existed
-    /// (nothing journaled — the caller keeps the message queued).
-    pub fn journal_steered(&self, answers: Vec<MessageId>) -> bool {
-        let mut inner = self.inner();
-        let turn_id = match inner.state.clone() {
-            MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => turn_id,
-            _ => match inner.last_assistant_turn_id.clone() {
-                Some(turn_id) => turn_id,
-                None => return false,
-            },
-        };
-        inner
-            .journal
-            .append(|_| EventKind::TurnSteered { turn_id, answers });
-        true
-    }
-
-    /// Janitor: finalize the open turn without a harness terminal event (the
-    /// interrupt deadline expired — the harness never delivered
-    /// `TurnCompleted`). Journals `TurnFinished`, commits and broadcasts the
-    /// turn as accumulated so far, and settles the mind to `Idle`. Returns
-    /// whether there was an open turn to finalize.
+    /// Janitor: finalize the open turn without a resident terminal delta —
+    /// the interrupt deadline expired with the resident silent, or the
+    /// resident process died mid-turn. Journals `TurnFinished`, commits and
+    /// broadcasts the turn as accumulated so far, settles the mind to `Idle`,
+    /// and arms the drop guard: late wire deltas for the closed turn are
+    /// ignored until the next `TurnOpened`. Returns whether there was an open
+    /// turn to finalize.
     pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
         let mut inner = self.inner();
         let Some(mut turn) = inner.open_turn.take() else {
             return false;
         };
+        inner.drop_deltas_until_opened = true;
+        inner.open_usage = Usage::empty();
+        inner.open_text_items = 0;
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn.id.clone(),
             status,
@@ -675,19 +716,20 @@ impl WaveRuntime {
         turn.created_at = event.at_rfc3339();
         turn.from = from.as_ref().map(|from| from.label.clone());
         let turn = self.commit_locked(&mut inner, turn);
-        // Inbox send still under the lock, so inbox order == journal order —
-        // sending after release lets two deliveries invert. The channel is
-        // unbounded: the send never blocks, so this cannot deadlock or stall
-        // the mind.
-        let _ = self
-            .inbox_tx
-            .send(InboxItem::Message(PendingMessage { id, op, text, from }));
+        // The pending fold stays live (not boot-only): it is the replay the
+        // resident's subscription serves and the validator for its `answers`.
+        let pending = PendingMessage { id, op, text, from };
+        inner.pending_messages.push(pending.clone());
+        // Inbox broadcast still under the lock, so inbox order == journal
+        // order — sending after release lets two deliveries invert. A send
+        // error just means no live subscribers; the pending fold has it.
+        let _ = self.inbox_tx.send(InboxItem::Message(pending));
         turn
     }
 
     /// Deliver a bare interrupt (no text). Nothing is journaled here — the
-    /// mind journals the `MindState` transition when it fires the cancel; an
-    /// interrupt while idle is a no-op by design.
+    /// resident reports the `MindState` transition when it fires the cancel;
+    /// an interrupt while idle is a no-op by design.
     pub fn deliver_interrupt(&self) {
         let _ = self.inbox_tx.send(InboxItem::Interrupt);
     }
@@ -733,7 +775,7 @@ impl WaveRuntime {
         self.commit_locked(&mut inner, committed)
     }
 
-    // -- TurnSink internals (same lock discipline as everything above) --
+    // -- The resident wire fold (same lock discipline as everything above) --
     //
     // Every content delta (opened / text / item) re-broadcasts the open-turn
     // snapshot under the same id. No debounce: deltas are item-granular from
@@ -742,8 +784,68 @@ impl WaveRuntime {
     // trailing frame would leave subscribers stale through a long tool call.
     // A throttle earns its place with the part-grained wire, not before.
 
-    fn sink_turn_started(&self, answers: Vec<MessageId>) -> Event {
+    /// Apply one ordered wire delta from the resident (`POST
+    /// /resident/deltas`). Malformed sequences — deltas for a turn that isn't
+    /// open, late deltas after a force-finalize, answers naming unknown
+    /// messages — are dropped with a warning, never journaled: the journal
+    /// stays a record of what verifiably happened.
+    pub fn apply_resident_delta(&self, delta: ResidentDelta) {
+        match delta {
+            ResidentDelta::TurnOpened { answers } => self.resident_turn_opened(answers),
+            ResidentDelta::TurnText { text } => self.resident_turn_text(text),
+            ResidentDelta::TurnItem { item } => self.resident_turn_item(item),
+            ResidentDelta::TurnUsage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+            } => self.resident_turn_usage(input_tokens, output_tokens, cache_read_tokens),
+            ResidentDelta::TurnFinished { status, cost_usd } => {
+                self.resident_turn_finished(status, cost_usd)
+            }
+            ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
+            ResidentDelta::MindState { to, reason } => match to {
+                ResidentStateTo::Interrupting => {
+                    if !self.begin_interrupt(&reason) {
+                        tracing::warn!(reason, "resident reported Interrupting with no live turn");
+                    }
+                }
+                ResidentStateTo::Failed => {
+                    self.transition(
+                        MindState::Failed {
+                            reason: reason.clone(),
+                        },
+                        &reason,
+                    );
+                }
+            },
+            ResidentDelta::ThreadStarted { vendor, thread_id } => {
+                self.journal_thread_started(&vendor, &thread_id);
+            }
+        }
+    }
+
+    fn resident_turn_opened(&self, answers: Vec<String>) {
         let mut inner = self.inner();
+        inner.drop_deltas_until_opened = false;
+        // Defensive: an Opened over an open turn closes the stale one failed
+        // (the resident's adapter prevents this; a rogue sequence must not
+        // wedge the fold).
+        if let Some(mut stale) = inner.open_turn.take() {
+            tracing::warn!(
+                turn_id = stale.id,
+                "TurnOpened over an open turn; closing the stale turn as failed"
+            );
+            let stale_usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
+            inner.journal.append(|_| EventKind::TurnFinished {
+                turn_id: stale.id.clone(),
+                status: Lifecycle::Failed,
+                usage: stale_usage,
+            });
+            stale.status = Lifecycle::Failed;
+            self.transition_locked(&mut inner, MindState::Idle, "stale open turn closed");
+            self.commit_locked(&mut inner, stale);
+        }
+        let answers = claim_answers(&mut inner, answers);
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
@@ -767,37 +869,144 @@ impl WaveRuntime {
         };
         let _ = self.turn_tx.send(Arc::new(open.clone()));
         inner.open_turn = Some(open);
-        event
+        inner.open_usage = Usage::empty();
+        inner.open_text_items = 0;
     }
 
-    fn sink_turn_item(&self, turn_id: &str, item: ConversationItem) {
+    fn resident_turn_text(&self, text: String) {
         let mut inner = self.inner();
-        inner.journal.append(|_| EventKind::TurnItem {
-            turn_id: turn_id.to_string(),
-            item: item.clone(),
-        });
-        // Grow the open-turn snapshot through the one shared rule
-        // (`ChatTurn::absorb_item` — the same call the journal fold makes)
-        // and re-broadcast it so live subscribers watch the turn in progress.
-        let Some(open) = inner.open_turn.as_mut() else {
+        if inner.drop_deltas_until_opened {
+            return;
+        }
+        if inner.open_turn.is_none() {
+            tracing::warn!("text delta with no open turn; dropped");
+            return;
+        }
+        let item = ConversationItem::Message {
+            id: format!("text-{}", inner.open_text_items),
+            text,
+            phase: None,
+        };
+        inner.open_text_items += 1;
+        self.append_turn_item_locked(&mut inner, item);
+    }
+
+    fn resident_turn_item(&self, item: ConversationItem) {
+        let mut inner = self.inner();
+        if inner.drop_deltas_until_opened {
+            return;
+        }
+        if inner.open_turn.is_none() {
+            tracing::warn!("item delta with no open turn; dropped");
+            return;
+        }
+        self.append_turn_item_locked(&mut inner, item);
+    }
+
+    /// Journal a `TurnItem` for the open turn, grow the open-turn snapshot
+    /// through the one shared rule (`ChatTurn::absorb_item` — the same call
+    /// the journal fold makes), and re-broadcast it so live subscribers watch
+    /// the turn in progress.
+    fn append_turn_item_locked(&self, inner: &mut Inner, item: ConversationItem) {
+        let open = inner.open_turn.as_mut().expect("checked by callers");
+        let turn_id = open.id.clone();
+        open.absorb_item(item.clone());
+        let frame = Arc::new(open.clone());
+        inner
+            .journal
+            .append(|_| EventKind::TurnItem { turn_id, item });
+        let _ = self.turn_tx.send(frame);
+    }
+
+    fn resident_turn_usage(
+        &self,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+    ) {
+        let mut inner = self.inner();
+        if inner.drop_deltas_until_opened || inner.open_turn.is_none() {
+            return;
+        }
+        inner.open_usage.input_tokens = add_opt(inner.open_usage.input_tokens, input_tokens);
+        inner.open_usage.output_tokens = add_opt(inner.open_usage.output_tokens, output_tokens);
+        inner.open_usage.cache_read_tokens =
+            add_opt(inner.open_usage.cache_read_tokens, cache_read_tokens);
+    }
+
+    fn resident_turn_finished(&self, status: Lifecycle, cost_usd: Option<f64>) {
+        let mut inner = self.inner();
+        if inner.drop_deltas_until_opened {
+            tracing::debug!("late TurnFinished after a force-finalize; dropped");
+            return;
+        }
+        let Some(mut turn) = inner.open_turn.take() else {
+            tracing::warn!("TurnFinished with no open turn; dropped");
             return;
         };
-        open.absorb_item(item);
-        let _ = self.turn_tx.send(Arc::new(open.clone()));
-    }
-
-    fn sink_turn_finished(&self, turn: ChatTurn, usage: Usage) -> ChatTurn {
-        let mut inner = self.inner();
+        let mut usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
+        usage.cost_usd = cost_usd;
+        inner.open_text_items = 0;
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn.id.clone(),
-            status: turn.status,
+            status,
             usage,
         });
+        turn.status = status;
         self.transition_locked(&mut inner, MindState::Idle, "turn finalized");
-        // The terminal turn replaces the open snapshot under the same id.
-        inner.open_turn = None;
-        self.commit_locked(&mut inner, turn)
+        self.commit_locked(&mut inner, turn);
     }
+
+    /// Steer consumption (`TurnSteered.answers`). Normally the live turn
+    /// consumed the message; when the turn closed between the harness
+    /// accepting the input and this delta arriving (the send/journal race),
+    /// consumption lands against the last assistant turn — the vendor heard
+    /// the text either way, and an unmarked message would stay pending
+    /// forever and be re-sent on every resident restart. A user turn is never
+    /// named. With no assistant turn anywhere (unreachable through the
+    /// resident's steer path, which requires an open turn) nothing is claimed
+    /// or journaled — the message stays pending.
+    fn resident_turn_steered(&self, answers: Vec<String>) {
+        let mut inner = self.inner();
+        let turn_id = match inner.state.clone() {
+            MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => turn_id,
+            _ => match inner.last_assistant_turn_id.clone() {
+                Some(turn_id) => turn_id,
+                None => {
+                    tracing::warn!("TurnSteered with no assistant turn anywhere; kept pending");
+                    return;
+                }
+            },
+        };
+        let answers = claim_answers(&mut inner, answers);
+        if answers.is_empty() {
+            return;
+        }
+        inner
+            .journal
+            .append(|_| EventKind::TurnSteered { turn_id, answers });
+    }
+}
+
+/// Validate a wire `answers` declaration against the pending fold: known ids
+/// are claimed (removed from pending) and returned in wire order; unknown or
+/// already-consumed ids are dropped with a warning — the journal never names
+/// a consumer for a message it can't account for.
+fn claim_answers(inner: &mut Inner, answers: Vec<String>) -> Vec<MessageId> {
+    let mut valid = Vec::new();
+    for id in answers {
+        let id = MessageId(id);
+        if let Some(pos) = inner.pending_messages.iter().position(|m| m.id == id) {
+            inner.pending_messages.remove(pos);
+            valid.push(id);
+        } else {
+            tracing::warn!(
+                id = %id,
+                "resident answered an unknown or already-consumed message; dropped"
+            );
+        }
+    }
+    valid
 }
 
 /// The thread plus the open turn, in one clone. The open turn rides last:
@@ -806,116 +1015,6 @@ fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
     let mut turns = inner.thread.clone();
     turns.extend(inner.open_turn.clone());
     turns
-}
-
-/// Folds the mind's [`TurnDelta`]s into journal events and committed turns:
-/// `Opened` → `TurnStarted` (+ `Idle → Turning`, claiming any expected
-/// answers), text/items → `TurnItem`s, usage accrues, `Finished` →
-/// `TurnFinished` (+ `Turning → Idle`) and the turn commits to the thread.
-/// One sink spans the mind's whole life; it resets itself at each `Finished`.
-#[derive(Debug)]
-pub struct TurnSink {
-    runtime: Arc<WaveRuntime>,
-    open: Option<OpenTurn>,
-    /// The queued `MessageId`s the next `Opened` claims as
-    /// `TurnStarted.answers` — the consumption marker. Set by the scheduler
-    /// before it sends a turn's input; taken when the turn opens.
-    pending_answers: Vec<MessageId>,
-}
-
-#[derive(Debug)]
-struct OpenTurn {
-    turn_id: String,
-    started_at: String,
-    /// Count of prose fragments, for `Message` item ids (`"text-<n>"`).
-    text_items: usize,
-    usage: Usage,
-}
-
-impl TurnSink {
-    pub fn new(runtime: Arc<WaveRuntime>) -> Self {
-        Self {
-            runtime,
-            open: None,
-            pending_answers: Vec::new(),
-        }
-    }
-
-    /// Declare which queued messages the next turn answers. The next `Opened`
-    /// delta journals them in its `TurnStarted.answers`.
-    pub fn expect_answers(&mut self, answers: Vec<MessageId>) {
-        self.pending_answers = answers;
-    }
-
-    /// Drop the open-turn record without finalizing it — the runtime janitor
-    /// already journaled the terminal event (interrupt deadline force-path).
-    /// A late harness terminal for that turn is then ignored instead of
-    /// journaled twice.
-    pub fn abandon_open(&mut self) {
-        self.open = None;
-    }
-
-    pub fn on_delta(&mut self, delta: TurnDelta) {
-        match delta {
-            TurnDelta::Opened => {
-                let answers = std::mem::take(&mut self.pending_answers);
-                let event = self.runtime.sink_turn_started(answers);
-                self.open = Some(OpenTurn {
-                    turn_id: format!("turn-{}", event.seq),
-                    started_at: event.at_rfc3339(),
-                    text_items: 0,
-                    usage: Usage::empty(),
-                });
-            }
-            TurnDelta::Text(text) => {
-                let Some(open) = self.open.as_mut() else {
-                    tracing::warn!("text delta with no open turn; dropped");
-                    return;
-                };
-                let item = ConversationItem::Message {
-                    id: format!("text-{}", open.text_items),
-                    text,
-                    phase: None,
-                };
-                open.text_items += 1;
-                let turn_id = open.turn_id.clone();
-                self.runtime.sink_turn_item(&turn_id, item);
-            }
-            TurnDelta::Item(item) => {
-                let Some(open) = self.open.as_ref() else {
-                    tracing::warn!("item delta with no open turn; dropped");
-                    return;
-                };
-                let turn_id = open.turn_id.clone();
-                self.runtime.sink_turn_item(&turn_id, item);
-            }
-            TurnDelta::Usage {
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-            } => {
-                let Some(open) = self.open.as_mut() else {
-                    return;
-                };
-                open.usage.input_tokens = add_opt(open.usage.input_tokens, input_tokens);
-                open.usage.output_tokens = add_opt(open.usage.output_tokens, output_tokens);
-                open.usage.cache_read_tokens =
-                    add_opt(open.usage.cache_read_tokens, cache_read_tokens);
-            }
-            TurnDelta::Finished { mut turn, cost_usd } => {
-                let Some(open) = self.open.take() else {
-                    tracing::warn!("finished delta with no open turn; recording whole");
-                    self.runtime.append_finalized_turn(turn, Vec::new());
-                    return;
-                };
-                let mut usage = open.usage;
-                usage.cost_usd = cost_usd;
-                turn.id = open.turn_id;
-                turn.created_at = open.started_at;
-                self.runtime.sink_turn_finished(turn, usage);
-            }
-        }
-    }
 }
 
 fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
@@ -928,8 +1027,7 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::conversations::types::{ConversationEvent, Lifecycle, TurnUsage};
-    use crate::wave::mind::EventAdapter;
+    use std::path::Path;
 
     /// Parse the sequence out of a `"turn-<n>"` id; panics on a malformed one
     /// (ids are always minted from journal seqs).
@@ -937,6 +1035,11 @@ mod tests {
         id.strip_prefix("turn-")
             .and_then(|n| n.parse().ok())
             .expect("turn id minted from journal seq")
+    }
+
+    /// The message id a delivered user turn journaled (`msg-<seq>`).
+    fn msg_id(turn: &ChatTurn) -> String {
+        format!("msg-{}", turn_seq(&turn.id))
     }
 
     fn progress_turn(text: &str) -> ChatTurn {
@@ -951,40 +1054,24 @@ mod tests {
         }
     }
 
-    fn open_runtime(
-        repo: &std::path::Path,
-    ) -> (Arc<WaveRuntime>, mpsc::UnboundedReceiver<InboxItem>) {
+    fn open_runtime(repo: &Path) -> Arc<WaveRuntime> {
         WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
     }
 
-    /// Feed one harness event through the production pipeline
-    /// (adapter → deltas → sink).
-    fn feed(adapter: &mut EventAdapter, sink: &mut TurnSink, event: ConversationEvent) {
-        for delta in adapter.feed(&event) {
-            sink.on_delta(delta);
+    // -- Wire delta builders (the resident door's vocabulary) --
+
+    fn d_opened(answers: &[&str]) -> ResidentDelta {
+        ResidentDelta::TurnOpened {
+            answers: answers.iter().map(|s| s.to_string()).collect(),
         }
     }
 
-    fn ev_started() -> ConversationEvent {
-        ConversationEvent::TurnStarted {
-            turn_id: "vendor-turn".into(),
-        }
+    fn d_text(text: &str) -> ResidentDelta {
+        ResidentDelta::TurnText { text: text.into() }
     }
 
-    fn ev_text(text: &str) -> ConversationEvent {
-        ConversationEvent::ItemCompleted {
-            turn_id: "vendor-turn".into(),
-            item: ConversationItem::Message {
-                id: "item".into(),
-                text: text.into(),
-                phase: None,
-            },
-        }
-    }
-
-    fn ev_tool() -> ConversationEvent {
-        ConversationEvent::ItemCompleted {
-            turn_id: "vendor-turn".into(),
+    fn d_tool() -> ResidentDelta {
+        ResidentDelta::TurnItem {
             item: ConversationItem::Tool {
                 id: "item-tool".into(),
                 name: "Bash".into(),
@@ -995,32 +1082,25 @@ mod tests {
         }
     }
 
-    fn ev_completed(status: Lifecycle) -> ConversationEvent {
-        ConversationEvent::TurnCompleted {
-            turn_id: "vendor-turn".into(),
-            status,
+    fn d_usage(input: u64, output: u64) -> ResidentDelta {
+        ResidentDelta::TurnUsage {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            cache_read_tokens: None,
         }
     }
 
-    fn ev_usage(input: u64, output: u64) -> ConversationEvent {
-        ConversationEvent::TurnUsage {
-            turn_id: "vendor-turn".into(),
-            usage: TurnUsage {
-                input_tokens: input,
-                output_tokens: output,
-                reasoning_tokens: None,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                model: None,
-                cost_usd: Some(0.02),
-            },
+    fn d_finished(status: Lifecycle) -> ResidentDelta {
+        ResidentDelta::TurnFinished {
+            status,
+            cost_usd: None,
         }
     }
 
     #[test]
     fn turns_get_monotonic_ids_from_the_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         let a = rt.append_finalized_turn(progress_turn("one"), Vec::new());
         let b = rt.append_finalized_turn(progress_turn("two"), Vec::new());
         assert!(turn_seq(&b.id) > turn_seq(&a.id));
@@ -1030,7 +1110,7 @@ mod tests {
     #[test]
     fn narrated_turns_no_longer_blob_memory() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         rt.append_finalized_turn(progress_turn("landed the parser"), Vec::new());
         // The journal carries raw history; MEMORY.md stays untouched until
         // the mind curates it deliberately.
@@ -1038,25 +1118,29 @@ mod tests {
     }
 
     #[test]
-    fn deliver_user_message_appends_user_turn() {
+    fn deliver_user_message_appends_user_turn_and_broadcasts() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, mut rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
         let turn = rt.deliver_user_message("how goes it?".into(), MessageOp::Message);
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
-        // The message landed in the inbox for the mind, id tied to its event.
+        // The op rode the live inbox broadcast, id tied to its journal event.
         let InboxItem::Message(msg) = rx.try_recv().expect("inbox message") else {
             panic!("expected a message inbox item");
         };
         assert_eq!(msg.text, "how goes it?");
         assert_eq!(msg.op, MessageOp::Message);
-        assert_eq!(msg.id, MessageId(format!("msg-{}", turn_seq(&turn.id))));
+        assert_eq!(msg.id, MessageId(msg_id(&turn)));
+        // And the durable queue has it immediately — no reboot needed.
+        assert_eq!(rt.pending_messages().len(), 1);
     }
 
     #[test]
     fn deliver_say_journals_attribution_and_queues_for_the_mind() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, mut rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
         let from = Attribution {
             session_id: Some("sess-9".into()),
             label: "worker".into(),
@@ -1083,7 +1167,7 @@ mod tests {
         };
         assert_eq!(*op, MessageOp::Say);
         assert_eq!(stored.as_ref(), Some(&from));
-        let (rt2, _rx2) = open_runtime(tmp.path());
+        let rt2 = open_runtime(tmp.path());
         let pending = rt2.pending_messages();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].from, Some(from));
@@ -1093,7 +1177,7 @@ mod tests {
     #[test]
     fn update_memory_writes_the_origin_file_and_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         rt.update_memory("# Ship\n\n- fold is truth\n", "fold is truth")
             .expect("update");
         assert_eq!(rt.memory().read(), "# Ship\n\n- fold is truth\n");
@@ -1124,34 +1208,39 @@ mod tests {
     #[test]
     fn deliver_interrupt_is_a_control_item_not_a_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, mut rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
         rt.deliver_interrupt();
         assert!(matches!(
             rx.try_recv().expect("inbox item"),
             InboxItem::Interrupt
         ));
-        // Nothing journaled, nothing in the thread.
+        // Nothing journaled, nothing in the thread, nothing pending.
         assert!(rt.thread_snapshot().is_empty());
+        assert!(rt.pending_messages().is_empty());
     }
 
     #[test]
     fn thread_id_round_trips_through_the_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
         {
-            let (rt, _rx) = open_runtime(tmp.path());
+            let rt = open_runtime(tmp.path());
             assert_eq!(rt.last_thread_id(), None);
-            rt.journal_thread_started("codex", "thread-abc");
+            rt.apply_resident_delta(ResidentDelta::ThreadStarted {
+                vendor: "codex".into(),
+                thread_id: "thread-abc".into(),
+            });
             assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
         }
         // A restarted runtime folds the resume handle back out of the log.
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
     }
 
     #[test]
     fn illegal_transition_is_refused_and_leaves_state_alone() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         assert_eq!(rt.mind_state(), MindState::Idle);
 
         // Nothing to interrupt when idle.
@@ -1180,22 +1269,23 @@ mod tests {
     }
 
     #[test]
-    fn turn_sink_journals_a_harness_turn_and_commits_it() {
+    fn resident_deltas_journal_a_turn_and_commit_it() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
-        let mut sink = TurnSink::new(rt.clone());
-        let mut adapter = EventAdapter::new();
+        let rt = open_runtime(tmp.path());
 
-        feed(&mut adapter, &mut sink, ev_started());
+        rt.apply_resident_delta(d_opened(&[]));
         assert_eq!(
             rt.mind_state().name(),
             "turning",
             "mid-turn the mind is Turning"
         );
-        feed(&mut adapter, &mut sink, ev_text("hello"));
-        feed(&mut adapter, &mut sink, ev_tool());
-        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-        feed(&mut adapter, &mut sink, ev_usage(10, 4));
+        rt.apply_resident_delta(d_text("hello"));
+        rt.apply_resident_delta(d_tool());
+        rt.apply_resident_delta(d_usage(10, 4));
+        rt.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: Some(0.02),
+        });
 
         assert_eq!(rt.mind_state(), MindState::Idle, "back to idle after turn");
         let thread = rt.thread_snapshot();
@@ -1206,27 +1296,45 @@ mod tests {
         assert_eq!(turn.status, Lifecycle::Completed);
         // The id comes from the journal seq domain (turn_seq panics otherwise).
         turn_seq(&turn.id);
+
+        // The journal's TurnFinished carries the accrued usage and the cost.
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let usage = events
+            .iter()
+            .find_map(|e| match &e.kind {
+                EventKind::TurnFinished { usage, .. } => Some(usage.clone()),
+                _ => None,
+            })
+            .expect("TurnFinished journaled");
+        assert_eq!(usage.input_tokens, Some(10));
+        assert_eq!(usage.output_tokens, Some(4));
+        assert_eq!(usage.cost_usd, Some(0.02));
     }
 
+    /// The consumption declaration is the RESIDENT's, validated by the
+    /// listener: known pending ids are claimed and journaled in
+    /// `TurnStarted.answers`; unknown or already-consumed ids are dropped.
     #[test]
-    fn turn_started_claims_the_expected_answers() {
+    fn turn_opened_answers_are_validated_against_the_pending_fold() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
-        let mut sink = TurnSink::new(rt.clone());
-        let mut adapter = EventAdapter::new();
+        let rt = open_runtime(tmp.path());
+        let m1 = rt.deliver_user_message("first".into(), MessageOp::Message);
+        let m2 = rt.deliver_user_message("second".into(), MessageOp::Message);
+        assert_eq!(rt.pending_messages().len(), 2);
 
-        sink.expect_answers(vec![MessageId("msg-1".into()), MessageId("msg-2".into())]);
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+        // The turn claims both real messages plus a ghost id.
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m1), &msg_id(&m2), "msg-999"]));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        assert!(
+            rt.pending_messages().is_empty(),
+            "claimed messages leave the live pending fold"
+        );
 
-        // The journal's TurnStarted carries the consumption marker; a second
-        // turn without expect_answers claims nothing.
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+        // A second turn re-claiming a consumed id gets nothing.
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
 
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen journal");
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let answers: Vec<Vec<MessageId>> = events
             .iter()
             .filter_map(|e| match &e.kind {
@@ -1237,31 +1345,33 @@ mod tests {
         assert_eq!(answers.len(), 2);
         assert_eq!(
             answers[0],
-            vec![MessageId("msg-1".into()), MessageId("msg-2".into())]
+            vec![MessageId(msg_id(&m1)), MessageId(msg_id(&m2))],
+            "valid ids journaled, the ghost dropped"
         );
-        assert!(answers[1].is_empty());
+        assert!(answers[1].is_empty(), "already-consumed ids never re-claim");
+
+        // The fold agrees on restart: nothing pending.
+        let fold = fold_thread(&events);
+        assert!(fold.pending_messages.is_empty());
     }
 
     #[test]
     fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         let sub = rt.subscribe_with_snapshot();
         assert!(sub.turns.is_empty());
         assert_eq!(sub.state, MindState::Idle);
         let mut frames = sub.turn_rx;
         let mut states = sub.state_rx;
 
-        let mut sink = TurnSink::new(rt.clone());
-        let mut adapter = EventAdapter::new();
-
         // The turn opens empty and running, then the text lands in a second
         // frame under the same id.
-        feed(&mut adapter, &mut sink, ev_started());
+        rt.apply_resident_delta(d_opened(&[]));
         let opened = frames.try_recv().expect("opened frame");
         assert_eq!(opened.status, Lifecycle::Running);
         assert_eq!(opened.text, "");
-        feed(&mut adapter, &mut sink, ev_text("thinking"));
+        rt.apply_resident_delta(d_text("thinking"));
         let grown = frames.try_recv().expect("text frame");
         assert_eq!(grown.id, opened.id);
         assert_eq!(grown.text, "thinking");
@@ -1274,15 +1384,15 @@ mod tests {
         assert_eq!(mid[0].status, Lifecycle::Running);
 
         // An item delta grows the same snapshot.
-        feed(&mut adapter, &mut sink, ev_tool());
+        rt.apply_resident_delta(d_tool());
         let with_item = frames.try_recv().expect("item frame");
         assert_eq!(with_item.id, opened.id);
         assert_eq!(with_item.items.len(), 1);
         assert_eq!(with_item.text, "thinking");
 
         // Finalization replaces the running turn under the same id.
-        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-        feed(&mut adapter, &mut sink, ev_usage(10, 5));
+        rt.apply_resident_delta(d_usage(10, 5));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         let terminal = frames.try_recv().expect("terminal frame");
         assert_eq!(terminal.id, opened.id);
         assert_eq!(terminal.status, Lifecycle::Completed);
@@ -1305,15 +1415,19 @@ mod tests {
         assert!(states.try_recv().is_err(), "no extra state frames");
     }
 
+    /// The listener-side janitor: force-finalize closes the journal and
+    /// settles Idle, and the drop guard swallows the resident's late deltas —
+    /// including its own eventual TurnFinished — until the next TurnOpened.
     #[test]
-    fn force_finalize_open_turn_closes_journal_and_settles_idle() {
+    fn force_finalize_closes_the_turn_and_drops_late_deltas() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
-        let mut sink = TurnSink::new(rt.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_text("half"));
-        assert!(rt.begin_interrupt("user interrupt"));
+        let rt = open_runtime(tmp.path());
+        rt.apply_resident_delta(d_opened(&[]));
+        rt.apply_resident_delta(d_text("half"));
+        rt.apply_resident_delta(ResidentDelta::MindState {
+            to: ResidentStateTo::Interrupting,
+            reason: "user interrupt".into(),
+        });
         assert_eq!(rt.mind_state().name(), "interrupting");
 
         assert!(rt.force_finalize_open_turn(Lifecycle::Interrupted, "deadline"));
@@ -1331,18 +1445,36 @@ mod tests {
 
         // Nothing left to force a second time.
         assert!(!rt.force_finalize_open_turn(Lifecycle::Interrupted, "again"));
+
+        // Late deltas for the closed turn are dropped whole…
+        let journal_len = events.len();
+        rt.apply_resident_delta(d_text("late text"));
+        rt.apply_resident_delta(d_usage(1, 1));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        assert_eq!(events.len(), journal_len, "late deltas journal nothing");
+        assert_eq!(rt.thread_snapshot().len(), 1, "thread untouched");
+        assert_eq!(rt.mind_state(), MindState::Idle, "no double transition");
+
+        // …and the next TurnOpened clears the guard: life goes on.
+        rt.apply_resident_delta(d_opened(&[]));
+        rt.apply_resident_delta(d_text("fresh"));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        let thread = rt.thread_snapshot();
+        assert_eq!(thread.len(), 2);
+        assert_eq!(thread[1].text, "fresh");
+        assert_eq!(thread[1].status, Lifecycle::Completed);
     }
 
     #[test]
     fn worker_observations_are_idempotent_and_survive_restart() {
         let tmp = tempfile::tempdir().expect("tempdir");
         {
-            let (rt, _rx) = open_runtime(tmp.path());
+            let rt = open_runtime(tmp.path());
             assert!(rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
             // Same run seen again (reconnect snapshot): guarded, not journaled.
             assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
             assert_eq!(rt.in_flight_workers().len(), 1);
-
             // A finish for a run never dispatched is refused.
             assert!(!rt.journal_run_completed("run-9", WorkerOutcome::Failed, "?"));
             assert!(rt.journal_run_completed("run-1", WorkerOutcome::Completed, "pr landed"));
@@ -1356,7 +1488,7 @@ mod tests {
 
         // A restarted runtime folds the same guard state back out of the log:
         // the finished run stays finished, a new run dispatches normally.
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
         assert!(rt.journal_run_observed("run-2", "sess-2", "design", "sketch it"));
         assert_eq!(rt.in_flight_workers().len(), 1);
@@ -1382,48 +1514,37 @@ mod tests {
         assert_eq!(finished, vec!["run-1"]);
     }
 
+    /// Steer consumption over the wire: the live turn answers a steered
+    /// message; the boundary race (turn closed during the send) falls back to
+    /// the last assistant turn; nothing is claimed with no assistant turn
+    /// anywhere.
     #[test]
-    fn journal_steered_consumes_against_live_or_just_closed_turn() {
+    fn turn_steered_consumes_against_live_or_just_closed_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
-        assert!(
-            !rt.journal_steered(vec![MessageId("msg-0".into())]),
-            "no turn anywhere: nothing to consume against"
-        );
+        let rt = open_runtime(tmp.path());
 
-        // Two real queued messages, ids from the journal fold.
-        rt.deliver_user_message("steer me".into(), MessageOp::Message);
-        rt.deliver_user_message("me too".into(), MessageOp::Message);
-        assert!(
-            !rt.journal_steered(vec![MessageId("msg-1".into())]),
-            "user turns are never named as consumers: no assistant turn yet"
-        );
-        let pending_ids: Vec<MessageId> = {
-            let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-            fold_thread(&events)
-                .pending_messages
-                .into_iter()
-                .map(|pending| pending.id)
-                .collect()
-        };
-        assert_eq!(pending_ids.len(), 2);
+        let m1 = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
+        let m2 = rt.deliver_user_message("me too".into(), MessageOp::Steer);
+
+        // No assistant turn anywhere: nothing journaled, both stay pending.
+        rt.apply_resident_delta(ResidentDelta::TurnSteered {
+            answers: vec![msg_id(&m1)],
+        });
+        assert_eq!(rt.pending_messages().len(), 2, "kept pending");
 
         // First consumed mid-turn, the normal steer path.
-        let mut sink = TurnSink::new(rt.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
-        assert!(rt.journal_steered(vec![pending_ids[0].clone()]));
-        feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-        feed(&mut adapter, &mut sink, ev_usage(1, 1));
+        rt.apply_resident_delta(d_opened(&[]));
+        rt.apply_resident_delta(ResidentDelta::TurnSteered {
+            answers: vec![msg_id(&m1)],
+        });
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
 
-        // The send/journal boundary race: the turn closed between the harness
-        // accepting the input and the consumption write. The marker must
-        // still land (against the last assistant turn) or the message stays
-        // pending forever and is re-sent on every restart.
-        assert!(
-            rt.journal_steered(vec![pending_ids[1].clone()]),
-            "boundary race consumes against the last assistant turn"
-        );
+        // The boundary race: the turn closed between the harness accepting
+        // the input and the delta arriving. The marker still lands, against
+        // the last assistant turn.
+        rt.apply_resident_delta(ResidentDelta::TurnSteered {
+            answers: vec![msg_id(&m2)],
+        });
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let assistant_turn = rt
@@ -1444,8 +1565,8 @@ mod tests {
         assert_eq!(
             steered,
             vec![
-                (assistant_turn.clone(), vec![pending_ids[0].clone()]),
-                (assistant_turn, vec![pending_ids[1].clone()]),
+                (assistant_turn.clone(), vec![MessageId(msg_id(&m1))]),
+                (assistant_turn, vec![MessageId(msg_id(&m2))]),
             ],
             "both markers name the turn that heard the text"
         );
@@ -1463,15 +1584,12 @@ mod tests {
     /// restarted runtime still names the last assistant turn, never the user
     /// turn that carried the steer text.
     #[test]
-    fn journal_steered_fallback_survives_restart() {
+    fn turn_steered_fallback_survives_restart() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let assistant_id = {
-            let (rt, _rx) = open_runtime(tmp.path());
-            let mut sink = TurnSink::new(rt.clone());
-            let mut adapter = EventAdapter::new();
-            feed(&mut adapter, &mut sink, ev_started());
-            feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
-            feed(&mut adapter, &mut sink, ev_usage(1, 1));
+            let rt = open_runtime(tmp.path());
+            rt.apply_resident_delta(d_opened(&[]));
+            rt.apply_resident_delta(d_finished(Lifecycle::Completed));
             rt.thread_snapshot()
                 .iter()
                 .find(|turn| turn.role == ChatRole::Assistant)
@@ -1480,10 +1598,12 @@ mod tests {
                 .clone()
         };
 
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         // The steer's own user turn is now the thread's last turn.
-        rt.deliver_user_message("steer me".into(), MessageOp::Steer);
-        assert!(rt.journal_steered(vec![MessageId("msg-9".into())]));
+        let steer = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
+        rt.apply_resident_delta(ResidentDelta::TurnSteered {
+            answers: vec![msg_id(&steer)],
+        });
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let steered_turn = events
@@ -1512,7 +1632,7 @@ mod tests {
             std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, channel))
                 .unwrap();
         }
-        let (rt, _rx) = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
+        let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
         rt.deliver_user_message("to the wave".into(), MessageOp::Message);
         rt.deliver_to_channel(
@@ -1563,7 +1683,7 @@ mod tests {
 
         // Consumption is local: the parent's pending queue never sees the
         // children's messages, and consuming the parent's leaves theirs be.
-        let (rt2, _rx2) = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
+        let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();
         assert_eq!(pending.len(), 1, "only the wave channel's message queues");
         assert_eq!(pending[0].text, "to the wave");
@@ -1583,7 +1703,7 @@ mod tests {
         std::fs::create_dir_all(&origin).unwrap();
         let doomed = crate::wave::channel::child_worktree_path(&origin, "ship.gone");
         std::fs::create_dir_all(&doomed).unwrap();
-        let (rt, _rx) = WaveRuntime::open("ship".into(), origin).expect("open runtime");
+        let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
 
         rt.deliver_to_channel("ship.gone", MessageOp::Message, "hi".into(), None)
             .expect("deliver while alive")
@@ -1611,7 +1731,7 @@ mod tests {
     #[test]
     fn journal_channel_opened_is_idempotent_and_thread_visible() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, _rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
         let turn = rt
             .journal_channel_opened("ship.148e0e02", "run-1")
             .expect("first knock journals");
@@ -1625,7 +1745,7 @@ mod tests {
         assert_eq!(rt.thread_snapshot().len(), 1);
 
         // Restart: the guard folds back out of the journal.
-        let (rt2, _rx2) = open_runtime(tmp.path());
+        let rt2 = open_runtime(tmp.path());
         assert!(rt2
             .journal_channel_opened("ship.148e0e02", "run-1")
             .is_none());
@@ -1636,13 +1756,39 @@ mod tests {
         );
     }
 
-    /// Journal order and inbox order are one order: the inbox send happens
-    /// under the same lock as the append, so concurrent deliveries can never
-    /// invert between the durable queue fold and the live channel.
+    /// A subscription's snapshot carries the pending queue (the resident's
+    /// boot replay) and its receiver carries exactly the ops sent after it.
+    #[test]
+    fn subscription_carries_pending_replay_and_live_inbox() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        rt.deliver_user_message("before".into(), MessageOp::Message);
+
+        let mut sub = rt.subscribe_with_snapshot();
+        assert_eq!(sub.pending.len(), 1);
+        assert_eq!(sub.pending[0].text, "before");
+        assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
+
+        rt.deliver_user_message("after".into(), MessageOp::Message);
+        rt.deliver_interrupt();
+        let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
+            panic!("expected message");
+        };
+        assert_eq!(live.text, "after");
+        assert!(matches!(
+            sub.inbox_rx.try_recv().expect("interrupt frame"),
+            InboxItem::Interrupt
+        ));
+    }
+
+    /// Journal order and inbox order are one order: the inbox broadcast
+    /// happens under the same lock as the append, so concurrent deliveries
+    /// can never invert between the durable queue fold and the live channel.
     #[test]
     fn concurrent_deliveries_keep_inbox_order_equal_to_journal_order() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (rt, mut rx) = open_runtime(tmp.path());
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
 
         let mut handles = Vec::new();
         for writer in 0..4 {

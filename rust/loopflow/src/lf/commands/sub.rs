@@ -169,9 +169,11 @@ impl SseFrameParser {
 
 /// Follow one `/events` connection until it ends, handing every frame to
 /// `on_frame`. `query` scopes the subscription (`""` = the whole family,
-/// `"?channel=<name>"` = one channel). Connection failure and non-2xx are
-/// errors (the caller retries).
-async fn stream_events(
+/// `"?channel=<name>"` = one channel, `"?inbox=true"` = the resident's
+/// scope). Connection failure and non-2xx are errors (the caller retries —
+/// except the resident, whose one connection IS its tenancy). Shared with
+/// [`crate::wave::resident`], the subscription's second customer.
+pub(crate) async fn stream_events(
     endpoint: &str,
     query: &str,
     on_frame: &mut impl FnMut(Frame),
@@ -588,11 +590,15 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (runtime, _inbox) =
+        let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(
+            runtime.clone(),
+            server::ResidentDoor::new("test-token"),
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });

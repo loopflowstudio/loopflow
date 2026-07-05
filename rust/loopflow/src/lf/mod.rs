@@ -135,9 +135,10 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
-    /// Start a wave's reactive server: a long-lived process that autonomously
-    /// runs progress subagents and serves the live conversation + chat over a
-    /// loopback HTTP port (discovery via `wave/<name>/.wave-endpoint`).
+    /// Start a wave: a long-lived listener (journal, doors, live events over
+    /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
+    /// that spawns and supervises the wave's mind as a resident child
+    /// process.
     #[command(name = "wave", alias = "loop")]
     Wave {
         /// Wave name (matches wave/<name>/)
@@ -145,6 +146,12 @@ pub enum Commands {
         /// Take over even if lfd reports another live wave-agent session
         #[arg(long)]
         force: bool,
+        /// Serve dormant: listener only, no resident (health reads mind: null)
+        #[arg(long, conflicts_with = "mind_only")]
+        no_mind: bool,
+        /// Run only the resident (the mind) against an existing listener
+        #[arg(long, conflicts_with = "no_mind")]
+        mind_only: bool,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,

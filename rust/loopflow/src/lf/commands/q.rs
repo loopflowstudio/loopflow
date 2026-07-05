@@ -506,12 +506,16 @@ mod tests {
         store.create_wave(&wave).await.expect("seed wave");
 
         // A live listener at the wave home (discovery-file resolution).
-        let (runtime, _inbox) =
+        let runtime =
             crate::wave::runtime::WaveRuntime::open("ship".into(), repo.path().to_path_buf())
                 .expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = crate::wave::server::router(runtime.clone());
+        let app = crate::wave::server::router(
+            runtime.clone(),
+            crate::wave::server::ResidentDoor::new("test-token"),
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });

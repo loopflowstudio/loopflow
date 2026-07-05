@@ -42,6 +42,9 @@ pub(crate) struct WaveConfig {
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
+    /// The wave's mind vendor (`codex` default; `claude`, `opencode`) — read
+    /// by the RESIDENT (`crate::wave::resident::resolve_mind_vendor`).
+    pub mind: Option<String>,
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

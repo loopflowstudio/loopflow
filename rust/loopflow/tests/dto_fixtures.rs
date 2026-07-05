@@ -12,6 +12,7 @@ use loopflow::lfd::http::dto::{
     WorkerPlacementDto,
 };
 use loopflow::wave::state::MindState;
+use loopflow::wave::wire::{PostDeltasRequest, ResidentDelta, ResidentStateTo};
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -245,6 +246,73 @@ fn post_message_response_fixture_pins_wave_chat_reply() {
         }
         .name()
     );
+}
+
+/// The resident wire (`POST /resident/deltas` — wave/wire.rs). CARVE-OUT:
+/// unlike the other fixtures this wire is Rust↔Rust only (the listener and
+/// the resident are the same binary), so only this Rust test pins it — Swift
+/// and Python do not consume it (see tests/fixtures/dto/README.md).
+#[test]
+fn resident_deltas_fixture_round_trips_the_wire() {
+    let value = load_fixture("resident_deltas.json");
+    let request: PostDeltasRequest =
+        serde_json::from_value(value.clone()).expect("resident deltas fixture should parse");
+    assert_eq!(request.deltas.len(), 9);
+
+    // Every wire kind appears in the fixture, in a realistic turn order.
+    assert!(matches!(
+        &request.deltas[0],
+        ResidentDelta::ThreadStarted { vendor, thread_id }
+            if vendor == "codex" && thread_id == "thread-0199a"
+    ));
+    assert!(matches!(
+        &request.deltas[1],
+        ResidentDelta::TurnOpened { answers } if answers == &["msg-4", "msg-5"]
+    ));
+    assert!(matches!(&request.deltas[2], ResidentDelta::TurnText { .. }));
+    assert!(matches!(&request.deltas[3], ResidentDelta::TurnItem { .. }));
+    assert!(matches!(
+        &request.deltas[4],
+        ResidentDelta::TurnUsage {
+            input_tokens: Some(1204),
+            output_tokens: Some(96),
+            cache_read_tokens: None,
+        }
+    ));
+    assert!(matches!(
+        &request.deltas[5],
+        ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost) }
+            if (cost - 0.0125).abs() < f64::EPSILON
+    ));
+    assert!(matches!(
+        &request.deltas[6],
+        ResidentDelta::TurnSteered { answers } if answers == &["msg-6"]
+    ));
+    assert!(matches!(
+        &request.deltas[7],
+        ResidentDelta::MindState {
+            to: ResidentStateTo::Interrupting,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &request.deltas[8],
+        ResidentDelta::MindState { to: ResidentStateTo::Failed, reason }
+            if reason.contains("codex_disconnected")
+    ));
+
+    // Round-trip: serializing back reproduces the fixture byte-for-value —
+    // explicit nulls included, no defaults injected or dropped.
+    assert_eq!(
+        serde_json::to_value(&request).expect("serialize request"),
+        value
+    );
+
+    // No serde defaults: an absent required field is a parse error.
+    let missing = serde_json::from_value::<PostDeltasRequest>(serde_json::json!({
+        "deltas": [{ "kind": "turn_finished", "cost_usd": null }]
+    }));
+    assert!(missing.is_err(), "status is required on the wire");
 }
 
 /// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)

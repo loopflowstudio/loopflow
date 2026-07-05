@@ -287,7 +287,8 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
 }
 
 /// Whether a process with `pid` is running on this host (`kill -0` probe).
-async fn process_alive(pid: u32) -> bool {
+/// Shared with the supervisor's attached-resident probe.
+pub(crate) async fn process_alive(pid: u32) -> bool {
     Command::new("kill")
         .args(["-0", &pid.to_string()])
         .status()
@@ -953,7 +954,7 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let wave = make_wave("ship");
         store.create_wave(&wave).await.expect("seed wave");
-        let (runtime, _inbox) =
+        let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let observer = StoreObserver::new(runtime.clone(), store.clone(), wave.id().clone());
         // This test's workers are fabricated rows, not real tmux sessions;
@@ -1035,7 +1036,7 @@ mod tests {
 
         // A restarted server (fresh runtime over the same journal) keeps the
         // guard: nothing re-journals.
-        let (runtime_2, _inbox) =
+        let runtime_2 =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen runtime");
         let observer_2 = StoreObserver::new(runtime_2, store, wave.id().clone());
         observer_2.set_liveness_probe(|_| true);
@@ -1058,7 +1059,7 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let wave = make_wave("ship");
         store.create_wave(&wave).await.expect("seed wave");
-        let (runtime, _inbox) =
+        let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let observer = StoreObserver::new(runtime.clone(), store.clone(), wave.id().clone());
         observer.set_liveness_probe(|_| false);
@@ -1112,7 +1113,7 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let wave = make_wave("ship");
         store.create_wave(&wave).await.expect("seed wave");
-        let (runtime, _inbox) =
+        let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let observer = StoreObserver::new(runtime, store.clone(), wave.id().clone());
         observer.set_liveness_probe(|_| false);

@@ -1,117 +1,122 @@
-//! `lf wave <name>` — the wave runtime as a long-lived REACTIVE SERVER.
+//! `lf wave <name>` — the wave as two processes: a LISTENER and a RESIDENT.
 //!
-//! This is `lf`'s implementation: a sovereign process the user starts, not
-//! part of the daemon. Its old home under the daemon's module tree implied
-//! lfd owned it; it doesn't — the server only takes a best-effort seat in
-//! the shared registry ([`crate::lfdb`]), where lfd is one more client.
+//! The listener (this module's `serve`) is the channel made durable — pure
+//! hear / check / fold / tell, vendor-free:
 //!
-//! A wave is not a loop. `lf wave <name>` starts a server that stays up until
-//! stopped. Its brain is THE MIND ([`mind`]): one persistent vendor thread
-//! (codex app-server, driven through the conversations [`Harness`]) that
-//! handles progress and chat as one context. Turns are scheduled by events —
-//! a user message, a turn boundary with a non-empty queue, or a heartbeat
-//! tick when quiet — never a busy-loop:
+//! - holds every journal pen (the wave channel + the family's work lines);
+//! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
+//!   `/channels`, and the token-gated resident door ([`server`]);
+//! - folds the store's worker facts ([`registry::StoreObserver`]);
+//! - keeps the registry seat and the discovery pointer;
+//! - supervises the resident ([`supervisor`]): process liveness, the respawn
+//!   ladder, the interrupt janitor.
+//!
+//! The resident (`lf wave <name> --mind-only`, [`resident`]) is the mind: it
+//! owns the vendor harness and the scheduler ([`mind`]), runs in the wave's
+//! `<repo>.<wave>` worktree, consumes its own wave's `/events?inbox=true`
+//! subscription, and publishes ordered turn deltas back through the resident
+//! door. The wire between them is [`wire`].
 //!
 //! ```text
-//!                 ┌─ user messages (HTTP inbox) ─┐
-//!   Wave server ──┤                              ├──▶ the mind (one thread)
-//!                 └─ heartbeat when idle ────────┘
+//!   lf wave <name>                      lf wave <name> --mind-only
+//!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
+//!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
+//!   │ pens · folds · doors  │           │ harness · scheduler      │
+//!   │ observer · supervisor │◀──deltas──│ seed · queue             │
+//!   └──────────┬────────────┘           └────────────▲─────────────┘
+//!              └────────── /events?inbox=true ───────┘
 //! ```
 //!
-//! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
-//! waves/<name>/`); the in-process state ([`runtime::WaveRuntime`]) — the
-//! `thread` the user sees, the mind [`state`], the vendor thread id — is a
-//! fold of it, rebuilt on boot so a restart keeps the whole conversation. The
-//! journal is server-owned persistence, not IPC; the only coordination file
-//! is a dumb discovery pointer, `wave/<name>/.wave-endpoint` (see [`server`]).
+//! Default `lf wave <name>` boots the listener and spawns the resident as a
+//! child `lf` process — keeper spawns tenant, one command, today's UX.
+//! `--no-mind` serves a dormant channel (`/health` reads `mind: null`);
+//! `--mind-only` attaches a resident to an existing listener (also the
+//! respawn affordance and, one day, the human-as-mind seat).
 //!
-//! The server also keeps a best-effort seat in the shared session
+//! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
+//! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
+//! and no longer creates worktrees); the in-process state
+//! ([`runtime::WaveRuntime`]) is a fold of it, rebuilt on boot so a restart
+//! keeps the whole conversation. The journal is listener-owned persistence;
+//! the resident never touches journal files. The only coordination files are
+//! dumb discovery: `wave/<name>/.wave-endpoint` and, beside it, this boot's
+//! `.wave-resident-token`.
+//!
+//! The listener also keeps a best-effort seat in the shared session
 //! [`registry`] (the same local store lfd serves from — the db IS the
 //! registry): a `WaveAgent` session row registered store-direct at boot (one
 //! brain per wave, enforced by a pid-probing pre-flight) and a store-polling
-//! observer that journals `RunObserved`/`RunCompleted` observations,
-//! which fold into the mind's `<in_flight>` heartbeat context. No registry
-//! store on the machine → warn once, fully functional anyway.
+//! observer that journals `RunObserved`/`RunCompleted` observations. No
+//! registry store on the machine → warn once, fully functional anyway.
 
 pub mod channel;
 pub mod journal;
 pub mod memory;
 pub mod mind;
 pub mod registry;
+pub mod resident;
 pub mod runtime;
 pub mod server;
 pub mod state;
+pub mod supervisor;
+pub mod wire;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use tokio::sync::mpsc;
 
 use crate::engine::worktrees::main_repo_root;
 use crate::lf::commands::util::find_repo_root;
-use crate::lfd::conversations::harness::{default_create_harness, ApprovalPolicy, Harness};
-use crate::lfd::conversations::types::ConversationEvent;
-use crate::lfd::executor::ensure_wave_worktree;
+use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::util::resolve_wave_name;
-use crate::wave::mind::MindConfig;
 use crate::wave::runtime::WaveRuntime;
 
-/// Start the reactive wave server for `name` and block until it is stopped
-/// (Ctrl-C). Bootstraps into the wave's worktree (`<repo>.<wave>` sibling —
-/// created if missing; the mind always runs there, never the main checkout),
-/// binds a loopback port, publishes the discovery pointer, registers as the
-/// wave's agent session in the shared store (best-effort — see [`registry`];
-/// `force` takes over an existing live wave-agent session), and runs the
-/// mind on a codex app-server session. Wave state (journal, discovery
-/// pointer, MEMORY.md) lives under the main repo so Concerto and a restarted
-/// server agree on where it is.
-pub fn run(name: &str, force: bool) -> Result<()> {
+/// Whether the listener spawns (and supervises) a resident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MindPolicy {
+    /// Spawn `lf wave <name> --mind-only` as a child and keep it alive
+    /// (respawn ladder, immediate respawn on a human message).
+    Spawn,
+    /// Serve dormant: pens, folds, and doors only — `/health` reads
+    /// `mind: null` until a resident attaches by hand.
+    Dormant,
+}
+
+/// `lf wave <name>` — start the wave. `mind_only` runs the resident half
+/// against an existing listener; otherwise this boots the listener (from the
+/// ORIGIN repo — the worktree bootstrap lives with the resident) and, unless
+/// `no_mind`, spawns the resident as a child process. Blocks until stopped
+/// (Ctrl-C).
+pub fn run(name: &str, force: bool, no_mind: bool, mind_only: bool) -> Result<()> {
+    if mind_only {
+        return resident::run(name);
+    }
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-
-    // Self-bootstrap: ensure and enter the wave's worktree.
-    let mind_cwd = wave_worktree(&main_repo, &wave)?;
-    if std::env::current_dir().ok().as_deref() != Some(mind_cwd.as_path()) {
-        std::env::set_current_dir(&mind_cwd)?;
-        println!("lf wave · {wave} · worktree {}", mind_cwd.display());
-    }
-
-    // Every child of this server — the mind's harness and anything it shells
-    // out to — must resolve `lf` to the binary running this server, not an
-    // installed one (observed live: the mind's `lf` predated `lf q`).
-    std::env::set_var("PATH", mind::path_for_children());
-
-    let (events_tx, events_rx) = mpsc::unbounded_channel();
-    let harness = default_create_harness("codex", ApprovalPolicy::AutoApprove, events_tx)?;
+    let mind = if no_mind {
+        MindPolicy::Dormant
+    } else {
+        MindPolicy::Spawn
+    };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let registry_config = resolve_registry(&main_repo, &wave, &mind_cwd, force).await;
+        let registry_config = resolve_registry(&main_repo, &wave, force).await;
         serve(
             main_repo,
-            mind_cwd,
             wave,
-            harness,
-            events_rx,
             registry_config,
             force,
+            mind,
             shutdown_signal(),
         )
         .await
     })
-}
-
-/// The wave's own worktree — `<repo>.<wave>`, a sibling of the main repo —
-/// created on first boot, reused after. The server registers under this
-/// directory's name and the mind runs in it.
-fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
-    let (path, _branch) = ensure_wave_worktree(main_repo, wave)?;
-    Ok(PathBuf::from(path))
 }
 
 /// Open the machine's shared registry and resolve this wave's row, creating
@@ -124,7 +129,6 @@ fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
 async fn resolve_registry(
     main_repo: &Path,
     wave: &str,
-    cwd: &Path,
     force: bool,
 ) -> Option<registry::RegistryConfig> {
     let Some(store) = open_existing_store().await else {
@@ -140,7 +144,7 @@ async fn resolve_registry(
         Ok(row) => Some(registry::RegistryConfig {
             store,
             wave: row,
-            cwd: cwd.display().to_string(),
+            cwd: main_repo.display().to_string(),
             pid: std::process::id(),
             force,
         }),
@@ -151,20 +155,53 @@ async fn resolve_registry(
     }
 }
 
-/// Serve the wave until `shutdown` resolves. The harness and its event stream
-/// are parameters so tests can drive a mock instead of a real vendor process;
-/// `registry_config` is `None` in tests that exercise the server without a
-/// registry store. `force` rides separately because the endpoint-file floor
-/// must honor it even when there is no registry config at all.
-#[allow(clippy::too_many_arguments)]
+/// The production resident spawner: `lf wave <wave> --mind-only`, run by this
+/// same executable, endpoint + token + wave-session context in env. The
+/// resident's stdout/stderr inherit — one `lf wave` terminal shows both
+/// halves, today's UX.
+fn resident_spawner(
+    wave: String,
+    repo_root: PathBuf,
+    endpoint: String,
+    token: String,
+    session_env: Vec<(String, String)>,
+) -> supervisor::SpawnResident {
+    Box::new(move || {
+        let exe = std::env::current_exe()?;
+        let mut command = tokio::process::Command::new(exe);
+        command
+            .arg("wave")
+            .arg(&wave)
+            .arg("--mind-only")
+            .current_dir(&repo_root)
+            .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
+            .env(wire::RESIDENT_TOKEN_ENV, &token)
+            // The resident's children must resolve `lf` to this binary.
+            .env("PATH", mind::path_for_children())
+            .stdin(std::process::Stdio::null());
+        // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
+        // resident's exit isn't journaled as a failure), then SIGTERMs the
+        // resident by pid — its hooks stop the vendor process group. A
+        // SIGKILL-on-drop here would orphan the codex group instead.
+        for (key, value) in &session_env {
+            command.env(key, value);
+        }
+        command.spawn()
+    })
+}
+
+/// Serve the wave until `shutdown` resolves. Vendor-free by construction:
+/// no harness, no vendor process — the resident (spawned per `mind`, or
+/// attached by hand) owns those. `registry_config` is `None` in tests that
+/// exercise the server without a registry store; `force` rides separately
+/// because the endpoint-file floor must honor it even when there is no
+/// registry config at all.
 async fn serve(
     repo_root: PathBuf,
-    mind_cwd: PathBuf,
     wave: String,
-    harness: Box<dyn Harness>,
-    events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
+    mind: MindPolicy,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     // File-level one-brain floor, before anything else: an existing pointer
@@ -187,7 +224,7 @@ async fn serve(
         );
     }
 
-    let (runtime, inbox_rx) = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+    let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -203,6 +240,10 @@ async fn serve(
     let mut registration: Option<registry::Registration> = None;
     let mut observer: Option<Arc<registry::StoreObserver>> = None;
     let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
+    // Wave-session context handed to the spawned resident: a bare `lf`
+    // inside the mind self-registers under this wave with the listener's
+    // session as its parent (see lf::session for the env contract).
+    let mut session_env: Vec<(String, String)> = Vec::new();
     if let Some(config) = registry_config {
         match registry::register(&config, &addr.to_string()).await {
             Ok(registry::RegisterOutcome::Registered(reg)) => {
@@ -212,18 +253,20 @@ async fn serve(
                     session_id = %reg.session_id(),
                     "registered in the session registry as the wave's agent session"
                 );
-                // The mind's children attribute here: a bare `lf` inside the
-                // mind self-registers under this wave with this session as
-                // its parent (see lf::session for the env contract).
-                std::env::set_var(
-                    crate::lf::session::WAVE_ID_ENV,
-                    config.wave.id().to_string(),
-                );
-                std::env::set_var(
-                    crate::lf::session::SESSION_ID_ENV,
-                    reg.session_id().to_string(),
-                );
-                std::env::set_var(crate::lf::session::SESSION_INHERITED_ENV, "1");
+                session_env = vec![
+                    (
+                        crate::lf::session::WAVE_ID_ENV.to_string(),
+                        config.wave.id().to_string(),
+                    ),
+                    (
+                        crate::lf::session::SESSION_ID_ENV.to_string(),
+                        reg.session_id().to_string(),
+                    ),
+                    (
+                        crate::lf::session::SESSION_INHERITED_ENV.to_string(),
+                        "1".to_string(),
+                    ),
+                ];
                 // Ctrl+C exits the process before the graceful path below
                 // runs, so deregister from the interrupt hook too; the
                 // once-guard makes whichever path runs first the only one.
@@ -258,44 +301,76 @@ async fn serve(
         }
     }
 
-    // The mind is the wave's one brain: it owns the vendor thread and reacts
-    // to user messages and heartbeats. It runs as its own task so the HTTP
-    // surface never blocks on a turn.
-    let mind = tokio::spawn(mind::run_mind(
-        runtime.clone(),
-        inbox_rx,
-        harness,
-        events_rx,
-        mind_cwd,
-        MindConfig::default(),
-        observer,
-    ));
+    // The resident door: a per-boot token, published beside the endpoint
+    // pointer so `--mind-only` residents can attach (same trust domain).
+    let token = server::generate_resident_token();
+    let door = server::ResidentDoor::new(token.clone());
+    server::write_resident_token(&repo_root, &wave, &token)?;
+
+    // The keeper's watch: resident liveness, respawn ladder, interrupt
+    // janitor. Runs even dormant — the pen-side anti-wedges (janitor, attach
+    // probe) never depend on who spawned the resident.
+    let spawner = match mind {
+        MindPolicy::Spawn => Some(resident_spawner(
+            wave.clone(),
+            repo_root.clone(),
+            addr.to_string(),
+            token.clone(),
+            session_env,
+        )),
+        MindPolicy::Dormant => None,
+    };
+    let supervisor_task = tokio::spawn(
+        supervisor::Supervisor::new(
+            runtime.clone(),
+            door.clone(),
+            spawner,
+            supervisor::SupervisorConfig::default(),
+        )
+        .run(),
+    );
 
     server::write_endpoint(&repo_root, &wave, addr)?;
-    // Ctrl+C exits the process before graceful shutdown runs, so remove the
-    // discovery pointer from the interrupt handler too. Both paths remove it
-    // only while it still holds OUR address — a takeover's pointer stays.
+    // Ctrl+C exits the process before graceful shutdown runs, so clean up
+    // from the interrupt handler too: SIGTERM the resident (its hooks stop
+    // the vendor process group) and remove the discovery files — only while
+    // they still hold OUR address/token (a takeover's stay).
     let own_addr = addr.to_string();
     let cleanup_repo = repo_root.clone();
     let cleanup_wave = wave.clone();
     let cleanup_addr = own_addr.clone();
+    let cleanup_token = token.clone();
+    let cleanup_door = door.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
+        if let Some(pid) = cleanup_door.seat_pid() {
+            supervisor::terminate_resident_blocking(pid);
+        }
         server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
+        server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
     });
     println!(
-        "lf wave · {wave} · reactive server on http://{addr} \
-         (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)"
+        "lf wave · {wave} · listener on http://{addr}{} \
+         (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
+        match mind {
+            MindPolicy::Spawn => " · spawning resident",
+            MindPolicy::Dormant => " · dormant (--no-mind)",
+        }
     );
 
-    let app = server::router(runtime.clone());
+    let app = server::router(runtime.clone(), door.clone(), observer);
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await;
 
-    // Shutdown: stop the mind (its harness child dies with it — kill_on_drop),
-    // mark the registry row terminal, drop the pointer. Workers are their own
-    // tmux sessions — nothing here owns them.
-    mind.abort();
+    // Shutdown: stand the keeper down FIRST (so the resident's exit below
+    // is not journaled as a failure), then ask the resident to leave
+    // (SIGTERM → its interrupt hooks stop the harness; SIGKILL after a
+    // grace), mark the registry row terminal, drop the discovery files.
+    // Workers are their own tmux sessions — nothing here owns them.
+    supervisor_task.abort();
+    if let Some(pid) = door.seat_pid() {
+        supervisor::terminate_resident(pid).await;
+    }
     if let Some(task) = observer_task {
         task.abort();
     }
@@ -303,6 +378,7 @@ async fn serve(
         registration.deregister().await;
     }
     server::remove_endpoint(&repo_root, &wave, &own_addr);
+    server::remove_resident_token(&repo_root, &wave, &token);
 
     result.map_err(|err| anyhow!("wave server error: {err}"))
 }
@@ -318,41 +394,11 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::engine::agent::AgentConfig;
-    use crate::lfd::conversations::harness::Capabilities;
     use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-    use crate::lfd::conversations::types::{ConversationItem, Lifecycle, TurnUsage};
-    use crate::wave::mind::EventAdapter;
-    use crate::wave::runtime::TurnSink;
-
-    /// A harness that never speaks: `serve` tests exercise the HTTP shell,
-    /// not a vendor process.
-    struct StubHarness;
-
-    #[async_trait::async_trait]
-    impl Harness for StubHarness {
-        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
-            Ok(())
-        }
-        async fn send_input(&mut self, _content: &str) -> Result<()> {
-            Ok(())
-        }
-        async fn interrupt(&mut self) -> Result<()> {
-            Ok(())
-        }
-        async fn stop(&mut self) -> Result<()> {
-            Ok(())
-        }
-        fn capabilities(&self) -> Capabilities {
-            Capabilities {
-                supports_steer: false,
-                supports_interrupt: false,
-            }
-        }
-        fn provider_session_id(&self) -> Option<String> {
-            None
-        }
-    }
+    use crate::lfd::conversations::types::Lifecycle;
+    use crate::wave::journal::MessageOp;
+    use crate::wave::server::ResidentDoor;
+    use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
@@ -371,21 +417,20 @@ mod tests {
         runtime.append_finalized_turn(progress_turn(text), Vec::new());
     }
 
-    /// Boot just the HTTP surface over a runtime we control, without a mind.
-    /// Returns the bound address and the runtime so the test can inject turns
-    /// directly.
-    async fn boot() -> (String, std::sync::Arc<WaveRuntime>, tempfile::TempDir) {
+    /// Boot just the HTTP surface over a runtime we control, without a
+    /// resident. Returns the bound address and the runtime so the test can
+    /// inject turns directly.
+    async fn boot() -> (String, Arc<WaveRuntime>, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("wave/ship");
         std::fs::create_dir_all(&dir).expect("dir");
         std::fs::write(dir.join("MEMORY.md"), "Goal: ship the reactive server.\n").expect("mem");
 
-        let (runtime, _inbox_rx) =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -448,10 +493,12 @@ mod tests {
         }
 
         // The open turn counts as the newest turn in the tail.
-        let mut sink = TurnSink::new(runtime.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_text("in progress"));
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "in progress".into(),
+        });
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=1"))
             .await
             .unwrap()
@@ -483,8 +530,8 @@ mod tests {
         assert_eq!(posted.text, "how's it going?");
         assert_eq!(body["state"], "idle");
 
-        // The message is in the thread; the mind answers it at its next turn
-        // (mind scheduling is covered in mind.rs tests).
+        // The message is in the thread; the resident answers it at its next
+        // turn (mind scheduling is covered in mind.rs tests).
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
@@ -514,7 +561,7 @@ mod tests {
         assert_eq!(body["turn"]["from"], "worker");
         assert_eq!(body["turn"]["role"], "user");
 
-        // The wire thread carries the byline; the mind's queue has the input.
+        // The wire thread carries the byline; the pending queue has the input.
         let conversation: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
@@ -646,12 +693,15 @@ mod tests {
     }
 
     /// `/health` splits channel liveness from the resident: `status` says
-    /// the channel serves; `mind` carries the resident's state — a dead
-    /// resident on a live channel reads `serving` + `failed`.
+    /// the channel serves; `mind` is null while no resident was ever spawned
+    /// or attached (`--no-mind` serves dormant), then carries the resident's
+    /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
     async fn health_splits_channel_liveness_from_the_mind() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
+
+        // Dormant: no resident ever — mind is null, the channel serves.
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
@@ -659,9 +709,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving", "status is channel liveness");
-        assert_eq!(body["mind"], "idle", "mind is the resident's state");
+        assert!(body["mind"].is_null(), "dormant channel has no mind");
         assert_eq!(body["wave"], "ship");
         assert_eq!(body["turns"], 1);
+
+        // A resident exists: mind reports its state.
+        runtime.set_resident_expected();
+        let body: serde_json::Value = reqwest::get(format!("{base}/health"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["mind"], "idle", "mind is the resident's state");
 
         // The resident dies; the channel keeps serving.
         runtime.transition(
@@ -678,6 +738,90 @@ mod tests {
             .unwrap();
         assert_eq!(body["status"], "serving");
         assert_eq!(body["mind"], "failed");
+    }
+
+    /// The resident door end to end over HTTP: auth gates on the token,
+    /// attach registers + revives, deltas fold into the journal and the
+    /// thread, and the context door serves the pre-turn snapshot.
+    #[tokio::test]
+    async fn resident_door_gates_attaches_and_applies_deltas() {
+        let (base, runtime, _tmp) = boot().await;
+        let client = reqwest::Client::new();
+
+        // No token (or a wrong one): 401, and nothing changes.
+        for request in [
+            client
+                .post(format!("{base}/resident/attach"))
+                .json(&serde_json::json!({ "pid": 1234 })),
+            client
+                .post(format!("{base}/resident/attach"))
+                .header(RESIDENT_TOKEN_HEADER, "wrong")
+                .json(&serde_json::json!({ "pid": 1234 })),
+        ] {
+            let denied = request.send().await.unwrap();
+            assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+        }
+        assert!(!runtime.resident_expected());
+
+        // A failed mind + attach: the fresh resident IS the revival.
+        runtime.set_resident_expected();
+        runtime.transition(
+            crate::wave::state::MindState::Failed {
+                reason: "old resident died".into(),
+            },
+            "test",
+        );
+        let attach: serde_json::Value = client
+            .post(format!("{base}/resident/attach"))
+            .header(RESIDENT_TOKEN_HEADER, "test-token")
+            .json(&serde_json::json!({ "pid": std::process::id() }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(attach["wave"], "ship");
+        assert!(attach["thread_id"].is_null());
+        assert_eq!(runtime.mind_state().name(), "idle", "attach revives");
+
+        // Deltas through the door: a whole turn, in order, one batch.
+        let deltas: serde_json::Value = client
+            .post(format!("{base}/resident/deltas"))
+            .header(RESIDENT_TOKEN_HEADER, "test-token")
+            .json(&serde_json::json!({ "deltas": [
+                { "kind": "thread_started", "vendor": "codex", "thread_id": "t-1" },
+                { "kind": "turn_opened", "answers": [] },
+                { "kind": "turn_text", "text": "over the wire" },
+                { "kind": "turn_usage", "input_tokens": 7, "output_tokens": 3, "cache_read_tokens": null },
+                { "kind": "turn_finished", "status": "completed", "cost_usd": 0.01 },
+            ] }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(deltas["accepted"], 5);
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].text, "over the wire");
+        assert_eq!(thread[0].status, Lifecycle::Completed);
+
+        // The context door serves the resume handle and the in-flight fold.
+        runtime.journal_run_observed("run-1", "sess-1", "implement", "wire it");
+        let context: serde_json::Value = client
+            .get(format!("{base}/resident/context"))
+            .header(RESIDENT_TOKEN_HEADER, "test-token")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(context["thread_id"], "t-1");
+        assert_eq!(context["in_flight"][0]["run_id"], "run-1");
+        assert_eq!(context["in_flight"][0]["flow"], "implement");
     }
 
     #[tokio::test]
@@ -718,6 +862,61 @@ mod tests {
         assert!(
             acc.contains("live turn"),
             "streams turns narrated after connect"
+        );
+        assert!(
+            !acc.contains("event: inbox"),
+            "the default stream carries no inbox frames"
+        );
+    }
+
+    /// The resident's subscription scope: `?inbox=true` replays the pending
+    /// queue as `inbox` frames and streams live ops (bare interrupts
+    /// included, id-less).
+    #[tokio::test]
+    async fn events_inbox_scope_replays_pending_and_streams_ops() {
+        let (base, runtime, _tmp) = boot().await;
+        runtime.deliver_user_message("queued before".into(), MessageOp::Message);
+
+        let host = base.strip_prefix("http://").unwrap().to_string();
+        let mut stream = tokio::net::TcpStream::connect(&host).await.unwrap();
+        stream
+            .write_all(
+                b"GET /events?inbox=true HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+            )
+            .await
+            .unwrap();
+
+        // Wait for the replay first — it proves the subscription is live —
+        // THEN deliver the (live-only, unjournaled) bare interrupt.
+        let mut acc = String::new();
+        let mut buf = [0u8; 4096];
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut interrupt_sent = false;
+        loop {
+            if acc.contains("queued before") && !interrupt_sent {
+                interrupt_sent = true;
+                runtime.deliver_interrupt();
+            }
+            let read = tokio::time::timeout_at(deadline, stream.read(&mut buf)).await;
+            match read {
+                Ok(Ok(0)) | Err(_) => break,
+                Ok(Ok(n)) => {
+                    acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    if acc.contains("queued before") && acc.contains(r#""id":null"#) {
+                        break;
+                    }
+                }
+                Ok(Err(_)) => break,
+            }
+        }
+        assert!(acc.contains("event: inbox"), "inbox frames are named");
+        assert!(
+            acc.contains("queued before") && acc.contains(r#""op":"message""#),
+            "the pending queue replays: {acc}"
+        );
+        assert!(
+            acc.contains(r#""id":null"#) && acc.contains(r#""op":"interrupt""#),
+            "a live bare interrupt rides id-less: {acc}"
         );
     }
 
@@ -832,62 +1031,18 @@ mod tests {
         states
     }
 
-    /// Feed one harness event through the production delta pipeline.
-    fn feed(adapter: &mut EventAdapter, sink: &mut TurnSink, event: ConversationEvent) {
-        for delta in adapter.feed(&event) {
-            sink.on_delta(delta);
-        }
-    }
-
-    fn ev_started() -> ConversationEvent {
-        ConversationEvent::TurnStarted {
-            turn_id: "vt".into(),
-        }
-    }
-
-    fn ev_text(text: &str) -> ConversationEvent {
-        ConversationEvent::ItemCompleted {
-            turn_id: "vt".into(),
-            item: ConversationItem::Message {
-                id: "m".into(),
-                text: text.into(),
-                phase: None,
-            },
-        }
-    }
-
-    fn ev_completed() -> ConversationEvent {
-        ConversationEvent::TurnCompleted {
-            turn_id: "vt".into(),
-            status: Lifecycle::Completed,
-        }
-    }
-
-    fn ev_usage() -> ConversationEvent {
-        ConversationEvent::TurnUsage {
-            turn_id: "vt".into(),
-            usage: TurnUsage {
-                input_tokens: 1,
-                output_tokens: 1,
-                reasoning_tokens: None,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                model: None,
-                cost_usd: None,
-            },
-        }
-    }
-
     #[tokio::test]
     async fn sse_late_subscriber_watches_the_open_turn_grow_and_finalize() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "already finalized");
 
         // A turn is mid-flight before the client connects.
-        let mut sink = TurnSink::new(runtime.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_text("thinking"));
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "thinking".into(),
+        });
 
         // Late subscriber: replay carries the finalized thread AND the open turn.
         let mut client = SseClient::connect(&base).await;
@@ -907,7 +1062,9 @@ mod tests {
             .clone();
 
         // Re-broadcast: the same id grows in place.
-        feed(&mut adapter, &mut sink, ev_text("more"));
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "more".into(),
+        });
         client
             .frames_until(|f| {
                 f.iter().any(|t| {
@@ -917,8 +1074,10 @@ mod tests {
             .await;
 
         // Finalization replaces it terminally, same id.
-        feed(&mut adapter, &mut sink, ev_completed());
-        feed(&mut adapter, &mut sink, ev_usage());
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+        });
         let frames = client
             .frames_until(|f| {
                 f.iter()
@@ -940,14 +1099,16 @@ mod tests {
         assert_eq!(states, vec!["idle"]);
 
         // A turn opens → `turning` arrives live; finalization → `idle`.
-        let mut sink = TurnSink::new(runtime.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
         let states = client.states_until(|s| s.len() >= 2).await;
         assert_eq!(states, vec!["idle", "turning"]);
 
-        feed(&mut adapter, &mut sink, ev_completed());
-        feed(&mut adapter, &mut sink, ev_usage());
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+        });
         let states = client.states_until(|s| s.len() >= 3).await;
         assert_eq!(states, vec!["idle", "turning", "idle"]);
     }
@@ -955,10 +1116,12 @@ mod tests {
     #[tokio::test]
     async fn conversation_includes_the_open_running_turn() {
         let (base, runtime, _tmp) = boot().await;
-        let mut sink = TurnSink::new(runtime.clone());
-        let mut adapter = EventAdapter::new();
-        feed(&mut adapter, &mut sink, ev_started());
-        feed(&mut adapter, &mut sink, ev_text("half a thought"));
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "half a thought".into(),
+        });
 
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
@@ -972,8 +1135,10 @@ mod tests {
         assert_eq!(turns[0]["text"], "half a thought");
 
         // After finalization the same id is served exactly once, terminal.
-        feed(&mut adapter, &mut sink, ev_completed());
-        feed(&mut adapter, &mut sink, ev_usage());
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+        });
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
@@ -991,20 +1156,20 @@ mod tests {
 
         // First life crashes mid-turn: started + text journaled, never finished.
         {
-            let (runtime, _rx) =
-                WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-            let mut sink = TurnSink::new(runtime.clone());
-            let mut adapter = EventAdapter::new();
-            feed(&mut adapter, &mut sink, ev_started());
-            feed(&mut adapter, &mut sink, ev_text("half a thought"));
+            let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+            runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+                answers: Vec::new(),
+            });
+            runtime.apply_resident_delta(ResidentDelta::TurnText {
+                text: "half a thought".into(),
+            });
         }
 
         // Second life: journal replay + boot janitor close the crash tail.
-        let (runtime, _rx) =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1034,9 +1199,7 @@ mod tests {
 
     /// Boot the HTTP surface over a family: origin repo nested in the
     /// tempdir so child worktrees (siblings of the origin) stay inside it.
-    async fn boot_family(
-        children: &[&str],
-    ) -> (String, std::sync::Arc<WaveRuntime>, tempfile::TempDir) {
+    async fn boot_family(children: &[&str]) -> (String, Arc<WaveRuntime>, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(origin.join("wave/ship")).expect("wave dir");
@@ -1044,10 +1207,10 @@ mod tests {
             std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, child))
                 .expect("child worktree");
         }
-        let (runtime, _inbox_rx) = WaveRuntime::open("ship".into(), origin).expect("open runtime");
+        let runtime = WaveRuntime::open("ship".into(), origin).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1266,26 +1429,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serve_publishes_and_removes_discovery_pointer() {
+    async fn serve_publishes_and_removes_discovery_pointer_and_token() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let repo = tmp.path().to_path_buf();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
-        let cwd = repo.clone();
-        // Keep the events sender alive so the stub mind doesn't see a closed
-        // stream.
-        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             serve(
                 repo2,
-                cwd,
                 "ship".into(),
-                Box::new(StubHarness),
-                events_rx,
                 None,
                 false,
+                MindPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1300,10 +1457,18 @@ mod tests {
             contents.starts_with("127.0.0.1:"),
             "pointer is just an address"
         );
+        assert!(
+            server::read_resident_token(&repo, "ship").is_some(),
+            "the resident token publishes beside the pointer"
+        );
 
         shutdown_tx.send(()).unwrap();
         handle.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "pointer removed on shutdown");
+        assert!(
+            server::read_resident_token(&repo, "ship").is_none(),
+            "token removed on shutdown"
+        );
     }
 
     /// No registry store on the machine: the boot degrades to unregistered
@@ -1315,7 +1480,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let previous = std::env::var_os("LFD_DB_PATH");
         std::env::set_var("LFD_DB_PATH", tmp.path().join("absent.db"));
-        let config = resolve_registry(tmp.path(), "ship", tmp.path(), false).await;
+        let config = resolve_registry(tmp.path(), "ship", false).await;
         match previous {
             Some(value) => std::env::set_var("LFD_DB_PATH", value),
             None => std::env::remove_var("LFD_DB_PATH"),
@@ -1338,18 +1503,14 @@ mod tests {
         server::write_endpoint(&repo, "ship", dead_addr).expect("stale pointer");
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let repo2 = repo.clone();
-        let cwd = repo.clone();
         let handle = tokio::spawn(async move {
             serve(
                 repo2,
-                cwd,
                 "ship".into(),
-                Box::new(StubHarness),
-                events_rx,
                 None,
                 false,
+                MindPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1378,18 +1539,14 @@ mod tests {
 
         // First server, unregistered (no store): boots and writes the pointer.
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let repo2 = repo.clone();
-        let cwd = repo.clone();
         let first = tokio::spawn(async move {
             serve(
                 repo2,
-                cwd,
                 "ship".into(),
-                Box::new(StubHarness),
-                events_rx,
                 None,
                 false,
+                MindPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1402,15 +1559,12 @@ mod tests {
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
-        let (_events_tx2, events_rx2) = mpsc::unbounded_channel();
         let err = serve(
             repo.clone(),
-            repo.clone(),
             "ship".into(),
-            Box::new(StubHarness),
-            events_rx2,
             None,
             false,
+            MindPolicy::Dormant,
             async {
                 let _ = shutdown_rx2.await;
             },
@@ -1463,11 +1617,7 @@ mod tests {
     /// The registry seat end to end through `serve`: the WaveAgent row is
     /// live while the server runs and marked terminal by graceful shutdown.
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn serve_registers_the_brain_and_deregisters_on_shutdown() {
-        // serve() exports the wave-context env on registration; serialize
-        // with everything else that touches process env.
-        let _env = crate::lf::session::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let repo = tmp.path().to_path_buf();
@@ -1483,9 +1633,7 @@ mod tests {
         let wave_id = wave_row.id().clone();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let repo2 = repo.clone();
-        let cwd = repo.clone();
         let config = registry::RegistryConfig {
             store: store.clone(),
             wave: wave_row,
@@ -1496,12 +1644,10 @@ mod tests {
         let handle = tokio::spawn(async move {
             serve(
                 repo2,
-                cwd,
                 "ship".into(),
-                Box::new(StubHarness),
-                events_rx,
                 Some(config),
                 false,
+                MindPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1541,9 +1687,7 @@ mod tests {
 
     /// One brain per wave: a live registered server refuses a second serve.
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn serve_refuses_to_start_over_a_live_brain() {
-        let _env = crate::lf::session::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let store: crate::lfdb::SharedStore = Arc::new(
@@ -1560,7 +1704,7 @@ mod tests {
         let first = registry::RegistryConfig {
             store: store.clone(),
             wave: wave_row.clone(),
-            cwd: "/tmp/repo.ship".to_string(),
+            cwd: "/tmp/repo".to_string(),
             pid: std::process::id(),
             force: false,
         };
@@ -1573,21 +1717,18 @@ mod tests {
         };
 
         let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (_events_tx, events_rx) = mpsc::unbounded_channel();
         let err = serve(
             tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
             "ship".into(),
-            Box::new(StubHarness),
-            events_rx,
             Some(registry::RegistryConfig {
                 store,
                 wave: wave_row,
-                cwd: "/tmp/repo.ship".to_string(),
+                cwd: "/tmp/repo".to_string(),
                 pid: std::process::id(),
                 force: false,
             }),
             false,
+            MindPolicy::Dormant,
             async {
                 let _ = shutdown_rx.await;
             },
@@ -1598,29 +1739,5 @@ mod tests {
             err.to_string().contains("--force"),
             "error points at --force: {err}"
         );
-    }
-
-    /// `lf wave` self-bootstraps: the wave's `<repo>.<wave>` sibling worktree
-    /// is created on first boot and reused after — the mind never runs in the
-    /// main checkout.
-    #[test]
-    fn wave_worktree_creates_and_reuses_the_sibling_tree() {
-        let repo = loopflow_test_support::TestRepo::new();
-
-        let created = wave_worktree(repo.path(), "ship").expect("bootstrap worktree");
-        let repo_name = repo
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("repo name");
-        assert_eq!(
-            created.file_name().and_then(|name| name.to_str()),
-            Some(format!("{repo_name}.ship").as_str()),
-            "wave worktree is the <repo>.<wave> sibling"
-        );
-        assert!(created.join(".git").exists(), "worktree is a checkout");
-
-        let reused = wave_worktree(repo.path(), "ship").expect("reuse worktree");
-        assert_eq!(reused, created, "second boot reuses the same tree");
     }
 }

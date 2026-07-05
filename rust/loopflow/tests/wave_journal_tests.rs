@@ -10,8 +10,8 @@ use loopflow::lfd::conversations::types::{
 };
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::wave::mind::EventAdapter;
-use loopflow::wave::runtime::{TurnSink, WaveRuntime};
-use loopflow::wave::server;
+use loopflow::wave::runtime::WaveRuntime;
+use loopflow::wave::server::{self, ResidentDoor};
 use loopflow::wave::state::MindState;
 
 /// One complete harness turn, as the codex driver would emit it: a command
@@ -61,13 +61,12 @@ fn codex_turn_events() -> Vec<ConversationEvent> {
 }
 
 /// Run one harness turn through the production pipeline (EventAdapter →
-/// TurnDeltas → TurnSink → journal + thread).
+/// resident wire deltas → the listener's fold), as the resident door would.
 fn run_harness_turn(runtime: Arc<WaveRuntime>, events: &[ConversationEvent]) {
-    let mut sink = TurnSink::new(runtime);
     let mut adapter = EventAdapter::new();
     for event in events {
         for delta in adapter.feed(event) {
-            sink.on_delta(delta);
+            runtime.apply_resident_delta(delta);
         }
     }
 }
@@ -79,9 +78,7 @@ fn turn_seq(id: &str) -> u64 {
 }
 
 fn open_wave(repo: &Path) -> Arc<WaveRuntime> {
-    WaveRuntime::open("ship".into(), repo.to_path_buf())
-        .expect("open runtime")
-        .0
+    WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
 }
 
 #[tokio::test]
@@ -235,7 +232,8 @@ async fn illegal_mind_transition_is_refused() {
 }
 
 /// `/health` splits channel liveness (`status`, always `serving`) from the
-/// resident's condition (`mind`, the mind-state name).
+/// resident's condition (`mind`: null while no resident was ever spawned or
+/// attached, then the mind-state name).
 #[tokio::test]
 async fn health_reports_channel_liveness_and_the_mind_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -243,7 +241,7 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = server::router(rt.clone());
+    let app = server::router(rt.clone(), ResidentDoor::new("test-token"), None);
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });
@@ -255,6 +253,15 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving");
+    assert!(body["mind"].is_null(), "no resident yet: a dormant channel");
+
+    rt.set_resident_expected();
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(body["mind"], "idle");
 
     rt.transition(

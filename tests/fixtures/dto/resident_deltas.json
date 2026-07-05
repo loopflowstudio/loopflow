@@ -1,0 +1,53 @@
+{
+  "deltas": [
+    {
+      "kind": "thread_started",
+      "vendor": "codex",
+      "thread_id": "thread-0199a"
+    },
+    {
+      "kind": "turn_opened",
+      "answers": ["msg-4", "msg-5"]
+    },
+    {
+      "kind": "turn_text",
+      "text": "Dispatching one worker for the parser."
+    },
+    {
+      "kind": "turn_item",
+      "item": {
+        "type": "tool",
+        "id": "t-1",
+        "name": "Bash",
+        "status": "completed",
+        "input": "lf q worker run ship --flow implement --task \"parser\"",
+        "output": null
+      }
+    },
+    {
+      "kind": "turn_usage",
+      "input_tokens": 1204,
+      "output_tokens": 96,
+      "cache_read_tokens": null
+    },
+    {
+      "kind": "turn_finished",
+      "status": "completed",
+      "cost_usd": 0.0125
+    },
+    {
+      "kind": "turn_steered",
+      "answers": ["msg-6"]
+    },
+    {
+      "kind": "mind_state",
+      "to": "interrupting",
+      "reason": "user interrupt"
+    },
+    {
+      "kind": "mind_state",
+      "to": "failed",
+      "reason": "harness disconnected: codex_disconnected"
+    }
+  ]
+}

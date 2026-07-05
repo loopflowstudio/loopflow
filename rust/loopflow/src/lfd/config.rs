@@ -1,13 +1,12 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ipnet::IpNet;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use tracing::warn;
 
 use secrecy::SecretString;
 
-const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 const DEFAULT_HTTP_MAX_JSON_BODY_BYTES: usize = 1_048_576;
 const DEFAULT_HTTP_MAX_HOOK_BODY_BYTES: usize = 262_144;
 const DEFAULT_HTTP_MAX_WS_FRAME_BYTES: usize = 65_536;
@@ -31,33 +30,16 @@ pub struct AuthConfig {
 
 #[derive(Debug, Clone)]
 pub struct LfdConfig {
-    pub mode: Mode,
-    pub service_manager: ServiceManager,
-    pub runtime_backend: RuntimeBackend,
-    pub storage: StorageType,
-    pub credential_socket: Option<String>,
     pub auth: AuthConfig,
-    pub executor: ExecutorConfig,
     pub github: GitHubConfig,
     pub http_security: HttpSecurityConfig,
     pub output_log_retention_days: u32,
 }
 
-// TODO(M2): remove Mode::Container, StorageType::Postgres, and the container
-// service profile. Preserve the useful mechanisms from this path (env
-// allowlisting, named credential mounts, service-file secret hygiene, health
-// checks) in the SSH/native deploy story only if they still apply.
-
 impl Default for LfdConfig {
     fn default() -> Self {
         Self {
-            mode: Mode::default(),
-            service_manager: ServiceManager::default(),
-            runtime_backend: RuntimeBackend::default(),
-            storage: StorageType::default(),
-            credential_socket: None,
             auth: AuthConfig::default(),
-            executor: ExecutorConfig::default(),
             github: GitHubConfig::default(),
             http_security: HttpSecurityConfig::default(),
             output_log_retention_days: DEFAULT_OUTPUT_LOG_RETENTION_DAYS,
@@ -90,18 +72,10 @@ impl LfdConfig {
 const DEFAULT_OUTPUT_LOG_RETENTION_DAYS: u32 = 7;
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawLfdConfig {
     #[serde(default)]
-    mode: Mode,
-    service_manager: Option<ServiceManager>,
-    runtime_backend: Option<RuntimeBackend>,
-    storage: Option<StorageType>,
-    #[serde(default)]
-    credential_socket: Option<String>,
-    #[serde(default)]
     auth: AuthConfig,
-    #[serde(default)]
-    executor: RawExecutorConfig,
     #[serde(default)]
     github: GitHubConfig,
     #[serde(default)]
@@ -116,68 +90,32 @@ fn default_output_log_retention_days() -> u32 {
 
 fn reject_removed_env(name: &str, replacement: &str) -> Result<()> {
     if std::env::var_os(name).is_some() {
-        bail!("{name} was removed; use {replacement} for self-hosted lfd auth");
+        bail!("{name} was removed; use {replacement}");
     }
     Ok(())
 }
 
 impl RawLfdConfig {
     fn apply_env_overrides(&mut self) -> Result<()> {
-        if let Ok(value) = std::env::var("LFD_MODE") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.mode = Mode::parse(trimmed)?;
-            }
-        }
-
         reject_removed_env("LFD_AUTH_MODE", "LFD_AUTH_TOKEN")?;
+        reject_removed_env("LFD_MODE", "native lfd; mode no longer exists")?;
+        reject_removed_env(
+            "LFD_EXECUTOR_CREDENTIALS_ENV",
+            "native lfd; docker executor credentials no longer exist",
+        )?;
+        reject_removed_env(
+            "LFD_EXECUTOR_CREDENTIALS_MOUNTS",
+            "native lfd; docker credential mounts no longer exist",
+        )?;
+        reject_removed_env(
+            "LFD_EXECUTOR_IMAGE",
+            "native lfd; executor images no longer exist",
+        )?;
 
         if let Ok(value) = std::env::var("LFD_AUTH_TOKEN") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.token = Some(SecretString::new(trimmed.to_string()));
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_CREDENTIAL_SOCKET") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.credential_socket = Some(trimmed.to_string());
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_CREDENTIALS_ENV") {
-            let names: Vec<String> = value
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !names.is_empty() {
-                self.executor.credentials.env = names;
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_CREDENTIALS_MOUNTS") {
-            let names: Result<Vec<CredentialMount>, _> = value
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .map(CredentialMount::try_from)
-                .collect();
-            match names {
-                Ok(mounts) if !mounts.is_empty() => {
-                    self.executor.credentials.mounts = mounts;
-                }
-                Err(err) => {
-                    return Err(anyhow!("invalid LFD_EXECUTOR_CREDENTIALS_MOUNTS: {err}"));
-                }
-                _ => {}
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_IMAGE") {
-            if !value.trim().is_empty() {
-                self.executor.image = value;
             }
         }
 
@@ -272,72 +210,12 @@ impl RawLfdConfig {
     }
 
     fn resolve(self) -> Result<LfdConfig> {
-        if self.service_manager.is_some() {
-            bail!("`service_manager` is managed by `mode`; remove this key");
-        }
-        if self.runtime_backend.is_some() {
-            bail!("`runtime_backend` is managed by `mode`; remove this key");
-        }
-        if self.storage.is_some() {
-            bail!("`storage` is managed by `mode`; remove this key");
-        }
-        if self.executor.r#type.is_some() {
-            bail!("`executor.type` is managed by `mode`; remove this key");
-        }
-
-        if self.executor.sandbox.is_present() {
-            bail!(
-                "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
-            );
-        }
-
-        let profile = ModeProfile::for_mode(self.mode);
-
-        let auth = self.auth;
-
         Ok(LfdConfig {
-            mode: self.mode,
-            service_manager: profile.service_manager,
-            runtime_backend: profile.runtime_backend,
-            storage: profile.storage,
-            credential_socket: self.credential_socket,
-            auth,
-            executor: ExecutorConfig {
-                r#type: profile.executor_type,
-                image: self.executor.image,
-                credentials: self.executor.credentials,
-            },
+            auth: self.auth,
             github: self.github,
             http_security: self.http_security.resolve()?,
             output_log_retention_days: self.output_log_retention_days,
         })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ModeProfile {
-    service_manager: ServiceManager,
-    runtime_backend: RuntimeBackend,
-    storage: StorageType,
-    executor_type: ExecutorType,
-}
-
-impl ModeProfile {
-    fn for_mode(mode: Mode) -> Self {
-        match mode {
-            Mode::Native => Self {
-                service_manager: ServiceManager::default_for_os(),
-                runtime_backend: RuntimeBackend::Native,
-                storage: StorageType::Sqlite,
-                executor_type: ExecutorType::Local,
-            },
-            Mode::Container => Self {
-                service_manager: ServiceManager::default_for_os(),
-                runtime_backend: RuntimeBackend::Compose,
-                storage: StorageType::Postgres,
-                executor_type: ExecutorType::Docker,
-            },
-        }
     }
 }
 
@@ -466,31 +344,6 @@ impl RawHttpSecurityConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    #[default]
-    Native,
-    Container,
-}
-
-impl Mode {
-    fn parse(raw: &str) -> Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "native" => Ok(Self::Native),
-            "container" => Ok(Self::Container),
-            _ => bail!("invalid LFD_MODE value '{raw}'; expected 'native' or 'container'"),
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Native => "native",
-            Self::Container => "container",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceManager {
@@ -522,145 +375,6 @@ impl ServiceManager {
 impl Default for ServiceManager {
     fn default() -> Self {
         Self::default_for_os()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeBackend {
-    #[default]
-    Native,
-    Compose,
-}
-
-impl RuntimeBackend {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Native => "native",
-            Self::Compose => "compose",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum StorageType {
-    #[default]
-    Sqlite,
-    Postgres,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ExecutorType {
-    #[default]
-    Local,
-    Docker,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ExecutorCredentialsConfig {
-    #[serde(default)]
-    pub env: Vec<String>,
-    #[serde(default)]
-    pub mounts: Vec<CredentialMount>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "String")]
-pub struct CredentialMount(String);
-
-impl CredentialMount {
-    pub fn name(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl TryFrom<String> for CredentialMount {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let name = value.trim();
-        if name.is_empty() {
-            return Err("credential mount name must not be empty".to_string());
-        }
-        if name.contains(':') {
-            return Err(
-                "credential mounts no longer accept host:container paths; use named mounts"
-                    .to_string(),
-            );
-        }
-        if name.starts_with('/') {
-            return Err("credential mount name must not be an absolute path".to_string());
-        }
-        Ok(Self(name.to_string()))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutorConfig {
-    pub r#type: ExecutorType,
-    pub image: String,
-    pub credentials: ExecutorCredentialsConfig,
-}
-
-impl Default for ExecutorConfig {
-    fn default() -> Self {
-        Self {
-            r#type: ExecutorType::Local,
-            image: default_executor_image(),
-            credentials: ExecutorCredentialsConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawExecutorConfig {
-    r#type: Option<ExecutorType>,
-    #[serde(default)]
-    sandbox: RemovedExecutorSandboxConfig,
-    #[serde(default = "default_executor_image")]
-    image: String,
-    #[serde(default)]
-    credentials: ExecutorCredentialsConfig,
-}
-
-impl Default for RawExecutorConfig {
-    fn default() -> Self {
-        Self {
-            r#type: None,
-            sandbox: RemovedExecutorSandboxConfig::default(),
-            image: default_executor_image(),
-            credentials: ExecutorCredentialsConfig::default(),
-        }
-    }
-}
-
-fn default_executor_image() -> String {
-    DEFAULT_EXECUTOR_IMAGE.to_string()
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum RemovedExecutorSandboxConfig {
-    #[default]
-    Absent,
-    Present,
-}
-
-impl RemovedExecutorSandboxConfig {
-    fn is_present(self) -> bool {
-        matches!(self, Self::Present)
-    }
-}
-
-impl<'de> Deserialize<'de> for RemovedExecutorSandboxConfig {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let _ = serde_yaml_ng::Value::deserialize(deserializer)?;
-        Ok(Self::Present)
     }
 }
 
@@ -746,13 +460,10 @@ mod tests {
     }
 
     #[test]
-    fn mode_native_is_default() {
+    fn native_config_is_default() {
         let config = RawLfdConfig::default().resolve().expect("default resolves");
-        assert_eq!(config.mode, Mode::Native);
-        assert_eq!(config.runtime_backend, RuntimeBackend::Native);
-        assert_eq!(config.storage, StorageType::Sqlite);
-        assert_eq!(config.credential_socket, None);
-        assert_eq!(config.executor.r#type, ExecutorType::Local);
+
+        assert!(config.auth.token.is_none());
         assert_eq!(config.http_security.max_json_body_bytes, 1_048_576);
         assert_eq!(config.http_security.max_hook_body_bytes, 262_144);
         assert_eq!(config.http_security.max_ws_frame_bytes, 65_536);
@@ -764,116 +475,29 @@ mod tests {
     }
 
     #[test]
-    fn mode_container_defaults_to_docker_profile() {
-        let config: RawLfdConfig = serde_yaml_ng::from_str("mode: container").expect("yaml parses");
-        let resolved = config.resolve().expect("container resolves");
+    fn removed_mode_yaml_is_rejected() {
+        let err =
+            serde_yaml_ng::from_str::<RawLfdConfig>("mode: container").expect_err("mode removed");
 
-        assert_eq!(resolved.mode, Mode::Container);
-        assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
-        assert_eq!(resolved.storage, StorageType::Postgres);
-        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        assert!(err.to_string().contains("unknown field `mode`"));
     }
 
     #[test]
-    fn executor_sandbox_key_is_rejected() {
-        let raw = r#"
-mode: container
-executor:
-  sandbox: true
-"#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let err = config.resolve().expect_err("sandbox key should fail");
-        assert_eq!(
-            err.to_string(),
-            "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
-        );
-    }
-
-    #[test]
-    fn executor_sandbox_null_key_is_rejected() {
-        let raw = r#"
-mode: container
-executor:
-  sandbox:
-"#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let err = config.resolve().expect_err("sandbox key should fail");
-        assert_eq!(
-            err.to_string(),
-            "`executor.sandbox` was removed; container mode is Docker-only now. Delete this key and rerun `lfd install`"
-        );
-    }
-
-    #[test]
-    fn mode_container_preserves_explicit_token_auth() {
-        let raw = r#"
-mode: container
-auth:
-  token: explicit-token
-"#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let resolved = config.resolve().expect("container resolves");
-        assert_eq!(
-            resolved
-                .auth
-                .token
-                .as_ref()
-                .map(|t| t.expose_secret().as_str()),
-            Some("explicit-token")
-        );
-    }
-
-    #[test]
-    fn explicit_runtime_override_in_yaml_is_rejected() {
-        let raw = r#"
-mode: container
-runtime_backend: native
-"#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let err = config.resolve().expect_err("override should fail");
-        assert_eq!(
-            err.to_string(),
-            "`runtime_backend` is managed by `mode`; remove this key"
-        );
-    }
-
-    #[test]
-    fn explicit_executor_type_in_yaml_is_rejected() {
+    fn removed_executor_yaml_is_rejected() {
         let raw = r#"
 executor:
   type: docker
 "#;
-        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
-        let err = config
-            .resolve()
-            .expect_err("executor type override should fail");
-        assert_eq!(
-            err.to_string(),
-            "`executor.type` is managed by `mode`; remove this key"
-        );
-    }
+        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("executor removed");
 
-    #[test]
-    fn raw_credential_mount_paths_are_rejected() {
-        let raw = r#"
-executor:
-  credentials:
-    mounts:
-      - ~/.claude:/home/agent/.claude
-"#;
-        let result = serde_yaml_ng::from_str::<RawLfdConfig>(raw);
-        assert!(result.is_err());
+        assert!(err.to_string().contains("unknown field `executor`"));
     }
 
     #[test]
     fn env_overrides_allowed_fields() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
-            "LFD_MODE",
             "LFD_AUTH_TOKEN",
-            "LFD_CREDENTIAL_SOCKET",
-            "LFD_EXECUTOR_CREDENTIALS_ENV",
-            "LFD_EXECUTOR_IMAGE",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
             "LFD_HTTP_MAX_JSON_BODY_BYTES",
@@ -885,14 +509,7 @@ executor:
             "LFD_HTTP_AUTH_FAILURES_PER_MINUTE",
             "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
-        std::env::set_var("LFD_MODE", "container");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
-        std::env::set_var("LFD_CREDENTIAL_SOCKET", "/tmp/concerto-auth.sock");
-        std::env::set_var(
-            "LFD_EXECUTOR_CREDENTIALS_ENV",
-            "ANTHROPIC_API_KEY,OPENAI_API_KEY",
-        );
-        std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
         std::env::set_var("LFD_HTTP_MAX_JSON_BODY_BYTES", "2097152");
@@ -908,13 +525,6 @@ executor:
         config.apply_env_overrides().expect("overrides apply");
         let resolved = config.resolve().expect("resolved");
 
-        assert_eq!(resolved.mode, Mode::Container);
-        assert_eq!(resolved.storage, StorageType::Postgres);
-        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(
-            resolved.credential_socket,
-            Some("/tmp/concerto-auth.sock".to_string())
-        );
         assert_eq!(
             resolved
                 .auth
@@ -923,11 +533,6 @@ executor:
                 .map(|t| t.expose_secret().as_str()),
             Some("env-token-456")
         );
-        assert_eq!(
-            resolved.executor.credentials.env,
-            vec!["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
-        );
-        assert_eq!(resolved.executor.image, "loopflow/agent:env");
         assert_eq!(resolved.github.webhook_secret, "env-secret");
         assert_eq!(
             resolved
@@ -948,19 +553,36 @@ executor:
     }
 
     #[test]
-    fn invalid_mode_env_override_is_rejected() {
+    fn removed_mode_env_is_rejected() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&["LFD_MODE"]);
-        std::env::set_var("LFD_MODE", "invalid");
+        std::env::set_var("LFD_MODE", "container");
 
         let mut config = RawLfdConfig::default();
         let err = config
             .apply_env_overrides()
-            .expect_err("invalid mode should fail");
+            .expect_err("removed env should fail");
 
         assert_eq!(
             err.to_string(),
-            "invalid LFD_MODE value 'invalid'; expected 'native' or 'container'"
+            "LFD_MODE was removed; use native lfd; mode no longer exists"
+        );
+    }
+
+    #[test]
+    fn removed_executor_env_is_rejected() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_EXECUTOR_IMAGE"]);
+        std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
+
+        let mut config = RawLfdConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("removed env should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "LFD_EXECUTOR_IMAGE was removed; use native lfd; executor images no longer exist"
         );
     }
 
@@ -977,28 +599,8 @@ executor:
 
         assert_eq!(
             err.to_string(),
-            "LFD_AUTH_MODE was removed; use LFD_AUTH_TOKEN for self-hosted lfd auth"
+            "LFD_AUTH_MODE was removed; use LFD_AUTH_TOKEN"
         );
-    }
-
-    #[test]
-    fn auth_mode_yaml_is_rejected() {
-        let raw = r#"
-auth:
-  mode: local
-"#;
-        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("mode key rejected");
-        assert!(err.to_string().contains("unknown field `mode`"));
-    }
-
-    #[test]
-    fn legacy_auth_provider_key_is_rejected() {
-        let raw = r#"
-auth:
-  provider: studio
-"#;
-        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("provider key rejected");
-        assert!(err.to_string().contains("unknown field `provider`"));
     }
 
     #[test]
@@ -1036,11 +638,7 @@ http_security:
     fn load_invalid_yaml_returns_error() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
-            "LFD_MODE",
             "LFD_AUTH_TOKEN",
-            "LFD_CREDENTIAL_SOCKET",
-            "LFD_EXECUTOR_CREDENTIALS_ENV",
-            "LFD_EXECUTOR_IMAGE",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
             "LFD_HTTP_MAX_JSON_BODY_BYTES",
@@ -1055,7 +653,7 @@ http_security:
         let tmp = tempdir().expect("tempdir");
         let lf_dir = tmp.path().join(".lf");
         std::fs::create_dir_all(&lf_dir).expect("lf dir");
-        std::fs::write(lf_dir.join("lfd.yaml"), "executor: [").expect("write config");
+        std::fs::write(lf_dir.join("lfd.yaml"), "auth: [").expect("write config");
 
         let original_home = std::env::var_os("HOME");
         std::env::set_var("HOME", tmp.path());

@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use super::claude_mapping::{self, ReaderState};
 use super::codex::{process_notification, process_rpc_error, NotificationState};
 use super::opencode_mapping;
-use crate::conversation::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -180,7 +180,7 @@ fn claude_trace_crash_mid_tool_marks_failed_items() {
             ConversationEvent::ItemCompleted {
                 item: ConversationItem::Command { status, .. },
                 ..
-            } if *status == crate::conversation::types::Lifecycle::Failed
+            } if *status == crate::chat::types::Lifecycle::Failed
         )
     }));
 

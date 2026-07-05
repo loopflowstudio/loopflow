@@ -103,7 +103,7 @@
 //!   content's first non-empty line. The server is the sole writer of the
 //!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`.
 //!
-//! `Turn` is [`crate::conversation::turns::ChatTurn`].
+//! `Turn` is [`crate::chat::turns::ChatTurn`].
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::conversation::turns::ChatTurn;
+use crate::chat::turns::ChatTurn;
 use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};

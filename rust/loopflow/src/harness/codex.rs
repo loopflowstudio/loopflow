@@ -25,7 +25,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use crate::conversation::types::{ConversationEvent, ConversationItem, TurnUsage};
+use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{
     build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
 };
@@ -891,7 +891,7 @@ mod tests {
         assert!(matches!(
             events[1],
             ConversationEvent::TurnCompleted {
-                status: crate::conversation::types::Lifecycle::Interrupted,
+                status: crate::chat::types::Lifecycle::Interrupted,
                 ..
             }
         ));

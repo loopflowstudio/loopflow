@@ -33,8 +33,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::conversation::turns::{ChatRole, ChatTurn};
-use crate::conversation::types::{ConversationItem, Lifecycle};
+use crate::chat::turns::{ChatRole, ChatTurn};
+use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
 use crate::wave::journal::ellipsize;

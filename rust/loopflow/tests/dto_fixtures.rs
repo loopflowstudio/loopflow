@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use loopflow::conversation::turns::{ChatRole, ChatTurn};
-use loopflow::conversation::types::{ConversationItem, Lifecycle};
+use loopflow::chat::turns::{ChatRole, ChatTurn};
+use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
 use loopflow::wave::state::MindState;
 use loopflow::wave::wire::{

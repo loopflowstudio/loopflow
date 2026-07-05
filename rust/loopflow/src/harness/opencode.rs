@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::conversation::types::{ConversationEvent, Lifecycle};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};

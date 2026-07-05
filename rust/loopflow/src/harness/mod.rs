@@ -14,7 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::conversation::types::ConversationEvent;
+use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
 #[derive(Debug, thiserror::Error)]

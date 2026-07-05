@@ -1,10 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::lfd::config::{LfdConfig, RuntimeBackend};
+use crate::lfd::config::LfdConfig;
 
-use super::{compose, contains_sensitive_service_env, service_environment, write_service_file};
+use super::{contains_sensitive_service_env, service_environment, write_service_file};
 
 // Linux systemd user service management.
 //
@@ -19,22 +19,9 @@ fn unit_path() -> Result<PathBuf> {
 }
 
 pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
-    if let Some(existing_backend) = installed_backend()? {
-        if existing_backend != config.runtime_backend {
-            if !force {
-                bail!(
-                    "lfd is already installed with `{}` backend. Re-run `lfd install --force` to replace it.",
-                    existing_backend.as_str()
-                );
-            }
-            teardown_backend(existing_backend)?;
-        }
-    }
-
-    if config.runtime_backend == RuntimeBackend::Compose {
-        compose::ensure_docker_available()?;
-        compose::write_managed_compose_file(config)?;
-        compose::pull()?;
+    let unit_path = unit_path()?;
+    if unit_path.exists() && !force {
+        anyhow::bail!("lfd is already installed. Re-run `lfd install --force` to replace it.");
     }
 
     let lfd_path = std::env::current_exe()?
@@ -43,9 +30,8 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         .to_string();
     let path_env = std::env::var("PATH").unwrap_or_default();
     let env_vars = service_environment(&path_env);
-    let exec_start = build_exec_start(config.runtime_backend, &lfd_path)?;
+    let exec_start = build_exec_start(&lfd_path);
 
-    let unit_path = unit_path()?;
     if let Some(parent) = unit_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -74,7 +60,7 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
         .args(["--user", "start", UNIT_ID])
         .status()?;
     if status.success() {
-        println!("lfd service started ({})", config.runtime_backend.as_str());
+        println!("lfd service started");
     } else {
         eprintln!("Warning: systemctl start failed (exit {})", status);
     }
@@ -83,7 +69,6 @@ pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
 }
 
 pub fn uninstall(_config: &LfdConfig) -> Result<()> {
-    let backend = installed_backend()?;
     let unit_path = unit_path()?;
     if !unit_path.exists() {
         println!("Not installed");
@@ -102,10 +87,6 @@ pub fn uninstall(_config: &LfdConfig) -> Result<()> {
 
     println!("Uninstalled lfd");
 
-    if let Some(RuntimeBackend::Compose) = backend {
-        let _ = compose::teardown();
-    }
-
     Ok(())
 }
 
@@ -117,20 +98,8 @@ pub fn start(config: &LfdConfig, force: bool) -> Result<()> {
         ));
     }
 
-    let installed_backend = installed_backend()?.unwrap_or(RuntimeBackend::Native);
-    if installed_backend != config.runtime_backend {
-        if !force {
-            bail!(
-                "lfd is installed with `{}` backend, but config mode expects `{}`. Run `lfd install --force`.",
-                installed_backend.as_str(),
-                config.runtime_backend.as_str()
-            );
-        }
+    if force {
         return install(config, true);
-    }
-
-    if config.runtime_backend == RuntimeBackend::Compose {
-        compose::ensure_docker_available()?;
     }
 
     let status = Command::new("systemctl")
@@ -138,7 +107,7 @@ pub fn start(config: &LfdConfig, force: bool) -> Result<()> {
         .status()?;
 
     if status.success() {
-        println!("Started lfd ({})", config.runtime_backend.as_str());
+        println!("Started lfd");
     } else {
         eprintln!("Failed to start lfd (exit {})", status);
     }
@@ -165,16 +134,14 @@ pub fn stop(_config: &LfdConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn status(config: &LfdConfig) -> Result<()> {
+pub fn status(_config: &LfdConfig) -> Result<()> {
     let unit = unit_path()?;
     if !unit.exists() {
         println!("manager: systemd (missing)");
-        println!("backend: {}", config.runtime_backend.as_str());
+        println!("backend: native");
         println!("remediation: run `lfd install`");
         return Ok(());
     }
-
-    let backend = installed_backend()?.unwrap_or(RuntimeBackend::Native);
 
     let output = Command::new("systemctl")
         .args(["--user", "is-active", UNIT_ID])
@@ -187,11 +154,7 @@ pub fn status(config: &LfdConfig) -> Result<()> {
     };
 
     println!("manager: systemd ({manager_state})");
-    println!("backend: {}", backend.as_str());
-
-    if backend == RuntimeBackend::Compose {
-        compose::print_service_status();
-    }
+    println!("backend: native");
 
     Ok(())
 }
@@ -224,57 +187,13 @@ fn systemd_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn build_exec_start(backend: RuntimeBackend, lfd_path: &str) -> Result<String> {
-    match backend {
-        RuntimeBackend::Native => Ok(format!("{lfd_path} serve")),
-        RuntimeBackend::Compose => {
-            let mut args = vec!["/usr/bin/env".to_string(), "docker".to_string()];
-            args.extend(compose::compose_program_args()?);
-            Ok(args.join(" "))
-        }
-    }
-}
-
-fn installed_backend() -> Result<Option<RuntimeBackend>> {
-    let unit = unit_path()?;
-    if !unit.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(unit)?;
-    Ok(Some(detect_backend_from_unit(&content)))
-}
-
-fn detect_backend_from_unit(content: &str) -> RuntimeBackend {
-    if content.contains("docker compose") {
-        RuntimeBackend::Compose
-    } else {
-        RuntimeBackend::Native
-    }
-}
-
-fn teardown_backend(backend: RuntimeBackend) -> Result<()> {
-    if backend == RuntimeBackend::Compose {
-        compose::teardown()?;
-    }
-    Ok(())
+fn build_exec_start(lfd_path: &str) -> String {
+    format!("{lfd_path} serve")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_backend_from_unit, render_unit, RuntimeBackend};
-
-    #[test]
-    fn detects_compose_backend_from_unit_content() {
-        let content = "ExecStart=/usr/bin/env docker compose -f /tmp/docker-compose.yml up";
-        assert_eq!(detect_backend_from_unit(content), RuntimeBackend::Compose);
-    }
-
-    #[test]
-    fn detects_native_backend_from_unit_content() {
-        let content = "ExecStart=/usr/local/bin/lfd serve";
-        assert_eq!(detect_backend_from_unit(content), RuntimeBackend::Native);
-    }
+    use super::render_unit;
 
     #[test]
     fn render_unit_persists_remote_native_environment() {

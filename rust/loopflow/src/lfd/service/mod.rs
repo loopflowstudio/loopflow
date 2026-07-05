@@ -1,4 +1,3 @@
-mod compose;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -11,20 +10,12 @@ use anyhow::Result;
 
 use crate::lfd::config::{LfdConfig, ServiceManager};
 
-// TODO(M2): when container/postgres mode is cut, keep this native service
-// hygiene: explicit env allowlist and 0600 service files when tokens/secrets
-// ride in the generated unit/plist.
 const SERVICE_ENV_KEYS: &[&str] = &[
     "LFD_HTTP_ADDR",
     "LFD_AUTH_TOKEN",
-    "LFD_MODE",
     "LFD_DB_PATH",
-    "LFD_DATABASE_URL",
     "LFD_GITHUB_WEBHOOK_SECRET",
     "LFD_GITHUB_TOKEN",
-    "LFD_EXECUTOR_CREDENTIALS_ENV",
-    "LFD_EXECUTOR_CREDENTIALS_MOUNTS",
-    "LFD_EXECUTOR_IMAGE",
     "LFD_HTTP_MAX_JSON_BODY_BYTES",
     "LFD_HTTP_MAX_HOOK_BODY_BYTES",
     "LFD_HTTP_MAX_WS_FRAME_BYTES",
@@ -111,7 +102,7 @@ fn dispatch(
     force: bool,
     action: Action,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match config.service_manager {
+    match ServiceManager::default() {
         ServiceManager::Launchd => {
             #[cfg(target_os = "macos")]
             {
@@ -127,11 +118,7 @@ fn dispatch(
 
             #[cfg(not(target_os = "macos"))]
             {
-                Err(format!(
-                    "mode resolved service_manager={} on this OS; use a mode compatible with Linux",
-                    config.service_manager.as_str()
-                )
-                .into())
+                Err("launchd service management is only available on macOS".into())
             }
         }
         ServiceManager::Systemd => {
@@ -149,11 +136,7 @@ fn dispatch(
 
             #[cfg(not(target_os = "linux"))]
             {
-                Err(format!(
-                    "mode resolved service_manager={} on this OS; use a mode compatible with macOS",
-                    config.service_manager.as_str()
-                )
-                .into())
+                Err("systemd service management is only available on Linux".into())
             }
         }
     }

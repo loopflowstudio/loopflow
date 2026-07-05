@@ -31,8 +31,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::sync::broadcast;
 
-use crate::conversation::turns::{ChatRole, ChatTurn};
-use crate::conversation::types::{ConversationItem, Lifecycle};
+use crate::chat::turns::{ChatRole, ChatTurn};
+use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
 use crate::wave::channel::{matches_prefix, scan_child_channels, ChannelFrame, ChildChannel};

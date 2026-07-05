@@ -31,7 +31,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
 
-use crate::conversation::types::ConversationEvent;
+use crate::chat::types::ConversationEvent;
 use crate::engine::repo::find_repo_root;
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::worktrees::{ensure_wave_worktree, main_repo_root};

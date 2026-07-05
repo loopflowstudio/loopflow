@@ -1,4 +1,4 @@
-pub mod conversation;
+pub mod chat;
 pub mod engine;
 pub mod harness;
 pub mod journal;

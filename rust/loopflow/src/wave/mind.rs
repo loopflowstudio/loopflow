@@ -75,8 +75,8 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::conversation::turns::{ChatRole, ChatTurn};
-use crate::conversation::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::chat::turns::{ChatRole, ChatTurn};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
@@ -1113,7 +1113,7 @@ mod tests {
 
     use async_trait::async_trait;
 
-    use crate::conversation::types::TurnUsage;
+    use crate::chat::types::TurnUsage;
     use crate::harness::Capabilities;
     use crate::wave::journal::{journal_path, EventKind, Journal};
     use crate::wave::runtime::WaveRuntime;

@@ -8,7 +8,7 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use loopflow::lfd::config::{LfdConfig, StorageType};
+use loopflow::lfd::config::LfdConfig;
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -108,11 +108,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              Set a bearer token from Doppler or pass --allow-insecure-bind for local-network experiments"
         )
         .into());
-    }
-
-    if matches!(&storage_config, StorageConfig::Postgres { .. }) {
-        let version = migrate_store(&storage_config, false).await?;
-        tracing::info!(schema_version = %version, "postgres schema up to date");
     }
 
     let store: SharedStore = Arc::new(open_store(&storage_config).await?);
@@ -275,53 +270,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn storage_config_from_config(
-    config: &LfdConfig,
+    _config: &LfdConfig,
 ) -> Result<StorageConfig, Box<dyn std::error::Error>> {
-    match config.storage {
-        StorageType::Sqlite => {
-            let db_root = loopflow::lfd::default_db_path()
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "failed to resolve sqlite root directory",
-                    )
-                })?;
-            std::fs::create_dir_all(&db_root)?;
-
-            let db_candidate = std::env::var("LFD_DB_PATH")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("lfd.db"));
-            let db_path = if db_candidate.is_absolute() {
-                let parent = db_candidate.parent().ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "invalid LFD_DB_PATH: absolute path must include a parent directory",
-                    )
-                })?;
-                std::fs::create_dir_all(parent)?;
-                db_candidate
-            } else {
-                path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!("invalid LFD_DB_PATH: {err}"),
-                    )
-                })?
-            };
-            Ok(StorageConfig::sqlite(db_path))
-        }
-        StorageType::Postgres => {
-            let database_url = std::env::var("LFD_DATABASE_URL").map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "LFD_DATABASE_URL required for postgres storage",
-                )
-            })?;
-            Ok(StorageConfig::postgres(database_url))
-        }
+    if std::env::var_os("LFD_DATABASE_URL").is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "LFD_DATABASE_URL was removed; lfd uses sqlite via LFD_DB_PATH",
+        )
+        .into());
     }
+
+    let db_root = loopflow::lfd::default_db_path()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "failed to resolve sqlite root directory",
+            )
+        })?;
+    std::fs::create_dir_all(&db_root)?;
+
+    let db_candidate = std::env::var("LFD_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("lfd.db"));
+    let db_path = if db_candidate.is_absolute() {
+        let parent = db_candidate.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid LFD_DB_PATH: absolute path must include a parent directory",
+            )
+        })?;
+        std::fs::create_dir_all(parent)?;
+        db_candidate
+    } else {
+        path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid LFD_DB_PATH: {err}"),
+            )
+        })?
+    };
+    Ok(StorageConfig::sqlite(db_path))
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -330,7 +320,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_flag, storage_config_from_config, LfdConfig, StorageConfig, StorageType};
+    use super::{has_flag, storage_config_from_config, LfdConfig, StorageConfig};
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use tempfile::{tempdir, TempDir};
@@ -442,21 +432,17 @@ mod tests {
     }
 
     #[test]
-    fn storage_config_requires_database_url_for_postgres() {
+    fn storage_config_rejects_database_url() {
         let _lock = env_lock().lock().expect("env lock poisoned");
         let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        std::env::remove_var("LFD_DB_PATH");
-        std::env::remove_var("LFD_DATABASE_URL");
+        let _home = setup_sqlite_env();
+        std::env::set_var("LFD_DATABASE_URL", "postgres://example");
 
-        let config = LfdConfig {
-            storage: StorageType::Postgres,
-            ..LfdConfig::default()
-        };
         let err =
-            storage_config_from_config(&config).expect_err("postgres should require database url");
+            storage_config_from_config(&LfdConfig::default()).expect_err("postgres env removed");
         assert_eq!(
             err.to_string(),
-            "LFD_DATABASE_URL required for postgres storage"
+            "LFD_DATABASE_URL was removed; lfd uses sqlite via LFD_DB_PATH"
         );
     }
 

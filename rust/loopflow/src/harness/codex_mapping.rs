@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::conversation::types::{ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ItemPhase {

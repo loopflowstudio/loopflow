@@ -37,7 +37,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::conversation::types::{ConversationItem, Lifecycle};
+use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::wave::journal::{Attribution, MessageOp};
 
 /// Header carrying the resident token on every `/resident/*` request.

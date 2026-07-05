@@ -418,8 +418,8 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::conversation::turns::{ChatRole, ChatTurn};
-    use crate::conversation::types::Lifecycle;
+    use crate::chat::turns::{ChatRole, ChatTurn};
+    use crate::chat::types::Lifecycle;
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};

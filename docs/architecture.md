@@ -91,9 +91,8 @@ Important paths:
 - `rust/loopflow/src/lfd/executor/` (dispatch helpers shared with `lf q`, worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
-Native mode uses sqlite and a local capability token. The old container mode
-and postgres-backed shared-host story are staging debt scheduled for removal;
-self-hosted operations are SSH-first.
+`lfd` uses sqlite and a local capability token. The old container service path
+is gone; self-hosted operations are SSH-first.
 
 ## Clients
 
@@ -153,8 +152,6 @@ Loopflow integrates with:
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
 - Asana, Linear, and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
-- Docker/postgres container mode is legacy staging debt scheduled for the M2
-  substrate cut.
 - Swift/macOS services for Concerto and native host behavior.
 
 ## Where Complexity Collects

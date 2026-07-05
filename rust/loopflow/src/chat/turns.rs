@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::conversation::types::{ConversationItem, Lifecycle};
+use crate::chat::types::{ConversationItem, Lifecycle};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub enum ChatRole {
     Assistant,
 }
 
-/// One turn in a wave's conversation — the unit the chat server streams.
+/// One turn in a wave chat — the unit the chat server streams.
 ///
 /// Wire type consumed by Concerto. Every field is required (no serde defaults):
 /// the same shape round-trips through Rust and Swift.

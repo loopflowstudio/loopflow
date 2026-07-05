@@ -207,7 +207,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 ```
 
 `items` are the tool/command/file/message artifacts the mind produced, in
-order (`ConversationItem` — see `conversation/types.rs`). User turns
+order (`ConversationItem` — see `chat/types.rs`). User turns
 carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
 across all sources. `from` is the speaker byline of an attributed emission
 (`lf chat`); null for the mind's own turns and plain user turns.

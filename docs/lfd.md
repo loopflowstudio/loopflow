@@ -7,11 +7,9 @@ title: lfd Daemon Reference
 
 `lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work — `lf q` launches workers as tmux-wrapped `lf` processes, and each wave's resident mind owns its own loop.
 
-## Choose a deployment shape
+## Run Native lfd
 
-### Native (default)
-
-Use native mode for local or single-user setups on macOS/Linux.
+Use `lfd` locally or for single-user setups on macOS/Linux.
 
 - Storage: sqlite
 - Auth: local capability token
@@ -28,38 +26,6 @@ account system.
 
 Remote identity and user auth, including OAuth-backed remote access, are M3
 future work.
-
-### Legacy Container Mode
-
-Container mode is legacy staging debt and is scheduled for removal with
-postgres in the M2 substrate cut. Use native `lfd` locally; use SSH for
-self-hosted operations.
-
-- Storage: postgres
-- Auth: configured bearer token if bound beyond loopback
-- Config: `mode: container` still works until M2, but do not build on it
-
-Docker hosts the daemon itself (plus its postgres), nothing more. Agents still
-run as local `lf` processes dispatched by `lf q`. Do not build new product
-surface on this mode.
-
-Carry forward the useful mechanisms, not the container strategy: hardened
-environment handling, named read-only credential mounts, health checks,
-redaction, and service-file secret hygiene.
-
-```yaml
-# ~/.lf/lfd.yaml
-mode: container
-```
-
-```bash
-lfd install
-```
-
-`LFD_MODE=container` is still available as a process override until M2, but
-`~/.lf/lfd.yaml` is the real mode-selection path for installed services.
-
-If you still have `executor.sandbox` in `~/.lf/lfd.yaml`, delete it and rerun `lfd install` — `lfd` fails fast on that removed key.
 
 ## Run the daemon
 
@@ -90,7 +56,7 @@ lfd install
 lfd install --force
 ```
 
-`--force` tears down the conflicting backend first, then reinstalls for the configured mode.
+`--force` replaces the existing native service file.
 
 ## Uninstall
 
@@ -105,7 +71,7 @@ lfd migrate
 lfd migrate --status
 ```
 
-`lfd migrate` uses the configured mode to choose the backend (`sqlite` for native, `postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations. Postgres is staging debt scheduled for the M2 substrate cut.
+`lfd migrate` applies sqlite migrations for the local registry.
 
 ## Authentication transport
 
@@ -129,27 +95,17 @@ whitespace or control characters.
 
 ### Environment variables
 
-Shape selection and daemon settings:
+Daemon settings:
 
 ```bash
-LFD_MODE          # native; container is legacy staging debt
 LFD_HTTP_ADDR     # listen address (default 127.0.0.1:2486)
 LFD_DB_PATH       # sqlite path override
-LFD_DATABASE_URL  # legacy postgres/container staging debt
 ```
 
 Auth tuning within a shape:
 
 ```bash
 LFD_AUTH_TOKEN    # bearer token for deliberate non-loopback experiments
-```
-
-Legacy container compose generation (scheduled for M2 removal):
-
-```bash
-LFD_EXECUTOR_CREDENTIALS_ENV
-LFD_EXECUTOR_CREDENTIALS_MOUNTS
-LFD_EXECUTOR_IMAGE
 ```
 
 GitHub + HTTP security:
@@ -170,19 +126,8 @@ LFD_HTTP_TRUSTED_PROXY_CIDRS
 ### YAML
 
 ```yaml
-mode: native # native (default) or container
-
 auth:
   token: bundled-session-token # set from Doppler or env for non-loopback experiments
-
-executor:
-  image: loopflow/agent:latest # image the generated compose file runs the daemon from
-  credentials:
-    env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
-    mounts:
-      - claude
-      - codex
-      - ssh
 
 github:
   webhook_secret: your-webhook-secret
@@ -199,45 +144,8 @@ http_security:
   trusted_proxy_cidrs: []
 ```
 
-`mode` selects a strict profile. `service_manager`, `runtime_backend`, `storage`, and `executor.type` are derived from the mode and rejected if set directly.
-
-`auth.*`, `executor.*`, and `http_security.*` tune the selected shape. They are not separate deployment profiles.
-
-`executor.sandbox` was removed. If that key is still present in old config, `lfd` fails fast and tells you to delete it.
-
-Container mode is legacy staging debt. Set `LFD_AUTH_TOKEN` if you must run it
-before M2 removes it.
-
-### Credential mounts
-
-`executor.credentials.mounts` accepts named, allowlisted mounts only:
-
-- `claude` → `~/.claude`
-- `codex` → `~/.codex`
-- `gh` → `~/.config/gh`
-- `gemini` → `~/.config/gemini`
-- `gitconfig` → `~/.gitconfig`
-- `ssh` → `~/.ssh`
-- `gnupg` → `~/.gnupg`
-
-Mounts are read-only inside the daemon's container. Raw `host:container` strings are rejected.
-
-### Compose overrides
-
-`lfd install` generates `~/.lf/docker-compose.yml`. Do not edit it directly.
-
-To layer local changes on top, create `~/.lf/docker-compose.override.yml`:
-
-```yaml
-services:
-  lfd:
-    ports:
-      - "3000:2486"
-    environment:
-      - EXTRA_VAR=value
-  postgres:
-    command: postgres -c log_statement=all
-```
+`mode`, `service_manager`, `runtime_backend`, `storage`, and `executor.*` were
+removed with container mode. Delete those keys from old config files.
 
 ## Query waves
 

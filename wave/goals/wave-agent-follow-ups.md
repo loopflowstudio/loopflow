@@ -13,16 +13,12 @@ obviates centralized machinery, not dispatch — `lf q worker run` IS the
 distributed dispatch. What remains is deciding which centralized organs are
 vestigial.
 
-1. **Two dispatch worlds.** The lfd HTTP worker route
-   (`lfd/http/routes/waves.rs` `run_worker_handler`, ~700 lines across
-   rust + python + fixtures) and `lf q worker run` (`lf/commands/q.rs`)
-   both exist. They now share the tmux wrapper and the report-back task
-   decoration (`helpers::worker_dispatch_task`), but differ on scheduler
-   slots, completion watching, and lfd events (divergence table documented
-   at the route). Full convergence — the route exec'ing `lf q`, or one
-   dispatch core behind both doors — is the architecture wave's hard cut.
-   Only caller of the route is python `lfq`; deleting it loses
-   dispatch-against-remote-lfd.
+1. **Two dispatch worlds. — RESOLVED (#803).** `lf q` (`lf/commands/q.rs`)
+   was retired; dispatch now flows through `--dispatch`/`--wave` on the flow
+   commands (one dispatch door). The lfd HTTP worker route
+   (`lfd/http/routes/waves.rs` `run_worker_handler`) remains for
+   dispatch-against-remote-lfd; full convergence of the route onto the same
+   core is still the architecture wave's cut.
 
 2. **The old goal-agent launch path.** `run_wave_handler` →
    `build_wave_agent_command` (`lfd/executor/wave/mod.rs`) wraps the goal
@@ -109,8 +105,8 @@ you'll already know.
 | Layer | Where | The question to hold |
 |---|---|---|
 | 1. Wave server core | `rust/loopflow/src/wave/` | Is the journal really the only truth? |
-| 2. Harness | `rust/loopflow/src/lfd/conversations/` | Where does vendor drift bite? |
-| 3. lf surface | `lf/session.rs`, `commands/{chat,q,memory}.rs`, `engine/wave_context.rs` | Do the doors degrade correctly? |
+| 2. Harness | `rust/loopflow/src/harness/` (hoisted out of `lfd::conversations` in #803) | Where does vendor drift bite? |
+| 3. lf surface | `lf/session.rs`, `commands/{chat,memory}.rs`, `engine/wave_context.rs` | Do the doors degrade correctly? |
 | 4. Concerto | `swift/` WaveChat stack | Does the viewer ever participate? |
 
 **Layer 1 — core.** `journal.rs` (`EventKind`, `Journal::append` — the one
@@ -121,7 +117,7 @@ janitor; the `sink_*` trio; `force_finalize_open_turn`). `mind.rs`
 failure cap, auto-revive ladder). `state.rs` (`can_transition` — one
 screen, read first). `registry.rs` (one-brain enforcement,
 `live_brain_after_probe`, force-takeover). Turn growth is one function:
-`ChatTurn::absorb_item` (`conversations/turns.rs`) — live snapshot, fold,
+`ChatTurn::absorb_item` (`chat/turns.rs`, moved in #803) — live snapshot, fold,
 and adapter all call it.
 
 **Layer 3 — lf surface.** The env contract is the crux: `LFD_SESSION_ID`

@@ -47,8 +47,9 @@ messages queue mid-turn, steer redirects a live turn, interrupt finalizes a
 partial one. Truth is an append-only journal, so a restart keeps the whole
 thread. `lf chat` and `lf memory` are the speech surface — the same doors for
 minds, workers, humans, and scripts; worker reports arrive attributed in the
-thread. See `rust/loopflow/src/lfd/wave/README.md` for the wire contract, and
-`scripts/demo_wave.sh` for the guided demo.
+thread. Outside any wave a publish drops silently (exit 0) — the verbs are
+safe in every prompt. See `rust/loopflow/src/lfd/wave/README.md` for the wire
+contract, and `scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 

@@ -35,7 +35,7 @@ bloat the transcript with work that belongs in a child.
 Inside a Wave loop, dispatch with:
 
 ```bash
-lfq worker run <wave> --flow <flow> --task "<task>"
+lf q worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline
@@ -63,8 +63,9 @@ text. Everything proactive goes through `lf`:
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
 
-Use these unconditionally. Outside a wave (or with no live server) they fail
-with a clear error; that is never a blocker - note it and move on.
+Use these unconditionally. Outside any wave they drop silently (exit 0) -
+publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
+server is down errors instead; note it and move on.
 
 ## The Roadmap Lives in Asana
 

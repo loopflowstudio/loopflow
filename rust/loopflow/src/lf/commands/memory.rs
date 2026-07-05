@@ -6,7 +6,9 @@
 //! `MemoryUpdated {summary}`. `show` (the bare default) reads through the
 //! server when one is live and falls back to the origin file otherwise —
 //! reads don't need the pen. Targeting (`--wave`, `--parent`) matches
-//! `lf chat` ([`super::chat`]).
+//! `lf chat` ([`super::chat`]), including the drop rule: a write with no wave
+//! context anywhere is a publish to no subscriber — exit 0, one stderr note.
+//! `show` is a read, so no wave context stays an error.
 
 use std::io::Read;
 
@@ -19,30 +21,49 @@ use crate::lfd::wave::memory::Memory;
 pub fn run(cmd: Option<&MemoryCommand>, default_target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        match cmd {
-            None => show(default_target).await,
-            Some(MemoryCommand::Show { target }) => show(target).await,
-            Some(MemoryCommand::Update { summary, target }) => {
-                let mut content = String::new();
-                std::io::stdin().read_to_string(&mut content)?;
-                let resolved = resolve(target).await?;
-                let summary =
-                    write_memory(&resolved, "update", &content, summary.as_deref()).await?;
-                println!("memory updated for wave '{}': {summary}", resolved.name);
-                Ok(())
-            }
-            Some(MemoryCommand::Add { fact, target }) => {
-                let resolved = resolve(target).await?;
-                let summary = write_memory(&resolved, "add", fact, None).await?;
-                println!("memory fact added for wave '{}': {summary}", resolved.name);
-                Ok(())
-            }
-        }
+        let context = CliContext::detect().await;
+        run_with_context(&context, cmd, default_target).await
     })
 }
 
-async fn resolve(target: &WaveTargetArgs) -> Result<ResolvedWave> {
-    let context = CliContext::detect().await;
+pub(crate) async fn run_with_context(
+    context: &CliContext,
+    cmd: Option<&MemoryCommand>,
+    default_target: &WaveTargetArgs,
+) -> Result<()> {
+    match cmd {
+        None => show(context, default_target).await,
+        Some(MemoryCommand::Show { target }) => show(context, target).await,
+        Some(MemoryCommand::Update { summary, target }) => {
+            // Resolve before touching stdin so a no-wave drop never blocks.
+            let Some(resolved) = resolve(context, target).await? else {
+                drop_note();
+                return Ok(());
+            };
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content)?;
+            let summary = write_memory(&resolved, "update", &content, summary.as_deref()).await?;
+            println!("memory updated for wave '{}': {summary}", resolved.name);
+            Ok(())
+        }
+        Some(MemoryCommand::Add { fact, target }) => {
+            let Some(resolved) = resolve(context, target).await? else {
+                drop_note();
+                return Ok(());
+            };
+            let summary = write_memory(&resolved, "add", fact, None).await?;
+            println!("memory fact added for wave '{}': {summary}", resolved.name);
+            Ok(())
+        }
+    }
+}
+
+/// Publish-to-no-subscriber: writes outside any wave drop with exit 0.
+fn drop_note() {
+    eprintln!("no wave here; memory write dropped");
+}
+
+async fn resolve(context: &CliContext, target: &WaveTargetArgs) -> Result<Option<ResolvedWave>> {
     resolve_target(
         target,
         context.store.as_ref(),
@@ -52,8 +73,14 @@ async fn resolve(target: &WaveTargetArgs) -> Result<ResolvedWave> {
     .await
 }
 
-async fn show(target: &WaveTargetArgs) -> Result<()> {
-    let resolved = resolve(target).await?;
+/// Reads are not publishes: no wave context is an error, not a drop.
+async fn show(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
+    let resolved = resolve(context, target).await?.ok_or_else(|| {
+        anyhow!(
+            "cannot resolve a target wave: no LFD_WAVE_ID in env and \
+             not inside a wave worktree — pass --wave <name>"
+        )
+    })?;
     print!("{}", read_memory(&resolved).await?);
     Ok(())
 }
@@ -207,6 +234,43 @@ mod tests {
             .await
             .expect("read");
         assert_eq!(content, "served content\n");
+    }
+
+    /// No wave context at all: a write is a publish to no subscriber — it
+    /// drops with exit 0 instead of erroring.
+    #[tokio::test]
+    async fn add_without_wave_context_drops_with_exit_zero() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let context = CliContext {
+            store: None,
+            repo: Some(tmp.path().to_path_buf()),
+            env_wave_id: None,
+        };
+        run_with_context(
+            &context,
+            Some(&MemoryCommand::Add {
+                fact: "dropped fact".to_string(),
+                target: WaveTargetArgs::default(),
+            }),
+            &WaveTargetArgs::default(),
+        )
+        .await
+        .expect("dropped write exits 0");
+    }
+
+    /// `show` is a read, not a publish: no wave context stays a clear error.
+    #[tokio::test]
+    async fn show_without_wave_context_errors() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let context = CliContext {
+            store: None,
+            repo: Some(tmp.path().to_path_buf()),
+            env_wave_id: None,
+        };
+        let err = run_with_context(&context, None, &WaveTargetArgs::default())
+            .await
+            .expect_err("read with no wave context");
+        assert!(err.to_string().contains("--wave"), "{err}");
     }
 
     /// Writes have no offline path: no live server is an error.

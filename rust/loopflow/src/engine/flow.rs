@@ -167,7 +167,7 @@ set of Metrics. Each iteration:
    advances the goal.
 2. Capture, then dispatch — never solve substantial work yourself. If the move is
    a real subproject, first write it to the roadmap as an Asana task, then run
-   `lfq worker run <this-wave> --flow <flow> --task "<task>"`. Small,
+   `lf q worker run <this-wave> --flow <flow> --task "<task>"`. Small,
    atomic fixes can dispatch directly. Either way the work runs as its own
    attachable tmux session — watch it with `lfq sessions`, join one with
    `lfq attach <id>`; read the result back when it lands.
@@ -175,7 +175,7 @@ set of Metrics. Each iteration:
 4. Repeat until the metrics say done, or record a blocker if no safe move remains.
 
 Three powers:
-- Dispatch flows/steps via `lfq worker run` — your default hand; the inner work
+- Dispatch flows/steps via `lf q worker run` — your default hand; the inner work
   pipeline you run each iteration.
 - Fan out — when the budget allows and the roadmap holds well-scoped, independent
   tasks, launch parallel subagents instead of advancing one move at a time: one
@@ -1721,7 +1721,7 @@ mod tests {
         assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("an orchestrator, not an implementer."));
         assert!(rendered.contains("never solve substantial work yourself"));
-        assert!(rendered.contains("lfq worker run"));
+        assert!(rendered.contains("lf q worker run"));
         assert!(rendered.contains("lfq sessions"));
         assert!(rendered.contains("lfq attach"));
         assert!(rendered.contains("- build"));

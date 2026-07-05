@@ -45,7 +45,7 @@ const BOOL_FLAGS: &[&str] = &[
 
 /// Known subcommands that should not be treated as step names.
 const KNOWN_COMMANDS: &[&str] = &[
-    ":", "op", "q", "wave", "loop", "usage", "runs", "trace", "help",
+    ":", "op", "q", "wave", "chat", "memory", "loop", "usage", "runs", "trace", "help",
 ];
 
 fn is_value_flag(arg: &str) -> bool {
@@ -481,6 +481,27 @@ mod tests {
         let result = reorder_args(args);
         // Known commands should not be reordered
         assert_eq!(result, vec!["lf", "op", "commit", "-m", "msg"]);
+    }
+
+    /// `lf chat --wave X text` must reach the chat subcommand untouched —
+    /// hoisting `--wave` to the top level silently retargets the publish.
+    #[test]
+    fn reorder_args_leaves_chat_and_memory_targeting_alone() {
+        let args: Vec<String> = ["lf", "chat", "--wave", "systems", "shipped it"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "chat", "--wave", "systems", "shipped it"]
+        );
+
+        let args: Vec<String> = ["lf", "memory", "add", "fact", "--wave", "systems"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "memory", "add", "fact", "--wave", "systems"]
+        );
     }
 
     #[test]

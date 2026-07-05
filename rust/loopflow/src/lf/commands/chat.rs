@@ -8,7 +8,10 @@
 //!
 //! # Targeting
 //! - default: the invoking context's wave — `LFD_WAVE_ID` env first, else the
-//!   worktree name (`<repo>.<wave>` sibling).
+//!   worktree name (`<repo>.<wave>` sibling). No wave context at all (no env,
+//!   worktree not wave-shaped) means there is no subscriber: the publish
+//!   drops with exit 0 and one stderr note — correct pubsub semantics, which
+//!   is what makes the speech vocabulary safe in every prompt unconditionally.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   wave's live server; its endpoint rides the parent's WaveAgent session
 //!   row, so cross-repo parents resolve through the store, not the
@@ -19,8 +22,9 @@
 //! # Endpoint resolution
 //! The target's live WaveAgent session row carries `LF_WAVE_ENDPOINT`; when
 //! the store has no row (unregistered server, no registry on this machine),
-//! the local `wave/<name>/.wave-endpoint` discovery file is the fallback. No
-//! live server is a clear error — queuing for offline waves is future work.
+//! the local `wave/<name>/.wave-endpoint` discovery file is the fallback. A
+//! resolvable wave with no live server is a clear error — a dead wave's mail
+//! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!
 //! # Attribution
 //! Sender context comes from env: `LFD_SESSION_ID` (the registry session, when
@@ -43,28 +47,42 @@ use crate::lfd::wave::server::endpoint_path;
 use crate::ops::util::resolve_wave_name;
 
 pub fn run(text_args: &[String], target: &WaveTargetArgs) -> Result<()> {
-    let text = message_text(text_args, std::io::stdin())?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        let resolved = resolve_target(
-            target,
-            context.store.as_ref(),
-            context.repo.as_deref(),
-            context.env_wave_id.as_deref(),
-        )
-        .await?;
-        let endpoint = resolved.require_endpoint()?;
-        let from = sender_attribution(target.parent, resolved.own_name.as_deref());
-        post_json(
-            &endpoint,
-            "/messages",
-            &serde_json::json!({ "op": "say", "text": text, "from": from }),
-        )
-        .await?;
-        println!("posted to wave '{}' as [{}]", resolved.name, from.label);
-        Ok(())
+        run_with_context(&context, text_args, target).await
     })
+}
+
+/// The command body, a function of the detected [`CliContext`]. Resolves the
+/// target before touching stdin so a no-wave drop never blocks on a pipe.
+pub(crate) async fn run_with_context(
+    context: &CliContext,
+    text_args: &[String],
+    target: &WaveTargetArgs,
+) -> Result<()> {
+    let Some(resolved) = resolve_target(
+        target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+    )
+    .await?
+    else {
+        eprintln!("no wave here; message dropped");
+        return Ok(());
+    };
+    let text = message_text(text_args, std::io::stdin())?;
+    let endpoint = resolved.require_endpoint()?;
+    let from = sender_attribution(target.parent, resolved.own_name.as_deref());
+    post_json(
+        &endpoint,
+        "/messages",
+        &serde_json::json!({ "op": "say", "text": text, "from": from }),
+    )
+    .await?;
+    println!("posted to wave '{}' as [{}]", resolved.name, from.label);
+    Ok(())
 }
 
 /// Message text from the args (joined) or stdin (heredoc-friendly).
@@ -127,13 +145,15 @@ impl ResolvedWave {
 }
 
 /// Resolve the target wave and its live endpoint. See the module doc for the
-/// targeting and endpoint rules.
+/// targeting and endpoint rules. `Ok(None)` is the publish-to-no-subscriber
+/// case: default targeting with no wave context anywhere — callers that
+/// publish drop the message; callers that read treat it as an error.
 pub(crate) async fn resolve_target(
     args: &WaveTargetArgs,
     store: Option<&SharedStore>,
     repo: Option<&Path>,
     env_wave_id: Option<&str>,
-) -> Result<ResolvedWave> {
+) -> Result<Option<ResolvedWave>> {
     let main_repo = repo.map(|r| main_repo_root(r).unwrap_or_else(|_| r.to_path_buf()));
 
     // The invoking context's wave: LFD_WAVE_ID first, else the worktree name.
@@ -195,12 +215,10 @@ pub(crate) async fn resolve_target(
                 (Some(row), name)
             }
             None => {
-                let name = own_name.clone().ok_or_else(|| {
-                    anyhow!(
-                        "cannot resolve a target wave: no LFD_WAVE_ID in env and \
-                         not inside a wave worktree — pass --wave <name>"
-                    )
-                })?;
+                // No wave context anywhere: the publish has no subscriber.
+                let Some(name) = own_name.clone() else {
+                    return Ok(None);
+                };
                 (None, name)
             }
         }
@@ -232,12 +250,12 @@ pub(crate) async fn resolve_target(
         }
     }
 
-    Ok(ResolvedWave {
+    Ok(Some(ResolvedWave {
         name: target_name,
         endpoint,
         repo_root,
         own_name,
-    })
+    }))
 }
 
 /// Attribution from env: `LFD_SESSION_ID` when present; label from
@@ -438,7 +456,8 @@ mod tests {
             Some(wave.id().as_str()),
         )
         .await
-        .expect("resolve");
+        .expect("resolve")
+        .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:4242"));
         assert_eq!(resolved.own_name.as_deref(), Some("ship"));
@@ -462,9 +481,32 @@ mod tests {
             None,
         )
         .await
-        .expect("resolve");
+        .expect("resolve")
+        .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:50505"));
+    }
+
+    /// Publish-to-no-subscriber: no env wave, no registry, and a repo that is
+    /// not wave-shaped resolve to no target at all — `lf chat` drops the
+    /// message and exits 0 instead of erroring.
+    #[tokio::test]
+    async fn no_wave_context_drops_the_message_with_exit_zero() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let context = CliContext {
+            store: None,
+            repo: Some(tmp.path().to_path_buf()),
+            env_wave_id: None,
+        };
+
+        let resolved = resolve_target(&WaveTargetArgs::default(), None, Some(tmp.path()), None)
+            .await
+            .expect("resolve");
+        assert!(resolved.is_none(), "plain temp dir is not a wave context");
+
+        run_with_context(&context, &["hello".into()], &WaveTargetArgs::default())
+            .await
+            .expect("dropped publish exits 0");
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
@@ -496,7 +538,8 @@ mod tests {
             Some(child.id().as_str()),
         )
         .await
-        .expect("resolve parent");
+        .expect("resolve parent")
+        .expect("wave context");
         assert_eq!(resolved.name, "goals");
         let endpoint = resolved.require_endpoint().expect("live endpoint");
         assert_eq!(endpoint, addr);
@@ -579,7 +622,8 @@ mod tests {
             Some(wave.id().as_str()),
         )
         .await
-        .expect("resolve");
+        .expect("resolve")
+        .expect("wave context");
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
         assert!(message.contains("no live server"), "{message}");

@@ -67,7 +67,11 @@ and scripts (the one-door exec convention). It resolves its target wave from
 context (`LFD_WAVE_ID`, else the worktree name; `--parent` walks
 `parent_wave_id` through the registry; `--wave <name>` is explicit), finds
 the live endpoint via the target's WaveAgent session row (falling back to
-`.wave-endpoint`), and POSTs a `say` op. Dispatched workers are instructed to
+`.wave-endpoint`), and POSTs a `say` op. Publish-to-no-subscriber drops: with
+no wave context anywhere, `lf chat` and `lf memory` writes exit 0 with one
+stderr note — the vocabulary is safe in every prompt unconditionally. A
+resolvable wave whose server is down errors instead (mail to a dead wave
+bounces, it doesn't vanish). Dispatched workers are instructed to
 finish with an `lf chat` report, closing the loop through the same door —
 it arrives in the thread with a `from` byline (label from `LFD_AGENT_ROLE`,
 session id from `LFD_SESSION_ID`) and wakes the mind like any input.

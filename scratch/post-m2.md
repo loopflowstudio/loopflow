@@ -23,3 +23,8 @@ journal; only non-file state = vendor threads + the gate's rebuildable RAM.
 
 (Rendered diagram in the session log, 2026-07-05; this doc is the durable
 summary. M1 = the shape converges on components.md; M2 = this substrate.)
+
+Journal growth (Jack, 2026-07-05): rotation/segmentation is a solved-CS
+problem — MVP ships the simple append-only journal; post-MVP a specialized
+workstream optimizes it properly (segments/rotation/compaction, informed by
+the literature) rather than half-designing it now. Roadmap item, not M2.

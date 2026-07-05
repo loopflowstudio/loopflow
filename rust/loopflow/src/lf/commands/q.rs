@@ -13,32 +13,29 @@
 //! `LFD_AGENT_ROLE=worker`. `LFD_SESSION_INHERITED` is deliberately absent:
 //! a session id without the marker means "this very process owns the row"
 //! (see `lf::session`), so the child does NOT self-register a second row.
-//! The child's parentage is the dispatcher's: `LFD_SESSION_ID` in *this*
-//! process's env (the mind's session, when the mind dispatches) becomes the
-//! worker session's `parent_session_id`.
+//! The shared tmux wrapper (`helpers::tmux_shell_command`) explicitly
+//! `unset`s the marker, because a fresh tmux server inherits the
+//! dispatcher's environment and would otherwise leak `LFD_SESSION_INHERITED=1`
+//! into the worker. The child's parentage is the dispatcher's:
+//! `LFD_SESSION_ID` in *this* process's env (the mind's session, when the
+//! mind dispatches) becomes the worker session's `parent_session_id`.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 
 use crate::lf::{QCommand, WorkerCommand};
-use crate::lfd::executor::helpers::{build_lf_dispatch_command, shell_escape, tmux_exit_file};
+use crate::lfd::executor::helpers::{
+    build_lf_dispatch_command, launch_session_in_tmux, worker_dispatch_task, TMUX_EXIT_TAIL,
+};
 use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{
     tmux_session_name, Run, Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE,
 };
-
-/// One line appended to every dispatched worker's task: the finish trigger.
-/// The vocabulary itself (what a report looks like) rides the shared
-/// `<lf:loopflow>` section in the worker's assembled prompt — this stays a
-/// pointer, not a second teaching site.
-pub(crate) const WORKER_REPORT_INSTRUCTION: &str =
-    "When you finish, report the outcome to the wave's thread with `lf chat`.";
 
 pub fn run(cmd: &QCommand) -> Result<()> {
     match cmd {
@@ -97,6 +94,21 @@ pub(crate) struct Dispatch {
 /// Write the dispatch into the registry: resolve placement into a worktree +
 /// branch, create the Run row, then the worker's Session row carrying the
 /// env contract. No process is spawned here.
+///
+/// DIVERGENCE — two dispatch worlds still exist (the other is lfd's
+/// `POST /waves/{id}/worker`, `launch_worker_run` in http/routes/waves.rs):
+///
+///   `lf q worker run` (here)          | HTTP worker route (lfd)
+///   ----------------------------------|----------------------------------
+///   no scheduler slot                 | scheduler.acquire_guard
+///   worker completes its own row      | executor watcher / completion_token
+///   no lfd events                     | Event::session_created/updated
+///
+/// Both decorate the task via `helpers::worker_dispatch_task` and launch
+/// through `helpers::launch_session_in_tmux`, so workers behave identically
+/// where it matters. Full convergence — the route exec'ing `lf q`, or one
+/// shared dispatch core behind both doors — is the architecture wave's hard
+/// cut, not this branch's.
 pub(crate) async fn dispatch(
     store: &SharedStore,
     wave_name: &str,
@@ -157,7 +169,7 @@ pub(crate) async fn dispatch(
     // every process has — exec: it finishes by posting an `lf chat` report
     // into the wave's thread (attributed via LFD_SESSION_ID from its env).
     // The Run row keeps the raw task; only the dispatched prompt grows.
-    let dispatch_task = format!("{task}\n\n{WORKER_REPORT_INSTRUCTION}");
+    let dispatch_task = worker_dispatch_task(task);
 
     let session_id = LfdId::new();
     let env = BTreeMap::from([
@@ -202,61 +214,22 @@ pub(crate) async fn dispatch(
     Ok(Dispatch { run, session })
 }
 
-/// Launch the worker in a detached tmux session — the same wrapper the lfd
-/// executor uses: env exported inline, exit code written to the session's
-/// exit file so any running lfd's reconciliation can close the row.
+/// Launch the worker in a detached tmux session through the shared wrapper
+/// (`helpers::launch_session_in_tmux` — one authoring site for the exit-file
+/// contract and the inherited-marker unset, byte-identical to the lfd
+/// executor's launches).
 async fn launch_worker_tmux(store: &SharedStore, session: Session) -> Result<()> {
-    let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
-    let exit_dir = exit_file
-        .parent()
-        .expect("tmux exit file always has a parent");
-    let env_prefix = session
-        .env
-        .iter()
-        .map(|(key, value)| format!("{key}={} ", shell_escape(value)))
-        .collect::<String>();
-    let command = session
-        .argv
-        .iter()
-        .map(|arg| shell_escape(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let shell_command = format!(
-        "mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; exit \"$EXIT_CODE\"",
-        exit_dir = shell_escape(&exit_dir.display().to_string()),
-        exit_file = shell_escape(&exit_file.display().to_string()),
-    );
-
-    let status = tokio::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session.tmux_name,
-            "-c",
-            &session.cwd,
-            "/bin/zsh",
-            "-lc",
-            &shell_command,
-        ])
-        .status()
-        .await;
-    let launched = status.map(|status| status.success());
     let mut session = session;
-    match launched {
-        Ok(true) => {
-            let _ = tokio::process::Command::new("tmux")
-                .args(["set-option", "-t", &session.tmux_name, "mouse", "on"])
-                .status()
-                .await;
+    match launch_session_in_tmux(&session, TMUX_EXIT_TAIL).await {
+        Ok(()) => {
             session.start();
             store.update_control_session(&session).await?;
             Ok(())
         }
-        Ok(false) | Err(_) => {
+        Err(err) => {
             session.complete(1);
             store.update_control_session(&session).await?;
-            Err(anyhow!("tmux failed to launch the worker session"))
+            Err(anyhow!("tmux failed to launch the worker session: {err}"))
         }
     }
 }
@@ -265,9 +238,12 @@ async fn launch_worker_tmux(store: &SharedStore, session: Session) -> Result<()>
 mod tests {
     use super::*;
 
+    use std::path::Path;
+
     use loopflow_test_support::TestRepo;
 
     use crate::lf::session::classify_run_context;
+    use crate::lfd::executor::helpers::tmux_shell_command;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{RepoWork, RunStatus, Wave, WaveMode, WaveStatus};
 
@@ -392,7 +368,10 @@ mod tests {
         );
         assert_eq!(
             classify_run_context(
-                session.env.get("LFD_WAVE_ID").map(String::as_str),
+                session
+                    .env
+                    .get("LFD_WAVE_ID")
+                    .map(|id| crate::engine::wave_context::AmbientWaveRef::Id(id.clone())),
                 session.env.get("LFD_SESSION_ID").map(String::as_str),
                 session.env.contains_key("LFD_SESSION_INHERITED"),
             ),
@@ -407,6 +386,39 @@ mod tests {
             .expect("worktree lookup");
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].id, session.id);
+    }
+
+    /// The wrapper `lf q` launches workers with, pinned end to end: built
+    /// from a real dispatch's session, it must clear the inherited-session
+    /// marker before anything runs. A fresh tmux server inherits the
+    /// dispatcher's env, so without the unset a mind that is itself a
+    /// registered session would poison every worker into registering a
+    /// duplicate row instead of adopting the one created here.
+    #[tokio::test]
+    async fn dispatched_worker_wrapper_unsets_the_inherited_marker() {
+        let repo = TestRepo::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = make_wave(repo.path(), "ship", 2);
+        store.create_wave(&wave).await.expect("seed wave");
+
+        let dispatched = dispatch(
+            &store,
+            "ship",
+            "implement",
+            "Add the thing.",
+            Placement::Fresh,
+            None,
+        )
+        .await
+        .expect("dispatch");
+
+        let wrapper = tmux_shell_command(&dispatched.session, TMUX_EXIT_TAIL);
+        assert!(
+            wrapper.starts_with("unset LFD_SESSION_INHERITED; "),
+            "worker wrapper must clear the marker the tmux server inherits: {wrapper}"
+        );
+        assert!(wrapper.contains(&format!("LFD_SESSION_ID='{}' ", dispatched.session.id)));
     }
 
     #[tokio::test]

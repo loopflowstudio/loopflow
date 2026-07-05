@@ -917,6 +917,21 @@ async fn apply_run_wave_overrides(
     Ok(())
 }
 
+/// DIVERGENCE — two dispatch worlds still exist (the other is `lf q worker
+/// run`, `dispatch` in lf/commands/q.rs):
+///
+///   HTTP worker route (here)          | `lf q worker run`
+///   ----------------------------------|----------------------------------
+///   scheduler.acquire_guard           | no scheduler slot
+///   executor watcher / completion_token | worker completes its own row
+///   Event::session_created/updated    | no lfd events
+///
+/// Both decorate the task via `helpers::worker_dispatch_task` (applied in
+/// `build_run_command` on this path, so HTTP-dispatched workers get the
+/// report-back pointer too) and launch through the shared tmux wrapper.
+/// Full convergence — this route exec'ing `lf q`, or one shared dispatch
+/// core behind both doors — is the architecture wave's hard cut, not this
+/// branch's.
 async fn launch_worker_run(
     state: &HttpState,
     wave: &Wave,
@@ -2386,6 +2401,17 @@ mod tests {
             .find(|session| session.id == response_session_id)
             .expect("launched session should be stored");
         assert_eq!(child.parent_session_id.as_ref(), Some(&caller.id));
+
+        // HTTP-dispatched workers get the same report-back pointer as
+        // `lf q worker run` dispatches: the command's task arg carries the
+        // `lf chat` instruction while the Run row keeps the raw task.
+        let prompt = child.argv.last().expect("task arg");
+        assert!(prompt.starts_with("Add the worker endpoint."));
+        assert!(
+            prompt.contains("lf chat"),
+            "HTTP-path worker prompt must close the reporting loop: {prompt}"
+        );
+        assert_eq!(run.task.as_deref(), Some("Add the worker endpoint."));
     }
 
     #[tokio::test]

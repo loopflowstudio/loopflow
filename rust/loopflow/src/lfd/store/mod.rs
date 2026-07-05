@@ -708,6 +708,17 @@ impl Store {
         ControlSessionStore::list_sessions(self, wave_id, statuses).await
     }
 
+    /// This wave's live sessions plus sessions completed at or after
+    /// `completed_since` (unix seconds) — a poller's working set, bounded
+    /// regardless of how much terminal history the wave accumulates.
+    pub async fn list_recent_control_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        ControlSessionStore::list_recent_sessions(self, wave_id, completed_since).await
+    }
+
     /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
     /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
     /// `lf wave` server. One-brain enforcement (run_wave idempotency, the
@@ -972,6 +983,11 @@ pub trait ControlSessionStore: Send + Sync {
         &self,
         wave_id: Option<&LfdId>,
         statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>>;
+    async fn list_recent_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
     ) -> StoreResult<Vec<Session>>;
     async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>>;
     async fn update_session(&self, session: &Session) -> StoreResult<()>;
@@ -2094,6 +2110,27 @@ impl ControlSessionStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.list_control_sessions(wave_id, statuses).await,
+        }
+    }
+
+    async fn list_recent_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_recent_control_sessions(&wave_id, completed_since)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .list_recent_control_sessions(wave_id, completed_since)
+                    .await
+            }
         }
     }
 

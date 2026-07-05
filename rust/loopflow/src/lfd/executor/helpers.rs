@@ -10,8 +10,8 @@ use time::OffsetDateTime;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::ConcreteStep;
 use crate::engine::git::{
-    create_branch, current_branch, fetch, get_default_branch, push_with_upstream, rev_parse,
-    sync_main, worktree_add, WorktreeBranch,
+    create_branch, current_branch, fetch, get_default_branch, is_ancestor, push_with_upstream,
+    rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
@@ -22,7 +22,8 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Wave, WaveStatus,
+    ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Session, Wave,
+    WaveStatus,
 };
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
@@ -288,12 +289,24 @@ pub fn create_stacked_run_worktree(
 
     let _ = fetch(main_repo, "origin", parent_branch);
     let remote_ref = format!("origin/{parent_branch}");
-    let start_point = if rev_parse(main_repo, &remote_ref).is_ok() {
-        remote_ref
-    } else if branch_exists(main_repo, parent_branch)? {
-        parent_branch.to_string()
-    } else {
-        return Err(anyhow!("stack parent branch not found: {parent_branch}"));
+    let local_exists = branch_exists(main_repo, parent_branch)?;
+    let remote_exists = rev_parse(main_repo, &remote_ref).is_ok();
+    // Fork from the freshest tip: the parent run's unpushed local commits
+    // must reach the stack, so the local branch wins unless it is strictly
+    // behind the remote (absent, or all its commits already on origin).
+    let start_point = match (local_exists, remote_exists) {
+        (false, false) => {
+            return Err(anyhow!("stack parent branch not found: {parent_branch}"));
+        }
+        (true, false) => parent_branch.to_string(),
+        (false, true) => remote_ref,
+        (true, true) => {
+            if local_strictly_behind(main_repo, parent_branch, &remote_ref)? {
+                remote_ref
+            } else {
+                parent_branch.to_string()
+            }
+        }
     };
 
     let branch = unique_wave_branch(main_repo, wave_name)?;
@@ -307,6 +320,19 @@ pub fn create_stacked_run_worktree(
     )?;
     schedule_upstream_sync(run_wt.clone(), branch.clone());
     Ok((run_wt.to_string_lossy().to_string(), branch))
+}
+
+/// Whether `local` is strictly behind `remote_ref`: the remote has commits
+/// the local branch lacks and the local branch has none of its own. Equal,
+/// ahead, or diverged all read as "not behind" — the local tip carries
+/// everything the remote does (or more).
+fn local_strictly_behind(repo: &Path, local: &str, remote_ref: &str) -> anyhow::Result<bool> {
+    let local_sha = rev_parse(repo, local)?;
+    let remote_sha = rev_parse(repo, remote_ref)?;
+    if local_sha == remote_sha {
+        return Ok(false);
+    }
+    Ok(is_ancestor(repo, &local_sha, &remote_sha)?)
 }
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
@@ -441,6 +467,21 @@ pub(crate) fn build_lf_dispatch_command(
     cmd
 }
 
+/// One line appended to every dispatched worker's task: the finish trigger.
+/// The vocabulary itself (what a report looks like) rides the shared
+/// `<lf:loopflow>` section in the worker's assembled prompt — this stays a
+/// pointer, not a second teaching site.
+pub(crate) const WORKER_REPORT_INSTRUCTION: &str =
+    "When you finish, report the outcome to the wave's thread with `lf chat`.";
+
+/// The dispatched form of a worker task: the raw task plus the report-back
+/// pointer. Every dispatch door (`lf q worker run` and the lfd HTTP worker
+/// route) sends workers through this, so they report regardless of door.
+/// The Run row keeps the raw task; only the dispatched prompt grows.
+pub(crate) fn worker_dispatch_task(task: &str) -> String {
+    format!("{task}\n\n{WORKER_REPORT_INSTRUCTION}")
+}
+
 /// Shell-quote one argv element for the tmux launch line.
 pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
@@ -452,6 +493,75 @@ pub(crate) fn shell_escape(value: &str) -> String {
 pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
     cwd.join(".lf/tmp/sessions")
         .join(format!("{session_id}.exit"))
+}
+
+/// Wrapper tail for run-to-completion sessions: propagate the exit code.
+pub(crate) const TMUX_EXIT_TAIL: &str = r#"exit "$EXIT_CODE""#;
+
+/// The exit-file shell wrapper every tmux-backed session runs — the single
+/// authoring site of the exit-file wire contract.
+///
+/// Two invariants live here:
+/// - `unset LFD_SESSION_INHERITED` first: a fresh tmux server inherits the
+///   dispatcher's environment (verified empirically), so a dispatcher that is
+///   itself a registered session would leak `LFD_SESSION_INHERITED=1` into
+///   the worker's login shell. That flips `classify_run_context` from
+///   OwnSession to NeedsRegistration and the worker registers a duplicate row
+///   instead of adopting the one the dispatcher created. The session's own
+///   env contract is re-exported explicitly by the inline prefix.
+/// - The exit code lands in the session's exit file so whoever reconciles
+///   the row (a running lfd, or the next boot) can close it.
+pub(crate) fn tmux_shell_command(session: &Session, tail: &str) -> String {
+    let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
+    let exit_dir = exit_file
+        .parent()
+        .expect("tmux exit file always has a parent");
+    let env_prefix = session
+        .env
+        .iter()
+        .map(|(key, value)| format!("{key}={} ", shell_escape(value)))
+        .collect::<String>();
+    let command = session
+        .argv
+        .iter()
+        .map(|arg| shell_escape(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "unset LFD_SESSION_INHERITED; mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; {tail}",
+        exit_dir = shell_escape(&exit_dir.display().to_string()),
+        exit_file = shell_escape(&exit_file.display().to_string()),
+    )
+}
+
+/// Launch `session` detached in tmux running the exit-file wrapper, then
+/// enable mouse mode so scroll events reach tmux rather than the inner shell.
+/// Callers own the session row's lifecycle (start on `Ok`, fail on `Err`).
+pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Result<()> {
+    let shell_command = tmux_shell_command(session, tail);
+    let status = tokio::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session.tmux_name,
+            "-c",
+            &session.cwd,
+            "/bin/zsh",
+            "-lc",
+            &shell_command,
+        ])
+        .status()
+        .await
+        .map_err(|err| anyhow!("tmux failed to spawn: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!("tmux failed to launch terminal session"));
+    }
+    let _ = tokio::process::Command::new("tmux")
+        .args(["set-option", "-t", &session.tmux_name, "mouse", "on"])
+        .status()
+        .await;
+    Ok(())
 }
 
 pub(crate) fn build_lf_inline_command(
@@ -706,13 +816,20 @@ fn rebase_onto_if_available(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::Path;
     use std::process::Command;
 
     use tempfile::TempDir;
+    use time::OffsetDateTime;
 
-    use super::{ensure_wave_worktree, is_ephemeral_worktree_path};
+    use super::{
+        create_stacked_run_worktree, ensure_wave_worktree, is_ephemeral_worktree_path,
+        tmux_shell_command, worker_dispatch_task, TMUX_EXIT_TAIL, WORKER_REPORT_INSTRUCTION,
+    };
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE};
 
     fn run_git(dir: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -763,6 +880,136 @@ mod tests {
             ],
         );
         (temp, main_repo, origin)
+    }
+
+    /// The exit-file wire contract, pinned. Both dispatch paths (the lfd
+    /// executor and `lf q worker run`) run every tmux session through this
+    /// one wrapper: it clears the inherited-session marker the tmux server
+    /// leaks from the dispatcher's environment, exports the session env
+    /// inline, and records the exit code in the session's exit file.
+    #[test]
+    fn tmux_shell_command_unsets_inherited_marker_and_wires_exit_file() {
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            wave_id: LfdId::new(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::Worker,
+            step: "dispatch:implement".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
+            argv: vec![
+                "lf".to_string(),
+                "implement:".to_string(),
+                "Do it".to_string(),
+            ],
+            env: BTreeMap::from([
+                ("LFD_SESSION_ID".to_string(), session_id.to_string()),
+                ("LFD_AGENT_ROLE".to_string(), "worker".to_string()),
+            ]),
+            source: TMUX_TERMINAL_SOURCE.to_string(),
+            tmux_name: "lf-test".to_string(),
+            status: SessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+
+        let wrapper = tmux_shell_command(&session, TMUX_EXIT_TAIL);
+
+        assert!(
+            wrapper.starts_with("unset LFD_SESSION_INHERITED; "),
+            "the wrapper must clear the marker a fresh tmux server inherits \
+             from the dispatcher, or workers register duplicate rows: {wrapper}"
+        );
+        assert!(
+            wrapper.contains(&format!("LFD_SESSION_ID='{session_id}' ")),
+            "the session env is re-exported inline: {wrapper}"
+        );
+        assert!(
+            wrapper.contains(&format!(
+                "'/tmp/repo.wave.a1b2c3d4/.lf/tmp/sessions/{session_id}.exit'"
+            )),
+            "exit code lands in the session's exit file: {wrapper}"
+        );
+        assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
+    }
+
+    #[test]
+    fn worker_dispatch_task_appends_the_report_pointer_once() {
+        let task = worker_dispatch_task("Add the thing.");
+        assert!(task.starts_with("Add the thing."));
+        assert_eq!(task.matches(WORKER_REPORT_INSTRUCTION).count(), 1);
+    }
+
+    #[test]
+    fn stacked_worktree_forks_from_local_parent_when_ahead_of_origin() {
+        let (_temp, main_repo, _origin) = setup_repo_with_remote();
+
+        // Parent branch pushed, then one MORE local commit never pushed.
+        run_git(&main_repo, &["checkout", "-b", "parent-branch"]);
+        write_file(&main_repo.join("pushed.txt"), "pushed\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "pushed work"]);
+        run_git(&main_repo, &["push", "-u", "origin", "parent-branch"]);
+        write_file(&main_repo.join("local-only.txt"), "local only\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "local-only work"]);
+        run_git(&main_repo, &["checkout", "main"]);
+
+        let (worktree, _branch) =
+            create_stacked_run_worktree(&main_repo, "wave", "a1b2c3d4e5f6", "parent-branch")
+                .expect("stacked worktree");
+
+        assert!(
+            Path::new(&worktree).join("local-only.txt").exists(),
+            "the stack must fork from the local tip when it is ahead of origin"
+        );
+    }
+
+    #[test]
+    fn stacked_worktree_forks_from_origin_when_local_is_behind() {
+        let (_temp, main_repo, origin) = setup_repo_with_remote();
+
+        run_git(&main_repo, &["checkout", "-b", "parent-branch"]);
+        write_file(&main_repo.join("pushed.txt"), "pushed\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "pushed work"]);
+        run_git(&main_repo, &["push", "-u", "origin", "parent-branch"]);
+        run_git(&main_repo, &["checkout", "main"]);
+
+        // A collaborator advances the branch on origin; local is now behind.
+        let collaborator = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("collaborator-stack");
+        run_git(
+            main_repo.parent().expect("main repo parent"),
+            &[
+                "clone",
+                origin.to_str().unwrap_or(""),
+                collaborator.to_str().unwrap_or(""),
+            ],
+        );
+        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
+        run_git(&collaborator, &["config", "user.name", "Test User"]);
+        run_git(&collaborator, &["checkout", "parent-branch"]);
+        write_file(&collaborator.join("remote-only.txt"), "remote only\n");
+        run_git(&collaborator, &["add", "."]);
+        run_git(&collaborator, &["commit", "-m", "remote-only work"]);
+        run_git(&collaborator, &["push"]);
+
+        let (worktree, _branch) =
+            create_stacked_run_worktree(&main_repo, "wave", "b2c3d4e5f6a1", "parent-branch")
+                .expect("stacked worktree");
+
+        assert!(
+            Path::new(&worktree).join("remote-only.txt").exists(),
+            "a strictly-behind local branch must yield to origin's tip"
+        );
     }
 
     #[test]

@@ -45,7 +45,7 @@ use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_create_pr, build_lf_dispatch_command, build_lf_inline_command,
     build_lf_step_command, cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path,
-    shell_escape, tmux_exit_file,
+    launch_session_in_tmux, tmux_exit_file, worker_dispatch_task, TMUX_EXIT_TAIL,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -117,6 +117,16 @@ async fn read_tmux_exit_code(exit_file: PathBuf) -> Result<Option<i32>> {
     .map_err(|err| anyhow!("terminal exit file task failed: {err}"))
 }
 
+/// Wrapper tail per session kind: palette panes stay open as a shell after
+/// the command; everything else propagates the exit code and ends.
+fn session_tail(session: &Session) -> &'static str {
+    if session.source == PALETTE_TERMINAL_SOURCE {
+        r#"exec "${SHELL:-/bin/zsh}""#
+    } else {
+        TMUX_EXIT_TAIL
+    }
+}
+
 fn infer_branch_name(worktree: &str) -> Option<String> {
     std::process::Command::new("git")
         .args(["-C", worktree, "branch", "--show-current"])
@@ -134,8 +144,14 @@ fn build_run_command(
     in_flight: Vec<InFlightDispatch>,
 ) -> Result<(Vec<String>, String)> {
     if let Some(task) = run.task.as_ref() {
+        // Every dispatched worker's prompt closes the reporting loop through
+        // the one door every process has — exec: it finishes by posting an
+        // `lf chat` report into the wave's thread. Decorating here covers the
+        // HTTP worker route and every other lfd-side dispatch; `lf q worker
+        // run` applies the same decoration at its own command build.
+        let task = worker_dispatch_task(task);
         let cmd =
-            build_lf_dispatch_command(&run.flow, task, &run.direction, &run.area, wave.name());
+            build_lf_dispatch_command(&run.flow, &task, &run.direction, &run.area, wave.name());
         return Ok((cmd, format!("dispatch:{}", run.flow)));
     }
 
@@ -1025,58 +1041,12 @@ impl WaveExecutor {
     }
 
     async fn launch_tmux_session(&self, session: Session) -> Result<Session> {
-        let session_name = &session.tmux_name;
-        let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
-        let exit_dir = exit_file
-            .parent()
-            .expect("tmux exit file should always have a parent");
-        let env_prefix = session
-            .env
-            .iter()
-            .map(|(key, value)| format!("{key}={} ", shell_escape(value)))
-            .collect::<String>();
-        let command = session
-            .argv
-            .iter()
-            .map(|arg| shell_escape(arg))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let tail = if session.source == PALETTE_TERMINAL_SOURCE {
-            r#"exec "${SHELL:-/bin/zsh}""#
-        } else {
-            r#"exit "$EXIT_CODE""#
-        };
-        let shell_command = format!(
-            "mkdir -p {exit_dir}; rm -f {exit_file}; {env_prefix}{command}; EXIT_CODE=$?; printf '%s' \"$EXIT_CODE\" > {exit_file}; {tail}",
-            exit_dir = shell_escape(&exit_dir.display().to_string()),
-            exit_file = shell_escape(&exit_file.display().to_string()),
-        );
+        // The wrapper (exit-file contract, inherited-marker unset) has one
+        // authoring site: helpers::tmux_shell_command, shared with `lf q
+        // worker run`. Only the tail is the executor's choice.
+        launch_session_in_tmux(&session, session_tail(&session)).await?;
 
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                session_name,
-                "-c",
-                &session.cwd,
-                "/bin/zsh",
-                "-lc",
-                &shell_command,
-            ])
-            .status()
-            .await?;
-        if !status.success() {
-            return Err(anyhow!("tmux failed to launch terminal session"));
-        }
-
-        // Enable mouse mode so scroll events reach tmux rather than the inner shell.
-        let _ = Command::new("tmux")
-            .args(["set-option", "-t", session_name, "mouse", "on"])
-            .status()
-            .await;
-
-        let mut running = session.clone();
+        let mut running = session;
         let _ = running.start();
         self.store.update_control_session(&running).await?;
         self.event_hub.send(Event::session_updated(running.clone()));
@@ -2367,7 +2337,52 @@ mod tests {
         assert_eq!(terminal_step, "dispatch:implement");
         assert!(cmd.contains(&"implement:".to_string()));
         assert!(cmd.contains(&"-b".to_string()));
-        assert!(cmd.contains(&"Add the dispatch endpoint.".to_string()));
+        // The dispatched prompt is the raw task plus the report-back pointer —
+        // HTTP-dispatched workers report to the wave's thread too, not only
+        // `lf q` ones. The Run row keeps the raw task.
+        let prompt = cmd.last().expect("task arg");
+        assert!(prompt.starts_with("Add the dispatch endpoint."));
+        assert!(
+            prompt.contains("lf chat"),
+            "worker prompt closes the loop with an lf chat report: {prompt}"
+        );
+    }
+
+    /// The executor's tmux launch rides the shared wrapper: exit-code tail
+    /// for run sessions, shell tail for palette panes, and the inherited
+    /// marker cleared in both — a fresh tmux server inherits the
+    /// dispatcher's env, and a leaked marker makes workers double-register.
+    #[test]
+    fn executor_tmux_wrapper_unsets_inherited_marker_for_both_tails() {
+        let mut session = Session {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::Worker,
+            step: "dispatch:implement".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo.wave".to_string(),
+            argv: vec!["lf".to_string(), "implement".to_string()],
+            env: Default::default(),
+            source: TMUX_TERMINAL_SOURCE.to_string(),
+            tmux_name: "lf-test".to_string(),
+            status: SessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+
+        let wrapper = super::super::helpers::tmux_shell_command(&session, session_tail(&session));
+        assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
+        assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
+
+        session.source = PALETTE_TERMINAL_SOURCE.to_string();
+        let wrapper = super::super::helpers::tmux_shell_command(&session, session_tail(&session));
+        assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
+        assert!(wrapper.ends_with(r#"exec "${SHELL:-/bin/zsh}""#));
     }
 
     #[test]
